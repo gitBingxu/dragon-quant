@@ -5,7 +5,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 [project]
 name = "dragon-quant"
 version = "0.1.0"
-description = "龙头战法量化分析 — 从带动性、抗跌性、领涨性、资金承接性四个维度评估涨停股的龙头质量"
+description = "龙头战法四维量化筛选系统"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
@@ -14,13 +14,4 @@ requires-python = ">=3.8"
 name = "gitBingxu"
 
 [project.urls]
-homepage = "https://github.com/gitBingxu/dragon-quant"
 repository = "https://github.com/gitBingxu/dragon-quant"
-
-[project.scripts]
-dragon-quant = "dragon_quant.main:main"
-dq-analyze = "dragon_quant.analyze:main"
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["dragon_quant*"]

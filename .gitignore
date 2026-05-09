@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 日志
+logs/
+
+# 编辑器
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+
+# 环境
+.env
+*.local
+
+# 雪球 Cookie 缓存
+~/.lsa_xq_cookies
+.lsa_xq_cookies
+
+# 临时数据
+/tmp/lsa_*.json

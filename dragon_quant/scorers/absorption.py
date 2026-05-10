@@ -10,7 +10,8 @@ from dragon_quant.cache.data_cache import DataCache
 
 
 def score(code: str, cache: DataCache, primary_sector: str = "",
-          all_sector_codes: Optional[list[str]] = None) -> ScoreResult:
+          all_sector_codes: Optional[list[str]] = None,
+          sector_name_map: Optional[dict[str, str]] = None) -> ScoreResult:
     """
     Args:
         code: 股票代码
@@ -52,7 +53,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
         )
 
     # ─── Step 1: 滑动窗口检测虹吸事件 ───
-    events = _detect_events(target_klines, other_klines_map)
+    events = _detect_events(target_klines, other_klines_map, sector_name_map or {})
 
     if not events:
         return ScoreResult(
@@ -93,8 +94,11 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
 # ─── 事件检测 ───
 
 def _detect_events(target_klines: list[KBar],
-                   other_map: dict[str, list[KBar]]) -> list[dict]:
+                   other_map: dict[str, list[KBar]],
+                   sector_name_map: dict[str, str] = None) -> list[dict]:
     """滑动窗口扫描虹吸事件"""
+    if sector_name_map is None:
+        sector_name_map = {}
     WINDOW = 6  # 30 分钟
     events = []
 
@@ -132,6 +136,7 @@ def _detect_events(target_klines: list[KBar],
             if s_ret < -0.01:
                 fleeing_sectors.append({
                     "code": s_code,
+                    "name": sector_name_map.get(s_code, s_code),
                     "drop_pct": round(s_ret * 100, 2),
                 })
 
@@ -154,13 +159,21 @@ def _detect_events(target_klines: list[KBar],
         # 出逃板块平均跌幅
         fleeing_avg_drop = sum(f["drop_pct"] for f in fleeing_sectors) / len(fleeing_sectors)
 
+        # 时间戳（从 bar 的 timestamp 换算）
+        from datetime import datetime
+        start_dt = datetime.fromtimestamp(target_aligned[start].timestamp / 1000)
+        end_dt = datetime.fromtimestamp(target_aligned[end].timestamp / 1000)
+
         events.append({
             "start_bar": start,
             "end_bar": end,
+            "start_time": start_dt.strftime("%H:%M"),
+            "end_time": end_dt.strftime("%H:%M"),
             "target_pct": round(target_ret * 100, 2),
             "yang_count": yang_count,
             "fleeing_count": len(fleeing_sectors),
             "fleeing_avg_drop": round(fleeing_avg_drop, 2),
+            "fleeing_sectors": fleeing_sectors,
             "drawdown_ratio": round(drawdown_ratio, 2),
         })
 

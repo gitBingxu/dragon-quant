@@ -203,21 +203,25 @@ def _score_limit_up_day(lu: dict, primary_sector: str,
     Returns: (day_score, detail_dict)
     """
     # (a) 板块共鸣 Voice 30%
-    voice_score = _voice_score(primary_sector, components, quote_map)
+    voice_score, voice_raw = _voice_score(primary_sector, components, quote_map)
 
     # (b) 跟风力度 Follow 30%
-    follow_score = _follow_score(primary_sector, components, quote_map)
+    follow_score, follow_raw = _follow_score(primary_sector, components, quote_map)
 
     # (c) 封板决策力 Board Leadership 40%
     board_score, board_detail = _board_leadership_score(
         lu, peer_candidates, components, primary_sector
     )
+    # 加入板块涨停总数
+    board_detail["sector_limit_up_total"] = voice_raw.get("limit_up", 0)
 
     day_score = voice_score * 0.3 + follow_score * 0.3 + board_score * 0.4
 
     return day_score, {
         "voice": round(voice_score, 2),
+        "voice_raw": voice_raw,
         "follow": round(follow_score, 2),
+        "follow_raw": follow_raw,
         "board_leadership": round(board_score, 2),
         "board_detail": board_detail,
     }
@@ -226,33 +230,35 @@ def _score_limit_up_day(lu: dict, primary_sector: str,
 # ─── 子因子 A: 板块共鸣 ───
 
 def _voice_score(sector_code: str, components: list[StockInfo],
-                 quote_map: dict) -> float:
-    """同行业涨停家数占比"""
-    if not components:
-        return 0.0
-
-    limit_up_count = 0
+                 quote_map: dict) -> tuple[float, dict]:
+    """同行业涨停家数占比 → (score, raw_counts)"""
+    limit_up_codes = []
     for comp in components:
         pct_val = comp.pct
         if pct_val == 0.0 and comp.code in quote_map:
             pct_val = quote_map[comp.code].pct
         if pct_val >= 9.9:
-            limit_up_count += 1
+            limit_up_codes.append(comp.code)
 
-    ratio = limit_up_count / len(components)
-    return min(ratio / 0.10, 1.0) * 100
+    total = len(components)
+    limit_up_count = len(limit_up_codes)
+    if total == 0:
+        return 0.0, {"total": 0, "limit_up": 0}
+
+    ratio = limit_up_count / total
+    score = min(ratio / 0.10, 1.0) * 100
+    return score, {"total": total, "limit_up": limit_up_count}
 
 
 # ─── 子因子 B: 跟风力度 ───
 
 def _follow_score(sector_code: str, components: list[StockInfo],
-                  quote_map: dict) -> float:
-    """涨幅 >3% 但未涨停的占比"""
-    if not components:
-        return 0.0
-
+                  quote_map: dict) -> tuple[float, dict]:
+    """涨幅 >3% 但未涨停的占比 → (score, raw_counts)"""
     limit_up_codes = set()
     strong_count = 0
+    down_count = 0
+    total = len(components)
 
     for comp in components:
         pct_val = comp.pct
@@ -262,13 +268,16 @@ def _follow_score(sector_code: str, components: list[StockInfo],
             limit_up_codes.add(comp.code)
         elif pct_val > 3.0:
             strong_count += 1
+        if pct_val < 0:
+            down_count += 1
 
-    non_limit_total = len(components) - len(limit_up_codes)
+    non_limit_total = total - len(limit_up_codes)
     if non_limit_total == 0:
-        return 0.0
+        return 0.0, {"total": total, "strong": strong_count, "down": down_count, "limit_up": len(limit_up_codes)}
 
     ratio = strong_count / non_limit_total
-    return min(ratio / 0.15, 1.0) * 100
+    score = min(ratio / 0.15, 1.0) * 100
+    return score, {"total": total, "strong": strong_count, "down": down_count, "limit_up": len(limit_up_codes)}
 
 
 # ─── 子因子 C: 封板决策力 ───

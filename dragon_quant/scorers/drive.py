@@ -121,18 +121,28 @@ def _find_limit_up_dates(day_klines: list[KBar], five_min_klines: list[KBar]) ->
 
 
 def _detect_board_time(five_min: list[KBar], day_ts: int) -> Optional[str]:
-    """从 5 分 K 线找封板时间（首根 pct ≥ 9.9% 的 bar）"""
+    """从 5 分 K 线找封板时间（当天第一个接近涨停价的 bar）"""
     if not five_min:
         return None
 
     day_date = datetime.fromtimestamp(day_ts / 1000).date()
+    day_bars = [b for b in five_min
+                if datetime.fromtimestamp(b.timestamp / 1000).date() == day_date]
 
-    for bar in five_min:
-        bar_date = datetime.fromtimestamp(bar.timestamp / 1000).date()
-        if bar_date != day_date:
-            continue
-        # 涨幅 ≥ 9.9%（相对前日收盘近似：close >= open * 1.099）
-        if bar.close >= bar.open * 1.099:
+    if not day_bars:
+        return None
+
+    # 涨停价 ≈ 当天最高价（涨停日 high 就是涨停价）
+    limit_up_price = max(b.close for b in day_bars)
+    # 找到第一个 close 接近涨停价的 bar（0.1%误差容忍）
+    for bar in day_bars:
+        if limit_up_price > 0 and bar.close / limit_up_price >= 0.999:
+            return datetime.fromtimestamp(bar.timestamp / 1000).strftime("%H:%M")
+
+    # fallback: close >= 当天第一根 bar open * 1.099
+    day_open = day_bars[0].open
+    for bar in day_bars:
+        if day_open > 0 and bar.close / day_open >= 1.099:
             return datetime.fromtimestamp(bar.timestamp / 1000).strftime("%H:%M")
 
     return None

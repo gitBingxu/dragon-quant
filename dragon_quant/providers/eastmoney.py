@@ -195,9 +195,9 @@ class EastMoneyProvider(StockProvider):
             result.append(SectorPerformance(
                 code=d.get("f12", ""),
                 name=d.get("f14", ""),
-                pct=_safe_float(d.get("f3", 0)),
-                amplitude=_safe_float(d.get("f8", 0)),
-                turnover_rate=_safe_float(d.get("f104", 0)),
+                pct=_safe_float(d.get("f3", 0)) / 100.0,
+                amplitude=_safe_float(d.get("f8", 0)) / 100.0,
+                turnover_rate=_safe_float(d.get("f104", 0)) / 100.0,
             ))
         return result
 
@@ -233,7 +233,7 @@ class EastMoneyProvider(StockProvider):
                 code=d.get("f12", ""),
                 name=d.get("f14", ""),
                 sector_code=sector_code,
-                pct=_safe_float(d.get("f3", 0)),
+                pct=_safe_float(d.get("f3", 0)) / 100.0,
                 price=_safe_float(d.get("f2", 0)),
             ))
         return result

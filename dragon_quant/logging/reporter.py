@@ -1,19 +1,11 @@
 """
 报告生成器 — 将 ScanLogger 的结构化日志转为自然语言报告
 
-用法:
-  reporter = ReportBuilder(logger)
-  text = reporter.build_stock_report("600519")
-  all_text = reporter.build_summary_report(ranking)
+严格按照 fewshot 格式输出详细报告。
 """
 
 from typing import Optional
 from dragon_quant.logging.logger import ScanLogger, LogEntry
-
-
-def _nn(v, default=""):
-    """none/null → 默认值"""
-    return default if v is None else v
 
 
 class ReportBuilder:
@@ -25,7 +17,7 @@ class ReportBuilder:
     def build_stock_report(self, code: str, name: str = "",
                            board_count: int = 0,
                            concepts: Optional[list[str]] = None) -> str:
-        """单只股票的完整分析报告"""
+        """单只股票的完整分析报告（fewshot 格式）"""
         ctx = self.logger.report_context(code)
         dims = ctx.get("dimensions", {})
 
@@ -77,61 +69,76 @@ class ReportBuilder:
 
         return "\n".join(lines)
 
+    # ═══ 带动性 ═══
+
     def _format_drive(self, d: dict) -> str:
         details = d.get("details", d)
         bd = details.get("best_day_detail", {})
         voice = bd.get("voice", 0)
         follow = bd.get("follow", 0)
         board_det = bd.get("board_detail", {})
-        seal_rank = board_det.get("seal_rank", "?")
-        board_time = board_det.get("board_time", "?")
-        is_yizi = board_det.get("is_yiziban", False)
-        gap_det = board_det.get("gap_detail", {})
+        board_lead = bd.get("board_leadership", 0)
         consecutive_bonus = details.get("consecutive_bonus", 0)
         score = d.get("score", 0)
 
-        parts = [f"- 🐉 带动性({score:.0f})"]
+        # 子分
+        header = f"- 🐉 带动性({score:.0f}): 板块共鸣{voice:.0f}/小弟跟风{follow:.0f}/封板力度{board_lead:.0f}"
 
-        voice_str = ""
-        if voice >= 80:
-            voice_str = "极强"
-        elif voice >= 50:
-            voice_str = "较好"
-        elif voice >= 20:
-            voice_str = "一般"
-        elif voice > 0:
-            voice_str = "较弱"
+        lines = [header]
 
-        follow_str = ""
-        if follow >= 80:
-            follow_str = "强"
-        elif follow >= 50:
-            follow_str = "较好"
-        elif follow >= 20:
-            follow_str = "一般"
-        elif follow > 0:
-            follow_str = "弱"
+        # ─ 板块共鸣详情
+        voice_raw = bd.get("voice_raw", {})
+        if voice_raw:
+            total = voice_raw.get("total", 0)
+            lu = voice_raw.get("limit_up", 0)
+            if lu / max(total, 1) >= 0.10:
+                level = "极强"
+            elif lu / max(total, 1) >= 0.05:
+                level = "较强"
+            elif lu > 0:
+                level = "一般"
+            else:
+                level = "无"
+            lines.append(f"  - 板块共鸣：板块共 {total} 只票，共 {lu} 只涨停，板块共鸣度{level}；")
 
-        parts.append(f"板块共鸣{voice_str}")
+        # ─ 小弟跟风详情
+        follow_raw = bd.get("follow_raw", {})
+        if follow_raw:
+            total = follow_raw.get("total", 0)
+            strong = follow_raw.get("strong", 0)
+            down = follow_raw.get("down", 0)
+            if follow >= 80:
+                level = "强"
+            elif follow >= 50:
+                level = "较好"
+            elif follow >= 20:
+                level = "一般"
+            else:
+                level = "弱"
+            lines.append(f"  - 小弟跟风：板块共 {total} 只票，其中 {strong} 只涨幅超 3%，{down} 只下跌，跟风属性{level}；")
 
-        # 封板描述
+        # ─ 封板力度详情
+        seal_rank = board_det.get("seal_rank", "?")
+        board_time = board_det.get("board_time", "?")
+        is_yizi = board_det.get("is_yiziban", False)
+        sector_lu_total = board_det.get("sector_limit_up_total", 0)
+
         if is_yizi:
-            seal_desc = "一字板封死，无带动"
+            lines.append(f"  - 封板力度：一字板封死，无带动效应；")
         elif board_time and board_time != "?":
-            seal_desc = f"{board_time}封板，同板块排第{seal_rank}"
-            peer_count = gap_det.get("peer_count", 0)
-            if peer_count > 0:
-                avg_gap = gap_det.get("avg_gap_min", 0)
-                if avg_gap is not None:
-                    seal_desc += f"，小弟平均间隔{avg_gap:.0f}min"
+            if seal_rank == 1 and sector_lu_total > 0:
+                desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 开盘即涨停，是最先涨停的票"
+            elif sector_lu_total > 0:
+                desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 涨停，为第 {seal_rank} 只封板"
+            else:
+                desc = f"{board_time} 封板"
+            lines.append(f"  - 封板力度：{desc}；")
         else:
-            seal_desc = "未检测到明确封板信号"
+            lines.append(f"  - 封板力度：未检测到明确封板时间；")
 
-        parts.append(f"/{seal_desc}")
-        if consecutive_bonus > 0:
-            parts.append(f"/连板+{consecutive_bonus:.0f}")
+        return "\n".join(lines)
 
-        return "".join(parts)
+    # ═══ 抗跌性 ═══
 
     def _format_anti_drop(self, d: dict) -> str:
         details = d.get("details", d)
@@ -143,24 +150,39 @@ class ReportBuilder:
         parts = [f"- 🛡️ 抗跌性({score:.0f}): "]
 
         if not plunge_days:
-            parts.append("近30日无跳水日")
+            parts.append("近 30 日无跳水日，无法评估抗跌性；")
         elif len(plunge_days) == 1:
-            parts.append(f"{plunge_days[0]}大盘跳水，该股")
-            # 尝试从 day_details 获取更多信息
+            day_str = plunge_days[0]
+            parts.append(f"{day_str} 大盘跳水，")
             if day_details:
                 dd = day_details[0]
                 stock_pct = dd.get("stock_pct", 0)
                 market_pct = dd.get("market_pct", 0)
                 if stock_pct > 0:
-                    parts.append(f"逆势收红+{stock_pct:.1f}%")
+                    parts.append(f"该股逆势收红 +{stock_pct:.1f}%，抗跌性强；")
+                elif stock_pct > market_pct:
+                    parts.append(f"该股仅跌 {stock_pct:.1f}%（大盘跌 {market_pct:.1f}%），抗跌性较好；")
                 else:
-                    parts.append(f"小幅跟跌{stock_pct:.1f}%（大盘{market_pct:.1f}%）")
+                    parts.append(f"该股跟跌 {stock_pct:.1f}%，抗跌性一般；")
+            else:
+                parts.append("抗跌性一般；")
         else:
-            parts.append(f"{len(plunge_days)}个跳水日")
+            days_str = "/".join(plunge_days[:5])
+            parts.append(f"近 30 日共 {len(plunge_days)} 个跳水日（{days_str}），")
             if bonus > 0:
-                parts.append(f"，连续暴跌中表现抗跌(+{bonus:.0f})")
+                parts.append(f"连续暴跌中表现抗跌，额外加分；")
+            else:
+                # 算平均相对表现
+                avg_stock = sum(dd.get("stock_pct", 0) for dd in day_details) / max(len(day_details), 1)
+                avg_market = sum(dd.get("market_pct", 0) for dd in day_details) / max(len(day_details), 1)
+                if avg_stock > avg_market:
+                    parts.append(f"个股平均跑赢大盘，抗跌性较好；")
+                else:
+                    parts.append(f"个股跟随大盘下跌，抗跌性一般；")
 
         return "".join(parts)
+
+    # ═══ 领涨性 ═══
 
     def _format_leadership(self, d: dict) -> str:
         details = d.get("details", d)
@@ -174,19 +196,21 @@ class ReportBuilder:
 
         if total > 0:
             pct_rank = rank / total * 100
-            parts.append(f"行业排名前{pct_rank:.0f}%（{rank}/{total}）")
+            parts.append(f"行业排名前 {pct_rank:.0f}%（{rank}/{total}）")
         else:
             parts.append("行业排名无法评估")
 
-        # 东财返回的 pct 是原始值（如 531=5.31%），除 100 显示
         if deviation != 0:
             direction = "跑赢" if deviation > 0 else "跑输"
-            parts.append(f"，{direction}行业中位数{abs(deviation)/100:.1f}%")
+            parts.append(f"，{direction}中位数 {abs(deviation):+.1f}%")
 
         if lead_lag > 0:
-            parts.append(f"，有领先板块拉伸信号(+{lead_lag:.0f})")
+            parts.append(f"，有领先板块拉伸信号")
 
+        parts.append("；")
         return "".join(parts)
+
+    # ═══ 资金承接 ═══
 
     def _format_absorption(self, d: dict) -> str:
         details = d.get("details", d)
@@ -198,38 +222,76 @@ class ReportBuilder:
         parts = [f"- 💰 资金承接({score:.0f}): "]
 
         if reason:
-            parts.append(reason)
-        elif event_count == 0:
-            parts.append("未检测到显著虹吸信号")
+            parts.append(f"{reason}；")
+            return "".join(parts)
+
+        if event_count == 0:
+            parts.append("未检测到显著跨板块资金虹吸信号；")
+            return "".join(parts)
+
+        # 取最佳事件详情
+        if best:
+            target_pct = best.get("target_pct", 0)
+            start_time = best.get("start_time", "?")
+            end_time = best.get("end_time", "?")
+            fleeing = best.get("fleeing_sectors", [])
+
+            # 描述流出板块
+            if fleeing:
+                fleeing_names = [f.get("name", f.get("code", "?")) for f in fleeing[:3]]
+                fleeing_str = "、".join(fleeing_names)
+                parts.append(f"{start_time} {fleeing_str} 等板块跳水，")
+                parts.append(f"{start_time}~{end_time} 该板块拉伸 +{target_pct}%")
+
+                # 如果有第二个显著事件
+                if event_count >= 2:
+                    # 找时间上不同的第二事件
+                    all_events_sorted = sorted(
+                        [e for e in self._get_all_events(details)],
+                        key=lambda e: e.get("start_time", "99:99")
+                    )
+                    for evt in all_events_sorted:
+                        if evt.get("start_time") != start_time:
+                            f2 = evt.get("fleeing_sectors", [])
+                            if f2:
+                                f2_names = [x.get("name", x.get("code", "?")) for x in f2[:2]]
+                                parts.append(f"，{evt.get('start_time')} {'、'.join(f2_names)} 跳水")
+                                parts.append(f"，板块继续拉伸 +{evt.get('target_pct', 0)}%")
+                            break
+
+                parts.append("；")
+            else:
+                parts.append(f"检测到 {event_count} 次虹吸事件，最强窗口涨幅 +{target_pct}%，{best.get('fleeing_count', 0)} 个板块被抽血；")
         else:
-            parts.append(f"检测到{event_count}次虹吸事件")
-            if best:
-                target_pct = best.get("target_pct", 0)
-                fleeing = best.get("fleeing_count", 0)
-                drawdown = best.get("drawdown_ratio", 0)
-                parts.append(f"，最强窗口涨幅+{target_pct}%")
-                parts.append(f"，{fleeing}个板块被抽血")
-                if drawdown > 0:
-                    parts.append(f"，回撤{drawdown:.0%}")
+            parts.append(f"检测到 {event_count} 次虹吸事件；")
 
         return "".join(parts)
 
+    def _get_all_events(self, details: dict) -> list[dict]:
+        """从日志中提取所有事件（当前 scorer 只在 best_event 里存了最强的，
+        但我们可以从 fleeing_sectors 数据重建）"""
+        # 当前结构只存 best_event，返回一个单元素列表
+        best = details.get("best_event")
+        if best:
+            return [best]
+        return []
+
+    # ═══ 汇总 ═══
+
     def build_summary_report(self, ranking: list[dict]) -> str:
-        """全量汇总报告"""
+        """全量排名表"""
         summary = self.logger.summary()
         api = summary.get("api", {})
 
         lines = [
             f"🐉 龙头战法扫描报告",
-            f"{'═'*50}",
+            f"{'═'*60}",
             f"耗时: {summary['elapsed_s']}s | 日志: {summary['total_entries']}条 | 错误: {summary['error_count']}个",
-            f"API: {api.get('total',0)}次调用, {api.get('ok',0)}成功, {api.get('error',0)}失败, 总耗时{api.get('total_ms',0):.0f}ms",
             "",
         ]
 
-        # TOP 10 排名表
         lines.append(f"{'排名':4s} {'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}  等级")
-        lines.append("-" * 75)
+        lines.append("-" * 78)
         for i, r in enumerate(ranking[:10]):
             dims = r.get("dimensions", {})
             composite = r.get("composite_score", 0)

@@ -102,6 +102,7 @@ def _load_shared(path: str, cache: DataCache):
 def _score_one(cand: Candidate, cache: DataCache,
                candidate_pool: list[Candidate],
                all_sector_codes: list[str],
+               sector_name_map: dict[str, str],
                logger) -> dict:
     from dragon_quant.scorers.drive import score as score_drive
     from dragon_quant.scorers.anti_drop import score as score_anti_drop
@@ -126,6 +127,7 @@ def _score_one(cand: Candidate, cache: DataCache,
                 kwargs["primary_sector"] = cand.primary_sector
             if dim_name == "absorption":
                 kwargs["all_sector_codes"] = all_sector_codes
+                kwargs["sector_name_map"] = sector_name_map
 
             sr = score_fn(**kwargs)
             dims[dim_name] = {"score": sr.score, "weight": sr.weight, "details": sr.details}
@@ -299,11 +301,14 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     # 重建候选股对象（用于 drive 的 peer_pool）
     candidate_pool = ranking  # 直接用 sorted ranking
 
+    # 板块名称映射（用于资金承接报告）
+    sector_name_map = {s.code: s.name for s in all_sectors}
+
     results = []
     for cand in candidate_pool:
         try:
             sr = _score_one(cand, cache, candidate_pool, [s.code for s in all_sectors],
-                           logger)
+                           sector_name_map, logger)
             results.append(sr)
             dims = sr.get("dimensions", {})
             print(f"  {cand.code} {cand.name:6s}  "

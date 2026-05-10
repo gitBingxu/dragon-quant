@@ -127,7 +127,7 @@ class ReportBuilder:
             lines.append(f"  - 封板力度：一字板封死，无带动效应；")
         elif board_time and board_time != "?":
             if seal_rank == 1 and sector_lu_total > 0:
-                desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 开盘即涨停，是最先涨停的票"
+                desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 封板，是最先涨停的票"
             elif sector_lu_total > 0:
                 desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 涨停，为第 {seal_rank} 只封板"
             else:

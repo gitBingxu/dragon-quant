@@ -23,12 +23,14 @@ class KBar:
 
 @dataclass
 class StockInfo:
-    """股票基本信息"""
+    """股票基本信息 + 当日行情快照"""
     code: str               # 如 "600519"
     name: str               # 如 "贵州茅台"
     exchange: str = ""      # "SH" / "SZ"
     sector_code: str = ""   # 所属板块代码
     sector_name: str = ""   # 所属板块名称
+    pct: float = 0.0        # 涨跌幅 %
+    price: float = 0.0      # 最新价
 
 
 @dataclass

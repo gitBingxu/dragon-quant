@@ -36,6 +36,14 @@ REFERERS = {
 }
 
 
+def _safe_float(v, default=0.0):
+    """安全转浮点，处理 '-' 和 None"""
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return default
+
+
 def _fetch(url: str, referer: str) -> Optional[dict]:
     """JSONP GET 请求"""
     cookie = get_em()
@@ -52,14 +60,80 @@ def _fetch(url: str, referer: str) -> Optional[dict]:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
     except Exception as e:
-        print(f"  ⚠️ 东财请求失败: {e}", file=sys.stderr)
-        return None
+        # urllib 被 TLS 指纹拦截 → 降级到 Playwright
+        return _fetch_playwright(url, referer, cookie)
 
-    # 解析 JSONP: jQueryxxx({...});
+    return _parse_jsonp(raw)
+
+
+def _parse_jsonp(raw: str) -> Optional[dict]:
+    """解析 JSONP: jQueryxxx({...});"""
     m = re.search(r"\((\{.*\})\)", raw, re.DOTALL)
     if not m:
         return None
     return json.loads(m.group(1))
+
+
+# ─── Playwright 降级路径（push2 域名有 TLS 指纹检测） ───
+
+_pw_browser = None
+_pw_context = None
+_pw_page = None
+
+
+def _ensure_pw():
+    """懒加载 Playwright 单例浏览器"""
+    global _pw_browser, _pw_context, _pw_page
+    if _pw_browser is not None:
+        return
+    from playwright.sync_api import sync_playwright
+    _pw_instance = sync_playwright().start()
+    _pw_browser = _pw_instance.chromium.launch(headless=True)
+    _pw_context = _pw_browser.new_context(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        locale="zh-CN",
+        timezone_id="Asia/Shanghai",
+    )
+    _pw_page = _pw_context.new_page()
+    # 预加载东财页面，建立 session + cookie domain
+    try:
+        _pw_page.goto("https://quote.eastmoney.com/center/hsbk.html",
+                      wait_until="domcontentloaded", timeout=20000)
+        _pw_page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
+
+def _fetch_playwright(url: str, referer: str, cookie: str) -> Optional[dict]:
+    """通过 Playwright add_script_tag 发 JSONP 请求（绕过 TLS 指纹检测）"""
+    try:
+        _ensure_pw()
+        cb_name = "dq_cb_" + str(int(time.time() * 1000))
+        jsonp_url = re.sub(r'cb=[^&]+', f'cb={cb_name}', url)
+        if 'cb=' not in jsonp_url:
+            sep = '&' if '?' in jsonp_url else '?'
+            jsonp_url += f'{sep}cb={cb_name}'
+        if 'cb=' not in jsonp_url:
+            sep = '&' if '?' in jsonp_url else '?'
+            jsonp_url += f'{sep}cb={cb_name}'
+
+        # 注册回调 → 发起请求 → 等待执行
+        _pw_page.evaluate(
+            '(cb) => { window[cb] = (d) => { window.__dq_tmp = d; }; }', cb_name)
+        _pw_page.add_script_tag(url=jsonp_url)
+        _pw_page.wait_for_timeout(1000)
+
+        # 读取结果
+        result = _pw_page.evaluate('window.__dq_tmp')
+        _pw_page.evaluate('delete window.__dq_tmp')
+        _pw_page.evaluate(f'delete window["{cb_name}"]')
+
+        if result:
+            return result
+        return None
+    except Exception as e:
+        print(f"  ⚠️ 东财 Playwright 请求失败: {e}", file=sys.stderr)
+        return None
 
 
 def _parse_kline_items(raw_items: list[str]) -> list[KBar]:
@@ -121,9 +195,9 @@ class EastMoneyProvider(StockProvider):
             result.append(SectorPerformance(
                 code=d.get("f12", ""),
                 name=d.get("f14", ""),
-                pct=float(d.get("f3", 0)),
-                amplitude=float(d.get("f8", 0)),
-                turnover_rate=float(d.get("f104", 0)),
+                pct=_safe_float(d.get("f3", 0)),
+                amplitude=_safe_float(d.get("f8", 0)),
+                turnover_rate=_safe_float(d.get("f104", 0)),
             ))
         return result
 
@@ -159,6 +233,8 @@ class EastMoneyProvider(StockProvider):
                 code=d.get("f12", ""),
                 name=d.get("f14", ""),
                 sector_code=sector_code,
+                pct=_safe_float(d.get("f3", 0)),
+                price=_safe_float(d.get("f2", 0)),
             ))
         return result
 

@@ -101,7 +101,8 @@ def _load_shared(path: str, cache: DataCache):
 
 def _score_one(cand: Candidate, cache: DataCache,
                candidate_pool: list[Candidate],
-               all_sector_codes: list[str]) -> dict:
+               all_sector_codes: list[str],
+               logger) -> dict:
     from dragon_quant.scorers.drive import score as score_drive
     from dragon_quant.scorers.anti_drop import score as score_anti_drop
     from dragon_quant.scorers.leadership import score as score_leadership
@@ -129,8 +130,13 @@ def _score_one(cand: Candidate, cache: DataCache,
             sr = score_fn(**kwargs)
             dims[dim_name] = {"score": sr.score, "weight": sr.weight, "details": sr.details}
             composite += sr.score * sr.weight
+
+            # 结构化日志
+            logger.scorer(dim_name, cand.code, score=sr.score, weight=sr.weight,
+                          **sr.details)
         except Exception as e:
-            print(f"    ⚠️ {dim_name} 打分异常 {cand.code}: {e}", file=sys.stderr)
+            logger.error(f"scorer:{dim_name}", f"打分异常: {e}",
+                         code=cand.code, exception=str(e))
             dims[dim_name] = {"score": 50.0, "weight": weight, "details": {"error": str(e)}}
             composite += 50.0 * weight
 
@@ -156,6 +162,9 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     cache = DataCache()
     limiter = RateLimiter()
 
+    from dragon_quant.logging.logger import ScanLogger
+    logger = ScanLogger()
+
     # ────────────────────────────────────────────
     # Phase A: 板块排行
     # ────────────────────────────────────────────
@@ -163,6 +172,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
 
     top10_up = em.get_sector_ranking(asc=False)[:10]
     top10_down = em.get_sector_ranking(asc=True)[:10]
+    logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     print(f"   前10涨: {len(top10_up)} 个板块")
     print(f"   前10跌: {len(top10_down)} 个板块")
 
@@ -201,6 +211,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
         sector_components[s.code] = components
 
     candidate_pool = list(all_candidates.values())
+    logger.phase("B", f"候选股筛选", count=len(candidate_pool))
     print(f"   候选池: {len(candidate_pool)} 只（去重）")
     for c in candidate_pool:
         print(f"     {c.name:6s} {c.code}  概念: {c.concepts}")
@@ -232,6 +243,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     # 排序
     candidate_pool.sort(key=lambda c: (len(c.concepts), c.board_count), reverse=True)
     ranking = candidate_pool[:top_n]
+    logger.phase("C", f"连板高度排序", top=len(ranking))
 
     print(f"   排序取前 {len(ranking)} 只:")
     for r in ranking:
@@ -268,6 +280,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
                                     tx.batch_get_quotes(all_codes_list)))
 
     limiter.wait_all()
+    logger.phase("D", "并发数据加载完成")
     print(f"   ✅ 全部加载完成")
 
     # ────────────────────────────────────────────
@@ -289,7 +302,8 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     results = []
     for cand in candidate_pool:
         try:
-            sr = _score_one(cand, cache, candidate_pool, [s.code for s in all_sectors])
+            sr = _score_one(cand, cache, candidate_pool, [s.code for s in all_sectors],
+                           logger)
             results.append(sr)
             dims = sr.get("dimensions", {})
             print(f"  {cand.code} {cand.name:6s}  "
@@ -305,6 +319,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     # Phase F: 输出
     # ────────────────────────────────────────────
     elapsed = time.time() - t_start
+    logger.phase("F", f"扫描完成", elapsed_s=round(elapsed, 1))
     print(f"\n{'═'*56}")
     print(f"🐉 龙头战法扫描完成 ({elapsed:.0f}s)")
     print(f"{'═'*56}")
@@ -321,3 +336,22 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
                   f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
                   f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
                   f"{dims.get('absorption', {}).get('score', 0):6.1f}")
+
+        # ── 自然语言报告 ──
+        from dragon_quant.logging.reporter import ReportBuilder
+        reporter = ReportBuilder(logger)
+        print(f"\n{'═'*56}")
+        print(f"📋 TOP 3 详细报告")
+        print(f"{'═'*56}")
+        for r in results[:3]:
+            print(reporter.build_stock_report(
+                r["code"], r.get("name", ""),
+                r.get("board_count", 0), r.get("concepts", [])
+            ))
+            print()
+
+        # ── 持久化 ──
+        from dragon_quant.providers.cookie import _data_dir as get_data_dir
+        log_path = get_data_dir() / "logs" / f"scan_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
+        logger.dump_jsonl(log_path)
+        print(f"📝 日志已保存: {log_path}")

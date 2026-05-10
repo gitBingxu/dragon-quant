@@ -92,21 +92,22 @@ class XueqiuProvider(StockProvider):
     def get_kline(self, code: str, days: int = 20) -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
-        begin = now_ms - (days + 14) * 86400 * 1000
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type=before&count=-{days}&indicator=kline&begin={begin}"
+        begin = now_ms - (days + 30) * 86400 * 1000  # 足够早的起点
+        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type=after&count={days*2}&indicator=kline&begin={begin}"
         data = _fetch(path)
         if not data:
             return []
         items = data.get("data", {}).get("item", []) or data.get("data", {}).get("items", [])
-        return _parse_kline(items)
+        # 只取最近 days 根
+        return _parse_kline(items)[-days:]
 
     # ─── 5 分钟 K 线 ───
 
     def get_5min_kline(self, code: str, bars: int = 96) -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
-        begin = now_ms - 14 * 86400 * 1000
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=5m&type=before&count=-{bars}&indicator=kline&begin={begin}"
+        begin = now_ms - 30 * 86400 * 1000  # 足够早的起点
+        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=5m&type=after&count={bars*3}&indicator=kline&begin={begin}"
         data = _fetch(path)
         if not data:
             return []

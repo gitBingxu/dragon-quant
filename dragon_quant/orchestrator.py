@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import time
-import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -60,14 +59,32 @@ def _compute_consecutive_boards(klines: list) -> int:
     return count
 
 
+def _to_serializable(obj):
+    """递归转换 dataclass 为 dict"""
+    if hasattr(obj, '__dataclass_fields__'):
+        return {
+            f.name: _to_serializable(getattr(obj, f.name))
+            for f in obj.__dataclass_fields__.values()
+        }
+    if isinstance(obj, list):
+        return [_to_serializable(i) for i in obj]
+    if isinstance(obj, dict):
+        return {k: _to_serializable(v) for k, v in obj.items()}
+    # Convert bytes/timestamp objects that might cause issues
+    if isinstance(obj, bytes):
+        return obj.decode('utf-8', errors='replace')
+    return obj
+
+
 def _save_shared(cache: DataCache):
     """导出缓存快照到共享文件，子进程读取"""
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     SHARED_DIR.mkdir(parents=True, exist_ok=True)
     path = SHARED_DIR / f"dq_shared_{timestamp}.json"
     snapshot = cache.snapshot()
+    serializable = _to_serializable(snapshot)
     with open(path, "w") as f:
-        json.dump(snapshot, f, ensure_ascii=False)
+        json.dump(serializable, f, ensure_ascii=False)
     return str(path)
 
 
@@ -76,6 +93,52 @@ def _load_shared(path: str, cache: DataCache):
     with open(path) as f:
         data = json.load(f)
     cache.load_snapshot(data)
+
+
+# ════════════════════════════════════════════════════════════
+# 单只打分
+# ════════════════════════════════════════════════════════════
+
+def _score_one(cand: Candidate, cache: DataCache,
+               candidate_pool: list[Candidate],
+               all_sector_codes: list[str]) -> dict:
+    from dragon_quant.scorers.drive import score as score_drive
+    from dragon_quant.scorers.anti_drop import score as score_anti_drop
+    from dragon_quant.scorers.leadership import score as score_leadership
+    from dragon_quant.scorers.absorption import score as score_absorption
+
+    scorers = [
+        ("drive",      score_drive,      0.35),
+        ("anti_drop",  score_anti_drop,  0.15),
+        ("leadership", score_leadership, 0.25),
+        ("absorption", score_absorption, 0.25),
+    ]
+
+    dims = {}
+    composite = 0.0
+    for dim_name, score_fn, weight in scorers:
+        try:
+            kwargs = {"code": cand.code, "cache": cache}
+            if dim_name == "drive":
+                kwargs["candidate_pool"] = candidate_pool
+            if dim_name in ("drive", "leadership", "absorption"):
+                kwargs["primary_sector"] = cand.primary_sector
+            if dim_name == "absorption":
+                kwargs["all_sector_codes"] = all_sector_codes
+
+            sr = score_fn(**kwargs)
+            dims[dim_name] = {"score": sr.score, "weight": sr.weight, "details": sr.details}
+            composite += sr.score * sr.weight
+        except Exception as e:
+            print(f"    ⚠️ {dim_name} 打分异常 {cand.code}: {e}", file=sys.stderr)
+            dims[dim_name] = {"score": 50.0, "weight": weight, "details": {"error": str(e)}}
+            composite += 50.0 * weight
+
+    return {
+        "code": cand.code, "name": cand.name,
+        "concepts": cand.concepts, "board_count": cand.board_count,
+        "composite_score": round(composite, 2), "dimensions": dims,
+    }
 
 
 # ════════════════════════════════════════════════════════════
@@ -208,31 +271,53 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     print(f"   ✅ 全部加载完成")
 
     # ────────────────────────────────────────────
-    # Phase E: 聚合
+    # Phase E: 主进程直接打分（跳过子进程序列化）
     # ────────────────────────────────────────────
-    shared_path = _save_shared(cache)
-    print(f"💾 Phase E — 共享缓存: {shared_path}")
+    print("🔨 Phase E — 四维打分")
 
-    # ────────────────────────────────────────────
-    # Phase F: subprocess 并行打分
-    # ────────────────────────────────────────────
-    print("🔨 Phase F — 并行打分")
+    # 注入元数据到缓存（供 scorer 读取）
+    cache.set("__meta__:candidates", [
+        {"code": c.code, "name": c.name, "concepts": c.concepts,
+         "primary_sector": c.primary_sector, "board_count": c.board_count}
+        for c in ranking
+    ])
+    cache.set("__meta__:sector_codes", [s.code for s in all_sectors])
+
+    # 重建候选股对象（用于 drive 的 peer_pool）
+    candidate_pool = ranking  # 直接用 sorted ranking
 
     results = []
-    with subprocess.Popen(
-        [sys.executable, "-m", "dragon_quant.analyze", "stub", "--shared-cache", shared_path],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    ) as proc:
-        out, err = proc.communicate(timeout=60)
-        if out:
-            print(out.strip())
+    for cand in candidate_pool:
+        try:
+            sr = _score_one(cand, cache, candidate_pool, [s.code for s in all_sectors])
+            results.append(sr)
+            dims = sr.get("dimensions", {})
+            print(f"  {cand.code} {cand.name:6s}  "
+                  f"综合={sr['composite_score']:5.1f}  "
+                  f"带动={dims.get('drive',{}).get('score',0):5.1f}  "
+                  f"抗跌={dims.get('anti_drop',{}).get('score',0):5.1f}  "
+                  f"领涨={dims.get('leadership',{}).get('score',0):5.1f}  "
+                  f"承接={dims.get('absorption',{}).get('score',0):5.1f}")
+        except Exception as e:
+            print(f"  ⚠️ {cand.code} 打分失败: {e}", file=sys.stderr)
 
     # ────────────────────────────────────────────
-    # Phase G: 输出
+    # Phase F: 输出
     # ────────────────────────────────────────────
     elapsed = time.time() - t_start
-    print(f"\n══════════════════════════════════════════")
+    print(f"\n{'═'*56}")
     print(f"🐉 龙头战法扫描完成 ({elapsed:.0f}s)")
-    print(f"══════════════════════════════════════════")
+    print(f"{'═'*56}")
 
-    return ranking, cache.stats()
+    if results:
+        results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
+        print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
+        print("-" * 56)
+        for r in results:
+            dims = r.get("dimensions", {})
+            print(f"{r['code']:8s} {r.get('name', ''):8s} "
+                  f"{r['composite_score']:6.1f}  "
+                  f"{dims.get('drive', {}).get('score', 0):6.1f}  "
+                  f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
+                  f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
+                  f"{dims.get('absorption', {}).get('score', 0):6.1f}")

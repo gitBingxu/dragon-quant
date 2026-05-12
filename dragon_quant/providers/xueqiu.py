@@ -44,8 +44,14 @@ def _fetch(path: str) -> Optional[dict]:
 
     url = f"{BASE}{path}"
     headers = dict(HEADERS)
-    headers["Referer"] = f"https://xueqiu.com/S/{_symbol(path.split('symbol=')[1].split('&')[0])}" \
-        if "symbol=" in path else "https://xueqiu.com/"
+    if "symbol=" in path:
+        try:
+            symbol_part = path.split("symbol=")[1].split("&")[0]
+            headers["Referer"] = f"https://xueqiu.com/S/{symbol_part}"
+        except (IndexError, ValueError):
+            headers["Referer"] = "https://xueqiu.com/"
+    else:
+        headers["Referer"] = "https://xueqiu.com/"
     headers["Cookie"] = cookie
 
     req = urllib.request.Request(url, headers=headers)

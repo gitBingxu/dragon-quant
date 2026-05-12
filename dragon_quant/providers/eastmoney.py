@@ -3,7 +3,7 @@
 所有请求 JSONP 格式，带完整反爬 Header
 """
 
-import json, re, sys, time
+import json, re, sys, threading, time
 import urllib.request, urllib.parse
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -74,63 +74,48 @@ def _parse_jsonp(raw: str) -> Optional[dict]:
     return json.loads(m.group(1))
 
 
-# ─── Playwright 降级路径（push2 域名有 TLS 指纹检测） ───
+# ─── Playwright 降级路径（push2 / push2his 有 TLS 指纹检测） ───
 
-_pw_browser = None
-_pw_context = None
-_pw_page = None
+_pw_local = threading.local()
 
 
-def _ensure_pw():
-    """懒加载 Playwright 单例浏览器"""
-    global _pw_browser, _pw_context, _pw_page
-    if _pw_browser is not None:
-        return
+def _get_thread_playwright():
+    """按线程懒加载 Playwright 单例（避免 greenlet 跨线程错误）"""
+    if hasattr(_pw_local, '_browser'):
+        return _pw_local
     from playwright.sync_api import sync_playwright
-    _pw_instance = sync_playwright().start()
-    _pw_browser = _pw_instance.chromium.launch(headless=True)
-    _pw_context = _pw_browser.new_context(
+    _pw_local._playwright = sync_playwright().start()
+    _pw_local._browser = _pw_local._playwright.chromium.launch(headless=True)
+    _pw_local._context = _pw_local._browser.new_context(
         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
         locale="zh-CN",
         timezone_id="Asia/Shanghai",
     )
-    _pw_page = _pw_context.new_page()
-    # 预加载东财页面，建立 session + cookie domain
-    try:
-        _pw_page.goto("https://quote.eastmoney.com/center/hsbk.html",
-                      wait_until="domcontentloaded", timeout=20000)
-        _pw_page.wait_for_timeout(2000)
-    except Exception:
-        pass
+    return _pw_local
 
 
 def _fetch_playwright(url: str, referer: str, cookie: str) -> Optional[dict]:
-    """通过 Playwright add_script_tag 发 JSONP 请求（绕过 TLS 指纹检测）"""
+    """通过 Playwright page.goto() 发 JSONP 请求（绕过 TLS 指纹检测）
+
+    使用独立 page → goto(url) → response.text() 直接读取响应体。
+    按 thread-local 创建浏览器实例，解决 RateLimiter 多线程 greenlet 冲突。
+    """
     try:
-        _ensure_pw()
         cb_name = "dq_cb_" + str(int(time.time() * 1000))
         jsonp_url = re.sub(r'cb=[^&]+', f'cb={cb_name}', url)
         if 'cb=' not in jsonp_url:
             sep = '&' if '?' in jsonp_url else '?'
             jsonp_url += f'{sep}cb={cb_name}'
-        if 'cb=' not in jsonp_url:
-            sep = '&' if '?' in jsonp_url else '?'
-            jsonp_url += f'{sep}cb={cb_name}'
 
-        # 注册回调 → 发起请求 → 等待执行
-        _pw_page.evaluate(
-            '(cb) => { window[cb] = (d) => { window.__dq_tmp = d; }; }', cb_name)
-        _pw_page.add_script_tag(url=jsonp_url)
-        _pw_page.wait_for_timeout(1000)
+        pw = _get_thread_playwright()
+        page = pw._context.new_page()
+        try:
+            response = page.goto(jsonp_url, wait_until="domcontentloaded", timeout=15000)
+            body = response.text()
+        finally:
+            page.close()
 
-        # 读取结果
-        result = _pw_page.evaluate('window.__dq_tmp')
-        _pw_page.evaluate('delete window.__dq_tmp')
-        _pw_page.evaluate(f'delete window["{cb_name}"]')
-
-        if result:
-            return result
-        return None
+        return _parse_jsonp(body)
     except Exception as e:
         print(f"  ⚠️ 东财 Playwright 请求失败: {e}", file=sys.stderr)
         return None

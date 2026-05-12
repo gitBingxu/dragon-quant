@@ -39,6 +39,7 @@ def main():
     # 读取元数据
     candidates_raw = cache.get("__meta__:candidates") or []
     all_sector_codes = cache.get("__meta__:sector_codes") or []
+    sector_name_map_raw = cache.get("__meta__:sector_name_map") or {}
 
     if not candidates_raw:
         print("[]")
@@ -74,6 +75,7 @@ def main():
                     kwargs["primary_sector"] = primary_sector
                 if dim_name == "absorption":
                     kwargs["all_sector_codes"] = all_sector_codes
+                    kwargs["sector_name_map"] = sector_name_map_raw
 
                 sr = score_fn(**kwargs)
                 dims[dim_name] = {
@@ -96,6 +98,8 @@ def main():
             "name": name,
             "concepts": cand.get("concepts", []),
             "board_count": cand.get("board_count", 0),
+            "primary_sector": primary_sector,
+            "primary_sector_name": sector_name_map_raw.get(primary_sector, ""),
             "composite_score": round(composite, 2),
             "dimensions": dims,
         })

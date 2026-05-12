@@ -145,6 +145,8 @@ def _score_one(cand: Candidate, cache: DataCache,
     return {
         "code": cand.code, "name": cand.name,
         "concepts": cand.concepts, "board_count": cand.board_count,
+        "primary_sector": cand.primary_sector,
+        "primary_sector_name": sector_name_map.get(cand.primary_sector, ""),
         "composite_score": round(composite, 2), "dimensions": dims,
     }
 
@@ -162,7 +164,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     tx = providers["tencent"]
 
     cache = DataCache()
-    limiter = RateLimiter()
+    limiter = RateLimiter(max_workers=workers)
 
     from dragon_quant.logging.logger import ScanLogger
     logger = ScanLogger()
@@ -298,11 +300,9 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     ])
     cache.set("__meta__:sector_codes", [s.code for s in all_sectors])
 
-    # 重建候选股对象（用于 drive 的 peer_pool）
-    candidate_pool = ranking  # 直接用 sorted ranking
-
-    # 板块名称映射（用于资金承接报告）
+    # 板块名称映射（供 scorer 报告用，同时写入缓存供子进程读取）
     sector_name_map = {s.code: s.name for s in all_sectors}
+    cache.set("__meta__:sector_name_map", sector_name_map)
 
     results = []
     for cand in candidate_pool:
@@ -351,12 +351,14 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
         for r in results[:3]:
             print(reporter.build_stock_report(
                 r["code"], r.get("name", ""),
-                r.get("board_count", 0), r.get("concepts", [])
+                r.get("board_count", 0), r.get("concepts", []),
+                composite_score=r.get("composite_score", 0),
+                dimensions=r.get("dimensions", {}),
+                primary_sector_name=r.get("primary_sector_name", ""),
             ))
             print()
 
         # ── 持久化 ──
-        from dragon_quant.providers.cookie import _data_dir as get_data_dir
         log_path = get_data_dir() / "logs" / f"scan_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
         logger.dump_jsonl(log_path)
         print(f"📝 日志已保存: {log_path}")

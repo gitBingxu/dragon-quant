@@ -137,13 +137,15 @@ def _detect_board_time(five_min: list[KBar], day_ts: int) -> Optional[str]:
     # 找到第一个 close 接近涨停价的 bar（0.1%误差容忍）
     for bar in day_bars:
         if limit_up_price > 0 and bar.close / limit_up_price >= 0.999:
-            return datetime.fromtimestamp(bar.timestamp / 1000).strftime("%H:%M")
+            dt = datetime.fromtimestamp(bar.timestamp / 1000)
+            return f"{dt.hour}:{dt.minute:02d}"
 
     # fallback: close >= 当天第一根 bar open * 1.099
     day_open = day_bars[0].open
     for bar in day_bars:
         if day_open > 0 and bar.close / day_open >= 1.099:
-            return datetime.fromtimestamp(bar.timestamp / 1000).strftime("%H:%M")
+            dt = datetime.fromtimestamp(bar.timestamp / 1000)
+            return f"{dt.hour}:{dt.minute:02d}"
 
     return None
 

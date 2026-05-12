@@ -53,7 +53,7 @@ class ReportBuilder:
         # 抗跌性
         anti = dims.get("anti_drop", {})
         if anti:
-            lines.append(self._format_anti_drop(anti))
+            lines.append(self._format_anti_drop(anti, name))
 
         # 领涨性
         lead = dims.get("leadership", {})
@@ -146,7 +146,7 @@ class ReportBuilder:
 
     # ═══ 抗跌性 ═══
 
-    def _format_anti_drop(self, d: dict) -> str:
+    def _format_anti_drop(self, d: dict, stock_name: str = "") -> str:
         from datetime import datetime
 
         details = d.get("details", d)
@@ -173,11 +173,11 @@ class ReportBuilder:
                 stock_pct = dd.get("stock_pct", 0)
                 market_pct = dd.get("market_pct", 0)
                 if stock_pct > 0:
-                    parts.append(f"该股逆势收红 +{stock_pct:.1f}%，抗跌性强；")
+                    parts.append(f"{stock_name}逆势收红 +{stock_pct:.1f}%，抗跌性强；")
                 elif stock_pct > market_pct:
-                    parts.append(f"该股仅跌 {stock_pct:.1f}%（大盘跌 {market_pct:.1f}%），抗跌性较好；")
+                    parts.append(f"{stock_name}仅跌 {stock_pct:.1f}%（大盘跌 {market_pct:.1f}%），抗跌性较好；")
                 else:
-                    parts.append(f"该股跟跌 {stock_pct:.1f}%，抗跌性一般；")
+                    parts.append(f"{stock_name}跟跌 {stock_pct:.1f}%，抗跌性一般；")
             else:
                 parts.append("抗跌性一般；")
 
@@ -190,18 +190,18 @@ class ReportBuilder:
                 except Exception:
                     days_fmt.append(d)
             days_str = "/".join(days_fmt)
-            parts.append(f"分析对比大盘近 30 日 K，{days_str} 日大盘跳水，")
+            parts.append(f"分析对比大盘近 15 日 K，{days_str} 日大盘跳水，")
             if bonus > 0:
                 parts.append(f"连续暴跌中表现抗跌，额外加分；")
             else:
                 avg_stock = sum(dd.get("stock_pct", 0) for dd in day_details) / max(len(day_details), 1)
                 avg_market = sum(dd.get("market_pct", 0) for dd in day_details) / max(len(day_details), 1)
                 if avg_stock > 0:
-                    parts.append(f"但该股逆势收红，抗跌性强；")
+                    parts.append(f"但{stock_name}逆势收红，抗跌性强；")
                 elif avg_stock > avg_market:
-                    parts.append(f"但该股维持横盘，抗跌性较好；")
+                    parts.append(f"但{stock_name}维持横盘，抗跌性较好；")
                 else:
-                    parts.append(f"该股跟随大盘下跌，抗跌性一般；")
+                    parts.append(f"{stock_name}跟随大盘下跌，抗跌性一般；")
 
         return "".join(parts)
 
@@ -223,7 +223,7 @@ class ReportBuilder:
             pct_rank = rank / total * 100
             direction = "跑赢" if deviation > 0 else "跑输"
             return (f"- 📊 领涨性({score:.0f}): "
-                    f"行业排名前{pct_rank:.0f}%（{rank}/{total}），"
+                    f"行业排名前{pct_rank:.0f}%，"
                     f"{direction}中位数{abs(deviation):+.1f}%{leadlag_str}")
         else:
             return f"- 📊 领涨性({score:.0f}): 行业排名无法评估{leadlag_str}"
@@ -285,7 +285,7 @@ class ReportBuilder:
                 stretch2 = "继续拉伸"
 
             parts.append(f"，{time2} {fleeing_names2} 跳水，")
-            parts.append(f"{end_time2} {sector_label}{stretch2}（+{target_pct2}%）")
+            parts.append(f"{end_time2} {sector_label}{stretch2}（{target_pct2}%）")
 
         parts.append("；")
         return "".join(parts)

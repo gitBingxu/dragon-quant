@@ -110,6 +110,47 @@ def _find_matching_index(klines: list[KBar], target_ts: int) -> Optional[int]:
 # ─── 子维度计算 ───
 
 
+def _relative_retreat(sbar: KBar, market_pct: float) -> float:
+    stock_return = sbar.pct
+    excess_return = stock_return - market_pct
+
+    if stock_return > 0:
+        return 100.0
+    elif excess_return > 0:
+        return 60.0 + excess_return / abs(market_pct) * 40.0
+    elif stock_return > -2.0:
+        return 30.0
+    else:
+        return 0.0
+
+
+def _intraday_hold(sbar: KBar, prev_close: float) -> float:
+    open_px = sbar.open
+    close_px = sbar.close
+    high_px = sbar.high
+    low_px = sbar.low
+
+    if high_px == low_px:
+        return 50.0
+
+    entity_low = min(open_px, close_px)
+    lower_shadow_pct = (entity_low - low_px) / (high_px - low_px)
+
+    close_pos = (close_px - open_px) / (high_px - low_px)
+
+    if prev_close == 0:
+        max_drop_pct = 0.0
+    else:
+        max_drop_pct = (low_px - prev_close) / prev_close
+
+    penalty = min(abs(max_drop_pct) / 0.05, 1.0)
+
+    support_score = (lower_shadow_pct * 0.6 + close_pos * 0.4) * 100
+    support_score = support_score * (1 - penalty * 0.3)
+
+    return max(min(support_score, 100), 0)
+
+
 def _rebound(stock_klines: list[KBar], market_klines: list[KBar],
              s_idx: int, m_idx: int) -> float:
     """反弹弹性 — 跳水日次日表现"""

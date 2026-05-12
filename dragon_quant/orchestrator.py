@@ -27,6 +27,13 @@ DATA_DIR = get_data_dir()
 SHARED_DIR = DATA_DIR / "shared"
 LOG_DIR = DATA_DIR / "logs"
 
+STATISTICAL_CONCEPT_PREFIXES = (
+    "昨日涨停", "昨日连板", "昨日首板", "昨日打二板",
+    "昨日涨停_含一字", "昨日连板_含一字",
+    "昨日炸板", "昨日跌停", "昨日触板",
+    "最近多板", "东方财富热股",
+)
+
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
     """过滤：非ST、非双创(30/68开头)"""
@@ -174,7 +181,8 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     # ────────────────────────────────────────────
     print("📊 Phase A — 板块排行")
 
-    top10_up = em.get_sector_ranking(asc=False)[:10]
+    top10_up = [s for s in em.get_sector_ranking(asc=False)
+                if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
     top10_down = em.get_sector_ranking(asc=True)[:10]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     print(f"   前10涨: {len(top10_up)} 个板块")
@@ -346,9 +354,9 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
         from dragon_quant.logging.reporter import ReportBuilder
         reporter = ReportBuilder(logger)
         print(f"\n{'═'*56}")
-        print(f"📋 TOP 3 详细报告")
+        print(f"📋 完整详细报告")
         print(f"{'═'*56}")
-        for r in results[:3]:
+        for r in results:
             print(reporter.build_stock_report(
                 r["code"], r.get("name", ""),
                 r.get("board_count", 0), r.get("concepts", []),

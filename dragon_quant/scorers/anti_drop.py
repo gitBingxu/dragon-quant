@@ -5,7 +5,7 @@
 """
 
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional
 from dragon_quant.models.types import ScoreResult, KBar
 from dragon_quant.cache.data_cache import DataCache
 
@@ -56,7 +56,9 @@ def score(code: str, cache: DataCache) -> ScoreResult:
         relative_score = _relative_retreat(sbar, market_pct)
 
         # (b) 日内承接强度 30%
-        intraday_score = _intraday_hold(sbar, stock_5min, mbar.timestamp if 'mbar' in dir() else None)
+        prev_sbar = stock_klines[s_idx + 1] if s_idx + 1 < len(stock_klines) else None
+        prev_close = prev_sbar.close if prev_sbar else 0.0
+        intraday_score = _intraday_hold(sbar, prev_close)
 
         # (c) 反弹弹性 30%
         rebound_score = _rebound(stock_klines, market_klines, s_idx, m_idx)
@@ -106,62 +108,6 @@ def _find_matching_index(klines: list[KBar], target_ts: int) -> Optional[int]:
 
 
 # ─── 子维度计算 ───
-
-def _relative_retreat(sbar: KBar, market_pct: float) -> float:
-    """相对回撤强度 — 分段判断"""
-    stock_return = sbar.pct
-    excess_return = stock_return - market_pct
-
-    if stock_return > 0:
-        return 100.0  # 逆势收红
-    elif excess_return > 0:
-        # 超额为正但个股微跌：60-99
-        return 60.0 + excess_return / abs(market_pct) * 40.0
-    elif stock_return > -2.0:
-        return 30.0  # 小幅跟跌
-    else:
-        return 0.0  # 崩了
-
-
-def _intraday_hold(sbar: KBar, stock_5min: list[KBar], market_ts: Optional[int]) -> float:
-    """日内承接强度 — 下影线/收盘位置/最大跌幅惩罚"""
-    open_px = sbar.open
-    close_px = sbar.close
-    high_px = sbar.high
-    low_px = sbar.low
-
-    if high_px == low_px:
-        return 50.0  # 一字板无振幅，中性
-
-    # 下影线占比：实体下沿到最低 / 全日振幅
-    entity_low = min(open_px, close_px)
-    lower_shadow_pct = (entity_low - low_px) / (high_px - low_px)
-
-    # 收盘位置：收盘相对开盘在日内的位置
-    close_pos = (close_px - open_px) / (high_px - low_px)
-
-    # 日内最大跌幅惩罚（需要昨收）
-    prev_close = _get_prev_close(stock_5min, sbar.timestamp)
-    if prev_close == 0:
-        max_drop_pct = 0.0
-    else:
-        max_drop_pct = (low_px - prev_close) / prev_close
-
-    penalty = min(abs(max_drop_pct) / 0.05, 1.0)
-
-    support_score = (lower_shadow_pct * 0.6 + close_pos * 0.4) * 100
-    support_score = support_score * (1 - penalty * 0.3)
-
-    return max(min(support_score, 100), 0)
-
-
-def _get_prev_close(klines: list[KBar], current_ts: int) -> float:
-    """从日K线获取昨收，或从5分K第一条bar的开盘近似"""
-    for bar in klines:
-        if bar.timestamp < current_ts:
-            return bar.close
-    # fallback: 从日K的 chg/pct 反推
-    return 0.0
 
 
 def _rebound(stock_klines: list[KBar], market_klines: list[KBar],

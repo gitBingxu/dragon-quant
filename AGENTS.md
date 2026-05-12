@@ -53,7 +53,7 @@ dragon_quant/
 ├── cli.py                       # argparse CLI
 ├── orchestrator.py              # 编排主流程 (Phase A→G)
 ├── rate_limit.py                # 分组并发调度器
-├── analyze.py                   # 子进程打分入口（桩）
+├── analyze.py                   # 子进程打分入口（已实现，被主进程内打分取代）
 │
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC (6 抽象方法)
@@ -62,7 +62,7 @@ dragon_quant/
 │   ├── tencent.py               # 腾讯 — 零认证 + fallback
 │   └── cookie.py                # Cookie 管理 + CLI
 │
-├── scorers/                     # 四维评分器（⚠️ 待实现）
+├── scorers/                     # 四维评分器（✅ 已实现）
 │   ├── drive.py                 # 带动性 (35%)
 │   ├── anti_drop.py             # 抗跌性 (15%)
 │   ├── leadership.py            # 领涨性 (25%)
@@ -71,8 +71,11 @@ dragon_quant/
 ├── cache/
 │   └── data_cache.py            # 内存+本地双重缓存
 │
+├── logging/                     # 结构化日志 + 自然语言报告（✅ 已实现）
+│   ├── logger.py                # ScanLogger — 线程安全日志器
+│   └── reporter.py              # ReportBuilder — 自然语言报告生成
+│
 ├── storage/                     # ⚠️ 待实现
-├── logging/                     # ⚠️ 待实现
 ├── utils/                       # ⚠️ 待实现
 └── models/
     └── types.py                 # dataclass 数据模型
@@ -89,10 +92,9 @@ dragon_quant/
 | **A** 板块排行 | 东财·概念板块涨跌幅 Top10 | 2 次 | JSONP，反爬 Header 已内置 |
 | **B** 候选筛选 | 每领涨板块取前5成分股，过滤 ST + 双创 | 20 次 | 去重 + 多概念跟踪 |
 | **C** 连板+排序 | 雪球日K → 算连板天数 → 按(概念数, 连板数)排序取 Top25 | N+1 次 | 涨停阈值 ≥9.9% |
-| **D** 并发加载 | 板块5分K + 个股5分K + 腾讯批量行情 | ~50 次 | RateLimiter 4 线程并发 |
-| **E** 聚合 | 写入共享 JSON 文件 | 1 次 | 子进程只读 |
-| **F** 并行打分 | subprocess 四维评分 | N 个 | ⚠️ 当前是桩 |
-| **G** 输出 | 加权排序 + 报告 | — | — |
+| **D** 并发加载 | 板块5分K + 个股5分K + 腾讯批量行情 | ~50 次 | RateLimiter 8 线程并发 |
+| **E** 四维打分 | 主进程直接调用 4 个 scorer，逐个候选股评分 | N×4 次 | 评分器接口见下方 |
+| **F** 输出 | 加权排序 + 自然语言报告 + JSONL 日志 | — | ReportBuilder 生成中文报告 |
 
 总耗时约 40-50 秒（取决于网络和并发数）。
 
@@ -139,32 +141,35 @@ dragon_quant/
 
 ### ✅ 已完成
 - 数据模型（types.py）
-- 全部 3 个 Provider（东财/雪球/腾讯），含完整反爬 Header
+- 全部 3 个 Provider（东财/雪球/腾讯），含完整反爬 Header + Playwright 降级
 - Cookie 管理（手动设置 + Playwright 自动获取）
-- RateLimiter 分组并发调度
+- RateLimiter 分组并发调度（`workers` 参数控制线程数）
 - DataCache 内存+本地双重缓存 + 快照导出
-- Orchestrator 编排全流程（Phase A→G 骨架）
+- Orchestrator 编排全流程（Phase A→F 完整贯通，主进程直接打分）
 - CLI 入口 + `__main__.py` 入口
-- 技术方案文档（技术方案.md）
+- 四维评分器 `scorers/`（drive.py / anti_drop.py / leadership.py / absorption.py）
+- 结构化日志 `logging/`（ScanLogger + ReportBuilder 自然语言报告）
+- 技术方案文档（技术方案.md / 评分器技术方案.md）
 
 ### ⚠️ 待完成（按优先级）
 
-1. **四维评分器** `scorers/` — `drive.py`, `anti_drop.py`, `leadership.py`, `absorption.py`
-   - 这是项目核心，目前 `analyze.py` 是桩（只列出缓存数据，不做实际打分）
-   - 详细评分逻辑见 README.md 和技术方案文档
-   - 每个评分器接受 `(code, DataCache)` → 返回 `ScoreResult`
+1. **storage 模块** — `paths.py`（数据目录管理）、`local_store.py`（历史报告持久化）
+   - 当前报告只打 JSONL 到 `~/.dragon-quant/logs/`，无可视化回溯界面
 
-2. **analyze.py 对接评分器** — 当前是 stub，需要从共享缓存提取数据、调用四维评分器、输出 JSON
+2. **单票分析 CLI** — `dragon-quant analyze <code>` 子命令
+   - `analyze.py` 作为子进程入口已实现骨架，但缺少 `sector_name_map` 等元数据注入
 
-3. **orchestrator.py Phase F 并行打分** — 当前 `Popen` 只跑一个子进程，需要改成 `workers` 个并发 + 汇总结果
+3. **测试** — 无
+   - 建议优先：评分器单元测试（CDF / 封板时间 / 虹吸事件检测）、Provider mock 测试
 
-4. **storage 模块** — `paths.py`（数据目录管理）、`local_store.py`（历史报告持久化）
+4. **utils 模块** — 空桩，待填充公共工具函数
 
-5. **logging 模块** — 结构化日志 + ReportBuilder（输出格式化）
-
-6. **单票分析 CLI** — `dragon-quant analyze <code>` 子命令
-
-7. **测试** — 无
+### 📝 已知修复（2026-05）
+- `leadership.py` `_normal_cdf_approx` 正负号反了，已修正
+- `anti_drop.py` 日内承接评分的 `prev_close` 始终为 0，已改为从日K线取昨日收盘
+- `orchestrator.py` `--workers` 参数未传递到 RateLimiter，已连接
+- `eastmoney.py` `_fetch_playwright` 重复 `cb=` 追加，已清理
+- `xueqiu.py` Referer 解析无防御，已加 try/except
 
 ---
 
@@ -179,7 +184,7 @@ dragon_quant/
 
 ### 评分器接口约定
 ```python
-def score(code: str, cache: DataCache) -> ScoreResult:
+def score(code: str, cache: DataCache, **kwargs) -> ScoreResult:
     """
     cache 中可用数据：
     - kline:day:{code}           # list[KBar] 日K线
@@ -187,6 +192,12 @@ def score(code: str, cache: DataCache) -> ScoreResult:
     - kline:5min:sector:{s_code} # list[KBar] 板块5分K
     - sector:components:{s_code} # list[StockInfo] 板块成分股
     - quotes:batch               # dict[code → Quote] 批量行情
+
+    各评分器额外参数:
+    - drive:   candidate_pool, primary_sector
+    - anti_drop: （无额外参数）
+    - leadership: primary_sector
+    - absorption: primary_sector, all_sector_codes, sector_name_map
     """
 ```
 

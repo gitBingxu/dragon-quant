@@ -142,19 +142,22 @@ def _intraday_ranking(code: str, components: list[StockInfo],
 # ─── 正态 CDF 近似 ───
 
 def _normal_cdf_approx(z: float) -> float:
-    """分段线性近似标准正态 CDF，返回 estimated_rank (0.01=头部, 0.99=垫底)"""
-    if z < -3:
-        return 0.99
-    elif z < -1:
-        return 0.84 + (z + 1) * 0.16
-    elif z < 0:
-        return 0.50 + z * 0.34
-    elif z < 1:
-        return 0.50 - z * 0.34
-    elif z < 3:
-        return 0.16 - (z - 1) * 0.16
-    else:
+    """分段线性近似标准正态 CDF，返回 estimated_rank (0.01=头部, 0.99=垫底)
+
+    原理: rank = 1.0 - Φ(z)，用分段线性近似 Φ(z):
+      Φ(0)=0.5  Φ(1)=0.84  Φ(2)=0.98  Φ(3)=0.999
+      Φ(-1)=0.16  Φ(-2)=0.02  Φ(-3)=0.001
+    """
+    if z > 3:
         return 0.01
+    elif z > 1:
+        return 0.16 - (z - 1) * 0.075
+    elif z > -1:
+        return 0.50 - z * 0.34
+    elif z > -3:
+        return 0.84 - (z + 1) * 0.075
+    else:
+        return 0.99
 
 
 # ─── Lead-Lag 检测 ───
@@ -174,8 +177,8 @@ def _lead_lag_score(stock_5min: list[KBar], sector_5min: list[KBar]) -> float:
 
     # 滑动窗口：每根 bar 判断其后 6 根 bar 内板块是否跟随
     for i in range(min_len - 6):
-        s_ret = _bar_return(stock_bars, i, i)
-        sec_ret = _bar_return(sector_bars, i, i)
+        s_ret = _bar_return(stock_bars, i)
+        sec_ret = _bar_return(sector_bars, i)
 
         # 个股显著拉升（>0.5%）且板块未跟（涨幅差 > 0.3%）
         if s_ret > 0.005 and (s_ret - sec_ret) > 0.003:
@@ -194,7 +197,7 @@ def _lead_lag_score(stock_5min: list[KBar], sector_5min: list[KBar]) -> float:
     return lead_ratio * 20.0  # 满分 20
 
 
-def _bar_return(klines: list[KBar], idx: int, _unused: int) -> float:
+def _bar_return(klines: list[KBar], idx: int) -> float:
     """单根 bar 涨跌幅"""
     bar = klines[idx]
     if bar.open == 0:

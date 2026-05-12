@@ -1,7 +1,7 @@
 """
 报告生成器 — 将 ScanLogger 的结构化日志转为自然语言报告
 
-严格按照 fewshot 格式输出详细报告。
+严格按照 fewshot.md 格式输出详细报告。
 """
 
 from typing import Optional
@@ -16,26 +16,24 @@ class ReportBuilder:
 
     def build_stock_report(self, code: str, name: str = "",
                            board_count: int = 0,
-                           concepts: Optional[list[str]] = None) -> str:
+                           concepts: Optional[list[str]] = None,
+                           composite_score: float = 0.0,
+                           dimensions: Optional[dict] = None,
+                           primary_sector_name: str = "") -> str:
         """单只股票的完整分析报告（fewshot 格式）"""
-        ctx = self.logger.report_context(code)
-        dims = ctx.get("dimensions", {})
-
-        composite = 0.0
-        for d in dims.values():
-            composite += d["score"] * d["weight"]
+        dims = dimensions or {}
 
         # 等级判定
-        if composite >= 80:
-            grade = "🐉 龙头"
-        elif composite >= 65:
-            grade = "🔥 强票"
-        elif composite >= 50:
-            grade = "📈 中等"
+        if composite_score >= 80:
+            grade = "龙头"
+        elif composite_score >= 65:
+            grade = "强票"
+        elif composite_score >= 50:
+            grade = "中等"
         else:
-            grade = "📉 偏弱"
+            grade = "偏弱"
 
-        concept_str = " · ".join(concepts[:2]) if concepts else ""
+        concept_str = concepts[0] if concepts else ""
         board_str = f"{board_count}连板" if board_count > 0 else ""
 
         lines = []
@@ -44,13 +42,13 @@ class ReportBuilder:
             header += f"——{concept_str}"
         if board_str:
             header += f"——{board_str}"
-        header += f"——{composite:.1f}分——{grade}"
+        header += f"-{composite_score:.1f}分-{grade}"
         lines.append(header)
 
         # 带动性
         drive = dims.get("drive", {})
         if drive:
-            lines.append(self._format_drive(drive))
+            lines.append(self._format_drive(drive, primary_sector_name, name))
 
         # 抗跌性
         anti = dims.get("anti_drop", {})
@@ -65,25 +63,24 @@ class ReportBuilder:
         # 资金承接
         absorb = dims.get("absorption", {})
         if absorb:
-            lines.append(self._format_absorption(absorb))
+            lines.append(self._format_absorption(absorb, primary_sector_name))
 
         return "\n".join(lines)
 
     # ═══ 带动性 ═══
 
-    def _format_drive(self, d: dict) -> str:
+    def _format_drive(self, d: dict, sector_name: str = "", stock_name: str = "") -> str:
         details = d.get("details", d)
         bd = details.get("best_day_detail", {})
         voice = bd.get("voice", 0)
         follow = bd.get("follow", 0)
         board_det = bd.get("board_detail", {})
         board_lead = bd.get("board_leadership", 0)
-        consecutive_bonus = details.get("consecutive_bonus", 0)
         score = d.get("score", 0)
 
-        # 子分
-        header = f"- 🐉 带动性({score:.0f}): 板块共鸣{voice:.0f}/小弟跟风{follow:.0f}/封板力度{board_lead:.0f}"
+        sector_label = f"{sector_name}" if sector_name else "该"
 
+        header = f"- 🐉 带动性({score:.0f}): 板块共鸣{voice:.0f}/小弟跟风{follow:.0f}/封板力度{board_lead:.0f}"
         lines = [header]
 
         # ─ 板块共鸣详情
@@ -99,7 +96,7 @@ class ReportBuilder:
                 level = "一般"
             else:
                 level = "无"
-            lines.append(f"  - 板块共鸣：板块共 {total} 只票，共 {lu} 只涨停，板块共鸣度{level}；")
+            lines.append(f"    - 板块共鸣({voice:.0f})：{sector_label}板块共 {total} 只票，共 {lu} 只票涨停，板块共鸣度{level}；")
 
         # ─ 小弟跟风详情
         follow_raw = bd.get("follow_raw", {})
@@ -115,7 +112,7 @@ class ReportBuilder:
                 level = "一般"
             else:
                 level = "弱"
-            lines.append(f"  - 小弟跟风：板块共 {total} 只票，其中 {strong} 只涨幅超 3%，{down} 只下跌，跟风属性{level}；")
+            lines.append(f"    - 小弟跟风({follow:.0f})：{sector_label}板块共 {total} 只票，其中 {strong} 只涨幅超过 3%，{down} 只股票下跌，跟风属性{level}；")
 
         # ─ 封板力度详情
         seal_rank = board_det.get("seal_rank", "?")
@@ -124,23 +121,34 @@ class ReportBuilder:
         sector_lu_total = board_det.get("sector_limit_up_total", 0)
 
         if is_yizi:
-            lines.append(f"  - 封板力度：一字板封死，无带动效应；")
+            lines.append(f"    - 封板力度({board_lead:.0f})：一字板封死，无带动效应；")
         elif board_time and board_time != "?":
+            try:
+                h, m = board_time.split(":")
+                board_minutes = int(h) * 60 + int(m)
+            except (ValueError, AttributeError):
+                board_minutes = 9999
+            is_morning = board_minutes <= 9 * 60 + 35
             if seal_rank == 1 and sector_lu_total > 0:
-                desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 封板，是最先涨停的票"
+                if is_morning:
+                    desc = f"{sector_label}板块共 {sector_lu_total} 只股票涨停，{stock_name}在 {board_time} 开盘即涨停，是最先涨停的票"
+                else:
+                    desc = f"{sector_label}板块共 {sector_lu_total} 只股票涨停，{stock_name}在 {board_time} 涨停，是最先涨停的票"
             elif sector_lu_total > 0:
-                desc = f"板块共 {sector_lu_total} 只涨停，{board_time} 涨停，为第 {seal_rank} 只封板"
+                desc = f"{sector_label}板块共 {sector_lu_total} 只股票涨停，{stock_name}在 {board_time} 涨停，为第 {seal_rank} 只封板"
             else:
-                desc = f"{board_time} 封板"
-            lines.append(f"  - 封板力度：{desc}；")
+                desc = f"{stock_name}在 {board_time} 封板"
+            lines.append(f"    - 封板力度({board_lead:.0f})：{desc}；")
         else:
-            lines.append(f"  - 封板力度：未检测到明确封板时间；")
+            lines.append(f"    - 封板力度({board_lead:.0f})：未检测到明确封板时间；")
 
         return "\n".join(lines)
 
     # ═══ 抗跌性 ═══
 
     def _format_anti_drop(self, d: dict) -> str:
+        from datetime import datetime
+
         details = d.get("details", d)
         score = d.get("score", 0)
         plunge_days = details.get("plunge_days", [])
@@ -151,9 +159,15 @@ class ReportBuilder:
 
         if not plunge_days:
             parts.append("近 30 日无跳水日，无法评估抗跌性；")
+
         elif len(plunge_days) == 1:
             day_str = plunge_days[0]
-            parts.append(f"{day_str} 大盘跳水，")
+            try:
+                dt = datetime.strptime(day_str, "%Y-%m-%d")
+                day_fmt = f"{dt.month}.{dt.day}"
+            except Exception:
+                day_fmt = day_str
+            parts.append(f"{day_fmt} 大盘跳水，")
             if day_details:
                 dd = day_details[0]
                 stock_pct = dd.get("stock_pct", 0)
@@ -166,19 +180,28 @@ class ReportBuilder:
                     parts.append(f"该股跟跌 {stock_pct:.1f}%，抗跌性一般；")
             else:
                 parts.append("抗跌性一般；")
+
         else:
-            days_str = "/".join(plunge_days[:5])
-            parts.append(f"近 30 日共 {len(plunge_days)} 个跳水日（{days_str}），")
+            days_fmt = []
+            for d in plunge_days[:5]:
+                try:
+                    dt = datetime.strptime(d, "%Y-%m-%d")
+                    days_fmt.append(f"{dt.month}.{dt.day}")
+                except Exception:
+                    days_fmt.append(d)
+            days_str = "/".join(days_fmt)
+            parts.append(f"分析对比大盘近 30 日 K，{days_str} 日大盘跳水，")
             if bonus > 0:
                 parts.append(f"连续暴跌中表现抗跌，额外加分；")
             else:
-                # 算平均相对表现
                 avg_stock = sum(dd.get("stock_pct", 0) for dd in day_details) / max(len(day_details), 1)
                 avg_market = sum(dd.get("market_pct", 0) for dd in day_details) / max(len(day_details), 1)
-                if avg_stock > avg_market:
-                    parts.append(f"个股平均跑赢大盘，抗跌性较好；")
+                if avg_stock > 0:
+                    parts.append(f"但该股逆势收红，抗跌性强；")
+                elif avg_stock > avg_market:
+                    parts.append(f"但该股维持横盘，抗跌性较好；")
                 else:
-                    parts.append(f"个股跟随大盘下跌，抗跌性一般；")
+                    parts.append(f"该股跟随大盘下跌，抗跌性一般；")
 
         return "".join(parts)
 
@@ -192,89 +215,80 @@ class ReportBuilder:
         deviation = details.get("deviation", 0)
         lead_lag = details.get("lead_lag_bonus", 0)
 
-        parts = [f"- 📊 领涨性({score:.0f}): "]
+        leadlag_str = ""
+        if lead_lag > 0:
+            leadlag_str = "，有领先板块拉伸信号"
 
         if total > 0:
             pct_rank = rank / total * 100
-            parts.append(f"行业排名前 {pct_rank:.0f}%（{rank}/{total}）")
-        else:
-            parts.append("行业排名无法评估")
-
-        if deviation != 0:
             direction = "跑赢" if deviation > 0 else "跑输"
-            parts.append(f"，{direction}中位数 {abs(deviation):+.1f}%")
-
-        if lead_lag > 0:
-            parts.append(f"，有领先板块拉伸信号")
-
-        parts.append("；")
-        return "".join(parts)
+            return (f"- 📊 领涨性({score:.0f}): "
+                    f"行业排名前{pct_rank:.0f}%（{rank}/{total}），"
+                    f"{direction}中位数{abs(deviation):+.1f}%{leadlag_str}")
+        else:
+            return f"- 📊 领涨性({score:.0f}): 行业排名无法评估{leadlag_str}"
 
     # ═══ 资金承接 ═══
 
-    def _format_absorption(self, d: dict) -> str:
+    def _format_absorption(self, d: dict, sector_name: str = "") -> str:
         details = d.get("details", d)
         score = d.get("score", 0)
         event_count = details.get("event_count", 0)
-        best = details.get("best_event") or {}
+        all_events = details.get("all_events", [])
         reason = details.get("fallback_reason", "")
 
         parts = [f"- 💰 资金承接({score:.0f}): "]
 
         if reason:
-            parts.append(f"{reason}；")
+            parts.append(f"{reason}")
             return "".join(parts)
 
-        if event_count == 0:
-            parts.append("未检测到显著跨板块资金虹吸信号；")
-            return "".join(parts)
+        if event_count == 0 or not all_events:
+            parts.append("未检测到显著跨板块资金虹吸信号")
+            return "".join(parts)  + "；"
 
-        # 取最佳事件详情
-        if best:
-            target_pct = best.get("target_pct", 0)
-            start_time = best.get("start_time", "?")
-            end_time = best.get("end_time", "?")
-            fleeing = best.get("fleeing_sectors", [])
+        sector_label = sector_name or "该板块"
 
-            # 描述流出板块
-            if fleeing:
-                fleeing_names = [f.get("name", f.get("code", "?")) for f in fleeing[:3]]
-                fleeing_str = "、".join(fleeing_names)
-                parts.append(f"{start_time} {fleeing_str} 等板块跳水，")
-                parts.append(f"{start_time}~{end_time} 该板块拉伸 +{target_pct}%")
+        # 第一事件（含日期）
+        evt1 = all_events[0]
+        time1 = evt1.get("start_time", "")
+        end_time1 = evt1.get("end_time", "")
+        date1 = evt1.get("start_date", "")
+        fleeing1 = evt1.get("fleeing_sectors", [])
+        fleeing_names1 = "、".join([f.get("name", f.get("code", "?")) for f in fleeing1[:3]])
+        target_pct1 = evt1.get("target_pct", 0)
 
-                # 如果有第二个显著事件
-                if event_count >= 2:
-                    # 找时间上不同的第二事件
-                    all_events_sorted = sorted(
-                        [e for e in self._get_all_events(details)],
-                        key=lambda e: e.get("start_time", "99:99")
-                    )
-                    for evt in all_events_sorted:
-                        if evt.get("start_time") != start_time:
-                            f2 = evt.get("fleeing_sectors", [])
-                            if f2:
-                                f2_names = [x.get("name", x.get("code", "?")) for x in f2[:2]]
-                                parts.append(f"，{evt.get('start_time')} {'、'.join(f2_names)} 跳水")
-                                parts.append(f"，板块继续拉伸 +{evt.get('target_pct', 0)}%")
-                            break
-
-                parts.append("；")
-            else:
-                parts.append(f"检测到 {event_count} 次虹吸事件，最强窗口涨幅 +{target_pct}%，{best.get('fleeing_count', 0)} 个板块被抽血；")
+        if abs(target_pct1) >= 1.5:
+            stretch1 = "大幅拉伸"
+        elif abs(target_pct1) >= 0.5:
+            stretch1 = "迎来小幅拉伸"
         else:
-            parts.append(f"检测到 {event_count} 次虹吸事件；")
+            stretch1 = "拉伸"
 
+        parts.append(f"{date1} {time1} {fleeing_names1} 等板块跳水，")
+        parts.append(f"当日 {end_time1} {sector_label}{stretch1}（+{target_pct1}%）")
+
+        # 第二事件（无日期前缀）
+        if len(all_events) >= 2:
+            evt2 = all_events[1]
+            time2 = evt2.get("start_time", "")
+            end_time2 = evt2.get("end_time", "")
+            fleeing2 = evt2.get("fleeing_sectors", [])
+            fleeing_names2 = "、".join([f.get("name", f.get("code", "?")) for f in fleeing2[:2]])
+            target_pct2 = evt2.get("target_pct", 0)
+
+            if abs(target_pct2) >= 1.5:
+                stretch2 = "继续大幅拉伸"
+            elif abs(target_pct2) >= 0.5:
+                stretch2 = "继续小幅拉伸"
+            else:
+                stretch2 = "继续拉伸"
+
+            parts.append(f"，{time2} {fleeing_names2} 跳水，")
+            parts.append(f"{end_time2} {sector_label}{stretch2}（+{target_pct2}%）")
+
+        parts.append("；")
         return "".join(parts)
-
-    def _get_all_events(self, details: dict) -> list[dict]:
-        """从日志中提取所有事件（当前 scorer 只在 best_event 里存了最强的，
-        但我们可以从 fleeing_sectors 数据重建）"""
-        # 当前结构只存 best_event，返回一个单元素列表
-        best = details.get("best_event")
-        if best:
-            return [best]
-        return []
 
     # ═══ 汇总 ═══
 

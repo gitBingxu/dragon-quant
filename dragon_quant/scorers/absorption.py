@@ -67,10 +67,12 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     # ─── Step 2 & 3: 打分 + 汇总 ───
     event_scores = []
     best_event = None
+    scored_events = []
     for evt in events:
         es = _score_event(evt)
         event_scores.append(es)
         scored_evt = {**evt, "score": round(es, 2)}
+        scored_events.append(scored_evt)
         if best_event is None or es > best_event["score"]:
             best_event = scored_evt
 
@@ -85,6 +87,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
         details={
             "event_count": len(events),
             "best_event": best_event,
+            "all_events": sorted(scored_events, key=lambda e: e["score"], reverse=True)[:3],
             "best_event_score": round(best_score, 2),
             "multi_event_bonus": round(multi_bonus, 2),
         }
@@ -167,8 +170,9 @@ def _detect_events(target_klines: list[KBar],
         events.append({
             "start_bar": start,
             "end_bar": end,
-            "start_time": start_dt.strftime("%H:%M"),
-            "end_time": end_dt.strftime("%H:%M"),
+            "start_date": f"{start_dt.month}.{start_dt.day}",
+            "start_time": f"{start_dt.hour}:{start_dt.minute:02d}",
+            "end_time": f"{end_dt.hour}:{end_dt.minute:02d}",
             "target_pct": round(target_ret * 100, 2),
             "yang_count": yang_count,
             "fleeing_count": len(fleeing_sectors),

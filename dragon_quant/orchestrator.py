@@ -36,6 +36,8 @@ STATISTICAL_CONCEPT_PREFIXES = (
     "最近多板", "东方财富热股",
 )
 
+FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
+
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
     """过滤：非ST、非双创(30/68开头)"""
@@ -285,13 +287,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     market_kline = xq.get_kline(market_code, days=30)
     cache.set(f"kline:day:{market_code}", market_kline)
 
-    # 排序 + 截取 top_n
+    # 排序 — 固定取 FULL_EVAL_COUNT 只做四维评分
     candidate_pool.sort(key=lambda c: (len(c.concepts), c.board_count), reverse=True)
-    ranking = candidate_pool[:top_n]
-    logger.phase("C", f"连板高度排序", top=len(ranking))
+    ranking = candidate_pool[:FULL_EVAL_COUNT]
+    logger.phase("C", f"评分候选池", total=len(ranking))
 
     if verbose:
-        print(f"   排序取前 {len(ranking)} 只:")
+        print(f"   评分候选池: {len(ranking)} 只")
         for r in ranking:
             print(f"     {r.code} {r.name:6s}  概念x{len(r.concepts)}  连板{r.board_count}")
 
@@ -391,12 +393,15 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     if results:
         results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
-        output["ranking"] = results
+        output["ranking"] = results  # 返回全部评分结果
+
+        # top_n 控制输出范围
+        display_list = results[:top_n]
 
         # 生成报告
         reporter = ReportBuilder(logger)
         report_parts = []
-        for r in results:
+        for r in display_list:
             report_parts.append(reporter.build_stock_report(
                 r["code"], r.get("name", ""),
                 r.get("board_count", 0), r.get("concepts", []),
@@ -412,7 +417,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             print(f"{'═'*56}")
             print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
             print("-" * 56)
-            for r in results:
+            for r in display_list:
                 dims = r.get("dimensions", {})
                 print(f"{r['code']:8s} {r.get('name', ''):8s} "
                       f"{r['composite_score']:6.1f}  "
@@ -424,7 +429,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             print(f"\n{'═'*56}")
             print(f"📋 完整详细报告")
             print(f"{'═'*56}")
-            for i, r in enumerate(results):
+            for i, r in enumerate(display_list):
                 print(report_parts[i])
                 print()
 
@@ -453,7 +458,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         # 报告文本
         report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
         with open(report_path, "w") as f:
-            f.write(reporter.build_summary_report(results))
+            f.write(reporter.build_summary_report(display_list))
             f.write("\n\n")
             f.write(output["report_text"])
         output["report_path"] = str(report_path)

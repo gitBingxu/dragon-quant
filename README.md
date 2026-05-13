@@ -275,6 +275,190 @@ dragon_quant/
     └── __init__.py
 ```
 
+## Agent 集成指南
+
+本节展示 AI Agent 如何通过 Python API 调用 dragon-quant 完成常见任务。
+
+### 场景 1：今日龙头扫榜 + 输出报告
+
+```python
+import dragon_quant
+
+# 扫榜取 top5
+result = dragon_quant.scan(top_n=5, candidates_n=5, workers=2)
+
+print(f"🐉 今日龙头 TOP5 | 耗时 {result['elapsed_s']}s")
+print()
+print(f"{'排名':4s} {'代码':8s} {'名称':8s} {'综合':>6s} {'带动':>6s} {'抗跌':>6s} {'领涨':>6s} {'承接':>6s}")
+print("-" * 56)
+for i, r in enumerate(result["ranking"], 1):
+    dims = r.get("dimensions", {})
+    print(f"{i:4d} {r['code']:8s} {r['name']:8s} "
+          f"{r['composite_score']:6.1f}  "
+          f"{dims.get('drive',{}).get('score',0):6.1f}  "
+          f"{dims.get('anti_drop',{}).get('score',0):6.1f}  "
+          f"{dims.get('leadership',{}).get('score',0):6.1f}  "
+          f"{dims.get('absorption',{}).get('score',0):6.1f}")
+
+# 输出自然语言报告（可直接发给用户）
+print()
+print(result["report_text"])
+```
+
+### 场景 2：只取龙头排行数据，不打印（Agent 内部消费）
+
+```python
+import dragon_quant
+
+result = dragon_quant.scan(top_n=10, verbose=False)
+
+# 提取关键信息
+for r in result["ranking"]:
+    code = r["code"]
+    name = r["name"]
+    score = r["composite_score"]
+    concepts = r.get("concepts", [])
+    boards = r.get("board_count", 0)
+    # 判断等级
+    if score >= 80:
+        grade = "🐲 龙头"
+    elif score >= 65:
+        grade = "🔥 强票"
+    else:
+        grade = "📊 一般"
+    print(f"{grade} {code} {name} | {boards}连板 | {', '.join(concepts)} | 综合{score}")
+```
+
+### 场景 3：查某只股票的 K 线和实时行情
+
+```python
+from dragon_quant.data import get_kline, get_minute_kline, get_quote
+
+code = "600172"
+
+# 日K线
+kline = get_kline(code, days=30)
+print(f"{code} 最近 30 日 K 线:")
+for k in kline[-5:]:  # 最近5天
+    print(f"  {getattr(k, 'time', '?')} | "
+          f"开{getattr(k, 'open', 0):.2f} 收{getattr(k, 'close', 0):.2f} "
+          f"涨{getattr(k, 'pct', 0):.2f}%")
+
+# 实时行情
+quote = get_quote(code)
+if quote:
+    print(f"当前价: {quote.price} | 涨跌幅: {quote.pct}% | 换手率: {getattr(quote, 'turnover', 0):.2f}%")
+```
+
+### 场景 4：查板块热度（哪个方向最强）
+
+```python
+from dragon_quant.data import get_sector_ranking, get_sector_components
+
+# 今日涨幅榜 top5 板块
+sectors = get_sector_ranking(asc=False)[:5]
+print("今日最强板块:")
+for s in sectors:
+    print(f"  {s.name} ({s.code}) | +{s.pct:.2f}%")
+
+# 看龙头板块的涨停分布
+if sectors:
+    stocks = get_sector_components(sectors[0].code)
+    up_limit = [s for s in stocks if s.pct and s.pct >= 9.9]
+    print(f"\n{sectors[0].name} 涨停股 ({len(up_limit)} 只):")
+    for s in up_limit:
+        print(f"  {s.code} {s.name} | +{s.pct:.2f}%")
+```
+
+### 场景 5：排查问题 — 查看扫描日志
+
+```python
+from dragon_quant.logging.query import list_logs, tail_logs, query_logs, log_summary, clear_logs
+
+# 列出所有日志文件
+files = list_logs()
+print(f"共 {len(files)} 个日志文件")
+for f in files[:5]:
+    print(f"  {f['name']} | {f['size']} | {f['lines']} 行")
+
+# 查看最新扫描的摘要
+summary = log_summary()
+print(f"\n最新扫描: {summary['file']}")
+print(f"  阶段: {list(summary['phases'].keys())}")
+print(f"  API 调用: {summary['api_stats']['total']} 次 | 成功 {summary['api_stats']['ok']} | 失败 {summary['api_stats']['error']}")
+print(f"  评分: {summary['scorer_count']} 次")
+print(f"  错误: {summary['error_count']} 条")
+
+# 如果有很多错误，查具体原因
+if summary['error_count'] > 0:
+    errors = query_logs(level="error", tail=10)
+    print(f"\n最近 10 条错误:")
+    for e in errors:
+        print(f"  [{e.get('category', '')}] {e.get('message', '')}")
+        if e.get('data', {}).get('exception'):
+            print(f"    exception: {e['data']['exception'][:120]}")
+
+# 查某只股票的评分细节
+entries = query_logs(category="scorer", code="600172")
+for e in entries:
+    print(f"  {e['category']} → score={e.get('data',{}).get('score',0)}")
+```
+
+### 场景 6：清理日志
+
+```python
+from dragon_quant.logging.query import clear_logs, list_logs
+
+# 清理前
+before = list_logs()
+print(f"清理前: {len(before)} 个日志文件")
+
+# 保留最近 3 天
+result = clear_logs(days=3)
+print(f"删除了 {result['cleared']} 个文件 | 保留 {result['kept']} 个")
+for f in result.get("files_removed", []):
+    print(f"  - {f}")
+```
+
+### 场景 7：拿上一次扫描结果（无需重新跑）
+
+```python
+import json
+from pathlib import Path
+
+# macOS 默认路径
+latest_path = Path.home() / "Library" / "Application Support" / "dragon-quant" / "results" / "latest.json"
+
+if latest_path.exists():
+    with open(latest_path) as f:
+        data = json.load(f)
+
+    print(f"上次扫描: {data['timestamp']} | 耗时 {data['elapsed_s']}s")
+    for r in data["ranking"]:
+        print(f"  {r['code']} {r['name']} — {r['composite_score']}分 — {r.get('board_count', 0)}连板")
+else:
+    print("暂无扫描缓存，运行一次 scan() 即可生成")
+```
+
+### 场景 8：批量获取多只票的行情对比
+
+```python
+from dragon_quant.data import batch_get_quotes
+
+codes = ["600172", "605589", "603052", "603203", "603126"]
+quotes = batch_get_quotes(codes)
+
+print(f"{'代码':8s} {'价格':>8s} {'涨跌幅':>8s} {'换手率':>8s} {'量比':>6s}")
+print("-" * 44)
+for q in quotes:
+    if q:
+        price = getattr(q, 'price', 0)
+        pct = getattr(q, 'pct', 0)
+        turnover = getattr(q, 'turnover', 0)
+        volume_ratio = getattr(q, 'volume_ratio', 0)
+        print(f"{q.code:8s} {price:8.2f} {pct:+7.2f}% {turnover:7.2f}% {volume_ratio:6.2f}")
+```
+
 ## License
 
 MIT

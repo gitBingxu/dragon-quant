@@ -8,6 +8,7 @@ Agent 可以直接调用获取个股K线、实时行情、板块数据等。
   from dragon_quant.data import (
       get_sector_ranking, get_sector_components, get_sector_5min_kline,
       get_kline, get_minute_kline, get_quote, batch_get_quotes,
+      cookie_status, fetch_cookies,
   )
 
   # 板块排行
@@ -27,6 +28,11 @@ Agent 可以直接调用获取个股K线、实时行情、板块数据等。
   quote = get_quote("600172")
   quotes = batch_get_quotes(["600172", "000001", "002409"])
 
+  # Cookie 管理
+  cookie_status()     # 查看 Cookie 状态
+  fetch_cookies()     # 自动刷新所有 Cookie
+  fetch_cookies(source="xueqiu")  # 只刷新雪球
+
 CLI 用法:
   python -m dragon_quant data sector
   python -m dragon_quant data sector --asc
@@ -35,6 +41,8 @@ CLI 用法:
   python -m dragon_quant data minute --code 600172
   python -m dragon_quant data quote --code 600172
   python -m dragon_quant data batch-quote --codes 600172,000001,002409
+  python -m dragon_quant data cookie-status
+  python -m dragon_quant data cookie-fetch [--source xueqiu]
 """
 
 import json
@@ -159,3 +167,56 @@ def batch_get_quotes(codes: list[str], source: str = "tencent") -> list[Quote]:
         return p.batch_get_quotes(codes)
     # fallback: 逐个请求
     return [p.get_quote(c) for c in codes]
+
+
+# ═══ Cookie 管理 ═══
+
+def cookie_status() -> dict:
+    """查看当前 Cookie 状态
+
+    返回每个数据源的 Cookie 是否存在及长度。
+    如果返回空字符串，说明该数据源的 Cookie 缺失或过期，需要刷新。
+
+    Returns:
+        {
+            "eastmoney": {"ok": True, "length": 1234},
+            "xueqiu": {"ok": False, "length": 0},
+        }
+    """
+    from dragon_quant.providers.cookie import get_em, get_xq
+
+    em = get_em()
+    xq = get_xq()
+    return {
+        "eastmoney": {"ok": bool(em), "length": len(em)},
+        "xueqiu": {"ok": bool(xq), "length": len(xq)},
+    }
+
+
+def fetch_cookies(source: str = "all") -> dict:
+    """自动刷新 Cookie（使用无头浏览器 Playwright）
+
+    Cookie 过期会导致 API 返回 400 / 401 / 空数据。
+    遇到接口异常时，优先尝试此方法刷新 Cookie，然后重试业务请求。
+
+    Args:
+        source: "all" 刷新全部, "eastmoney" 只刷新东财, "xueqiu" 只刷新雪球
+    Returns:
+        {
+            "eastmoney": {"ok": True, "length": 1234},
+            "xueqiu": {"ok": True, "length": 567},
+        }
+    """
+    from dragon_quant.providers.cookie import fetch_em, fetch_xq, get_em, get_xq
+
+    if source in ("all", "eastmoney"):
+        fetch_em()
+    if source in ("all", "xueqiu"):
+        fetch_xq()
+
+    # 重置 Provider 缓存，下次调用时重新初始化
+    global _providers
+    with _lock:
+        _providers = None
+
+    return cookie_status()

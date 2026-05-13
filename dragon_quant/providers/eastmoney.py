@@ -51,6 +51,10 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
         print("⚠️ 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
         return None
 
+    # push2/push2his 有 TLS 指纹检测，urllib 必然被拒，直接走 Playwright
+    if "push2" in url:
+        return _fetch_playwright(url, referer, cookie, logger=logger, endpoint=endpoint)
+
     headers = dict(HEADERS)
     headers["Referer"] = referer
     headers["Cookie"] = cookie

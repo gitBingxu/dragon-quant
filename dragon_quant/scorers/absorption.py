@@ -162,17 +162,52 @@ def _detect_events(target_klines: list[KBar],
         # 出逃板块平均跌幅
         fleeing_avg_drop = sum(f["drop_pct"] for f in fleeing_sectors) / len(fleeing_sectors)
 
-        # 时间戳（从 bar 的 timestamp 换算）
+        # ─── 逻辑关联性验证 ───
+        # 找各个出逃板块的第一个跳水K线
+        dive_bars = []
+        for ef in fleeing_sectors:
+            s_code = ef["code"]
+            s_klines = others_aligned[s_code]
+            db = _find_first_dive_bar(s_klines, start, end)
+            if db is not None:
+                dive_bars.append(db)
+
+        if not dive_bars:
+            continue
+
+        earliest_dive_bar = min(dive_bars)
+        rally_bar = _find_first_rally_bar(target_aligned, start, end)
+        if rally_bar is None:
+            continue
+
+        # 跳水必须在拉伸之前（允许同一根K线）
+        if earliest_dive_bar > rally_bar:
+            continue
+
+        dive_ts = target_aligned[earliest_dive_bar].timestamp
+        rally_ts = target_aligned[rally_bar].timestamp
+
         from datetime import datetime
-        start_dt = datetime.fromtimestamp(target_aligned[start].timestamp / 1000)
-        end_dt = datetime.fromtimestamp(target_aligned[end].timestamp / 1000)
+        dive_dt = datetime.fromtimestamp(dive_ts / 1000)
+        rally_dt = datetime.fromtimestamp(rally_ts / 1000)
+
+        # 必须在同一个交易日
+        if dive_dt.date() != rally_dt.date():
+            continue
+
+        # 时间相差不能超过 10 分钟
+        time_diff_ms = rally_ts - dive_ts
+        if time_diff_ms > 600_000:
+            continue
+
+        time_diff_min = round(time_diff_ms / 60000, 1)
 
         events.append({
             "start_bar": start,
             "end_bar": end,
-            "start_date": f"{start_dt.month}.{start_dt.day}",
-            "start_time": f"{start_dt.hour}:{start_dt.minute:02d}",
-            "end_time": f"{end_dt.hour}:{end_dt.minute:02d}",
+            "dive_time": f"{dive_dt.month}月{dive_dt.day}日 {dive_dt.hour}:{dive_dt.minute:02d}",
+            "rally_time": f"{rally_dt.month}月{rally_dt.day}日 {rally_dt.hour}:{rally_dt.minute:02d}",
+            "time_diff_min": time_diff_min,
             "target_pct": round(target_ret * 100, 2),
             "yang_count": yang_count,
             "fleeing_count": len(fleeing_sectors),
@@ -209,6 +244,28 @@ def _align_klines(target: list[KBar], other_map: dict[str, list[KBar]]):
         return None
 
     return target[:min_len], {k: v[:min_len] for k, v in other_map.items()}
+
+
+def _find_first_dive_bar(sector_klines, window_start, window_end):
+    """找到板块首次跳水的K线索引
+    条件：10分钟内（2根5分K）累计涨跌幅 < -0.5% 且 当前K为阴线
+    """
+    for i in range(window_start + 1, window_end + 1):
+        prev_close = sector_klines[i - 1].close
+        if prev_close == 0:
+            continue
+        ret_2bar = (sector_klines[i].close - prev_close) / prev_close
+        if ret_2bar < -0.005 and sector_klines[i].close < sector_klines[i].open:
+            return i
+    return None
+
+
+def _find_first_rally_bar(target_klines, window_start, window_end):
+    """找到目标板块在窗口内首次拉伸的K线索引（第一根阳线）"""
+    for i in range(window_start, window_end + 1):
+        if target_klines[i].close > target_klines[i].open:
+            return i
+    return None
 
 
 # ─── 事件打分 ───

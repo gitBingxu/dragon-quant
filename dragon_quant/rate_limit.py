@@ -14,11 +14,13 @@ from typing import Any, Callable, Optional
 class _SerialQueue:
     """单 key 任务队列 — 串行消费"""
 
-    def __init__(self, executor: ThreadPoolExecutor):
+    def __init__(self, executor: ThreadPoolExecutor, key: str = "", logger=None):
         self._executor = executor
         self._lock = threading.Lock()
         self._queue: queue.Queue = queue.Queue()
         self._running = False
+        self._key = key
+        self._logger = logger
 
     def submit(self, fn: Callable, *args, **kwargs) -> Future:
         future: Future = Future()
@@ -62,11 +64,12 @@ class RateLimiter:
         limiter.wait_all()
     """
 
-    def __init__(self, max_workers: int = 8):
+    def __init__(self, max_workers: int = 8, logger=None):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._queues: dict[str, _SerialQueue] = {}
         self._lock = threading.Lock()
         self._futures: list[Future] = []
+        self._logger = logger
 
     def _key(self, provider: str, endpoint: str) -> str:
         return f"{provider}:{endpoint}"
@@ -76,7 +79,7 @@ class RateLimiter:
         k = self._key(provider, endpoint)
         with self._lock:
             if k not in self._queues:
-                self._queues[k] = _SerialQueue(self._executor)
+                self._queues[k] = _SerialQueue(self._executor, key=k, logger=self._logger)
             q = self._queues[k]
         future = q.submit(fn, *args, **kwargs)
         self._futures.append(future)

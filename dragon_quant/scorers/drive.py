@@ -24,7 +24,7 @@ def score(code: str, cache: DataCache, candidate_pool: Optional[list[Candidate]]
     """
     # 加载个股数据
     stock_klines: list[KBar] = cache.get(f"kline:day:{code}") or []
-    stock_5min: list[KBar] = cache.get(f"kline:5min:{code}") or []
+    stock_1min: list[KBar] = cache.get(f"kline:1min:{code}") or []
     components: list[StockInfo] = cache.get(f"sector:components:{primary_sector}") or []
     all_quotes = cache.get("quotes:batch") or []
     quote_map = {q.code: q for q in all_quotes} if all_quotes else {}
@@ -36,7 +36,7 @@ def score(code: str, cache: DataCache, candidate_pool: Optional[list[Candidate]]
         )
 
     # ─── Step 1: 找近 3 个涨停日 ───
-    limit_up_dates = _find_limit_up_dates(stock_klines, stock_5min)
+    limit_up_dates = _find_limit_up_dates(stock_klines, stock_1min)
 
     if not limit_up_dates:
         return ScoreResult(
@@ -167,9 +167,9 @@ def _build_peer_pool(code: str, primary_sector: str,
         if primary_sector not in cand.concepts and not _is_same_sector(cand, primary_sector, cache):
             continue
 
-        peer_5min = cache.get(f"kline:5min:{cand.code}") or []
+        peer_1min = cache.get(f"kline:1min:{cand.code}") or []
         peer_day = cache.get(f"kline:day:{cand.code}") or []
-        peer_lu = _find_limit_up_dates(peer_day, peer_5min)
+        peer_lu = _find_limit_up_dates(peer_day, peer_1min)
 
         # 取当天的封板时间
         latest_date = datetime.now().strftime("%Y-%m-%d")

@@ -10,10 +10,14 @@ from dragon_quant.providers.tencent import TencentProvider
 __all__ = ["StockProvider", "EastMoneyProvider", "XueqiuProvider", "TencentProvider", "create_providers"]
 
 
-def create_providers() -> dict[str, StockProvider]:
+def create_providers(logger=None) -> dict[str, StockProvider]:
     """创建所有数据源适配器"""
-    return {
+    providers = {
         "eastmoney": EastMoneyProvider(),
         "xueqiu": XueqiuProvider(),
         "tencent": TencentProvider(),
     }
+    if logger:
+        for p in providers.values():
+            p.set_logger(logger)
+    return providers

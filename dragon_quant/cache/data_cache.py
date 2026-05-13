@@ -24,6 +24,22 @@ def _today_end() -> int:
     return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 23, 59, 59, 0, 0, 0)))
 
 
+def _to_json_safe(obj):
+    """递归转换 dataclass / bytes 为 JSON 安全类型"""
+    if hasattr(obj, '__dataclass_fields__'):
+        return {
+            f.name: _to_json_safe(getattr(obj, f.name))
+            for f in obj.__dataclass_fields__.values()
+        }
+    if isinstance(obj, list):
+        return [_to_json_safe(i) for i in obj]
+    if isinstance(obj, dict):
+        return {k: _to_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, bytes):
+        return obj.decode('utf-8', errors='replace')
+    return obj
+
+
 class CacheEntry:
     __slots__ = ("data", "ttl")
 
@@ -42,6 +58,11 @@ class DataCache:
     def __init__(self, cache_dir: Optional[Path] = None):
         self._mem: dict[str, CacheEntry] = {}
         self._lock = threading.Lock()
+
+        if cache_dir is None:
+            from dragon_quant.storage.paths import CACHE_DIR
+            cache_dir = CACHE_DIR
+
         self._cache_dir = cache_dir
         self._hit = 0
         self._miss = 0
@@ -111,8 +132,9 @@ class DataCache:
             return
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         try:
+            safe = _to_json_safe(data)
             with open(self._cache_dir / f"{key}.json", "w") as f:
-                json.dump({"data": data, "ts": time.time()}, f, ensure_ascii=False)
+                json.dump({"data": safe, "ts": time.time()}, f, ensure_ascii=False)
         except Exception as e:
             print(f"  ⚠️ 缓存持久化失败 {key}: {e}", file=sys.stderr)
 

@@ -44,7 +44,7 @@ def _safe_float(v, default=0.0):
         return default
 
 
-def _fetch(url: str, referer: str) -> Optional[dict]:
+def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[dict]:
     """JSONP GET 请求"""
     cookie = get_em()
     if not cookie:
@@ -56,14 +56,20 @@ def _fetch(url: str, referer: str) -> Optional[dict]:
     headers["Cookie"] = cookie
 
     req = urllib.request.Request(url, headers=headers)
+    t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
+        elapsed = (time.time() - t0) * 1000
+        data = _parse_jsonp(raw)
+        if logger:
+            logger.api("eastmoney", endpoint, ok=True, elapsed_ms=elapsed)
+        return data
     except Exception as e:
-        # urllib 被 TLS 指纹拦截 → 降级到 Playwright
-        return _fetch_playwright(url, referer, cookie)
-
-    return _parse_jsonp(raw)
+        elapsed = (time.time() - t0) * 1000
+        if logger:
+            logger.api("eastmoney", endpoint, ok=False, elapsed_ms=elapsed, error=str(e))
+        return _fetch_playwright(url, referer, cookie, logger=logger, endpoint=endpoint)
 
 
 def _parse_jsonp(raw: str) -> Optional[dict]:
@@ -94,14 +100,12 @@ def _get_thread_playwright():
     return _pw_local
 
 
-def _fetch_playwright(url: str, referer: str, cookie: str) -> Optional[dict]:
-    """通过 Playwright page.goto() 发 JSONP 请求（绕过 TLS 指纹检测）
-
-    使用独立 page → goto(url) → response.text() 直接读取响应体。
-    按 thread-local 创建浏览器实例，解决 RateLimiter 多线程 greenlet 冲突。
-    """
+def _fetch_playwright(url: str, referer: str, cookie: str,
+                      logger=None, endpoint: str = "") -> Optional[dict]:
+    """通过 Playwright 发 JSONP 请求（绕过 TLS 指纹 + 受限端点封锁）"""
+    t0 = time.time()
     try:
-        cb_name = "dq_cb_" + str(int(time.time() * 1000))
+        cb_name = "dq_cb_" + str(int(t0 * 1000))
         jsonp_url = re.sub(r'cb=[^&]+', f'cb={cb_name}', url)
         if 'cb=' not in jsonp_url:
             sep = '&' if '?' in jsonp_url else '?'
@@ -110,13 +114,28 @@ def _fetch_playwright(url: str, referer: str, cookie: str) -> Optional[dict]:
         pw = _get_thread_playwright()
         page = pw._context.new_page()
         try:
-            response = page.goto(jsonp_url, wait_until="domcontentloaded", timeout=15000)
-            body = response.text()
+            page.goto(referer, wait_until="domcontentloaded", timeout=15000)
+            body = page.evaluate(f'''async () => {{
+                const r = await fetch("{jsonp_url}", {{
+                    credentials: 'include',
+                    headers: {{"Referer": "{referer}"}}
+                }});
+                return await r.text();
+            }}''')
         finally:
             page.close()
 
-        return _parse_jsonp(body)
+        elapsed = (time.time() - t0) * 1000
+        result = _parse_jsonp(body)
+        if logger:
+            logger.api("eastmoney", endpoint, ok=result is not None,
+                       elapsed_ms=elapsed)
+        return result
     except Exception as e:
+        elapsed = (time.time() - t0) * 1000
+        if logger:
+            logger.api("eastmoney", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=str(e))
         print(f"  ⚠️ 东财 Playwright 请求失败: {e}", file=sys.stderr)
         return None
 
@@ -167,7 +186,8 @@ class EastMoneyProvider(StockProvider):
         }
         qs = urllib.parse.urlencode(params)
         url = f"{BASE}/api/qt/clist/get?{qs}"
-        data = _fetch(url, REFERERS["ranking"])
+        data = _fetch(url, REFERERS["ranking"],
+                      logger=self._logger, endpoint="sector_ranking")
         if not data:
             return []
 
@@ -204,7 +224,8 @@ class EastMoneyProvider(StockProvider):
         }
         qs = urllib.parse.urlencode(params)
         url = f"{BASE}/api/qt/clist/get?{qs}"
-        data = _fetch(url, REFERERS["components"])
+        data = _fetch(url, REFERERS["components"],
+                      logger=self._logger, endpoint="sector_components")
         if not data:
             return []
 
@@ -242,7 +263,8 @@ class EastMoneyProvider(StockProvider):
         qs = urllib.parse.urlencode(params)
         url = f"{BASE_HIS}/api/qt/stock/kline/get?{qs}"
         referer = REFERERS["kline"].format(code=sector_code)
-        data = _fetch(url, referer)
+        data = _fetch(url, referer,
+                      logger=self._logger, endpoint="sector_5min_kline")
         if not data:
             return []
 

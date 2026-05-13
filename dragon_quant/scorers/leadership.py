@@ -23,7 +23,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "") -> ScoreResult:
     components: list[StockInfo] = cache.get(f"sector:components:{primary_sector}") or []
     all_quotes = cache.get("quotes:batch") or []
     stock_klines: list[KBar] = cache.get(f"kline:day:{code}") or []
-    stock_5min: list[KBar] = cache.get(f"kline:5min:{code}") or []
+    stock_1min: list[KBar] = cache.get(f"kline:1min:{code}") or []
     sector_5min: list[KBar] = cache.get(f"kline:5min:sector:{primary_sector}") or []
 
     if not components:
@@ -79,7 +79,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "") -> ScoreResult:
     deviation_bonus = max(min(deviation / pct_std * 10, 20), 0)
 
     # ─── Part 6: Lead-Lag 检测 ───
-    lead_lag_bonus = _lead_lag_score(stock_5min, sector_5min)
+    lead_lag_bonus = _lead_lag_score(stock_1min, sector_5min)
 
     # ─── 最终得分 ───
     final_score = max(min((1 - avg_rank) * 100 + deviation_bonus + lead_lag_bonus, 100), 0)
@@ -162,12 +162,13 @@ def _normal_cdf_approx(z: float) -> float:
 
 # ─── Lead-Lag 检测 ───
 
-def _lead_lag_score(stock_5min: list[KBar], sector_5min: list[KBar]) -> float:
+def _lead_lag_score(stock_1min: list[KBar], sector_5min: list[KBar]) -> float:
     """检测个股是否先于板块拉伸。返回 0-20 的加分。"""
-    if not stock_5min or not sector_5min:
+    if not stock_1min or not sector_5min:
         return 0.0
 
-    # 对齐长度
+    stock_5min = _aggregate_1min_to_5min(stock_1min)
+
     min_len = min(len(stock_5min), len(sector_5min))
     stock_bars = stock_5min[:min_len]
     sector_bars = sector_5min[:min_len]
@@ -175,15 +176,12 @@ def _lead_lag_score(stock_5min: list[KBar], sector_5min: list[KBar]) -> float:
     lead_count = 0
     total_windows = 0
 
-    # 滑动窗口：每根 bar 判断其后 6 根 bar 内板块是否跟随
     for i in range(min_len - 6):
         s_ret = _bar_return(stock_bars, i)
         sec_ret = _bar_return(sector_bars, i)
 
-        # 个股显著拉升（>0.5%）且板块未跟（涨幅差 > 0.3%）
         if s_ret > 0.005 and (s_ret - sec_ret) > 0.003:
             total_windows += 1
-            # 后续 6 根 bar 内板块是否出现 >0.3% 涨幅
             for j in range(i + 1, min(i + 7, min_len)):
                 sec_follow = _bar_return(sector_bars, j, j)
                 if sec_follow > 0.003:
@@ -194,7 +192,29 @@ def _lead_lag_score(stock_5min: list[KBar], sector_5min: list[KBar]) -> float:
         return 0.0
 
     lead_ratio = lead_count / total_windows
-    return lead_ratio * 20.0  # 满分 20
+    return lead_ratio * 20.0
+
+
+def _aggregate_1min_to_5min(bars: list[KBar]) -> list[KBar]:
+    """每 5 根 1 分 bar 合成 1 根 5 分 bar"""
+    result = []
+    for i in range(0, len(bars), 5):
+        chunk = bars[i:i + 5]
+        if len(chunk) < 3:
+            continue
+        result.append(KBar(
+            timestamp=chunk[0].timestamp,
+            open=chunk[0].open,
+            close=chunk[-1].close,
+            high=max(b.high for b in chunk),
+            low=min(b.low for b in chunk),
+            volume=sum(b.volume for b in chunk),
+            amount=sum(b.amount for b in chunk),
+            chg=chunk[-1].chg,
+            pct=chunk[-1].pct,
+            turnover=0,
+        ))
+    return result
 
 
 def _bar_return(klines: list[KBar], idx: int) -> float:

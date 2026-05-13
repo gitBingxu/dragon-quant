@@ -3,7 +3,7 @@
 无需 Cookie，零认证
 """
 
-import json, sys
+import json, sys, time
 import urllib.request
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -22,18 +22,27 @@ def _gtimg_codes(codes: list[str]) -> str:
     return ",".join(parts)
 
 
-def _fetch_gtimg(codes: list[str]) -> Optional[str]:
+def _fetch_gtimg(codes: list[str], logger=None, endpoint: str = "") -> Optional[str]:
     """腾讯 gtimg 批量获取，返回原始 gbk 文本"""
     q = _gtimg_codes(codes)
     url = f"{GTIMG}/q={q}"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    })
+    t0 = time.time()
     try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        })
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read()
-        return raw.decode("gbk")
+        elapsed = (time.time() - t0) * 1000
+        result = raw.decode("gbk")
+        if logger:
+            logger.api("tencent", endpoint, ok=True, elapsed_ms=elapsed)
+        return result
     except Exception as e:
+        elapsed = (time.time() - t0) * 1000
+        if logger:
+            logger.api("tencent", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=str(e))
         print(f"  ⚠️ 腾讯行情失败: {e}", file=sys.stderr)
         return None
 
@@ -72,7 +81,7 @@ class TencentProvider(StockProvider):
     # ─── 实时行情 ───
 
     def get_quote(self, code: str) -> Optional[Quote]:
-        raw = _fetch_gtimg([code])
+        raw = _fetch_gtimg([code], logger=self._logger, endpoint="quote")
         if not raw:
             return None
         # gtimg 返回多行，找到对应股票的行
@@ -90,7 +99,7 @@ class TencentProvider(StockProvider):
 
     def batch_get_quotes(self, codes: list[str]) -> list[Quote]:
         """批量获取行情"""
-        raw = _fetch_gtimg(codes)
+        raw = _fetch_gtimg(codes, logger=self._logger, endpoint="batch_quotes")
         if not raw:
             return []
         result = []

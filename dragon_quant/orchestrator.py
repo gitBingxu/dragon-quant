@@ -21,11 +21,8 @@ from dragon_quant.models.types import Candidate, StockInfo
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.rate_limit import RateLimiter
 from dragon_quant.providers import create_providers
-from dragon_quant.providers.cookie import _data_dir as get_data_dir
-
-DATA_DIR = get_data_dir()
-SHARED_DIR = DATA_DIR / "shared"
-LOG_DIR = DATA_DIR / "logs"
+from dragon_quant.logging.logger import ScanLogger
+from dragon_quant.storage.paths import DATA_DIR, SHARED_DIR, LOG_DIR, RESULTS_DIR
 
 STATISTICAL_CONCEPT_PREFIXES = (
     "昨日涨停", "昨日连板", "昨日首板", "昨日打二板",
@@ -165,16 +162,16 @@ def _score_one(cand: Candidate, cache: DataCache,
 def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     """完整扫描流程"""
     t_start = time.time()
-    providers = create_providers()
+
+    logger = ScanLogger()
+
+    providers = create_providers(logger=logger)
     em = providers["eastmoney"]
     xq = providers["xueqiu"]
     tx = providers["tencent"]
 
     cache = DataCache()
-    limiter = RateLimiter(max_workers=workers)
-
-    from dragon_quant.logging.logger import ScanLogger
-    logger = ScanLogger()
+    limiter = RateLimiter(max_workers=workers, logger=logger)
 
     # ────────────────────────────────────────────
     # Phase A: 板块排行
@@ -183,7 +180,8 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
 
     top10_up = [s for s in em.get_sector_ranking(asc=False)
                 if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
-    top10_down = em.get_sector_ranking(asc=True)[:10]
+    top10_down = [s for s in em.get_sector_ranking(asc=True)
+                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     print(f"   前10涨: {len(top10_up)} 个板块")
     print(f"   前10跌: {len(top10_down)} 个板块")
@@ -274,12 +272,12 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
                            cache.set(f"kline:5min:sector:{sc}",
                                      em.get_sector_5min_kline(sc))))
 
-    # T2: 候选股5分K（25只）
+    # T2: 候选股分时K线（25只）
     for r in ranking:
-        limiter.submit("xueqiu", "5min_kline",
+        limiter.submit("xueqiu", "minute_kline",
                        lambda c=r.code: (
-                           cache.set(f"kline:5min:{c}",
-                                     xq.get_5min_kline(c))))
+                           cache.set(f"kline:1min:{c}",
+                                     xq.get_minute_kline(c))))
 
     # T3: 腾讯批量行情
     all_codes = set()
@@ -306,7 +304,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
          "primary_sector": c.primary_sector, "board_count": c.board_count}
         for c in ranking
     ])
-    cache.set("__meta__:sector_codes", [s.code for s in all_sectors])
+    cache.set("__meta__:sector_codes", [s.code for s in top10_down])
 
     # 板块名称映射（供 scorer 报告用，同时写入缓存供子进程读取）
     sector_name_map = {s.code: s.name for s in all_sectors}
@@ -315,7 +313,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     results = []
     for cand in candidate_pool:
         try:
-            sr = _score_one(cand, cache, candidate_pool, [s.code for s in all_sectors],
+            sr = _score_one(cand, cache, candidate_pool, [s.code for s in top10_down],
                            sector_name_map, logger)
             results.append(sr)
             dims = sr.get("dimensions", {})
@@ -367,6 +365,53 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
             print()
 
         # ── 持久化 ──
-        log_path = get_data_dir() / "logs" / f"scan_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        # 结构化日志
+        log_path = LOG_DIR / f"scan_{timestamp}.jsonl"
         logger.dump_jsonl(log_path)
         print(f"📝 日志已保存: {log_path}")
+
+        # 结果 JSON
+        results_path = RESULTS_DIR / f"scan_results_{timestamp}.json"
+        results_data = {
+            "timestamp": timestamp,
+            "elapsed_s": round(elapsed, 1),
+            "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers},
+            "sectors": {
+                "up": [
+                    {"code": s.code, "name": s.name, "pct": round(s.pct, 4)}
+                    for s in top10_up
+                ],
+                "down": [
+                    {"code": s.code, "name": s.name, "pct": round(s.pct, 4)}
+                    for s in top10_down
+                ],
+            },
+            "ranking": results,
+            "api_stats": logger.api_stats(),
+        }
+        with open(results_path, "w") as f:
+            json.dump(results_data, f, ensure_ascii=False, indent=2)
+        print(f"📊 结果已保存: {results_path}")
+
+        # 报告文本
+        report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
+        with open(report_path, "w") as f:
+            f.write(reporter.build_summary_report(results))
+            f.write("\n\n")
+            for r in results:
+                f.write(reporter.build_stock_report(
+                    r["code"], r.get("name", ""),
+                    r.get("board_count", 0), r.get("concepts", []),
+                    composite_score=r.get("composite_score", 0),
+                    dimensions=r.get("dimensions", {}),
+                    primary_sector_name=r.get("primary_sector_name", ""),
+                ))
+                f.write("\n\n")
+        print(f"📋 报告已保存: {report_path}")
+
+        # 最新结果快照
+        latest_path = RESULTS_DIR / "latest.json"
+        with open(latest_path, "w") as f:
+            json.dump(results_data, f, ensure_ascii=False, indent=2)

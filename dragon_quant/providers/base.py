@@ -11,6 +11,12 @@ from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
 class StockProvider(ABC):
     """数据提供者抽象基类"""
 
+    def __init__(self):
+        self._logger = None
+
+    def set_logger(self, logger):
+        self._logger = logger
+
     @property
     @abstractmethod
     def name(self) -> str:

@@ -3,27 +3,23 @@ Cookie 管理 — ~/.dragon-quant/cookies/{eastmoney,xueqiu}
 支持手动设置 & 无头浏览器自动获取
 """
 
-import os, sys
-from pathlib import Path
+import os
 from typing import Optional
 
-def _data_dir() -> Path:
-    override = os.environ.get("DQ_DATA_DIR")
-    if override:
-        return Path(override)
-    if sys.platform == "win32":
-        return Path(os.environ["APPDATA"]) / "dragon-quant"
-    elif sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "dragon-quant"
-    else:
-        return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "dragon-quant"
+from dragon_quant.storage.paths import COOKIE_DIR
 
-COOKIE_DIR = _data_dir() / "cookies"
 EM_FILE = COOKIE_DIR / "eastmoney"
 XQ_FILE = COOKIE_DIR / "xueqiu"
 
+
 def _ensure():
     COOKIE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _data_dir():
+    """向后兼容别名"""
+    from dragon_quant.storage.paths import DATA_DIR
+    return DATA_DIR
 
 # ─── 读写 ───
 

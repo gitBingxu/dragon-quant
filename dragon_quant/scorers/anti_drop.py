@@ -21,7 +21,7 @@ def score(code: str, cache: DataCache) -> ScoreResult:
     # 加载数据
     stock_klines: list[KBar] = cache.get(f"kline:day:{code}") or []
     market_klines: list[KBar] = cache.get(f"kline:day:000001") or []
-    stock_5min: list[KBar] = cache.get(f"kline:5min:{code}") or []
+    stock_1min: list[KBar] = cache.get(f"kline:1min:{code}") or []
 
     if not stock_klines or not market_klines:
         return ScoreResult(

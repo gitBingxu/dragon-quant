@@ -35,7 +35,7 @@ def _symbol(code: str) -> str:
     return f"{prefix}{code}"
 
 
-def _fetch(path: str) -> Optional[dict]:
+def _fetch(path: str, logger=None, endpoint: str = "") -> Optional[dict]:
     """雪球 API GET 请求"""
     cookie = get_xq()
     if not cookie:
@@ -55,17 +55,29 @@ def _fetch(path: str) -> Optional[dict]:
     headers["Cookie"] = cookie
 
     req = urllib.request.Request(url, headers=headers)
+    t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
             data = json.loads(raw)
+        elapsed = (time.time() - t0) * 1000
     except Exception as e:
+        elapsed = (time.time() - t0) * 1000
+        if logger:
+            logger.api("xueqiu", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=str(e))
         print(f"  ⚠️ 雪球请求失败: {e}", file=sys.stderr)
         return None
 
     if data.get("error_code") and data["error_code"] != 0:
+        if logger:
+            logger.api("xueqiu", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=data.get("error_description", ""))
         print(f"  ⚠️ 雪球 API 错误: {data.get('error_description','')}", file=sys.stderr)
         return None
+
+    if logger:
+        logger.api("xueqiu", endpoint, ok=True, elapsed_ms=elapsed)
     return data
 
 
@@ -98,13 +110,12 @@ class XueqiuProvider(StockProvider):
     def get_kline(self, code: str, days: int = 20) -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
-        begin = now_ms - (days + 30) * 86400 * 1000  # 足够早的起点
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type=after&count={days*2}&indicator=kline&begin={begin}"
-        data = _fetch(path)
+        begin = now_ms - 100 * 86400 * 1000  # 从 100 天前开始取
+        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type=after&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
+        data = _fetch(path, logger=self._logger, endpoint="kline")
         if not data:
             return []
         items = data.get("data", {}).get("item", []) or data.get("data", {}).get("items", [])
-        # 只取最近 days 根
         return _parse_kline(items)[-days:]
 
     # ─── 5 分钟 K 线 ───
@@ -112,13 +123,46 @@ class XueqiuProvider(StockProvider):
     def get_5min_kline(self, code: str, bars: int = 96) -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
-        begin = now_ms - 30 * 86400 * 1000  # 足够早的起点
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=5m&type=after&count={bars*3}&indicator=kline&begin={begin}"
-        data = _fetch(path)
+        begin = now_ms - 3 * 86400 * 1000
+        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=5m&type=after&count={max(bars * 4, 500)}&indicator=kline&begin={begin}"
+        data = _fetch(path, logger=self._logger, endpoint="5min_kline")
         if not data:
             return []
         items = data.get("data", {}).get("item", []) or data.get("data", {}).get("items", [])
         return _parse_kline(items)
+
+    # ─── 分时 K 线（1 分钟级） ───
+
+    def get_minute_kline(self, code: str) -> list[KBar]:
+        """获取当日分时K线（1分钟级），open 取上一分钟的 close"""
+        symbol = _symbol(code)
+        path = f"/v5/stock/chart/minute.json?symbol={symbol}&period=1d"
+        data = _fetch(path, logger=self._logger, endpoint="minute_kline")
+        if not data:
+            return []
+        items = data.get("data", {}).get("items", [])
+        result = []
+        prev_close = None
+        for item in items:
+            cur = float(item["current"])
+            o = prev_close if prev_close is not None else cur
+            hi = item.get("high")
+            lo = item.get("low")
+            chg_v = item.get("chg")
+            pct_v = item.get("percent")
+            result.append(KBar(
+                timestamp=int(item["timestamp"]),
+                open=o, close=cur,
+                high=float(hi) if hi is not None else cur,
+                low=float(lo) if lo is not None else cur,
+                volume=float(item.get("volume", 0)),
+                amount=float(item.get("amount", 0)),
+                chg=float(chg_v) if chg_v is not None else 0,
+                pct=float(pct_v) if pct_v is not None else 0,
+                turnover=0,
+            ))
+            prev_close = cur
+        return result
 
     # ─── 未实现 ───
 

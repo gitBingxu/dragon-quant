@@ -72,9 +72,11 @@ def score(code: str, cache: DataCache, primary_sector: str = "") -> ScoreResult:
     # ─── Part 4: 加权平均 ───
     avg_rank = pct_rank * 0.6 + avg_estimated_rank * 0.4
 
-    # ─── Part 5: 偏离度加分 ───
-    latest_pct = quote_map.get(code)
-    latest_pct = latest_pct.pct if latest_pct else 0.0
+    # ─── Part 5: 偏离度加分（优先用东财数据，与排名一致） ───
+    target_comp = next((c for c in components if c.code == code), None)
+    latest_pct = target_comp.pct if target_comp else 0.0
+    if latest_pct == 0.0 and code in quote_map:
+        latest_pct = quote_map[code].pct
     deviation = latest_pct - median_pct
     deviation_bonus = max(min(deviation / pct_std * 10, 20), 0)
 

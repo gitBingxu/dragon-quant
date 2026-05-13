@@ -42,11 +42,6 @@ if [ "$VERSION" != "$PYPROJECT_VERSION" ]; then
   exit 1
 fi
 
-# ─── 检查工作区是否干净 ───
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo -e "${RED}错误: 工作区有未提交的修改或未跟踪文件，请先提交或 stash${NC}"
-  exit 1
-fi
 
 # ─── 发布流程 ───
 echo -e "${GREEN}==> 1/6 提交代码${NC}"

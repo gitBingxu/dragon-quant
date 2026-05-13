@@ -19,8 +19,15 @@
 cd ~/repo/dragon-quant
 python -m dragon_quant
 
-# 参数
-python -m dragon_quant --top 25 --candidates 5 --workers 2
+# 带参数
+python -m dragon_quant scan --top 25 --candidates 5 --workers 2
+python -m dragon_quant --top 25 --candidates 5 --workers 2  # 兼容旧写法
+
+# 持久化数据管理
+python -m dragon_quant storage status         # 查看存储状态
+python -m dragon_quant storage size           # 磁盘占用
+python -m dragon_quant storage clear --all    # 清理全部
+python -m dragon_quant storage clear --results --days 7  # 保留7天内结果
 ```
 
 ### 前置条件
@@ -75,7 +82,10 @@ dragon_quant/
 │   ├── logger.py                # ScanLogger — 线程安全日志器
 │   └── reporter.py              # ReportBuilder — 自然语言报告生成
 │
-├── storage/                     # ⚠️ 待实现
+├── storage/                     # ✅ 已实现 — 统一持久化管理
+│   ├── paths.py                 # 平台路径管理（win32/darwin/linux）
+│   └── manager.py               # StorageManager + CLI (status/size/clear)
+│
 ├── utils/                       # ⚠️ 待实现
 └── models/
     └── types.py                 # dataclass 数据模型
@@ -94,7 +104,7 @@ dragon_quant/
 | **C** 连板+排序 | 雪球日K → 算连板天数 → 按(概念数, 连板数)排序取 Top25 | N+1 次 | 涨停阈值 ≥9.9% |
 | **D** 并发加载 | 板块5分K + 个股5分K + 腾讯批量行情 | ~50 次 | RateLimiter 8 线程并发 |
 | **E** 四维打分 | 主进程直接调用 4 个 scorer，逐个候选股评分 | N×4 次 | 评分器接口见下方 |
-| **F** 输出 | 加权排序 + 自然语言报告 + JSONL 日志 | — | ReportBuilder 生成中文报告 |
+| **F** 输出+持久化 | 加权排序 + 自然语言报告 + 3 层持久化 | — | results JSON / report txt / latest.json / JSONL 日志 |
 
 总耗时约 40-50 秒（取决于网络和并发数）。
 
@@ -149,20 +159,21 @@ dragon_quant/
 - CLI 入口 + `__main__.py` 入口
 - 四维评分器 `scorers/`（drive.py / anti_drop.py / leadership.py / absorption.py）
 - 结构化日志 `logging/`（ScanLogger + ReportBuilder 自然语言报告）
+- Logger 全链路打点（Provider/HTTP 层自动记录每次接口调用的耗时与成败）
+- 统一持久化路径 `storage/`（paths.py 跨平台 + manager.py CLI 管理）
+- 扫描结果持久化（results JSON / 报告文本 / latest.json 快照）
+- 数据管理 CLI（`storage status/size/clear` 子命令）
 - 技术方案文档（技术方案.md / 评分器技术方案.md）
 
 ### ⚠️ 待完成（按优先级）
 
-1. **storage 模块** — `paths.py`（数据目录管理）、`local_store.py`（历史报告持久化）
-   - 当前报告只打 JSONL 到 `~/.dragon-quant/logs/`，无可视化回溯界面
-
-2. **单票分析 CLI** — `dragon-quant analyze <code>` 子命令
+1. **单票分析 CLI** — `dragon-quant analyze <code>` 子命令
    - `analyze.py` 作为子进程入口已实现骨架，但缺少 `sector_name_map` 等元数据注入
 
-3. **测试** — 无
+2. **测试** — 无
    - 建议优先：评分器单元测试（CDF / 封板时间 / 虹吸事件检测）、Provider mock 测试
 
-4. **utils 模块** — 空桩，待填充公共工具函数
+3. **utils 模块** — 空桩，待填充公共工具函数
 
 ### 📝 已知修复（2026-05）
 - `leadership.py` `_normal_cdf_approx` 正负号反了，已修正
@@ -170,6 +181,9 @@ dragon_quant/
 - `orchestrator.py` `--workers` 参数未传递到 RateLimiter，已连接
 - `eastmoney.py` `_fetch_playwright` 重复 `cb=` 追加，已清理
 - `xueqiu.py` Referer 解析无防御，已加 try/except
+- Logger 全链路打点：所有 Provider/HTTP 调用自动记录耗时与成败，可通过 `logger.api_stats()` 统计
+- DataCache 默认启用本地持久化 + dataclass JSON 序列化修复
+- 结果持久化：每轮扫描输出 results JSON / report TXT / latest.json 到统一数据目录
 
 ---
 

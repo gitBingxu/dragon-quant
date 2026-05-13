@@ -10,12 +10,11 @@ name = "dragon-quant"
 version = "0.1.0"
 description = "龙头战法四维量化筛选系统 — A股涨停板龙头识别工具"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.12",

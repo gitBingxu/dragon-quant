@@ -116,7 +116,7 @@ def _cmd_data(args):
         else:
             print(f"获取行情失败: {args.code}")
 
-    elif args.data_action == "batch_quote":
+    elif args.data_action == "batch-quote":
         if not args.codes:
             print("错误: 需要 --codes <代码列表,逗号分隔>", file=sys.stderr)
             return
@@ -126,11 +126,11 @@ def _cmd_data(args):
             if q:
                 print(json.dumps(_to_dict(q), ensure_ascii=False))
 
-    elif args.data_action == "cookie_status":
+    elif args.data_action == "cookie-status":
         from dragon_quant.data import cookie_status
         print(json.dumps(cookie_status(), ensure_ascii=False, indent=2))
 
-    elif args.data_action == "cookie_fetch":
+    elif args.data_action == "cookie-fetch":
         from dragon_quant.data import fetch_cookies
         result = fetch_cookies(source=args.source)
         print(json.dumps(result, ensure_ascii=False, indent=2))

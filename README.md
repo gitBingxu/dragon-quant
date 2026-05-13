@@ -82,6 +82,11 @@ dragon-quant data minute --code 600172
 # 实时行情
 dragon-quant data quote --code 600172
 dragon-quant data batch-quote --codes 600172,000001,002409
+
+# Cookie 管理
+dragon-quant data cookie-status    # 查看 Cookie 状态
+dragon-quant data cookie-fetch     # 刷新全部 Cookie
+dragon-quant data cookie-fetch --source xueqiu  # 只刷新雪球
 ```
 
 ### `storage` — 数据管理
@@ -131,6 +136,7 @@ result = dragon_quant.scan(top_n=5, candidates_n=5, workers=2)
 from dragon_quant.data import (
     get_sector_ranking, get_sector_components, get_sector_5min_kline,
     get_kline, get_minute_kline, get_quote, batch_get_quotes,
+    cookie_status, fetch_cookies,
 )
 
 # 板块
@@ -143,6 +149,11 @@ kline = get_kline("600172", source="xueqiu", days=30)
 mline = get_minute_kline("600172")             # 1 分 K
 quote = get_quote("600172")                    # 实时行情
 quotes = batch_get_quotes(["600172", "000001", "002409"])
+
+# Cookie 管理
+status = cookie_status()                       # 查看 Cookie 是否有效
+fetch_cookies()                                # 刷新全部 Cookie
+fetch_cookies(source="xueqiu")                 # 只刷新雪球 Cookie
 ```
 
 ### 日志查询
@@ -350,7 +361,34 @@ if quote:
     print(f"当前价: {quote.price} | 涨跌幅: {quote.pct}% | 换手率: {getattr(quote, 'turnover', 0):.2f}%")
 ```
 
-### 场景 4：查板块热度（哪个方向最强）
+### 场景 4：API 返回 400/空数据 → 刷新 Cookie
+
+当 scan() 或数据查询返回 400 错误、空数据时，通常是 Cookie 过期了。刷新后重试即可。
+
+```python
+from dragon_quant.data import cookie_status, fetch_cookies
+
+# 先查看状态
+status = cookie_status()
+for source, info in status.items():
+    print(f"{source}: {'✅ 有效' if info['ok'] else '❌ 过期'} ({info['length']}字符)")
+
+# 如果东财或雪球过期，刷新
+if not status["eastmoney"]["ok"] or not status["xueqiu"]["ok"]:
+    print("Cookie 过期，正在刷新...")
+    fetch_cookies()
+    # 刷新后重新检查
+    new_status = cookie_status()
+    for source, info in new_status.items():
+        print(f"  {source}: {'✅' if info['ok'] else '❌'} ({info['length']}字符)")
+
+# 刷新后重试 scan
+import dragon_quant
+result = dragon_quant.scan(top_n=5)
+print(f"扫描成功，{len(result['ranking'])} 只候选")
+```
+
+### 场景 5：查板块热度（哪个方向最强）
 
 ```python
 from dragon_quant.data import get_sector_ranking, get_sector_components
@@ -370,7 +408,7 @@ if sectors:
         print(f"  {s.code} {s.name} | +{s.pct:.2f}%")
 ```
 
-### 场景 5：排查问题 — 查看扫描日志
+### 场景 6：排查问题 — 查看扫描日志
 
 ```python
 from dragon_quant.logging.query import list_logs, tail_logs, query_logs, log_summary, clear_logs
@@ -404,7 +442,7 @@ for e in entries:
     print(f"  {e['category']} → score={e.get('data',{}).get('score',0)}")
 ```
 
-### 场景 6：清理日志
+### 场景 7：清理日志
 
 ```python
 from dragon_quant.logging.query import clear_logs, list_logs
@@ -420,7 +458,7 @@ for f in result.get("files_removed", []):
     print(f"  - {f}")
 ```
 
-### 场景 7：拿上一次扫描结果（无需重新跑）
+### 场景 8：拿上一次扫描结果（无需重新跑）
 
 ```python
 import json
@@ -440,7 +478,7 @@ else:
     print("暂无扫描缓存，运行一次 scan() 即可生成")
 ```
 
-### 场景 8：批量获取多只票的行情对比
+### 场景 9：批量获取多只票的行情对比
 
 ```python
 from dragon_quant.data import batch_get_quotes

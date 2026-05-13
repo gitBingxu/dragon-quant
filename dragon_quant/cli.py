@@ -126,6 +126,15 @@ def _cmd_data(args):
             if q:
                 print(json.dumps(_to_dict(q), ensure_ascii=False))
 
+    elif args.data_action == "cookie_status":
+        from dragon_quant.data import cookie_status
+        print(json.dumps(cookie_status(), ensure_ascii=False, indent=2))
+
+    elif args.data_action == "cookie_fetch":
+        from dragon_quant.data import fetch_cookies
+        result = fetch_cookies(source=args.source)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
 
 def _cmd_storage(args):
     """存储管理命令"""
@@ -255,6 +264,10 @@ def main():
     bq_p = data_subs.add_parser("batch-quote", help="批量实时行情")
     bq_p.add_argument("--codes", required=True, help="股票代码，逗号分隔")
     bq_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"])
+
+    data_subs.add_parser("cookie-status", help="查看 Cookie 状态")
+    cf_p = data_subs.add_parser("cookie-fetch", help="刷新 Cookie")
+    cf_p.add_argument("--source", default="all", choices=["all", "eastmoney", "xueqiu"])
 
     # storage 子命令
     st_p = sub.add_parser("storage", help="持久化数据管理")

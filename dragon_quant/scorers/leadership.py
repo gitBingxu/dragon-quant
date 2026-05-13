@@ -183,7 +183,7 @@ def _lead_lag_score(stock_1min: list[KBar], sector_5min: list[KBar]) -> float:
         if s_ret > 0.005 and (s_ret - sec_ret) > 0.003:
             total_windows += 1
             for j in range(i + 1, min(i + 7, min_len)):
-                sec_follow = _bar_return(sector_bars, j, j)
+                sec_follow = _bar_return(sector_bars, j)
                 if sec_follow > 0.003:
                     lead_count += 1
                     break

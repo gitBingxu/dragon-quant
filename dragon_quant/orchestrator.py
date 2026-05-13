@@ -4,10 +4,14 @@ Orchestrator — 编排层主流程
 阶段：
   A. 板块排行 → 前10涨/前10跌
   B. 候选股筛选 → 每板块前5（过滤ST/双创） + 多概念跟踪
-  C. 连板高度 + 排序 → top 25
+  C. 连板高度 + 排序 → top_n
   D. 并发加载评分数据 → 全部写共享缓存
-  E. subprocess 并行打分
-  F. 输出报告
+  E. 主进程四维打分 → 只对 top_n 评分
+  F. 输出报告（表格 + 自然语言 + 持久化）
+
+对外接口：
+  scan(top_n, candidates_n, workers) → dict   Programmtic API
+  run_scan(top_n, candidates_n, workers)       CLI 入口（带 print 输出）
 """
 
 import json
@@ -22,6 +26,7 @@ from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.rate_limit import RateLimiter
 from dragon_quant.providers import create_providers
 from dragon_quant.logging.logger import ScanLogger
+from dragon_quant.logging.reporter import ReportBuilder
 from dragon_quant.storage.paths import DATA_DIR, SHARED_DIR, LOG_DIR, RESULTS_DIR
 
 STATISTICAL_CONCEPT_PREFIXES = (
@@ -156,11 +161,38 @@ def _score_one(cand: Candidate, cache: DataCache,
 
 
 # ════════════════════════════════════════════════════════════
-# 主流程
+# 核心编排 — scan() Programmtic API
 # ════════════════════════════════════════════════════════════
 
-def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
-    """完整扫描流程"""
+def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
+         verbose: bool = True) -> dict:
+    """龙头战法完整扫描 — Programmtic API
+
+    返回结构化 dict:
+      {
+        "timestamp": str,
+        "elapsed_s": float,
+        "params": {"top_n", "candidates_n", "workers"},
+        "sectors": {"up": [...], "down": [...]},
+        "ranking": [  ← 仅 top_n 只，按综合分降序
+          {
+            "code", "name", "concepts", "board_count",
+            "primary_sector", "primary_sector_name",
+            "composite_score", "dimensions": {
+              "drive": {"score", "weight", "details"},
+              "anti_drop": {...},
+              "leadership": {...},
+              "absorption": {...},
+            }
+          }
+        ],
+        "api_stats": dict,
+        "report_text": str,     ← top_n 只的自然语言报告
+        "log_path": str,        ← 日志文件路径
+        "results_path": str,    ← 结果 JSON 路径
+        "report_path": str,     ← 报告文本路径
+      }
+    """
     t_start = time.time()
 
     logger = ScanLogger()
@@ -176,24 +208,26 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     # ────────────────────────────────────────────
     # Phase A: 板块排行
     # ────────────────────────────────────────────
-    print("📊 Phase A — 板块排行")
+    if verbose:
+        print("📊 Phase A — 板块排行")
 
     top10_up = [s for s in em.get_sector_ranking(asc=False)
                 if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
     top10_down = [s for s in em.get_sector_ranking(asc=True)
                   if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
-    print(f"   前10涨: {len(top10_up)} 个板块")
-    print(f"   前10跌: {len(top10_down)} 个板块")
+    if verbose:
+        print(f"   前10涨: {len(top10_up)} 个板块")
+        print(f"   前10跌: {len(top10_down)} 个板块")
 
     if not top10_up:
-        print("❌ 未获取到领涨板块", file=sys.stderr)
-        return
+        return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
 
     # ────────────────────────────────────────────
     # Phase B: 候选股筛选
     # ────────────────────────────────────────────
-    print("📋 Phase B — 候选股筛选")
+    if verbose:
+        print("📋 Phase B — 候选股筛选")
 
     all_candidates: dict[str, Candidate] = {}   # code → Candidate
     sector_components: dict[str, list[StockInfo]] = {}  # 所有20个板块成分股缓存
@@ -222,13 +256,13 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
 
     candidate_pool = list(all_candidates.values())
     logger.phase("B", f"候选股筛选", count=len(candidate_pool))
-    print(f"   候选池: {len(candidate_pool)} 只（去重）")
-    for c in candidate_pool:
-        print(f"     {c.name:6s} {c.code}  概念: {c.concepts}")
+    if verbose:
+        print(f"   候选池: {len(candidate_pool)} 只（去重）")
+        for c in candidate_pool:
+            print(f"     {c.name:6s} {c.code}  概念: {c.concepts}")
 
     if not candidate_pool:
-        print("❌ 无候选股", file=sys.stderr)
-        return
+        return {"error": "无候选股", "ranking": [], "report_text": ""}
 
     # 缓存板块成分股
     for s_code, comps in sector_components.items():
@@ -237,7 +271,8 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     # ────────────────────────────────────────────
     # Phase C: 连板高度 + 排序
     # ────────────────────────────────────────────
-    print("📈 Phase C — 连板高度")
+    if verbose:
+        print("📈 Phase C — 连板高度")
 
     # 拉候选股日K线
     for c in candidate_pool:
@@ -250,19 +285,21 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     market_kline = xq.get_kline(market_code, days=30)
     cache.set(f"kline:day:{market_code}", market_kline)
 
-    # 排序
+    # 排序 + 截取 top_n
     candidate_pool.sort(key=lambda c: (len(c.concepts), c.board_count), reverse=True)
     ranking = candidate_pool[:top_n]
     logger.phase("C", f"连板高度排序", top=len(ranking))
 
-    print(f"   排序取前 {len(ranking)} 只:")
-    for r in ranking:
-        print(f"     {r.code} {r.name:6s}  概念x{len(r.concepts)}  连板{r.board_count}")
+    if verbose:
+        print(f"   排序取前 {len(ranking)} 只:")
+        for r in ranking:
+            print(f"     {r.code} {r.name:6s}  概念x{len(r.concepts)}  连板{r.board_count}")
 
     # ────────────────────────────────────────────
     # Phase D: 并发加载评分数据
     # ────────────────────────────────────────────
-    print("⏳ Phase D — 并发加载")
+    if verbose:
+        print("⏳ Phase D — 并发加载")
 
     # T1: 板块5分K（20个板块）
     all_sectors = top10_up + top10_down
@@ -272,7 +309,7 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
                            cache.set(f"kline:5min:sector:{sc}",
                                      em.get_sector_5min_kline(sc))))
 
-    # T2: 候选股分时K线（25只）
+    # T2: 候选股分时K线（只拉 top_n 只）
     for r in ranking:
         limiter.submit("xueqiu", "minute_kline",
                        lambda c=r.code: (
@@ -291,12 +328,14 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
 
     limiter.wait_all()
     logger.phase("D", "并发数据加载完成")
-    print(f"   ✅ 全部加载完成")
+    if verbose:
+        print(f"   ✅ 全部加载完成")
 
     # ────────────────────────────────────────────
-    # Phase E: 主进程直接打分（跳过子进程序列化）
+    # Phase E: 主进程打分 — 只对 top_n 只
     # ────────────────────────────────────────────
-    print("🔨 Phase E — 四维打分")
+    if verbose:
+        print("🔨 Phase E — 四维打分")
 
     # 注入元数据到缓存（供 scorer 读取）
     cache.set("__meta__:candidates", [
@@ -306,112 +345,132 @@ def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
     ])
     cache.set("__meta__:sector_codes", [s.code for s in top10_down])
 
-    # 板块名称映射（供 scorer 报告用，同时写入缓存供子进程读取）
+    # 板块名称映射
     sector_name_map = {s.code: s.name for s in all_sectors}
     cache.set("__meta__:sector_name_map", sector_name_map)
 
     results = []
-    for cand in candidate_pool:
+    for cand in ranking:
         try:
-            sr = _score_one(cand, cache, candidate_pool, [s.code for s in top10_down],
+            sr = _score_one(cand, cache, ranking, [s.code for s in top10_down],
                            sector_name_map, logger)
             results.append(sr)
-            dims = sr.get("dimensions", {})
-            print(f"  {cand.code} {cand.name:6s}  "
-                  f"综合={sr['composite_score']:5.1f}  "
-                  f"带动={dims.get('drive',{}).get('score',0):5.1f}  "
-                  f"抗跌={dims.get('anti_drop',{}).get('score',0):5.1f}  "
-                  f"领涨={dims.get('leadership',{}).get('score',0):5.1f}  "
-                  f"承接={dims.get('absorption',{}).get('score',0):5.1f}")
+            if verbose:
+                dims = sr.get("dimensions", {})
+                print(f"  {cand.code} {cand.name:6s}  "
+                      f"综合={sr['composite_score']:5.1f}  "
+                      f"带动={dims.get('drive',{}).get('score',0):5.1f}  "
+                      f"抗跌={dims.get('anti_drop',{}).get('score',0):5.1f}  "
+                      f"领涨={dims.get('leadership',{}).get('score',0):5.1f}  "
+                      f"承接={dims.get('absorption',{}).get('score',0):5.1f}")
         except Exception as e:
-            print(f"  ⚠️ {cand.code} 打分失败: {e}", file=sys.stderr)
+            if verbose:
+                print(f"  ⚠️ {cand.code} 打分失败: {e}", file=sys.stderr)
 
     # ────────────────────────────────────────────
-    # Phase F: 输出
+    # Phase F: 输出与持久化
     # ────────────────────────────────────────────
     elapsed = time.time() - t_start
     logger.phase("F", f"扫描完成", elapsed_s=round(elapsed, 1))
-    print(f"\n{'═'*56}")
-    print(f"🐉 龙头战法扫描完成 ({elapsed:.0f}s)")
-    print(f"{'═'*56}")
+
+    output = {
+        "timestamp": time.strftime("%Y%m%d_%H%M%S"),
+        "elapsed_s": round(elapsed, 1),
+        "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers},
+        "sectors": {
+            "up": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_up],
+            "down": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_down],
+        },
+        "ranking": [],
+        "api_stats": logger.api_stats(),
+        "report_text": "",
+        "log_path": "",
+        "results_path": "",
+        "report_path": "",
+    }
 
     if results:
         results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
-        print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
-        print("-" * 56)
-        for r in results:
-            dims = r.get("dimensions", {})
-            print(f"{r['code']:8s} {r.get('name', ''):8s} "
-                  f"{r['composite_score']:6.1f}  "
-                  f"{dims.get('drive', {}).get('score', 0):6.1f}  "
-                  f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
-                  f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
-                  f"{dims.get('absorption', {}).get('score', 0):6.1f}")
+        output["ranking"] = results
 
-        # ── 自然语言报告 ──
-        from dragon_quant.logging.reporter import ReportBuilder
+        # 生成报告
         reporter = ReportBuilder(logger)
-        print(f"\n{'═'*56}")
-        print(f"📋 完整详细报告")
-        print(f"{'═'*56}")
+        report_parts = []
         for r in results:
-            print(reporter.build_stock_report(
+            report_parts.append(reporter.build_stock_report(
                 r["code"], r.get("name", ""),
                 r.get("board_count", 0), r.get("concepts", []),
                 composite_score=r.get("composite_score", 0),
                 dimensions=r.get("dimensions", {}),
                 primary_sector_name=r.get("primary_sector_name", ""),
             ))
-            print()
+        output["report_text"] = "\n\n".join(report_parts)
+
+        if verbose:
+            print(f"\n{'═'*56}")
+            print(f"🐉 龙头战法扫描完成 ({elapsed:.0f}s)")
+            print(f"{'═'*56}")
+            print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
+            print("-" * 56)
+            for r in results:
+                dims = r.get("dimensions", {})
+                print(f"{r['code']:8s} {r.get('name', ''):8s} "
+                      f"{r['composite_score']:6.1f}  "
+                      f"{dims.get('drive', {}).get('score', 0):6.1f}  "
+                      f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
+                      f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
+                      f"{dims.get('absorption', {}).get('score', 0):6.1f}")
+
+            print(f"\n{'═'*56}")
+            print(f"📋 完整详细报告")
+            print(f"{'═'*56}")
+            for i, r in enumerate(results):
+                print(report_parts[i])
+                print()
 
         # ── 持久化 ──
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        timestamp = output["timestamp"]
 
         # 结构化日志
         log_path = LOG_DIR / f"scan_{timestamp}.jsonl"
         logger.dump_jsonl(log_path)
-        print(f"📝 日志已保存: {log_path}")
+        output["log_path"] = str(log_path)
 
         # 结果 JSON
         results_path = RESULTS_DIR / f"scan_results_{timestamp}.json"
         results_data = {
             "timestamp": timestamp,
-            "elapsed_s": round(elapsed, 1),
-            "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers},
-            "sectors": {
-                "up": [
-                    {"code": s.code, "name": s.name, "pct": round(s.pct, 4)}
-                    for s in top10_up
-                ],
-                "down": [
-                    {"code": s.code, "name": s.name, "pct": round(s.pct, 4)}
-                    for s in top10_down
-                ],
-            },
-            "ranking": results,
-            "api_stats": logger.api_stats(),
+            "elapsed_s": output["elapsed_s"],
+            "params": output["params"],
+            "sectors": output["sectors"],
+            "ranking": output["ranking"],
+            "api_stats": output["api_stats"],
         }
         with open(results_path, "w") as f:
             json.dump(results_data, f, ensure_ascii=False, indent=2)
-        print(f"📊 结果已保存: {results_path}")
+        output["results_path"] = str(results_path)
 
         # 报告文本
         report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
         with open(report_path, "w") as f:
             f.write(reporter.build_summary_report(results))
             f.write("\n\n")
-            for r in results:
-                f.write(reporter.build_stock_report(
-                    r["code"], r.get("name", ""),
-                    r.get("board_count", 0), r.get("concepts", []),
-                    composite_score=r.get("composite_score", 0),
-                    dimensions=r.get("dimensions", {}),
-                    primary_sector_name=r.get("primary_sector_name", ""),
-                ))
-                f.write("\n\n")
-        print(f"📋 报告已保存: {report_path}")
+            f.write(output["report_text"])
+        output["report_path"] = str(report_path)
 
         # 最新结果快照
         latest_path = RESULTS_DIR / "latest.json"
         with open(latest_path, "w") as f:
             json.dump(results_data, f, ensure_ascii=False, indent=2)
+
+        if verbose:
+            print(f"📝 日志已保存: {log_path}")
+            print(f"📊 结果已保存: {results_path}")
+            print(f"📋 报告已保存: {report_path}")
+
+    return output
+
+
+def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
+    """CLI 入口 — 同 scan() 但带 verbose 输出"""
+    scan(top_n=top_n, candidates_n=candidates_n, workers=workers, verbose=True)

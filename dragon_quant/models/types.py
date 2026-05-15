@@ -31,6 +31,7 @@ class StockInfo:
     sector_name: str = ""   # 所属板块名称
     pct: float = 0.0        # 涨跌幅 %
     price: float = 0.0      # 最新价
+    five_day_return: float = 0.0  # 5日累计涨幅 %
 
 
 @dataclass

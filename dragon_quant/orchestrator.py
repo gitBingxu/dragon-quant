@@ -3,8 +3,8 @@ Orchestrator — 编排层主流程
 
 阶段：
   A. 板块排行 → 前10涨/前10跌
-  B. 候选股筛选 → 每板块前5（过滤ST/双创） + 多概念跟踪
-  C. 连板高度 + 排序 → top_n
+  B. 候选股筛选 → 每板块按5日累计涨幅取前5（过滤ST/双创/北交所） + 多概念跟踪
+  C. 连板高度 + 排序（连板优先） → top_n
   D. 并发加载评分数据 → 全部写共享缓存
   E. 主进程四维打分 → 只对 top_n 评分
   F. 输出报告（表格 + 自然语言 + 持久化）
@@ -40,7 +40,7 @@ FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
 
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
-    """过滤：非ST、非双创(30/68开头)"""
+    """过滤：非ST、非双创(30/68)、非北交所(8/92)"""
     name = stock.name or ""
     code = stock.code or ""
     if not code:
@@ -48,8 +48,10 @@ def _is_valid_candidate(stock: StockInfo) -> bool:
     # ST
     if "ST" in name.upper():
         return False
-    # 双创
-    if code.startswith(("30", "68")):
+    # 双创 + 北交所
+    if code.startswith(("30", "68", "8")):
+        return False
+    if code.startswith("92"):
         return False
     return True
 
@@ -68,6 +70,15 @@ def _compute_consecutive_boards(klines: list) -> int:
         else:
             break
     return count
+
+
+def _compute_5day_return(klines: list) -> float:
+    """从日K线计算5日累计涨幅(%)。klines 按时间升序排列。"""
+    if len(klines) < 6:
+        return 0.0
+    if klines[-6].close <= 0:
+        return 0.0
+    return (klines[-1].close / klines[-6].close - 1) * 100
 
 
 def _to_serializable(obj):
@@ -231,18 +242,44 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("📋 Phase B — 候选股筛选")
 
-    all_candidates: dict[str, Candidate] = {}   # code → Candidate
-    sector_components: dict[str, list[StockInfo]] = {}  # 所有20个板块成分股缓存
+    all_candidates: dict[str, Candidate] = {}
+    sector_components: dict[str, list[StockInfo]] = {}
+    sector_filtered: dict[str, list[StockInfo]] = {}
 
-    # 拉前10涨板块成分股 → 筛选候选
+    # 第一遍：拉板块成分股 + 过滤
     for s in top10_up:
         components = em.get_sector_components(s.code, page=1)
         sector_components[s.code] = components
-
         filtered = [c for c in components if _is_valid_candidate(c)]
-        top5 = filtered[:candidates_n]
+        sector_filtered[s.code] = filtered
 
-        for stock in top5:
+    # 收集需要拉K线的唯一股票（每板块前 pre_n 只）
+    unique_codes: dict[str, StockInfo] = {}
+    pre_n = max(candidates_n * 2, 10)
+    for s in top10_up:
+        for stock in sector_filtered[s.code][:pre_n]:
+            if stock.code not in unique_codes:
+                unique_codes[stock.code] = stock
+
+    # 并发拉日K线
+    if verbose:
+        print(f"   拉取 {len(unique_codes)} 只个股日K线...")
+    for code in unique_codes:
+        limiter.submit("xueqiu", "kline",
+                       lambda c=code: cache.set(f"kline:day:{c}", xq.get_kline(c, days=30)))
+    limiter.wait_all()
+
+    # 计算5日累计涨幅
+    for code, stock in unique_codes.items():
+        klines = cache.get(f"kline:day:{code}") or []
+        stock.five_day_return = _compute_5day_return(klines)
+
+    # 每个板块按5日累计涨幅重排，取前N
+    for s in top10_up:
+        pre_list = [st for st in sector_filtered[s.code] if st.code in unique_codes]
+        pre_list.sort(key=lambda c: c.five_day_return, reverse=True)
+        top_n_stocks = pre_list[:candidates_n]
+        for stock in top_n_stocks:
             if stock.code in all_candidates:
                 all_candidates[stock.code].concepts.append(s.name)
             else:
@@ -276,19 +313,18 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("📈 Phase C — 连板高度")
 
-    # 拉候选股日K线
+    # 日K线已在 Phase B 缓存，直接复用
     for c in candidate_pool:
-        kline = xq.get_kline(c.code, days=30)
+        kline = cache.get(f"kline:day:{c.code}") or []
         c.board_count = _compute_consecutive_boards(kline)
-        cache.set(f"kline:day:{c.code}", kline)
 
     # 拉大盘日K线（上证指数 000001 的 K 线用于跳水日检测）
     market_code = "000001"
     market_kline = xq.get_kline(market_code, days=30)
     cache.set(f"kline:day:{market_code}", market_kline)
 
-    # 排序 — 固定取 FULL_EVAL_COUNT 只做四维评分
-    candidate_pool.sort(key=lambda c: (len(c.concepts), c.board_count), reverse=True)
+    # 排序 — 固定取 FULL_EVAL_COUNT 只做四维评分（连板优先）
+    candidate_pool.sort(key=lambda c: (c.board_count, len(c.concepts)), reverse=True)
     ranking = candidate_pool[:FULL_EVAL_COUNT]
     logger.phase("C", f"评分候选池", total=len(ranking))
 

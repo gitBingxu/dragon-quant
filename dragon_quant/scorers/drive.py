@@ -67,7 +67,7 @@ def score(code: str, cache: DataCache, candidate_pool: Optional[list[Candidate]]
     best_day_detail = day_details[best_idx]
 
     # 连板加分
-    max_cons = max(lu["consecutive"] for lu in limit_up_dates[:3])
+    max_cons = max(lu["consecutive"] for lu in limit_up_dates)
     if max_cons >= 2:
         consecutive_bonus = min(max_cons * 5, 100 - drive_score)
         drive_score += consecutive_bonus
@@ -113,9 +113,6 @@ def _find_limit_up_dates(day_klines: list[KBar], five_min_klines: list[KBar]) ->
             })
         else:
             consecutive = 0
-
-        if len(limit_up_dates) >= 3:
-            break
 
     return limit_up_dates
 

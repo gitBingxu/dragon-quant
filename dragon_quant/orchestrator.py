@@ -63,7 +63,7 @@ def _compute_consecutive_boards(klines: list) -> int:
     # 倒序遍历（从最近往前）
     for bar in reversed(klines):
         pct = getattr(bar, "pct", 0)
-        if pct and pct >= 9.9:
+        if pct >= 9.9:
             count += 1
         else:
             break

@@ -151,7 +151,7 @@ dragon_quant/
 
 ### ✅ 已完成
 - 数据模型（types.py）
-- 全部 3 个 Provider（东财/雪球/腾讯），含完整反爬 Header + Playwright 降级
+- 全部 3 个 Provider（东财/雪球/腾讯），含完整反爬 Header
 - Cookie 管理（手动设置 + Playwright 自动获取）
 - RateLimiter 分组并发调度（`workers` 参数控制线程数）
 - DataCache 内存+本地双重缓存 + 快照导出
@@ -179,7 +179,7 @@ dragon_quant/
 - `leadership.py` `_normal_cdf_approx` 正负号反了，已修正
 - `anti_drop.py` 日内承接评分的 `prev_close` 始终为 0，已改为从日K线取昨日收盘
 - `orchestrator.py` `--workers` 参数未传递到 RateLimiter，已连接
-- `eastmoney.py` `_fetch_playwright` 重复 `cb=` 追加，已清理
+- `eastmoney.py` 删除 Playwright 降级路径，urllib 通所有 push2 请求（原"TLS指纹检测"为误判）
 - `xueqiu.py` Referer 解析无防御，已加 try/except
 - Logger 全链路打点：所有 Provider/HTTP 调用自动记录耗时与成败，可通过 `logger.api_stats()` 统计
 - DataCache 默认启用本地持久化 + dataclass JSON 序列化修复

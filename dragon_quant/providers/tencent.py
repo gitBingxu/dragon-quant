@@ -12,6 +12,20 @@ from dragon_quant.providers.base import StockProvider
 GTIMG = "https://qt.gtimg.cn"
 MINUTE = "https://web.ifzq.gtimg.cn/appstock/app/minute/query"
 
+TENCENT_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Connection": "keep-alive",
+    "Referer": "https://finance.qq.com/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "sec-ch-ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+}
+
 
 def _gtimg_codes(codes: list[str]) -> str:
     """sh600519,sZ300750 -> q=sh600519,sz300750"""
@@ -26,9 +40,7 @@ def _fetch_gtimg(codes: list[str], logger=None, endpoint: str = "") -> Optional[
     """腾讯 gtimg 批量获取，返回原始 gbk 文本"""
     q = _gtimg_codes(codes)
     url = f"{GTIMG}/q={q}"
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    })
+    req = urllib.request.Request(url, headers=dict(TENCENT_HEADERS))
     t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -129,9 +141,9 @@ class TencentProvider(StockProvider):
         prefix = "sh" if code.startswith(("6", "9")) else "sz"
         url = f"{MINUTE}?code={prefix}{code}"
         try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            })
+            headers = dict(TENCENT_HEADERS)
+            headers["Referer"] = f"https://finance.qq.com/"
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:

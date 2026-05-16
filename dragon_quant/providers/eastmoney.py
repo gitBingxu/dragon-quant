@@ -3,7 +3,7 @@
 所有请求 JSONP 格式，带完整反爬 Header
 """
 
-import json, re, sys, threading, time
+import json, re, sys, time
 import urllib.request, urllib.parse
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -48,12 +48,8 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
     """JSONP GET 请求"""
     cookie = get_em()
     if not cookie:
-        print("⚠️ 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
+        print("\u26a0\ufe0f 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
         return None
-
-    # push2/push2his 有 TLS 指纹检测，urllib 必然被拒，直接走 Playwright
-    if "push2" in url:
-        return _fetch_playwright(url, referer, cookie, logger=logger, endpoint=endpoint)
 
     headers = dict(HEADERS)
     headers["Referer"] = referer
@@ -67,13 +63,16 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
         elapsed = (time.time() - t0) * 1000
         data = _parse_jsonp(raw)
         if logger:
-            logger.api("eastmoney", endpoint, ok=True, elapsed_ms=elapsed)
+            logger.api("eastmoney", endpoint, ok=data is not None,
+                       elapsed_ms=elapsed)
         return data
     except Exception as e:
         elapsed = (time.time() - t0) * 1000
         if logger:
-            logger.api("eastmoney", endpoint, ok=False, elapsed_ms=elapsed, error=str(e))
-        return _fetch_playwright(url, referer, cookie, logger=logger, endpoint=endpoint)
+            logger.api("eastmoney", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=str(e))
+        print(f"  ⚠️ 东财请求失败: {e}", file=sys.stderr)
+        return None
 
 
 def _parse_jsonp(raw: str) -> Optional[dict]:
@@ -84,64 +83,30 @@ def _parse_jsonp(raw: str) -> Optional[dict]:
     return json.loads(m.group(1))
 
 
-# ─── Playwright 降级路径（push2 / push2his 有 TLS 指纹检测） ───
-
-_pw_local = threading.local()
-
-
-def _get_thread_playwright():
-    """按线程懒加载 Playwright 单例（避免 greenlet 跨线程错误）"""
-    if hasattr(_pw_local, '_browser'):
-        return _pw_local
-    from playwright.sync_api import sync_playwright
-    _pw_local._playwright = sync_playwright().start()
-    _pw_local._browser = _pw_local._playwright.chromium.launch(headless=True)
-    _pw_local._context = _pw_local._browser.new_context(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-        locale="zh-CN",
-        timezone_id="Asia/Shanghai",
-    )
-    return _pw_local
+_UT_CACHE = ""
+_UT_DEFAULT = "fa5fd1943c7b386f172d6893dbfba10b"
 
 
-def _fetch_playwright(url: str, referer: str, cookie: str,
-                      logger=None, endpoint: str = "") -> Optional[dict]:
-    """通过 Playwright 发 JSONP 请求（绕过 TLS 指纹 + 受限端点封锁）"""
-    t0 = time.time()
+def _get_ut_token() -> str:
+    """获取东财前端 ut token，优先从页面提取，失败回退硬编码"""
+    global _UT_CACHE
+    if _UT_CACHE:
+        return _UT_CACHE
     try:
-        cb_name = "dq_cb_" + str(int(t0 * 1000))
-        jsonp_url = re.sub(r'cb=[^&]+', f'cb={cb_name}', url)
-        if 'cb=' not in jsonp_url:
-            sep = '&' if '?' in jsonp_url else '?'
-            jsonp_url += f'{sep}cb={cb_name}'
-
-        pw = _get_thread_playwright()
-        page = pw._context.new_page()
-        try:
-            page.goto(referer, wait_until="domcontentloaded", timeout=15000)
-            body = page.evaluate(f'''async () => {{
-                const r = await fetch("{jsonp_url}", {{
-                    credentials: 'include',
-                    headers: {{"Referer": "{referer}"}}
-                }});
-                return await r.text();
-            }}''')
-        finally:
-            page.close()
-
-        elapsed = (time.time() - t0) * 1000
-        result = _parse_jsonp(body)
-        if logger:
-            logger.api("eastmoney", endpoint, ok=result is not None,
-                       elapsed_ms=elapsed)
-        return result
-    except Exception as e:
-        elapsed = (time.time() - t0) * 1000
-        if logger:
-            logger.api("eastmoney", endpoint, ok=False,
-                       elapsed_ms=elapsed, error=str(e))
-        print(f"  ⚠️ 东财 Playwright 请求失败: {e}", file=sys.stderr)
-        return None
+        req = urllib.request.Request(
+            "https://quote.eastmoney.com/center/gridlist.html",
+            headers={"User-Agent": HEADERS["User-Agent"]},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        m = re.search(r'"ut"\s*:\s*"([a-f0-9]{30,50})"', html)
+        if m:
+            _UT_CACHE = m.group(1)
+            return _UT_CACHE
+    except Exception:
+        pass
+    _UT_CACHE = _UT_DEFAULT
+    return _UT_CACHE
 
 
 def _parse_kline_items(raw_items: list[str]) -> list[KBar]:
@@ -184,7 +149,7 @@ class EastMoneyProvider(StockProvider):
             "fid": "f3",
             "pn": "1", "pz": "500",
             "po": "0" if asc else "1",  # 0=跌幅榜 1=涨幅榜
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            "ut": _get_ut_token(),
             "dect": "1", "wbp2u": "|0|0|0|web",
             "cb": "jQuery_dq",
         }
@@ -222,7 +187,7 @@ class EastMoneyProvider(StockProvider):
             "pn": str(page), "pz": "50",
             "po": "1",
             "dect": "1",
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            "ut": _get_ut_token(),
             "wbp2u": "|0|0|0|web",
             "cb": "jQuery_dq",
         }
@@ -255,7 +220,7 @@ class EastMoneyProvider(StockProvider):
         params = {
             "cb": "jQuery_dq",
             "secid": f"90.{sector_code}",
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            "ut": _get_ut_token(),
             "fields1": "f1,f2,f3,f4,f5,f6",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
             "klt": "5",

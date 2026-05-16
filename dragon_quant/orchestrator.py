@@ -246,9 +246,16 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     sector_components: dict[str, list[StockInfo]] = {}
     sector_filtered: dict[str, list[StockInfo]] = {}
 
-    # 第一遍：拉板块成分股 + 过滤
+    # 提交前10涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     for s in top10_up:
-        components = em.get_sector_components(s.code, page=1)
+        limiter.submit("eastmoney", "sector_components",
+                       lambda sc=s.code: (
+                           cache.set(f"sector:components:{sc}",
+                                     em.get_sector_components(sc, page=1))))
+    limiter.wait_all()
+
+    for s in top10_up:
+        components = cache.get(f"sector:components:{s.code}") or []
         sector_components[s.code] = components
         filtered = [c for c in components if _is_valid_candidate(c)]
         sector_filtered[s.code] = filtered
@@ -288,9 +295,16 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     concepts=[s.name], primary_sector=s.code,
                 )
 
-    # 拉前10跌板块成分股（资金承接用）
+    # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
     for s in top10_down:
-        components = em.get_sector_components(s.code, page=1)
+        limiter.submit("eastmoney", "sector_components",
+                       lambda sc=s.code: (
+                           cache.set(f"sector:components:{sc}",
+                                     em.get_sector_components(sc, page=1))))
+    limiter.wait_all()
+
+    for s in top10_down:
+        components = cache.get(f"sector:components:{s.code}") or []
         sector_components[s.code] = components
 
     candidate_pool = list(all_candidates.values())

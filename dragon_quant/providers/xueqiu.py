@@ -131,6 +131,30 @@ class XueqiuProvider(StockProvider):
         items = data.get("data", {}).get("item", []) or data.get("data", {}).get("items", [])
         return _parse_kline(items)
 
+    # ─── 指定日期的 5 分钟 K 线（用于复盘炸板检测）───
+
+    def get_5min_kline_for(self, code: str, target_ts: int,
+                           bars_before: int = 48,
+                           bars_after: int = 96) -> list[KBar]:
+        """拉取指定日期附近的 5 分钟 K 线。
+
+        雪球 5 分钟线回溯范围约 14 天，target_ts 在此范围内即可取到。
+        type=after 从 target_ts 向后取，确保覆盖目标日全天的分钟线。
+        """
+        symbol = _symbol(code)
+        count = bars_before + bars_after + 100
+        begin = max(0, target_ts - bars_before * 300 * 1000)
+        path = (
+            f"/v5/stock/chart/kline.json?symbol={symbol}"
+            f"&period=5m&type=after&count={count}"
+            f"&indicator=kline&begin={begin}"
+        )
+        data = _fetch(path, logger=self._logger, endpoint="5min_kline_for")
+        if not data:
+            return []
+        items = data.get("data", {}).get("item", []) or data.get("data", {}).get("items", [])
+        return _parse_kline(items)
+
     # ─── 分时 K 线（1 分钟级） ───
 
     def get_minute_kline(self, code: str) -> list[KBar]:

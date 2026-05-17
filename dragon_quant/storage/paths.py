@@ -6,8 +6,9 @@
   COOKIE_DIR  — Cookie 存储
   CACHE_DIR   — 接口数据缓存
   LOG_DIR     — 结构化日志 (JSONL)
-  RESULTS_DIR — 扫描结果 (JSON + 报告)
+  RESULTS_DIR — 扫描报告 (TXT)
   SHARED_DIR  — 子进程共享缓存快照
+  DB_PATH     — SQLite 数据库文件
 
 跨平台兼容：macOS / Linux / Windows
 """
@@ -38,6 +39,7 @@ CACHE_DIR = DATA_DIR / "cache"
 LOG_DIR = DATA_DIR / "logs"
 RESULTS_DIR = DATA_DIR / "results"
 SHARED_DIR = DATA_DIR / "shared"
+DB_PATH = DATA_DIR / "dragon.db"
 
 for _d in [COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR]:
     _d.mkdir(parents=True, exist_ok=True)

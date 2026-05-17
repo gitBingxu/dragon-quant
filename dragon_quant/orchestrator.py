@@ -27,7 +27,7 @@ from dragon_quant.rate_limit import RateLimiter
 from dragon_quant.providers import create_providers
 from dragon_quant.logging.logger import ScanLogger
 from dragon_quant.logging.reporter import ReportBuilder
-from dragon_quant.storage.paths import DATA_DIR, SHARED_DIR, LOG_DIR, RESULTS_DIR
+from dragon_quant.storage.paths import DATA_DIR, SHARED_DIR, RESULTS_DIR
 
 STATISTICAL_CONCEPT_PREFIXES = (
     "昨日涨停", "昨日连板", "昨日首板", "昨日打二板",
@@ -201,8 +201,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         ],
         "api_stats": dict,
         "report_text": str,     ← top_n 只的自然语言报告
-        "log_path": str,        ← 日志文件路径
-        "results_path": str,    ← 结果 JSON 路径
+        "log_count": int,       ← 持久化日志条数
         "report_path": str,     ← 报告文本路径
       }
     """
@@ -436,8 +435,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         "ranking": [],
         "api_stats": logger.api_stats(),
         "report_text": "",
-        "log_path": "",
-        "results_path": "",
+        "log_count": 0,
         "report_path": "",
     }
 
@@ -486,24 +484,15 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         # ── 持久化 ──
         timestamp = output["timestamp"]
 
-        # 结构化日志
-        log_path = LOG_DIR / f"scan_{timestamp}.jsonl"
-        logger.dump_jsonl(log_path)
-        output["log_path"] = str(log_path)
-
-        # 结果 JSON
-        results_path = RESULTS_DIR / f"scan_results_{timestamp}.json"
-        results_data = {
-            "timestamp": timestamp,
-            "elapsed_s": output["elapsed_s"],
-            "params": output["params"],
-            "sectors": output["sectors"],
-            "ranking": output["ranking"],
-            "api_stats": output["api_stats"],
-        }
-        with open(results_path, "w") as f:
-            json.dump(results_data, f, ensure_ascii=False, indent=2)
-        output["results_path"] = str(results_path)
+        # 结构化日志 → SQLite
+        try:
+            db.save_scan_logs(timestamp, logger.to_dicts())
+            log_count = db.count_scan_logs(timestamp)
+            output["log_count"] = log_count
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ 日志持久化失败: {e}", file=sys.stderr)
+            output["log_count"] = len(logger.to_dicts())
 
         # 报告文本
         report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
@@ -513,15 +502,26 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             f.write(output["report_text"])
         output["report_path"] = str(report_path)
 
-        # 最新结果快照
-        latest_path = RESULTS_DIR / "latest.json"
-        with open(latest_path, "w") as f:
-            json.dump(results_data, f, ensure_ascii=False, indent=2)
+        # SQLite 持久化
+        scan_date = timestamp[:8]
+        scan_date_fmt = f"{scan_date[:4]}-{scan_date[4:6]}-{scan_date[6:8]}"
+        try:
+            from dragon_quant.storage import db
+            db.save_scan(
+                scan_id=timestamp,
+                scan_date=scan_date_fmt,
+                elapsed_s=output["elapsed_s"],
+                top_n=top_n,
+                candidates_n=candidates_n,
+                workers=workers,
+                stocks=results,
+            )
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ SQLite 持久化失败: {e}", file=sys.stderr)
 
         if verbose:
-            print(f"📝 日志已保存: {log_path}")
-            print(f"📊 结果已保存: {results_path}")
-            print(f"📋 报告已保存: {report_path}")
+            print(f" 报告已保存: {report_path}")
 
     return output
 

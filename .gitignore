@@ -18,6 +18,7 @@ logs/
 # 环境
 .env
 *.local
+.trae/
 
 # 雪球 Cookie 缓存
 ~/.lsa_xq_cookies

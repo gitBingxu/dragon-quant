@@ -486,7 +486,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         # 结构化日志 → SQLite
         try:
-            import dragon_quant.storage.db as db
+            from dragon_quant.storage import db
             db.save_scan_logs(timestamp, logger.to_dicts())
             log_count = db.count_scan_logs(timestamp)
             output["log_count"] = log_count

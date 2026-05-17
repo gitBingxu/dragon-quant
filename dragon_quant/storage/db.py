@@ -244,14 +244,16 @@ def save_review(scan_id: str, review_date: str, trading_days: int,
         try:
             _ensure_schema(conn)
 
+            # 清理旧的 review_stocks 和 reviews，防止产生孤儿数据
+            conn.execute("DELETE FROM review_stocks WHERE scan_id = ?", (scan_id,))
+            conn.execute("DELETE FROM reviews WHERE scan_id = ?", (scan_id,))
+
             cursor = conn.execute(
                 "INSERT INTO reviews(scan_id, review_date, trading_days, benchmark_return, avg_return, win_rate) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (scan_id, review_date, trading_days, benchmark_return, avg_return, win_rate),
             )
             review_id = cursor.lastrowid
-
-            conn.execute("DELETE FROM review_stocks WHERE scan_id = ?", (scan_id,))
 
             rows = []
             for d in details:
@@ -285,7 +287,8 @@ def get_review(scan_id: str) -> Optional[dict]:
         _ensure_schema(conn)
         row = conn.execute(
             "SELECT id, scan_id, review_date, trading_days, benchmark_return, "
-            "avg_return, win_rate, created_at FROM reviews WHERE scan_id = ?",
+            "avg_return, win_rate, created_at FROM reviews WHERE scan_id = ? "
+            "ORDER BY id DESC LIMIT 1",
             (scan_id,),
         ).fetchone()
         if not row:

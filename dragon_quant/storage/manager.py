@@ -95,7 +95,18 @@ class StorageManager:
         return _clear_dir(RESULTS_DIR, days=days)
 
     def clear_logs(self, days: int = None) -> int:
-        return _clear_dir(LOG_DIR, days=days)
+        removed = _clear_dir(LOG_DIR, days=days)
+        try:
+            from dragon_quant.storage import db
+            if days:
+                cutoff_ts = time.time() - days * 86400
+                removed += db.delete_old_scan_logs(cutoff_ts)
+            else:
+                n = db.delete_all_scan_logs()
+                removed += n
+        except Exception:
+            pass
+        return removed
 
     def clear_all(self) -> dict:
         return {

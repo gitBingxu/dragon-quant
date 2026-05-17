@@ -176,14 +176,20 @@ class ScanLogger:
         """导出为 JSONL 文件"""
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            with self._lock:
-                for e in self._entries:
-                    record = {
-                        "ts": e.timestamp,
-                        "category": e.category,
-                        "level": e.level,
-                        "message": e.message,
-                        "code": e.code,
-                        "data": e.data,
-                    }
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            for record in self.to_dicts():
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def to_dicts(self) -> list[dict]:
+        """导出内存中的全部日志条目为 dict 列表"""
+        with self._lock:
+            return [
+                {
+                    "ts": e.timestamp,
+                    "category": e.category,
+                    "level": e.level,
+                    "message": e.message,
+                    "code": e.code,
+                    "data": e.data,
+                }
+                for e in self._entries
+            ]

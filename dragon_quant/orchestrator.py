@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -173,12 +174,85 @@ def _score_one(cand: Candidate, cache: DataCache,
     }
 
 
+def _print_cached_output(output_data: dict, top_n: int):
+    """打印来自 raw_output 的缓存结果"""
+    print(f"\n{'═'*56}")
+    print(f"🐉 龙头战法扫描完成 (缓存读取) - {output_data.get('timestamp', '?')}")
+    print(f"{'═'*56}")
+    print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
+    print("-" * 56)
+    display_list = output_data.get("ranking", [])[:top_n]
+    for r in display_list:
+        print(f"{r['code']:8s} {r.get('name', ''):8s} "
+              f"{r.get('composite_score', 0):6.1f}  "
+              f"{r.get('dimensions', {}).get('drive', {}).get('score', 0):6.1f}  "
+              f"{r.get('dimensions', {}).get('anti_drop', {}).get('score', 0):6.1f}  "
+              f"{r.get('dimensions', {}).get('leadership', {}).get('score', 0):6.1f}  "
+              f"{r.get('dimensions', {}).get('absorption', {}).get('score', 0):6.1f}")
+    print(f"\n{'═'*56}")
+    print(f"📋 完整详细报告 (来自缓存)")
+    print(f"{'═'*56}")
+    print(output_data.get("report_text", ""))
+    print()
+
+
+def _print_cached_from_stocks(cached_scan: dict, display_list: list, report_text: str):
+    """打印来自 scan_stocks 表的缓存结果"""
+    print(f"\n{'═'*56}")
+    print(f"🐉 龙头战法扫描完成 (缓存读取) - {cached_scan['id']}")
+    print(f"{'═'*56}")
+    print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
+    print("-" * 56)
+    for r in display_list:
+        print(f"{r['code']:8s} {r.get('name', ''):8s} "
+              f"{r['composite_score']:6.1f}  "
+              f"{r.get('dim_drive', 0):6.1f}  "
+              f"{r.get('dim_anti_drop', 0):6.1f}  "
+              f"{r.get('dim_leadership', 0):6.1f}  "
+              f"{r.get('dim_absorption', 0):6.1f}")
+    print(f"\n{'═'*56}")
+    print(f"📋 完整详细报告 (来自缓存)")
+    print(f"{'═'*56}")
+    print(report_text)
+    print()
+
+
+def _get_trade_date() -> Optional[str]:
+    """通过雪球API确定最近交易日（A股）。
+
+    先尝试分时K线，失败回退日K线。返回 "YYYY-MM-DD" 或 None。
+    """
+    from dragon_quant.providers import create_providers
+    providers = create_providers()
+    xq = providers.get("xueqiu")
+    if not xq:
+        return None
+    bj_tz = timezone(timedelta(hours=8))
+    # 优先分时K线（能精确反映当日是否有交易）
+    try:
+        bars = xq.get_minute_kline("600519")
+        if bars:
+            ts = bars[-1].timestamp / 1000
+            return datetime.fromtimestamp(ts, tz=bj_tz).strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    # 回退日K线（latest bar 即最近交易日）
+    try:
+        klines = xq.get_kline("600519", days=5)
+        if klines:
+            ts = klines[-1].timestamp / 1000
+            return datetime.fromtimestamp(ts, tz=bj_tz).strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return None
+
+
 # ════════════════════════════════════════════════════════════
 # 核心编排 — scan() Programmtic API
 # ════════════════════════════════════════════════════════════
 
 def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
-         verbose: bool = True) -> dict:
+         verbose: bool = True, force: bool = False) -> dict:
     """龙头战法完整扫描 — Programmtic API
 
     返回结构化 dict:
@@ -205,6 +279,77 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         "report_path": str,     ← 报告文本路径
       }
     """
+    bj_tz = timezone(timedelta(hours=8))
+    now = datetime.now(bj_tz)
+    
+    # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
+    is_trading_day = now.weekday() < 5
+    if not force and is_trading_day and 9 <= now.hour < 15:
+        msg = (
+            "⚠️ 拦截: 当前处于 A 股交易时段 (尚未收盘)！\n"
+            "【原因】龙头战法的四维打分强依赖于【日K线最终收盘价】、【最终连板高度】和【全天资金承接情况】。\n"
+            "在 15:00 收盘前，行情数据处于剧烈波动中，提前执行会导致评分严重失真、排名不准，极易选出伪龙头。\n"
+            "💡 强烈推荐在 15:00 收盘后再执行 scan 命令获取准确结果。\n"
+            "（若为盘中测试需要，请使用 --force 参数强制执行）"
+        )
+        if verbose:
+            print(msg)
+        return {"error": "未收盘", "message": msg, "ranking": [], "report_text": ""}
+
+    # 2. 三步缓存检查
+    scan_date_fmt = now.strftime("%Y-%m-%d")
+    cache_note = None
+    cached_scan = None
+    if not force:
+        try:
+            from dragon_quant.storage import db
+            # Step 1: 精确匹配当天日期
+            cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n)
+            # Step 2: 当天无记录 → 用雪球分时K确定最近交易日，查历史记录
+            if not cached_scan:
+                trade_date = _get_trade_date()
+                if trade_date and trade_date != scan_date_fmt:
+                    cached_scan = db.get_latest_scan_by_date(trade_date, top_n)
+                    if cached_scan:
+                        cache_note = f"（非交易日，使用最近交易日 {trade_date} 的数据）"
+            # 命中缓存 → 输出结果
+            if cached_scan:
+                if verbose:
+                    if cache_note:
+                        print(f"💡 {cache_note}")
+                    else:
+                        print(f"💡 发现今日 ({scan_date_fmt}) 已存在 top_n={top_n} 的扫描记录")
+                    print(f"   直接从数据库读取缓存 (ID: {cached_scan['id']})...")
+                # 优先使用 raw_output
+                if cached_scan.get("raw_output"):
+                    output_data = json.loads(cached_scan["raw_output"])
+                    output_data["cached"] = True
+                    if verbose:
+                        _print_cached_output(output_data, top_n)
+                    return output_data
+                else:
+                    cached_stocks = db.get_scan_stocks(cached_scan["id"])
+                    display_list = cached_stocks[:top_n]
+                    report_parts = [s.get("report_text", "") for s in display_list]
+                    report_text = "\n\n".join(report_parts)
+                    if verbose:
+                        _print_cached_from_stocks(cached_scan, display_list, report_text)
+                    return {
+                        "timestamp": cached_scan["id"],
+                        "elapsed_s": cached_scan["elapsed_s"],
+                        "params": {"top_n": top_n, "candidates_n": cached_scan["candidates_n"], "workers": cached_scan["workers"]},
+                        "sectors": {"up": [], "down": []},
+                        "ranking": cached_stocks,
+                        "api_stats": {},
+                        "report_text": report_text,
+                        "log_count": 0,
+                        "report_path": "",
+                        "cached": True
+                    }
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ 检查缓存失败，将执行完整扫描: {e}", file=sys.stderr)
+
     t_start = time.time()
 
     logger = ScanLogger()
@@ -441,22 +586,25 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     if results:
         results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
-        output["ranking"] = results  # 返回全部评分结果
-
-        # top_n 控制输出范围
-        display_list = results[:top_n]
-
-        # 生成报告
+        
+        # 提前初始化 Reporter，并为所有结果生成报告，存入 r["report_text"] 以便持久化
         reporter = ReportBuilder(logger)
-        report_parts = []
-        for r in display_list:
-            report_parts.append(reporter.build_stock_report(
+        for r in results:
+            r["report_text"] = reporter.build_stock_report(
                 r["code"], r.get("name", ""),
                 r.get("board_count", 0), r.get("concepts", []),
                 composite_score=r.get("composite_score", 0),
                 dimensions=r.get("dimensions", {}),
                 primary_sector_name=r.get("primary_sector_name", ""),
-            ))
+            )
+
+        output["ranking"] = results  # 返回全部评分结果
+
+        # top_n 控制输出范围
+        display_list = results[:top_n]
+
+        # 提取自然语言报告并拼接
+        report_parts = [r["report_text"] for r in display_list]
         output["report_text"] = "\n\n".join(report_parts)
 
         if verbose:
@@ -515,8 +663,35 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 top_n=top_n,
                 candidates_n=candidates_n,
                 workers=workers,
-                stocks=results,
+                stocks=results[:top_n],
+                raw_output=json.dumps(output, ensure_ascii=False)
             )
+            
+            # 保存 top_n 详细信息到 dragons 表
+            # 从缓存的 quotes:batch 提取个股行情快照
+            all_quotes = cache.get("quotes:batch") or []
+            quote_map = {q.code: q for q in all_quotes} if all_quotes else {}
+            
+            dragons_to_save = []
+            for r in display_list:
+                code = r["code"]
+                quote = quote_map.get(code)
+                dragon_data = r.copy()  # 复制基础评分数据
+                if quote:
+                    dragon_data.update({
+                        "open_px": quote.open_px,
+                        "close_px": quote.price, # quote.price 是现价/收盘价
+                        "high_px": quote.high,
+                        "low_px": quote.low,
+                        "pct": quote.pct,
+                        "turnover_rate": quote.turnover_rate,
+                        "amount": quote.amount,
+                        "market_cap": quote.market_cap,
+                    })
+                dragons_to_save.append(dragon_data)
+                
+            db.save_dragons(scan_date_fmt, timestamp, dragons_to_save)
+            
         except Exception as e:
             if verbose:
                 print(f"  ⚠️ SQLite 持久化失败: {e}", file=sys.stderr)
@@ -527,6 +702,6 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     return output
 
 
-def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2):
+def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2, force: bool = False):
     """CLI 入口 — 同 scan() 但带 verbose 输出"""
-    scan(top_n=top_n, candidates_n=candidates_n, workers=workers, verbose=True)
+    scan(top_n=top_n, candidates_n=candidates_n, workers=workers, verbose=True, force=force)

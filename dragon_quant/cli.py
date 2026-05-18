@@ -24,6 +24,7 @@ def _cmd_scan(args):
         candidates_n=args.candidates,
         workers=args.workers,
         verbose=True,
+        force=args.force,
     )
 
 
@@ -247,6 +248,7 @@ def main():
     shared.add_argument("--top", type=int, default=25, help="最终候选股数量 (默认25)")
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
     shared.add_argument("--workers", type=int, default=2, help="并发线程数 (默认2)")
+    shared.add_argument("--force", action="store_true", help="强制执行 (跳过交易时段拦截和缓存)")
 
     parser = argparse.ArgumentParser(
         description="龙头战法四维量化筛选系统",

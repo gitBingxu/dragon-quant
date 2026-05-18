@@ -3,7 +3,7 @@
 所有请求 JSONP 格式，带完整反爬 Header
 """
 
-import json, re, sys, time
+import json, re, socket, ssl, sys, time
 import urllib.request, urllib.parse
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -44,8 +44,21 @@ def _safe_float(v, default=0.0):
         return default
 
 
+def _resolve_ips(host: str) -> list[str]:
+    """解析域名所有 IPv4 地址，排除链路本地和回环地址"""
+    ips = set()
+    try:
+        for fam, _, _, _, addr in socket.getaddrinfo(host, 443, socket.AF_INET):
+            ip = addr[0]
+            if not ip.startswith("127.") and not ip.startswith("169.254."):
+                ips.add(ip)
+    except OSError:
+        pass
+    return list(ips)
+
+
 def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[dict]:
-    """JSONP GET 请求"""
+    """JSONP GET 请求（DNS 多 IP 自动 fallback）"""
     cookie = get_em()
     if not cookie:
         print("\u26a0\ufe0f 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
@@ -55,24 +68,77 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
     headers["Referer"] = referer
     headers["Cookie"] = cookie
 
-    req = urllib.request.Request(url, headers=headers)
-    t0 = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8")
-        elapsed = (time.time() - t0) * 1000
-        data = _parse_jsonp(raw)
-        if logger:
-            logger.api("eastmoney", endpoint, ok=data is not None,
-                       elapsed_ms=elapsed)
-        return data
-    except Exception as e:
-        elapsed = (time.time() - t0) * 1000
-        if logger:
-            logger.api("eastmoney", endpoint, ok=False,
-                       elapsed_ms=elapsed, error=str(e))
-        print(f"  ⚠️ 东财请求失败: {e}", file=sys.stderr)
-        return None
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    path = parsed.path + ("?" + parsed.query if parsed.query else "")
+
+    def _do_request(ip: str = None) -> Optional[dict]:
+        nonlocal host, path, headers
+        t0 = time.time()
+        try:
+            if ip:
+                raw = _raw_https(ip, host, path, headers)
+            else:
+                req = urllib.request.Request(f"https://{host}{path}", headers=headers)
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    raw = resp.read().decode("utf-8")
+            elapsed = (time.time() - t0) * 1000
+            data = _parse_jsonp(raw)
+            if logger:
+                logger.api("eastmoney", endpoint, ok=data is not None,
+                           elapsed_ms=elapsed)
+            return data
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if logger:
+                logger.api("eastmoney", endpoint, ok=False,
+                           elapsed_ms=elapsed, error=str(e))
+            print(f"  ⚠️ 东财请求失败 ({ip or 'dns'}): {e}", file=sys.stderr)
+            return None
+
+    # 1) 默认 DNS 连接
+    result = _do_request()
+    if result is not None:
+        return result
+
+    # 2) DNS 解析的 CDN IP 可能拒接 → 拿到所有 A 记录挨个直连重试
+    fallback_ips = _resolve_ips(host)
+    seen = set()
+    for ip in fallback_ips:
+        if ip in seen:
+            continue
+        seen.add(ip)
+        result = _do_request(ip)
+        if result is not None:
+            return result
+
+    return None
+
+
+def _raw_https(ip: str, host: str, path: str, headers: dict) -> str:
+    """绕过 DNS，直连目标 IP 发送 HTTPS GET"""
+    sock = socket.create_connection((ip, 443), timeout=15)
+    ctx = ssl.create_default_context()
+    ssock = ctx.wrap_socket(sock, server_hostname=host)
+
+    lines = [f"GET {path} HTTP/1.1", f"Host: {host}"]
+    for k, v in headers.items():
+        lines.append(f"{k}: {v}")
+    lines.extend(["Connection: close", "", ""])
+    ssock.sendall("\r\n".join(lines).encode())
+
+    buf = b""
+    while True:
+        chunk = ssock.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+    ssock.close()
+
+    body = buf.split(b"\r\n\r\n", 1)
+    if len(body) < 2:
+        raise ConnectionError(f"empty response from {ip}")
+    return body[1].decode("utf-8")
 
 
 def _parse_jsonp(raw: str) -> Optional[dict]:

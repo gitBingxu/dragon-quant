@@ -6,7 +6,6 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant logs {tail,query,clear,list} [options]
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
   dragon-quant storage {status,size,clear} [options]
-  dragon-quant review {list,run,stats} [options]
 """
 
 import argparse
@@ -180,46 +179,6 @@ def _cmd_storage(args):
             print(f"  {k}: {_fmt_size(b)}")
 
 
-def _cmd_review(args):
-    """复盘命令"""
-    from dragon_quant.review import list_scans, review_scan
-    from dragon_quant.storage import db as review_db
-
-    if args.review_action == "list":
-        scans = list_scans()
-        if not scans:
-            print("(无历史扫描记录)")
-        else:
-            print(f"{'扫描ID':20s} {'日期':12s} {'耗時':>6s}  {'TopN':>5s}  {'成分':>5s}")
-            print("-" * 58)
-            for s in scans:
-                print(f"{s['id']:20s} {s['scan_date']:12s} "
-                      f"{s['elapsed_s']:5.0f}s  {s['top_n']:5d}  {s['candidates_n']:5d}")
-
-    elif args.review_action == "run":
-        review_scan(
-            scan_id=args.timestamp,
-            latest=args.latest,
-            top_n=args.top,
-            trading_days=args.days,
-            verbose=True,
-        )
-
-    elif args.review_action == "stats":
-        stats = review_db.get_review_stats()
-        if stats["total"] == 0:
-            print("(无复盘记录)")
-        else:
-            print(f"{'═' * 40}")
-            print(f"历史复盘统计")
-            print(f"{'═' * 40}")
-            print(f"总复盘次数: {stats['total']}")
-            print(f"胜率:       {stats['win_rate']*100:.1f}%")
-            print(f"平均收益:   {stats['avg_return']:+.2f}%")
-            print(f"平均超额:   {stats['avg_excess']:+.2f}%")
-            print(f"最佳收益:   {stats['best_return']:+.2f}%")
-            print(f"最差收益:   {stats['worst_return']:+.2f}%")
-
 
 def _kbar_to_dict(kbar) -> dict:
     """KBar → dict"""
@@ -325,20 +284,6 @@ def main():
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
     clear_p.add_argument("--days", type=int, default=None, help="保留最近N天")
 
-    # review 子命令
-    rv_p = sub.add_parser("review", help="复盘历史扫描")
-    rv_subs = rv_p.add_subparsers(dest="review_action")
-
-    rv_subs.add_parser("list", help="列出所有历史扫描")
-
-    run_p = rv_subs.add_parser("run", help="复盘指定扫描")
-    run_p.add_argument("--timestamp", help="扫描时间戳，如 20260510_143000")
-    run_p.add_argument("--latest", action="store_true", help="复盘最近一次扫描")
-    run_p.add_argument("--top", type=int, default=5, help="复盘前N只 (默认5)")
-    run_p.add_argument("--days", type=int, default=5, help="持有交易日数 (默认5)")
-
-    rv_subs.add_parser("stats", help="历史复盘统计")
-
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -349,8 +294,7 @@ def main():
         _cmd_data(args)
     elif args.command == "storage":
         _cmd_storage(args)
-    elif args.command == "review":
-        _cmd_review(args)
+
     else:
         parser.print_help()
 

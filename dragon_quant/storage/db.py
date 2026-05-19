@@ -69,11 +69,17 @@ CREATE TABLE IF NOT EXISTS dragons (
     concepts_json   TEXT,
     report_text     TEXT,
     created_at      TEXT DEFAULT (datetime('now','localtime')),
+    buy_date        TEXT,
+    buy_price       REAL,
+    max_return_5d   REAL,
+    max_drawdown_5d REAL,
+    review_status   TEXT DEFAULT 'pending',
     UNIQUE(trade_date, code)
 );
 
 CREATE INDEX IF NOT EXISTS idx_dragons_date ON dragons(trade_date);
 CREATE INDEX IF NOT EXISTS idx_dragons_code ON dragons(code);
+CREATE INDEX IF NOT EXISTS idx_dragons_review ON dragons(review_status, trade_date);
 
 CREATE TABLE IF NOT EXISTS scan_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +112,23 @@ def _ensure_schema(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE scan_stocks ADD COLUMN report_text TEXT;")
     except sqlite3.OperationalError:
         pass
+    _migrate_dragons(conn)
+
+
+def _migrate_dragons(conn: sqlite3.Connection):
+    """为 dragons 表新增 review 相关列（幂等）。"""
+    COLUMNS = [
+        "buy_date TEXT",
+        "buy_price REAL",
+        "max_return_5d REAL",
+        "max_drawdown_5d REAL",
+        "review_status TEXT DEFAULT 'pending'",
+    ]
+    for col in COLUMNS:
+        try:
+            conn.execute(f"ALTER TABLE dragons ADD COLUMN {col};")
+        except sqlite3.OperationalError:
+            pass
     try:
         conn.execute("ALTER TABLE scans ADD COLUMN raw_output TEXT;")
     except sqlite3.OperationalError:
@@ -298,6 +321,95 @@ def get_dragons(trade_date: str) -> list[dict]:
         ]
     finally:
         conn.close()
+
+
+def get_last_entry(code: str) -> Optional[str]:
+    """返回该 code 最近一次入选的 trade_date，无记录则返回 None。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT trade_date FROM dragons WHERE code = ? "
+            "ORDER BY trade_date DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def get_pending_dragons(trade_date: Optional[str] = None,
+                        top_n: Optional[int] = None) -> list[dict]:
+    """获取待 review 的 dragons 记录（review_status = 'pending'）。
+
+    可按 trade_date 和 top_n 过滤。
+    """
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        sql = (
+            "SELECT trade_date, code, name, scan_id, rank, composite_score, "
+            "board_count, open_px, close_px, high_px, low_px, pct, "
+            "turnover_rate, amount, market_cap, concepts_json, report_text, "
+            "buy_date, buy_price, max_return_5d, max_drawdown_5d, review_status "
+            "FROM dragons WHERE review_status = 'pending'"
+        )
+        params: list = []
+        if trade_date:
+            sql += " AND trade_date = ?"
+            params.append(trade_date)
+        if top_n:
+            sql += " ORDER BY composite_score DESC LIMIT ?"
+            params.append(top_n)
+        else:
+            sql += " ORDER BY trade_date DESC, composite_score DESC"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "trade_date": r[0], "code": r[1], "name": r[2],
+                "scan_id": r[3], "rank": r[4], "composite_score": r[5],
+                "board_count": r[6], "open_px": r[7], "close_px": r[8],
+                "high_px": r[9], "low_px": r[10], "pct": r[11],
+                "turnover_rate": r[12], "amount": r[13], "market_cap": r[14],
+                "concepts": json.loads(r[15]) if r[15] else [],
+                "report_text": r[16] or "",
+                "buy_date": r[17], "buy_price": r[18],
+                "max_return_5d": r[19], "max_drawdown_5d": r[20],
+                "review_status": r[21],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def update_dragon_review(trade_date: str, code: str,
+                         buy_date: Optional[str] = None,
+                         buy_price: Optional[float] = None,
+                         max_return_5d: Optional[float] = None,
+                         max_drawdown_5d: Optional[float] = None,
+                         review_status: str = "completed"):
+    """更新单条 dragon 的 review 字段。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute(
+                "UPDATE dragons SET "
+                "buy_date = COALESCE(?, buy_date), "
+                "buy_price = COALESCE(?, buy_price), "
+                "max_return_5d = COALESCE(?, max_return_5d), "
+                "max_drawdown_5d = COALESCE(?, max_drawdown_5d), "
+                "review_status = ? "
+                "WHERE trade_date = ? AND code = ?",
+                (buy_date, buy_price, max_return_5d, max_drawdown_5d,
+                 review_status, trade_date, code),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
 
 def get_scan_stocks(scan_id: str) -> list[dict]:
     conn = _connect()

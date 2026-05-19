@@ -12,6 +12,9 @@ description = "龙头战法四维量化筛选系统 — A股涨停板龙头识�
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
+dependencies = [
+    "playwright>=1.30",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Financial and Insurance Industry",

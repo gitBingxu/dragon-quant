@@ -196,26 +196,6 @@ def _print_cached_output(output_data: dict, top_n: int):
     print()
 
 
-def _print_cached_from_stocks(cached_scan: dict, display_list: list, report_text: str):
-    """打印来自 scan_stocks 表的缓存结果"""
-    print(f"\n{'═'*56}")
-    print(f"🐉 龙头战法扫描完成 (缓存读取) - {cached_scan['id']}")
-    print(f"{'═'*56}")
-    print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
-    print("-" * 56)
-    for r in display_list:
-        print(f"{r['code']:8s} {r.get('name', ''):8s} "
-              f"{r['composite_score']:6.1f}  "
-              f"{r.get('dim_drive', 0):6.1f}  "
-              f"{r.get('dim_anti_drop', 0):6.1f}  "
-              f"{r.get('dim_leadership', 0):6.1f}  "
-              f"{r.get('dim_absorption', 0):6.1f}")
-    print(f"\n{'═'*56}")
-    print(f"📋 完整详细报告 (来自缓存)")
-    print(f"{'═'*56}")
-    print(report_text)
-    print()
-
 
 def _get_trade_date() -> Optional[str]:
     """通过雪球API确定最近交易日（A股）。
@@ -312,40 +292,19 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     cached_scan = db.get_latest_scan_by_date(trade_date, top_n)
                     if cached_scan:
                         cache_note = f"（非交易日，使用最近交易日 {trade_date} 的数据）"
-            # 命中缓存 → 输出结果
-            if cached_scan:
+            # 命中缓存 → 输出结果（仅 raw_output 非空时）
+            if cached_scan and cached_scan.get("raw_output"):
                 if verbose:
                     if cache_note:
                         print(f"💡 {cache_note}")
                     else:
                         print(f"💡 发现今日 ({scan_date_fmt}) 已存在 top_n={top_n} 的扫描记录")
                     print(f"   直接从数据库读取缓存 (ID: {cached_scan['id']})...")
-                # 优先使用 raw_output
-                if cached_scan.get("raw_output"):
-                    output_data = json.loads(cached_scan["raw_output"])
-                    output_data["cached"] = True
-                    if verbose:
-                        _print_cached_output(output_data, top_n)
-                    return output_data
-                else:
-                    cached_stocks = db.get_scan_stocks(cached_scan["id"])
-                    display_list = cached_stocks[:top_n]
-                    report_parts = [s.get("report_text", "") for s in display_list]
-                    report_text = "\n\n".join(report_parts)
-                    if verbose:
-                        _print_cached_from_stocks(cached_scan, display_list, report_text)
-                    return {
-                        "timestamp": cached_scan["id"],
-                        "elapsed_s": cached_scan["elapsed_s"],
-                        "params": {"top_n": top_n, "candidates_n": cached_scan["candidates_n"], "workers": cached_scan["workers"]},
-                        "sectors": {"up": [], "down": []},
-                        "ranking": cached_stocks,
-                        "api_stats": {},
-                        "report_text": report_text,
-                        "log_count": 0,
-                        "report_path": "",
-                        "cached": True
-                    }
+                output_data = json.loads(cached_scan["raw_output"])
+                output_data["cached"] = True
+                if verbose:
+                    _print_cached_output(output_data, top_n)
+                return output_data
         except Exception as e:
             if verbose:
                 print(f"  ⚠️ 检查缓存失败，将执行完整扫描: {e}", file=sys.stderr)
@@ -631,12 +590,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         # ── 持久化 ──
         timestamp = output["timestamp"]
+        scan_id = f"{timestamp[:8]}_{top_n}"  # 20260519_25，同日期同 top_n 自动覆盖
 
         # 结构化日志 → SQLite
         try:
             from dragon_quant.storage import db
-            db.save_scan_logs(timestamp, logger.to_dicts())
-            log_count = db.count_scan_logs(timestamp)
+            db.save_scan_logs(scan_id, logger.to_dicts())
+            log_count = db.count_scan_logs(scan_id)
             output["log_count"] = log_count
         except Exception as e:
             if verbose:
@@ -652,12 +612,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         output["report_path"] = str(report_path)
 
         # SQLite 持久化
-        scan_date = timestamp[:8]
+        scan_date = scan_id[:8]
         scan_date_fmt = f"{scan_date[:4]}-{scan_date[4:6]}-{scan_date[6:8]}"
         try:
             from dragon_quant.storage import db
             db.save_scan(
-                scan_id=timestamp,
+                scan_id=scan_id,
                 scan_date=scan_date_fmt,
                 elapsed_s=output["elapsed_s"],
                 top_n=top_n,
@@ -672,9 +632,23 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             all_quotes = cache.get("quotes:batch") or []
             quote_map = {q.code: q for q in all_quotes} if all_quotes else {}
             
+            # 构建交易日历（5 日去重用）
+            from dragon_quant.utils.trading import build_trade_calendar, trade_days_between
+            cal_start = (datetime.now(bj_tz) - timedelta(days=30)).strftime("%Y-%m-%d")
+            cal_end = now.strftime("%Y-%m-%d")
+            calendar = build_trade_calendar(cal_start, cal_end)
+
             dragons_to_save = []
+            skipped_count = 0
             for r in display_list:
                 code = r["code"]
+
+                # 5 日去重：该 code 上次入选距今 < 5 个交易日则跳过
+                last_entry = db.get_last_entry(code)
+                if last_entry and trade_days_between(last_entry, scan_date_fmt, calendar) < 5:
+                    skipped_count += 1
+                    continue
+
                 quote = quote_map.get(code)
                 dragon_data = r.copy()  # 复制基础评分数据
                 if quote:
@@ -689,8 +663,11 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                         "market_cap": quote.market_cap,
                     })
                 dragons_to_save.append(dragon_data)
+
+            if verbose and skipped_count > 0:
+                print(f"  🚫 5 日内已入选，跳过 {skipped_count} 只")
                 
-            db.save_dragons(scan_date_fmt, timestamp, dragons_to_save)
+            db.save_dragons(scan_date_fmt, scan_id, dragons_to_save)
             
         except Exception as e:
             if verbose:
@@ -698,6 +675,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         if verbose:
             print(f" 报告已保存: {report_path}")
+
+    # 清理浏览器共享会话
+    try:
+        from dragon_quant.providers.browser import close_browser
+        close_browser()
+    except Exception:
+        pass
 
     return output
 

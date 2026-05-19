@@ -45,11 +45,24 @@ def _safe_float(v, default=0.0):
 
 
 def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[dict]:
-    """JSONP GET 请求（DNS 多 IP 自动 fallback）"""
+    """JSONP GET 请求（DNS 多 IP 自动 fallback）
+
+    如果 playwright 可用，采用快速失败策略（8s 超时 / 1 次重试），
+    尽快交棒给 _browser_fetch 兜底。否则保持传统策略（15s / 2 次退避重试）。
+    """
     cookie = get_em()
     if not cookie:
         print("\u26a0\ufe0f 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
         return None
+
+    try:
+        from dragon_quant.providers.browser import is_available
+        _has_browser = is_available()
+    except Exception:
+        _has_browser = False
+
+    timeout_s = 8 if _has_browser else 15
+    max_retries = 1 if _has_browser else 2
 
     headers = dict(HEADERS)
     headers["Referer"] = referer
@@ -63,7 +76,7 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
         t0 = time.time()
         try:
             req = urllib.request.Request(f"https://{host}{path}", headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 raw = resp.read().decode("utf-8")
             elapsed = (time.time() - t0) * 1000
             data = _parse_jsonp(raw)
@@ -84,14 +97,49 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
     if result is not None:
         return result
 
-    # 2) 重试（退避延迟）
-    for retry in range(2):
-        time.sleep(random.uniform(0.8, 1.5) * (retry + 1))
+    # 2) 重试
+    for retry in range(max_retries):
+        if _has_browser:
+            time.sleep(random.uniform(0.5, 1.0))
+        else:
+            time.sleep(random.uniform(0.8, 1.5) * (retry + 1))
         result = _do_request()
         if result is not None:
             return result
 
     return None
+
+
+def _browser_fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[dict]:
+    """东财 JSONP 请求 — playwright 浏览器兜底通道
+
+    当 urllib（TLS 指纹 / HTTP/1.1 / Cookie 管理）失败时，
+    用真实 Chrome 浏览器在页面上下文中执行 fetch，绕过反爬检测。
+    """
+    t0 = time.time()
+    try:
+        from dragon_quant.providers.browser import get_browser, is_available
+
+        if not is_available():
+            return None
+
+        browser = get_browser()
+        raw = browser.fetch_jsonp(url, referer)
+        if not raw:
+            return None
+
+        data = _parse_jsonp(raw)
+        elapsed = (time.time() - t0) * 1000
+        if logger:
+            logger.api("eastmoney", endpoint, ok=data is not None,
+                       elapsed_ms=elapsed, note="browser")
+        return data
+    except Exception as e:
+        elapsed = (time.time() - t0) * 1000
+        if logger:
+            logger.api("eastmoney", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=f"browser:{e}")
+        return None
 
 
 def _parse_jsonp(raw: str) -> Optional[dict]:
@@ -177,6 +225,9 @@ class EastMoneyProvider(StockProvider):
         data = _fetch(url, REFERERS["ranking"],
                       logger=self._logger, endpoint="sector_ranking")
         if not data:
+            data = _browser_fetch(url, REFERERS["ranking"],
+                                  logger=self._logger, endpoint="sector_ranking")
+        if not data:
             return []
 
         diffs = data.get("data", {}).get("diff", []) or []
@@ -214,6 +265,9 @@ class EastMoneyProvider(StockProvider):
         url = f"{BASE}/api/qt/clist/get?{qs}"
         data = _fetch(url, REFERERS["components"],
                       logger=self._logger, endpoint="sector_components")
+        if not data:
+            data = _browser_fetch(url, REFERERS["components"],
+                                  logger=self._logger, endpoint="sector_components")
         if not data:
             return []
 
@@ -253,6 +307,9 @@ class EastMoneyProvider(StockProvider):
         referer = REFERERS["kline"].format(code=sector_code)
         data = _fetch(url, referer,
                       logger=self._logger, endpoint="sector_5min_kline")
+        if not data:
+            data = _browser_fetch(url, referer,
+                                  logger=self._logger, endpoint="sector_5min_kline")
         if not data:
             return []
 

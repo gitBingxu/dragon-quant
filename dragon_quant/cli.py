@@ -5,6 +5,7 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant scan [--top 5] [--candidates 5] [--workers 2]
   dragon-quant logs {tail,query,clear,list} [options]
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
+  dragon-quant review [--date DATE] [--top N] [--force]
   dragon-quant storage {status,size,clear} [options]
 """
 
@@ -133,6 +134,26 @@ def _cmd_data(args):
         from dragon_quant.data import fetch_cookies
         result = fetch_cookies(source=args.source)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _cmd_review(args):
+    """龙头回测命令"""
+    from dragon_quant.review import run_review
+
+    date_str = None
+    if args.date:
+        d = args.date
+        if len(d) == 8:
+            date_str = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+        else:
+            date_str = d
+
+    run_review(
+        trade_date=date_str,
+        top_n=args.top,
+        force=args.force,
+        verbose=True,
+    )
 
 
 def _cmd_storage(args):
@@ -270,6 +291,12 @@ def main():
     cf_p = data_subs.add_parser("cookie-fetch", help="刷新 Cookie")
     cf_p.add_argument("--source", default="all", choices=["all", "eastmoney", "xueqiu"])
 
+    # review 子命令
+    rev_p = sub.add_parser("review", help="龙头回测验证")
+    rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
+    rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
+    rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
+
     # storage 子命令
     st_p = sub.add_parser("storage", help="持久化数据管理")
     st_subs = st_p.add_subparsers(dest="storage_action")
@@ -294,6 +321,8 @@ def main():
         _cmd_data(args)
     elif args.command == "storage":
         _cmd_storage(args)
+    elif args.command == "review":
+        _cmd_review(args)
 
     else:
         parser.print_help()

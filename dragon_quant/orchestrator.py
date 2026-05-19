@@ -392,7 +392,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 提交前10涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     for s in top10_up:
-        limiter.submit("eastmoney", "sector_components",
+        limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
                                      em.get_sector_components(sc, page=1))))
@@ -441,7 +441,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
     for s in top10_down:
-        limiter.submit("eastmoney", "sector_components",
+        limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
                                      em.get_sector_components(sc, page=1))))
@@ -500,7 +500,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # T1: 板块5分K（20个板块）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
-        limiter.submit("eastmoney", "sector_5min",
+        limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"kline:5min:sector:{sc}",
                                      em.get_sector_5min_kline(sc))))

@@ -676,13 +676,6 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         if verbose:
             print(f" 报告已保存: {report_path}")
 
-    # 清理浏览器共享会话
-    try:
-        from dragon_quant.providers.browser import close_browser
-        close_browser()
-    except Exception:
-        pass
-
     return output
 
 

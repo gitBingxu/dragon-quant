@@ -9,9 +9,9 @@
 
 设计:
   - 所有 Playwright 操作跑在专用后台线程，避免 greenlet 线程切换问题
-  - headless=True 默认静默（数据获取），cookie 获取用 headless=False
-  - 首次 fetch 时自动启动浏览器并导航到东财主站建立 session cookie
-  - 预热：前 2-3 次 JS fetch 会失败，启动时自动发哑请求预热
+  - 使用 Playwright APIRequestContext 发请求（浏览器 HTTP 栈，无 CORS 限制）
+  - 启动时从 cookie 文件注入东财 Cookie，与 urllib 路径共享同一 Cookie 状态
+  - 首次 fetch 时自动启动浏览器并导航到东财主站
 """
 
 import atexit
@@ -103,7 +103,16 @@ class BrowserSession:
         from playwright.sync_api import sync_playwright
 
         playwright = sync_playwright().start()
-        browser = playwright.chromium.launch(headless=self._headless)
+        try:
+            browser = playwright.chromium.launch(headless=self._headless)
+        except Exception:
+            playwright.stop()
+            # 浏览器二进制不可用（段错误/未安装/版本不匹配）
+            # 全局标记为不可用，避免后续重复尝试
+            global _PLAYWRIGHT_AVAILABLE
+            _PLAYWRIGHT_AVAILABLE = False
+            raise
+
         context = browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -115,47 +124,60 @@ class BrowserSession:
         )
         self._page = context.new_page()
         self._pw = playwright
-        self._page.goto(
-            "https://quote.eastmoney.com/center/hsbk.html",
-            wait_until="domcontentloaded",
-            timeout=30000,
-        )
 
-        # 预热：前几次 fetch 会失败，先发哑请求让浏览器进入工作状态
-        warm_url = (
-            "https://push2.eastmoney.com/api/qt/clist/get?"
-            "pn=1&pz=1&po=1&np=1&fltt=2&invt=2&fid=f3"
-            "&fs=m:90+t:3&fields=f12,f14"
-            "&ut=fa5fd1943c7b386f172d6893dbfba10b&cb=jQuery_dq"
-        )
-        warm_ref = "https://quote.eastmoney.com/center/hsbk.html"
-        for _ in range(3):
-            try:
-                self._page.evaluate(
-                    """([url, referer]) => fetch(url, {
-                        headers: { 'Referer': referer },
-                        credentials: 'include'
-                    }).then(r => r.text())""",
-                    arg=[warm_url, warm_ref],
-                )
-            except Exception:
-                pass
-            time.sleep(0.1)
+        # 注入东财 Cookie（从本地 cookie 文件加载到浏览器上下文）
+        try:
+            from dragon_quant.providers.cookie import get_em
+            cookie_str = get_em()
+            if cookie_str:
+                cookies = []
+                for part in cookie_str.split(";"):
+                    part = part.strip()
+                    if "=" in part:
+                        name, value = part.split("=", 1)
+                        cookies.append({
+                            "name": name,
+                            "value": value,
+                            "domain": ".eastmoney.com",
+                            "path": "/",
+                        })
+                if cookies:
+                    context.add_cookies(cookies)
+        except Exception:
+            pass
 
         self._started = True
 
     def _do_fetch(self, url: str, referer: str) -> Optional[str]:
-        text = self._page.evaluate(
-            """([url, referer]) => fetch(url, {
-                headers: { 'Referer': referer },
-                credentials: 'include'
-            }).then(r => {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.text();
-            })""",
-            arg=[url, referer],
+        """用浏览器 HTTP 栈发送请求（不受 CORS 限制）。
+
+        使用 Playwright APIRequestContext 而非 page.evaluate() + JS fetch，
+        前者在浏览器进程内使用 Chromium 的 HTTP 栈（TLS 指纹同 Chrome），
+        但不受同源策略限制，适用于东财跨域 JSONP 请求。
+        """
+        api = self._page.context.request
+        resp = api.fetch(
+            url,
+            headers={
+                "Referer": referer,
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/147.0.0.0 Safari/537.36"
+                ),
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "sec-ch-ua": '"Chromium";v="147", "Google Chrome";v="147", "Not)A;Brand";v="99"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"macOS"',
+                "Sec-Fetch-Dest": "script",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+            },
         )
-        return text
+        if resp.ok:
+            return resp.text()
+        return None
 
     def _cleanup_impl(self):
         if not self._page:

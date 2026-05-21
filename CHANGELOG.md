@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-21
+
+### Added
+- dragons 表 `version` 字段，记录每条 dragon 入库时的 dragon_quant 版本号
+- `dragon_quant/_version.py` 版本号集中管理模块
+- `encrypt_token.sh` 加密脚本 + `publish.sh` 支持 `--passwd` 解密发布
+- 发布脚本自动同步版本号到 `pyproject.toml` 和 `_version.py`
+- review 模块 14 个单元测试（覆盖一字板跳过、日期筛选、批量回测）
+- 全量测试覆盖 154 个用例（+14 新增）
+
+### Changed
+- **review 可介入判定**：从「非涨停日(pct≥9.9%)」改为「非一字板(high!=low)」，以最低价买入
+- **review 自动筛选**：默认只回测入选日距今 >5 且 <20 交易日的 pending 记录
+- **东财请求**：urllib 优先 + curl 兜底 + TLSv1.2 强制 + DNS 多 IP 轮询，绕过 CDN 坏节点导致的 rc=52 / 空响应
+- 错误报告改进：urllib 失败不再静默，打印具体 IP 和错误原因
+
+### Fixed
+- `_get_ut_token()` 中 `html` 变量在 curl 失败时 `UnboundLocalError`，已初始化为空字符串
+- `_curl_request()` 在 curl rc=0 但输出为空时不打印任何信息，已修复为始终输出失败原因
+- `run_review` 的 `force` 分支与实际行为等价（待完善）
+- 发布脚本不再要求手动预改 `pyproject.toml` 版本号
+
 ### Added
 - Phase B 候选股按 5 日累计涨幅排序筛选（替换原日涨跌幅排序）
 - 候选滤镜新增北交所（8/92 开头）过滤

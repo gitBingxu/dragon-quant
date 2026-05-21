@@ -177,23 +177,29 @@ dragon_quant/
 - 扫描结果持久化（results JSON / 报告文本 / latest.json 快照）
 - 数据管理 CLI（`storage status/size/clear` 子命令）
 - 交易日历工具 `utils/trading.py`（基于雪球日K，不依赖外部假期表）
-- 龙头回测模块 `review.py`（买入日定位 + 5 日收益/回撤计算）
-- 技术方案文档（技术方案.md / 评分器技术方案.md / review/技术方案.md）
+- 龙头回测模块 `review.py`（一字板跳过 + 5~20 日窗口自动筛选 + 回撤计算）
+- dragons 表 `version` 字段，记录入库时的 dragon_quant 版本号
+- 版本号集中管理 `_version.py`，发布脚本自动同步
+- 加密发布流程（`encrypt_token.sh` + `publish_token.enc` + `--passwd` 解密）
+- 全量 154 个单元测试覆盖 14 个模块
 
 ### ⚠️ 待完成（按优先级）
 
 1. **单票分析 CLI** — `dragon-quant analyze <code>` 子命令
    - `analyze.py` 作为子进程入口已实现骨架，但缺少 `sector_name_map` 等元数据注入
 
-2. **测试** — 无
-   - 建议优先：评分器单元测试（CDF / 封板时间 / 虹吸事件检测）、Provider mock 测试
+2. **东财 push2his CDN** — 历史 K 线接口仍有个别 CDN 节点（如 `14.103.188.89`）返回空响应
+   - 不影响主流程，评分数据可以从好节点获取
+   - 可用 DNS 轮询策略覆盖 push2his 域名
+   - `browser.py` Playwright 兜底已拆掉，不再需要
 
 ### 📝 已知修复（2026-05）
 - `leadership.py` `_normal_cdf_approx` 正负号反了，已修正
 - `anti_drop.py` 日内承接评分的 `prev_close` 始终为 0，已改为从日K线取昨日收盘
 - `orchestrator.py` `--workers` 参数未传递到 RateLimiter，已连接
-- `eastmoney.py` 删除 Playwright 降级路径，urllib 通所有 push2 请求（原"TLS指纹检测"为误判）
+- `eastmoney.py` urllib/curl TLSv1.2 强制 + DNS 多 IP 轮询，根治 CDN 坏节点导致的空响应
 - `xueqiu.py` Referer 解析无防御，已加 try/except
+- `eastmoney.py` `_get_ut_token()` `html` 变量未初始化导致 `UnboundLocalError`，已修复
 - Logger 全链路打点：所有 Provider/HTTP 调用自动记录耗时与成败，可通过 `logger.api_stats()` 统计
 - DataCache 默认启用本地持久化 + dataclass JSON 序列化修复
 - 结果持久化：每轮扫描输出 results JSON / report TXT / latest.json 到统一数据目录
@@ -205,17 +211,17 @@ dragon_quant/
 ### 龙头回测
 
 ```bash
-# 回测全部待处理
+# 自动筛选 5~20 交易日内入选的 pending 票，全部回测
 python -m dragon_quant review
 
-# 指定日期和 top N
+# 指定日期和 top N（手动覆盖自动筛选）
 python -m dragon_quant review --date 20260519 --top 5
 
 # 强制重算
 python -m dragon_quant review --force --date 20260519
 ```
 
-回测逻辑：从 dragons 表读取 pending 龙头 → 拉取历史日K → 找入选后第一次断板日作为买入日 → 计算买入后 5 日内最大收益/回撤 → 写入 DB。
+回测逻辑：从 dragons 表读取 pending 龙头 → 自动过滤入选日距今 >5 且 <20 交易日 → 拉取日K → 找入选后第一个非一字板日（high!=low）以最低价买入 → 计算买入后 5 日内最大收益/回撤 → 写入 DB。每条 dragon 记录入库时的 dragon_quant 版本号写入 `version` 字段，方便按版本分组回溯策略效果。
 
 ### 必须遵守的约束
 - **运行时依赖**：`playwright` 为必选依赖，用于东财接口浏览器兜底通道 + Cookie 自动获取；其余模块仅使用 Python 3 标准库。`pyproject.toml` 中声明 `playwright` 为 dependency。

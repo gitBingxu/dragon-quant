@@ -92,17 +92,17 @@ dragon-quant data cookie-fetch --source xueqiu  # 只刷新雪球
 ### `review` — 龙头回测
 
 ```bash
-# 回测全部待处理
+# 自动筛选 5~20 交易日内入选的 pending 票，全部回测
 dragon-quant review
 
-# 指定日期和 top N
+# 指定日期和 top N（手动覆盖自动筛选）
 dragon-quant review --date 20260519 --top 5
 
 # 强制重算
 dragon-quant review --force --date 20260519
 ```
 
-从 `dragons` 表中读取入选龙头，拉取历史日K找第一次断板日作为买入点，计算买入后 5 日内最大收益和最大回撤。
+从 `dragons` 表中读取 pending 龙头 → 自动过滤入选日距今 >5 且 <20 交易日 → 拉取日K → 找入选后第一个非一字板日（high!=low）以最低价买入 → 计算买入后 5 日内最大收益/最大回撤 → 写入 DB。每条 dragon 记录入库时的 dragon_quant 版本号写入 `version` 字段，方便按版本分组回溯策略效果。
 
 ### `storage` — 数据管理
 
@@ -235,7 +235,7 @@ result = clear_logs(days=7)  # {"cleared": 3, "kept": 2, "files_removed": [...]}
 
 | 数据源 | 用途 | 接口数 |
 |---|---|---|
-| 东方财富 | 板块排行、成分股、板块 5 分 K（urllib + browser 双通道）| 3 |
+| 东方财富 | 板块排行、成分股、板块 5 分 K（urllib/curl + DNS 多 IP 轮询）| 3 |
 | 雪球 | 日 K 线、1 分 K 线、历史日 K | 3 |
 | 腾讯 | 实时行情、批量行情 | 2 |
 
@@ -271,6 +271,7 @@ result = clear_logs(days=7)  # {"cleared": 3, "kept": 2, "files_removed": [...]}
 dragon_quant/
 ├── __init__.py          # 公共 API 导出
 ├── __main__.py          # python -m 入口
+├── _version.py          # 版本号集中管理
 ├── cli.py               # CLI 命令（scan/logs/data/storage）
 ├── orchestrator.py      # 编排器（Phase A→F）
 ├── data.py              # 原子数据查询 API

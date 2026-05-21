@@ -150,6 +150,11 @@ dragon_quant/
 
 当前 Chrome UA 版本：147。如果大面积失效，更新到最新 Chrome 版本号即可。
 
+**浏览器兜底通道**：urllib 失败时走 Playwright `APIRequestContext.fetch()` 重试。
+- 使用 Chromium HTTP 栈（TLS 指纹同 Chrome），不受 CORS 限制
+- Cookie 从本地文件注入，与 urllib 路径共享同一 Cookie 状态
+- 无页面加载开销，首请求 ≤ 3 秒（Chromium 冷启动时间）
+
 ---
 
 ## 当前状态

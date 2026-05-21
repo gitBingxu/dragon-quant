@@ -4,7 +4,7 @@ set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 
 usage() {
-  echo "Usage: $0 --v <version> --token <pypi_token>"
+  echo "Usage: $0 --v <version> --passwd <password>"
   exit 1
 }
 
@@ -12,12 +12,12 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --v) VERSION="$2"; shift 2 ;;
-    --token) TOKEN="$2"; shift 2 ;;
+    --passwd) PASSWD="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
 
-[[ -z "${VERSION:-}" || -z "${TOKEN:-}" ]] && usage
+[[ -z "${VERSION:-}" || -z "${PASSWD:-}" ]] && usage
 
 # ─── 校验版本号格式 ───
 if ! python3 -c "import re; assert re.match(r'^\d+\.\d+\.\d+$', '$VERSION')" 2>/dev/null; then
@@ -25,22 +25,18 @@ if ! python3 -c "import re; assert re.match(r'^\d+\.\d+\.\d+$', '$VERSION')" 2>/
   exit 1
 fi
 
-# ─── 校验版本号与 pyproject.toml 一致 ───
-PYPROJECT_VERSION=$(python3 -c "
-import re
-with open('pyproject.toml') as f:
-    for line in f:
-        m = re.match(r'^version\s*=\s*\"(.+)\"', line)
-        if m:
-            print(m.group(1))
-            break
-")
-
-if [ "$VERSION" != "$PYPROJECT_VERSION" ]; then
-  echo -e "${RED}错误: --v $VERSION 与 pyproject.toml 中 version=$PYPROJECT_VERSION 不一致${NC}"
-  echo -e "${RED}请先更新 pyproject.toml 的 version 字段${NC}"
+# ─── 解密 PyPI token ───
+TOKEN=$(openssl enc -aes-256-cbc -pbkdf2 -d -in publish_token.enc -pass pass:"${PASSWD}" 2>/dev/null)
+if [[ -z "${TOKEN:-}" ]]; then
+  echo -e "${RED}错误: 解密失败（密码错误或 publish_token.enc 不存在）${NC}"
   exit 1
 fi
+
+# ─── 自动写入版本号 ───
+echo -e "${GREEN}==> 写入版本号: ${VERSION}${NC}"
+
+sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" pyproject.toml
+sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/" dragon_quant/_version.py
 
 
 # ─── 发布流程 ───

@@ -66,10 +66,12 @@ def _browser_cookies(url: str) -> str:
                 # 比如板块排行的接口
                 is_valid = page.evaluate("""() => {
                     return new Promise((resolve) => {
-                        fetch('https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14')
+                        const ctrl = new AbortController();
+                        const tid = setTimeout(() => { ctrl.abort(); resolve(false); }, 3000);
+                        fetch('https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14', { signal: ctrl.signal })
                         .then(r => r.text())
-                        .then(t => resolve(t.includes('"data":')))
-                        .catch(() => resolve(false));
+                        .then(t => { clearTimeout(tid); resolve(t.includes('"data":')); })
+                        .catch(() => { clearTimeout(tid); resolve(false); });
                     });
                 }""")
                 

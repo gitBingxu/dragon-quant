@@ -3,7 +3,7 @@
 所有请求 JSONP 格式，带完整反爬 Header
 """
 
-import json, re, sys, time
+import json, re, socket, ssl, subprocess, sys, time
 import urllib.request, urllib.parse
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -35,6 +35,19 @@ REFERERS = {
     "kline": "https://quote.eastmoney.com/bk/90.{code}.html",
 }
 
+# 东财部分 CDN 节点对 TLSv1.3 发空响应，强制 TLSv1.2
+_SSL_CTX = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+_SSL_CTX.maximum_version = ssl.TLSVersion.TLSv1_2
+
+
+def _resolve_ips(host: str) -> list[str]:
+    """解析 host 的所有 IPv4 地址（去重），失败返回空列表"""
+    try:
+        addrs = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+        return list(dict.fromkeys(a[4][0] for a in addrs))
+    except Exception:
+        return []
+
 
 def _safe_float(v, default=0.0):
     """安全转浮点，处理 '-' 和 None"""
@@ -44,8 +57,41 @@ def _safe_float(v, default=0.0):
         return default
 
 
+def _curl_request(url: str, headers: dict, resolve_ip: str = "") -> Optional[str]:
+    """用 curl 发送 HTTP 请求（绕过 Python TLS 指纹限制）。
+
+    东财 WAF 检测 Python ssl（LibreSSL）的 TLS 指纹并直接断开连接。
+    curl 使用系统 libcurl + SecureTransport TLS，指纹与浏览器一致。
+    可指定 resolve_ip 绑定到特定 CDN 节点。
+    """
+    cmd = ["curl", "-s", "--max-time", "15", "--http1.1", "--tlsv1.2", "--tls-max", "1.2", "-X", "GET"]
+    if resolve_ip:
+        host = urllib.parse.urlparse(url).hostname
+        cmd += ["--resolve", f"{host}:443:{resolve_ip}"]
+    for k, v in headers.items():
+        cmd += ["-H", f"{k}: {v}"]
+    cmd.append(url)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        if result.returncode == 0 and result.stdout:
+            return result.stdout
+        else:
+            err = result.stderr.strip()
+            reason = err[:200] if err else f"rc={result.returncode}, stdout空"
+            print(f"  ⚠️ curl 失败: {reason}", file=sys.stderr)
+    except FileNotFoundError:
+        print("  ⚠️ curl 不可用", file=sys.stderr)
+    except Exception as e:
+        print(f"  ⚠️ curl 异常: {e}", file=sys.stderr)
+    return None
+
+
 def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[dict]:
-    """JSONP GET 请求"""
+    """JSONP GET 请求
+
+    优先 urllib，curl 兜底。DNS 多 IP 轮询绕过坏掉的 CDN 节点。
+    最多重试 2 次，每次尝试不同 IP。
+    """
     cookie = get_em()
     if not cookie:
         print("\u26a0\ufe0f 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
@@ -55,24 +101,73 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
     headers["Referer"] = referer
     headers["Cookie"] = cookie
 
-    req = urllib.request.Request(url, headers=headers)
-    t0 = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8")
-        elapsed = (time.time() - t0) * 1000
-        data = _parse_jsonp(raw)
-        if logger:
-            logger.api("eastmoney", endpoint, ok=data is not None,
-                       elapsed_ms=elapsed)
-        return data
-    except Exception as e:
-        elapsed = (time.time() - t0) * 1000
-        if logger:
-            logger.api("eastmoney", endpoint, ok=False,
-                       elapsed_ms=elapsed, error=str(e))
-        print(f"  ⚠️ 东财请求失败: {e}", file=sys.stderr)
-        return None
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    ips = _resolve_ips(host)
+    if not ips:
+        ips = [host]  # DNS 失败，用原始 hostname
+
+    MAX_RETRIES = 2
+    last_error = None
+
+    for attempt in range(MAX_RETRIES):
+        ip = ips[attempt % len(ips)]
+
+        # 1) urllib，绑定到指定 IP
+        ip_headers = dict(headers)
+        if ip != host:
+            ip_headers["Host"] = host
+            ip_netloc = f"[{ip}]" if ":" in ip else ip
+            if parsed.port:
+                ip_netloc += f":{parsed.port}"
+            ip_url = parsed._replace(netloc=ip_netloc).geturl()
+        else:
+            ip_url = url
+
+        req = urllib.request.Request(ip_url, headers=ip_headers)
+        t0 = time.time()
+        try:
+            with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
+                raw = resp.read().decode("utf-8")
+            elapsed = (time.time() - t0) * 1000
+            data = _parse_jsonp(raw)
+            if logger:
+                logger.api("eastmoney", endpoint, ok=data is not None,
+                           elapsed_ms=elapsed, note=f"urllib@{ip}")
+            return data
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if logger:
+                logger.api("eastmoney", endpoint, ok=False,
+                           elapsed_ms=elapsed, error=str(e))
+            print(f"  ⚠️ urllib@{ip} 失败: {e}", file=sys.stderr)
+            last_error = e
+
+        # 2) 兜底：curl，绑定到同一 IP
+        t0 = time.time()
+        try:
+            raw = _curl_request(url, headers, resolve_ip=ip if ip != host else "")
+            if raw:
+                elapsed = (time.time() - t0) * 1000
+                data = _parse_jsonp(raw)
+                if logger:
+                    logger.api("eastmoney", endpoint, ok=data is not None,
+                               elapsed_ms=elapsed, note=f"curl@{ip}")
+                return data
+            raise RuntimeError("curl 返回空数据")
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if logger:
+                logger.api("eastmoney", endpoint, ok=False,
+                           elapsed_ms=elapsed, error=f"curl:{e}")
+            last_error = e
+
+        # 非最后一次尝试，等待后换 IP
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(1.0)
+
+    print(f"  ⚠️ 东财请求失败 (重试{MAX_RETRIES}次): {last_error}", file=sys.stderr)
+    return None
 
 
 def _parse_jsonp(raw: str) -> Optional[dict]:
@@ -93,12 +188,11 @@ def _get_ut_token() -> str:
     if _UT_CACHE:
         return _UT_CACHE
     try:
-        req = urllib.request.Request(
+        raw = _curl_request(
             "https://quote.eastmoney.com/center/gridlist.html",
             headers={"User-Agent": HEADERS["User-Agent"]},
         )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+        html = raw or ""
         m = re.search(r'"ut"\s*:\s*"([a-f0-9]{30,50})"', html)
         if m:
             _UT_CACHE = m.group(1)

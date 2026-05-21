@@ -117,18 +117,43 @@ def run_review(trade_date: Optional[str] = None,
                verbose: bool = True) -> list[dict]:
     """批量执行龙头回测。
 
+    默认行为（trade_date 未指定时）：
+    从 dragons 表中筛选 review_status='pending' 且入选日期距今
+    超过 5 个交易日但不足 20 个交易日的记录，一次性回测。
+
     Args:
-        trade_date: 只回测指定日期的记录（None=全部 pending）
+        trade_date: 指定日期时只回测该日（手动覆盖自动筛选）
         top_n: 只回测 top N
         force: True=无视 review_status 全部重算
         verbose: 打印进度
     """
-    # 获取待回测列表
-    if force:
-        # 强制模式暂时只支持按日期 + pending
-        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
-    else:
-        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
+    entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
+
+    # 未指定日期时，自动筛选 5~20 交易日内入选的票
+    if not trade_date and entries:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        lookback_start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        calendar = build_trade_calendar(lookback_start, today_str)
+        trading_days = sorted(calendar, reverse=True)  # 从近到远
+
+        cutoff_upper = trading_days[5] if len(trading_days) > 5 else None   # 5 交易日前
+        cutoff_lower = trading_days[19] if len(trading_days) > 19 else None  # 19 交易日前
+
+        filtered = []
+        skipped = 0
+        for e in entries:
+            td_ = e["trade_date"]
+            if cutoff_lower is not None and td_ < cutoff_lower:
+                skipped += 1
+                continue
+            if cutoff_upper is not None and td_ > cutoff_upper:
+                skipped += 1
+                continue
+            filtered.append(e)
+
+        if verbose and skipped:
+            print(f"🔍 自动筛选：跳过 {skipped} 条（不在 5~20 交易日窗口）")
+        entries = filtered
 
     if not entries:
         if verbose:
@@ -156,7 +181,7 @@ def run_review(trade_date: Optional[str] = None,
                 print(f"买入 {r['buy_date']} @ {r['buy_price']:.2f}  "
                       f"收益 {r['max_return_5d']:+.1f}%  回撤 {r['max_drawdown_5d']:+.1f}%")
             elif r["status"] == "no_entry":
-                print("5 日内无断板 ❌")
+                print("无可介入日 ❌")
             else:
                 print(f"错误: {r.get('error', '?')}")
 

@@ -29,6 +29,7 @@ from dragon_quant.providers import create_providers
 from dragon_quant.logging.logger import ScanLogger
 from dragon_quant.logging.reporter import ReportBuilder
 from dragon_quant.storage.paths import DATA_DIR, SHARED_DIR, RESULTS_DIR
+from dragon_quant._version import __version__
 
 STATISTICAL_CONCEPT_PREFIXES = (
     "昨日涨停", "昨日连板", "昨日首板", "昨日打二板",
@@ -667,7 +668,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             if verbose and skipped_count > 0:
                 print(f"  🚫 5 日内已入选，跳过 {skipped_count} 只")
                 
-            db.save_dragons(scan_date_fmt, scan_id, dragons_to_save)
+            db.save_dragons(scan_date_fmt, scan_id, dragons_to_save, version=__version__)
             
         except Exception as e:
             if verbose:

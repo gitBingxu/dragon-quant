@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS dragons (
     market_cap      REAL,
     concepts_json   TEXT,
     report_text     TEXT,
+    version         TEXT DEFAULT '',
     created_at      TEXT DEFAULT (datetime('now','localtime')),
     buy_date        TEXT,
     buy_price       REAL,
@@ -123,6 +124,7 @@ def _migrate_dragons(conn: sqlite3.Connection):
         "max_return_5d REAL",
         "max_drawdown_5d REAL",
         "review_status TEXT DEFAULT 'pending'",
+        "version TEXT DEFAULT ''",
     ]
     for col in COLUMNS:
         try:
@@ -253,7 +255,7 @@ def get_scan(scan_id: str) -> Optional[dict]:
         conn.close()
 
 
-def save_dragons(trade_date: str, scan_id: str, dragons: list[dict]):
+def save_dragons(trade_date: str, scan_id: str, dragons: list[dict], version: str = ""):
     """保存或更新 top_n 到 dragons 表中"""
     with _lock:
         conn = _connect()
@@ -281,14 +283,15 @@ def save_dragons(trade_date: str, scan_id: str, dragons: list[dict]):
                     s.get("market_cap", 0),
                     json.dumps(concepts, ensure_ascii=False),
                     s.get("report_text", ""),
+                    version,
                 ))
             
             conn.executemany(
                 "INSERT OR REPLACE INTO dragons("
                 "trade_date, code, name, scan_id, rank, composite_score, board_count, "
                 "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-                "concepts_json, report_text) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "concepts_json, report_text, version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             conn.commit()
@@ -303,7 +306,7 @@ def get_dragons(trade_date: str) -> list[dict]:
         rows = conn.execute(
             "SELECT code, name, scan_id, rank, composite_score, board_count, "
             "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-            "concepts_json, report_text "
+            "concepts_json, report_text, version "
             "FROM dragons WHERE trade_date = ? ORDER BY composite_score DESC",
             (trade_date,),
         ).fetchall()
@@ -316,6 +319,7 @@ def get_dragons(trade_date: str) -> list[dict]:
                 "pct": r[10], "turnover_rate": r[11], "amount": r[12], "market_cap": r[13],
                 "concepts": json.loads(r[14]) if r[14] else [],
                 "report_text": r[15] or "",
+                "version": r[16] or "",
             }
             for r in rows
         ]
@@ -351,7 +355,7 @@ def get_pending_dragons(trade_date: Optional[str] = None,
             "SELECT trade_date, code, name, scan_id, rank, composite_score, "
             "board_count, open_px, close_px, high_px, low_px, pct, "
             "turnover_rate, amount, market_cap, concepts_json, report_text, "
-            "buy_date, buy_price, max_return_5d, max_drawdown_5d, review_status "
+            "buy_date, buy_price, max_return_5d, max_drawdown_5d, review_status, version "
             "FROM dragons WHERE review_status = 'pending'"
         )
         params: list = []
@@ -377,6 +381,7 @@ def get_pending_dragons(trade_date: Optional[str] = None,
                 "buy_date": r[17], "buy_price": r[18],
                 "max_return_5d": r[19], "max_drawdown_5d": r[20],
                 "review_status": r[21],
+                "version": r[22] or "",
             }
             for r in rows
         ]

@@ -1,0 +1,51 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a6e8f36987f2dcaf0f14b3fedc60894709b584c4",
+  "prompts": {
+    "50dd836851b936e7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a0ad9dc87fa3d40ab0b1204",
+        "model": "gemini-3.1-pro__dev"
+      },
+      "human_author": "Bing Xu <xubing.13@bytedance.com>",
+      "messages": [],
+      "total_additions": 82,
+      "total_deletions": 48,
+      "accepted_lines": 77,
+      "overriden_lines": 0
+    },
+    "e5e060d48005dc40": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a09ceb187fa3d40ab0b1047",
+        "model": "gemini-3.1-pro__dev"
+      },
+      "human_author": "Bing Xu <xubing.13@bytedance.com>",
+      "messages": [],
+      "total_additions": 237,
+      "total_deletions": 16,
+      "accepted_lines": 200,
+      "overriden_lines": 0
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {
+    "50dd836851b936e7": {
+      "tool": "trae",
+      "conversation_id": "6a0ad9dc87fa3d40ab0b1204",
+      "session_id": "6a0ad9dc87fa3d40ab0b1204",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "e5e060d48005dc40": {
+      "tool": "trae",
+      "conversation_id": "6a09ceb187fa3d40ab0b1047",
+      "session_id": "6a09ceb187fa3d40ab0b1047",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}

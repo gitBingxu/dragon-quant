@@ -58,18 +58,18 @@ def kbar_to_dict(kbar) -> dict:
 
 
 def find_entry_day(klines: list[dict], entry_date: str) -> Optional[dict]:
-    """在日K列表中寻找入选日后第一个非涨停日作为买入日。
+    """在日K列表中寻找入选日后第一个可介入日。
 
-    entry_date 是龙头入选日（当天涨停不买），
-    从 entry_date 的下一日开始查找，直到找到非涨停日。
+    一字板（high == low，全天无波动）不可介入，
+    high != low 即可介入，买入价为当日最低价。
 
-    返回买入日的日K dict，5 日内找不到则返回 None。
+    返回可介入日的日K dict，找不到则返回 None。
     """
     future = [k for k in klines if k["date"] > entry_date]
     future.sort(key=lambda k: k["date"])
 
     for k in future:
-        if not is_limit_up(k):
+        if k["high"] != k["low"]:
             return k
 
     return None

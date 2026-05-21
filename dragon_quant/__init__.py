@@ -13,6 +13,7 @@ dragon_quant — 龙头战法四维量化筛选系统
   )
 """
 
+from dragon_quant._version import __version__
 from dragon_quant.orchestrator import scan
 from dragon_quant.review import run_review
 

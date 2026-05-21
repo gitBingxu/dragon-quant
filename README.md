@@ -89,6 +89,21 @@ dragon-quant data cookie-fetch     # 刷新全部 Cookie
 dragon-quant data cookie-fetch --source xueqiu  # 只刷新雪球
 ```
 
+### `review` — 龙头回测
+
+```bash
+# 回测全部待处理
+dragon-quant review
+
+# 指定日期和 top N
+dragon-quant review --date 20260519 --top 5
+
+# 强制重算
+dragon-quant review --force --date 20260519
+```
+
+从 `dragons` 表中读取入选龙头，拉取历史日K找第一次断板日作为买入点，计算买入后 5 日内最大收益和最大回撤。
+
 ### `storage` — 数据管理
 
 ```bash
@@ -220,8 +235,8 @@ result = clear_logs(days=7)  # {"cleared": 3, "kept": 2, "files_removed": [...]}
 
 | 数据源 | 用途 | 接口数 |
 |---|---|---|
-| 东方财富 | 板块排行、成分股、板块 5 分 K | 3 |
-| 雪球 | 日 K 线、1 分 K 线 | 2 |
+| 东方财富 | 板块排行、成分股、板块 5 分 K（urllib + browser 双通道）| 3 |
+| 雪球 | 日 K 线、1 分 K 线、历史日 K | 3 |
 | 腾讯 | 实时行情、批量行情 | 2 |
 
 ## 设计思想
@@ -261,9 +276,10 @@ dragon_quant/
 ├── data.py              # 原子数据查询 API
 ├── providers/           # 数据源适配器
 │   ├── base.py          # StockProvider 抽象接口
-│   ├── eastmoney.py     # 东方财富
+│   ├── eastmoney.py     # 东方财富（urllib + browser 双通道）
 │   ├── xueqiu.py        # 雪球
 │   ├── tencent.py       # 腾讯
+│   ├── browser.py       # Playwright 浏览器兜底
 │   └── cookie.py        # Cookie 管理
 ├── scorers/             # 四维评分器
 │   ├── drive.py         # 带动性
@@ -280,10 +296,13 @@ dragon_quant/
 │   └── query.py         # 日志查询 API
 ├── storage/
 │   ├── paths.py         # 数据目录管理
+│   ├── db.py            # SQLite 持久化
 │   └── manager.py       # StorageManager
 ├── rate_limit.py        # 并发限流器
+├── review.py            # 龙头回测验证
 └── utils/
-    └── __init__.py
+    ├── __init__.py
+    └── trading.py       # 交易日历工具
 ```
 
 ## Agent 集成指南
@@ -478,7 +497,30 @@ else:
     print("暂无扫描缓存，运行一次 scan() 即可生成")
 ```
 
-### 场景 9：批量获取多只票的行情对比
+### 场景 9：龙头回测 — 验证历史龙头表现
+
+```python
+from dragon_quant.review import run_review
+
+# 回测今天所有 pending 龙头
+results = run_review(trade_date=None, top_n=None, verbose=True)
+
+# 返回 list[dict]，每项包含：
+# {
+#   "code": "600172", "name": "黄河旋风",
+#   "trade_date": "2026-05-13",
+#   "buy_date": "2026-05-15",     # 第一次断板日
+#   "buy_price": 12.34,           # 买入价（断板日最低价）
+#   "max_return_5d": 18.2,        # 5 日最大收益 (%)
+#   "max_drawdown_5d": -3.1,      # 5 日最大回撤 (%)
+#   "review_status": "completed",
+# }
+
+# 或通过 CLI
+# dragon-quant review --date 20260513 --top 5
+```
+
+### 场景 10：批量获取多只票的行情对比
 
 ```python
 from dragon_quant.data import batch_get_quotes

@@ -19,6 +19,10 @@ from dragon_quant.storage.manager import StorageManager
 
 def _cmd_scan(args):
     """扫描命令"""
+    if args.date:
+        _cmd_scan_history(args)
+        return
+
     orchestrate_scan(
         top_n=args.top,
         candidates_n=args.candidates,
@@ -26,6 +30,47 @@ def _cmd_scan(args):
         verbose=True,
         force=args.force,
     )
+
+
+def _cmd_scan_history(args):
+    """查询历史扫描记录"""
+    d = args.date
+    if len(d) == 8:
+        date_str = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    else:
+        print("错误: --date 格式应为 YYYYMMDD", file=sys.stderr)
+        return
+
+    from dragon_quant.storage import db
+    scan = db.get_latest_scan_by_date(date_str, args.top)
+    if scan and scan.get("raw_output"):
+        output = json.loads(scan["raw_output"])
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    elif scan:
+        # raw_output 为空（旧版本兼容），从 scan_stocks 重构
+        stocks = db.get_scan_stocks(scan["id"])
+        output = {
+            "scan_id": scan["id"],
+            "scan_date": scan["scan_date"],
+            "elapsed_s": scan["elapsed_s"],
+            "top_n": scan["top_n"],
+            "candidates_n": scan["candidates_n"],
+            "ranking": stocks,
+            "note": "raw_output 缺失，ranking 从 scan_stocks 重构",
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    else:
+        scans = db.get_scans_by_date(date_str)
+        if scans:
+            tops = sorted(set(s["top_n"] for s in scans))
+            print(json.dumps({
+                "error": f"未找到 {date_str} 下 top_n={args.top} 的记录",
+                "available_top_n": tops,
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps({
+                "error": f"未找到 {date_str} 的扫描记录",
+            }, ensure_ascii=False, indent=2))
 
 
 def _cmd_logs(args):
@@ -238,6 +283,8 @@ def main():
 
     # scan 子命令
     scan_p = sub.add_parser("scan", help="批量扫描龙头股", parents=[shared])
+    scan_p.add_argument("--date", default=None,
+                        help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
 
     # logs 子命令
     logs_p = sub.add_parser("logs", help="日志查询与管理")

@@ -255,6 +255,28 @@ def get_scan(scan_id: str) -> Optional[dict]:
         conn.close()
 
 
+def get_scans_by_date(scan_date: str) -> list[dict]:
+    """返回某日期下所有 scan 记录（不同 top_n）。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT id, scan_date, elapsed_s, top_n, candidates_n, workers, created_at "
+            "FROM scans WHERE scan_date = ? ORDER BY top_n",
+            (scan_date,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0], "scan_date": r[1], "elapsed_s": r[2],
+                "top_n": r[3], "candidates_n": r[4], "workers": r[5],
+                "created_at": r[6],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
 def save_dragons(trade_date: str, scan_id: str, dragons: list[dict], version: str = ""):
     """保存或更新 top_n 到 dragons 表中"""
     with _lock:

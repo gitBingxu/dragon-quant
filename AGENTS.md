@@ -230,6 +230,12 @@ python -m dragon_quant review --force --date 20260519
 - **线程安全**：DataCache 的操作持有 `threading.Lock`
 - **子进程安全**：共享缓存只读，通过 JSON 文件传递，不通过内存
 
+### AI Agent 协作规范
+
+> **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。**
+>
+> 纯查询类操作（读文件、查数据库、搜索代码）不受此限，可直接执行。
+
 ### 评分器接口约定
 ```python
 def score(code: str, cache: DataCache, **kwargs) -> ScoreResult:

@@ -45,7 +45,7 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         provider = XueqiuProvider()
 
     try:
-        klines_raw = provider.get_kline(code, days=20)
+        klines_raw = provider.get_kline(code, days=20, fq_type="normal")
     except Exception as e:
         return {
             "buy_date": None, "buy_price": None,
@@ -139,7 +139,10 @@ def run_review(trade_date: Optional[str] = None,
         force: True=无视 review_status 全部重算
         verbose: 打印进度
     """
-    entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
+    if force:
+        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n, review_status=None)
+    else:
+        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
 
     # 未指定日期时，自动筛选 5~20 交易日内入选的票
     if not trade_date and entries:

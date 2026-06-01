@@ -107,11 +107,11 @@ class XueqiuProvider(StockProvider):
 
     # ─── 日 K 线 ───
 
-    def get_kline(self, code: str, days: int = 20) -> list[KBar]:
+    def get_kline(self, code: str, days: int = 20, fq_type: str = "after") -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
         begin = now_ms - 100 * 86400 * 1000  # 从 100 天前开始取
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type=after&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
+        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type={fq_type}&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
         data = _fetch(path, logger=self._logger, endpoint="kline")
         if not data:
             return []

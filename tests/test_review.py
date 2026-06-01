@@ -239,7 +239,7 @@ class TestReviewDragon(unittest.TestCase):
                    return_value={"2026-05-20"}):
             review_dragon("600172", "2026-05-19", provider=mock_provider)
 
-        mock_provider.get_kline.assert_called_once_with("600172", days=20)
+        mock_provider.get_kline.assert_called_once_with("600172", days=20, fq_type="normal")
 
 
 # ── run_review ───────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ class TestRunReview(unittest.TestCase):
         self.assertEqual(results[0]["code"], "600172")
 
     def test_run_review_force_passes_through(self):
-        """force=True 正确传递"""
+        """force=True 时传 review_status=None，不传 status 过滤"""
         with patch("dragon_quant.review.db.get_pending_dragons",
                    return_value=[]) as mock_pending, \
              patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
@@ -334,7 +334,40 @@ class TestRunReview(unittest.TestCase):
             mock_provider_cls.return_value = mock_provider
             mock_provider.get_kline.return_value = []
             run_review(force=True, verbose=False)
-        mock_pending.assert_called_once_with(trade_date=None, top_n=None)
+        mock_pending.assert_called_once_with(
+            trade_date=None, top_n=None, review_status=None,
+        )
+
+    def test_run_review_force_still_filters_window(self):
+        """force=True 时仍过滤 5~20 交易日窗口"""
+        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
+             patch("dragon_quant.review.db.update_dragon_review"), \
+             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.build_trade_calendar",
+                   return_value=self._calendar):
+
+            mock_pending.return_value = [
+                {"code": "000001", "name": "平安银行", "trade_date": "2026-05-26"},  # 太新
+                {"code": "600172", "name": "黄河旋风", "trade_date": "2026-05-19"},  # 窗口内
+            ]
+            mock_provider = MagicMock()
+            mock_provider_cls.return_value = mock_provider
+            mock_provider.get_kline.return_value = [
+                _mk_kbar("2026-05-18", 10.0, 11.0, 11.0, 10.0, 10.0),
+                _mk_kbar("2026-05-19", 11.0, 12.1, 12.1, 10.8, 10.0),
+                _mk_kbar("2026-05-20", 12.5, 13.0, 13.5, 11.5, 7.5),
+                _mk_kbar("2026-05-21", 13.0, 14.0, 14.5, 12.5, 7.7),
+                _mk_kbar("2026-05-22", 14.0, 13.0, 14.0, 11.8, -7.1),
+                _mk_kbar("2026-05-25", 13.0, 15.0, 16.0, 12.8, 15.4),
+                _mk_kbar("2026-05-26", 15.0, 14.0, 15.5, 10.5, -6.7),
+                _mk_kbar("2026-05-27", 14.0, 14.5, 14.8, 13.8, 3.6),
+            ]
+
+            results = run_review(force=True, verbose=False)
+
+        # force 仍会过滤掉 05-26，只保留 05-19
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["code"], "600172")
 
 
 if __name__ == "__main__":

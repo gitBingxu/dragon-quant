@@ -371,6 +371,21 @@ def get_last_entry(code: str) -> Optional[str]:
         conn.close()
 
 
+def get_last_entry_with_rank(code: str) -> Optional[tuple]:
+    """返回该 code 最近一次入选的 (trade_date, rank)，无记录则返回 None。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT trade_date, rank FROM dragons WHERE code = ? "
+            "ORDER BY trade_date DESC LIMIT 1",
+            (code,),
+        ).fetchone()
+        return (row[0], row[1]) if row else None
+    finally:
+        conn.close()
+
+
 def get_pending_dragons(trade_date: Optional[str] = None,
                         top_n: Optional[int] = None,
                         review_status: Optional[str] = "pending") -> list[dict]:

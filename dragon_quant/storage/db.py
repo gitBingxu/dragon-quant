@@ -372,9 +372,11 @@ def get_last_entry(code: str) -> Optional[str]:
 
 
 def get_pending_dragons(trade_date: Optional[str] = None,
-                        top_n: Optional[int] = None) -> list[dict]:
-    """获取待 review 的 dragons 记录（review_status = 'pending'）。
+                        top_n: Optional[int] = None,
+                        review_status: Optional[str] = "pending") -> list[dict]:
+    """获取待 review 的 dragons 记录。
 
+    review_status='pending' 时只取待回测记录；传入 None 则不做状态过滤。
     可按 trade_date 和 top_n 过滤。
     """
     conn = _connect()
@@ -386,12 +388,18 @@ def get_pending_dragons(trade_date: Optional[str] = None,
             "turnover_rate, amount, market_cap, concepts_json, report_text, "
             "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
             "max_return_hold_days, review_status, version "
-            "FROM dragons WHERE review_status = 'pending'"
+            "FROM dragons"
         )
         params: list = []
+        conditions: list[str] = []
+        if review_status is not None:
+            conditions.append("review_status = ?")
+            params.append(review_status)
         if trade_date:
-            sql += " AND trade_date = ?"
+            conditions.append("trade_date = ?")
             params.append(trade_date)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
         if top_n:
             sql += " ORDER BY composite_score DESC LIMIT ?"
             params.append(top_n)

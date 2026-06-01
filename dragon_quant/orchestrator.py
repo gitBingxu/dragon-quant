@@ -641,14 +641,23 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
             dragons_to_save = []
             skipped_count = 0
-            for r in display_list:
+            updated_count = 0
+            for i, r in enumerate(display_list):
                 code = r["code"]
+                new_rank = i + 1  # 与 save_dragons 中 rank = i + 1 一致
 
-                # 5 日去重：该 code 上次入选距今 < 5 个交易日则跳过
-                last_entry = db.get_last_entry(code)
-                if last_entry and trade_days_between(last_entry, scan_date_fmt, calendar) < 5:
-                    skipped_count += 1
-                    continue
+                # 5 日去重：该 code 上次入选距今 < 5 个交易日
+                last_info = db.get_last_entry_with_rank(code)
+                if last_info:
+                    last_date, old_rank = last_info
+                    if trade_days_between(last_date, scan_date_fmt, calendar) < 5:
+                        # 新 rank 更好（数字更小）→ 更新；否则跳过
+                        if old_rank is not None and new_rank < old_rank:
+                            updated_count += 1
+                            # 继续处理，让 save_dragons 的 INSERT OR REPLACE 更新记录
+                        else:
+                            skipped_count += 1
+                            continue
 
                 quote = quote_map.get(code)
                 dragon_data = r.copy()  # 复制基础评分数据
@@ -665,8 +674,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     })
                 dragons_to_save.append(dragon_data)
 
-            if verbose and skipped_count > 0:
-                print(f"  🚫 5 日内已入选，跳过 {skipped_count} 只")
+            if verbose and (skipped_count > 0 or updated_count > 0):
+                parts = []
+                if skipped_count > 0:
+                    parts.append(f"跳过 {skipped_count} 只")
+                if updated_count > 0:
+                    parts.append(f"更新 {updated_count} 只(rank 提升)")
+                print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
             db.save_dragons(scan_date_fmt, scan_id, dragons_to_save, version=__version__)
             

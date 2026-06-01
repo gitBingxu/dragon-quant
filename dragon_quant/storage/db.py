@@ -125,6 +125,7 @@ def _migrate_dragons(conn: sqlite3.Connection):
         "max_drawdown_5d REAL",
         "review_status TEXT DEFAULT 'pending'",
         "version TEXT DEFAULT ''",
+        "max_return_hold_days INTEGER",
     ]
     for col in COLUMNS:
         try:
@@ -328,7 +329,9 @@ def get_dragons(trade_date: str) -> list[dict]:
         rows = conn.execute(
             "SELECT code, name, scan_id, rank, composite_score, board_count, "
             "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-            "concepts_json, report_text, version "
+            "concepts_json, report_text, "
+            "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
+            "max_return_hold_days, review_status, version "
             "FROM dragons WHERE trade_date = ? ORDER BY composite_score DESC",
             (trade_date,),
         ).fetchall()
@@ -341,7 +344,11 @@ def get_dragons(trade_date: str) -> list[dict]:
                 "pct": r[10], "turnover_rate": r[11], "amount": r[12], "market_cap": r[13],
                 "concepts": json.loads(r[14]) if r[14] else [],
                 "report_text": r[15] or "",
-                "version": r[16] or "",
+                "buy_date": r[16], "buy_price": r[17],
+                "max_return_5d": r[18], "max_drawdown_5d": r[19],
+                "max_return_hold_days": r[20],
+                "review_status": r[21],
+                "version": r[22] or "",
             }
             for r in rows
         ]
@@ -365,9 +372,11 @@ def get_last_entry(code: str) -> Optional[str]:
 
 
 def get_pending_dragons(trade_date: Optional[str] = None,
-                        top_n: Optional[int] = None) -> list[dict]:
-    """获取待 review 的 dragons 记录（review_status = 'pending'）。
+                        top_n: Optional[int] = None,
+                        review_status: Optional[str] = "pending") -> list[dict]:
+    """获取待 review 的 dragons 记录。
 
+    review_status='pending' 时只取待回测记录；传入 None 则不做状态过滤。
     可按 trade_date 和 top_n 过滤。
     """
     conn = _connect()
@@ -377,13 +386,20 @@ def get_pending_dragons(trade_date: Optional[str] = None,
             "SELECT trade_date, code, name, scan_id, rank, composite_score, "
             "board_count, open_px, close_px, high_px, low_px, pct, "
             "turnover_rate, amount, market_cap, concepts_json, report_text, "
-            "buy_date, buy_price, max_return_5d, max_drawdown_5d, review_status, version "
-            "FROM dragons WHERE review_status = 'pending'"
+            "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
+            "max_return_hold_days, review_status, version "
+            "FROM dragons"
         )
         params: list = []
+        conditions: list[str] = []
+        if review_status is not None:
+            conditions.append("review_status = ?")
+            params.append(review_status)
         if trade_date:
-            sql += " AND trade_date = ?"
+            conditions.append("trade_date = ?")
             params.append(trade_date)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
         if top_n:
             sql += " ORDER BY composite_score DESC LIMIT ?"
             params.append(top_n)
@@ -402,8 +418,9 @@ def get_pending_dragons(trade_date: Optional[str] = None,
                 "report_text": r[16] or "",
                 "buy_date": r[17], "buy_price": r[18],
                 "max_return_5d": r[19], "max_drawdown_5d": r[20],
-                "review_status": r[21],
-                "version": r[22] or "",
+                "max_return_hold_days": r[21],
+                "review_status": r[22],
+                "version": r[23] or "",
             }
             for r in rows
         ]
@@ -416,6 +433,7 @@ def update_dragon_review(trade_date: str, code: str,
                          buy_price: Optional[float] = None,
                          max_return_5d: Optional[float] = None,
                          max_drawdown_5d: Optional[float] = None,
+                         max_return_hold_days: Optional[int] = None,
                          review_status: str = "completed"):
     """更新单条 dragon 的 review 字段。"""
     with _lock:
@@ -428,10 +446,11 @@ def update_dragon_review(trade_date: str, code: str,
                 "buy_price = COALESCE(?, buy_price), "
                 "max_return_5d = COALESCE(?, max_return_5d), "
                 "max_drawdown_5d = COALESCE(?, max_drawdown_5d), "
+                "max_return_hold_days = COALESCE(?, max_return_hold_days), "
                 "review_status = ? "
                 "WHERE trade_date = ? AND code = ?",
                 (buy_date, buy_price, max_return_5d, max_drawdown_5d,
-                 review_status, trade_date, code),
+                 max_return_hold_days, review_status, trade_date, code),
             )
             conn.commit()
         finally:

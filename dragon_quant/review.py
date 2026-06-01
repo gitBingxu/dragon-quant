@@ -34,8 +34,9 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
     {
         "buy_date": str or None,
         "buy_price": float or None,
-        "max_return_5d": float or None,   # 百分比
-        "max_drawdown_5d": float or None, # 百分比
+        "max_return_5d": float or None,       # 百分比
+        "max_drawdown_5d": float or None,     # 百分比
+        "max_return_hold_days": int or None,  # 达到最大收益的交易日数
         "status": "completed" | "no_entry" | "error",
         "error": str or None,
     }
@@ -44,11 +45,12 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         provider = XueqiuProvider()
 
     try:
-        klines_raw = provider.get_kline(code, days=20)
+        klines_raw = provider.get_kline(code, days=20, fq_type="normal")
     except Exception as e:
         return {
             "buy_date": None, "buy_price": None,
             "max_return_5d": None, "max_drawdown_5d": None,
+            "max_return_hold_days": None,
             "status": "error", "error": f"K线拉取失败: {e}",
         }
 
@@ -56,6 +58,7 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         return {
             "buy_date": None, "buy_price": None,
             "max_return_5d": None, "max_drawdown_5d": None,
+            "max_return_hold_days": None,
             "status": "error", "error": "无K线数据",
         }
 
@@ -67,6 +70,7 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         return {
             "buy_date": None, "buy_price": None,
             "max_return_5d": None, "max_drawdown_5d": None,
+            "max_return_hold_days": None,
             "status": "no_entry",
         }
 
@@ -83,6 +87,7 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         return {
             "buy_date": buy_date, "buy_price": buy_price,
             "max_return_5d": 0, "max_drawdown_5d": 0,
+            "max_return_hold_days": 0,
             "status": "completed",
         }
 
@@ -93,11 +98,17 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         return {
             "buy_date": buy_date, "buy_price": buy_price,
             "max_return_5d": 0, "max_drawdown_5d": 0,
+            "max_return_hold_days": 0,
             "status": "completed",
         }
 
     max_high = max(k["high"] for k in future_klines)
     min_low = min(k["low"] for k in future_klines)
+
+    # 找最大收益出现日 → 持有交易日数
+    peak_k = max(future_klines, key=lambda k: k["high"])
+    peak_date = peak_k["date"]
+    hold_days = sum(1 for d in calendar if buy_date < d <= peak_date)
 
     max_return = round((max_high - buy_price) / buy_price * 100, 2)
     max_drawdown = round((min_low - buy_price) / buy_price * 100, 2)
@@ -107,6 +118,7 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
         "buy_price": buy_price,
         "max_return_5d": max_return,
         "max_drawdown_5d": max_drawdown,
+        "max_return_hold_days": hold_days,
         "status": "completed",
     }
 
@@ -127,7 +139,10 @@ def run_review(trade_date: Optional[str] = None,
         force: True=无视 review_status 全部重算
         verbose: 打印进度
     """
-    entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
+    if force:
+        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n, review_status=None)
+    else:
+        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
 
     # 未指定日期时，自动筛选 5~20 交易日内入选的票
     if not trade_date and entries:
@@ -178,8 +193,9 @@ def run_review(trade_date: Optional[str] = None,
 
         if verbose:
             if r["status"] == "completed":
+                hold = r.get("max_return_hold_days", "?")
                 print(f"买入 {r['buy_date']} @ {r['buy_price']:.2f}  "
-                      f"收益 {r['max_return_5d']:+.1f}%  回撤 {r['max_drawdown_5d']:+.1f}%")
+                      f"收益 {r['max_return_5d']:+.1f}%({hold}d)  回撤 {r['max_drawdown_5d']:+.1f}%")
             elif r["status"] == "no_entry":
                 print("无可介入日 ❌")
             else:
@@ -193,6 +209,7 @@ def run_review(trade_date: Optional[str] = None,
                 buy_price=r.get("buy_price"),
                 max_return_5d=r.get("max_return_5d"),
                 max_drawdown_5d=r.get("max_drawdown_5d"),
+                max_return_hold_days=r.get("max_return_hold_days"),
                 review_status=r["status"],
             )
         except Exception as ex:

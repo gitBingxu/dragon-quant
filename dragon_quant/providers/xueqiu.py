@@ -107,11 +107,11 @@ class XueqiuProvider(StockProvider):
 
     # ─── 日 K 线 ───
 
-    def get_kline(self, code: str, days: int = 20) -> list[KBar]:
+    def get_kline(self, code: str, days: int = 20, fq_type: str = "after") -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
         begin = now_ms - 100 * 86400 * 1000  # 从 100 天前开始取
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type=after&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
+        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type={fq_type}&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
         data = _fetch(path, logger=self._logger, endpoint="kline")
         if not data:
             return []
@@ -200,4 +200,37 @@ class XueqiuProvider(StockProvider):
         raise NotImplementedError("雪球不提供板块 K 线")
 
     def get_quote(self, code: str) -> Optional[Quote]:
-        raise NotImplementedError("用腾讯 Get 行情")
+        """获取实时行情（通过雪球 quote.json?extend=detail）"""
+        symbol = _symbol(code)
+        path = f"/v5/stock/quote.json?symbol={symbol}&extend=detail"
+        data = _fetch(path, logger=self._logger, endpoint="quote")
+        if not data:
+            return None
+        q = data.get("data", {}).get("quote", {})
+        if not q:
+            return None
+        try:
+            return Quote(
+                code=str(q.get("code", code)),
+                name=str(q.get("name", "")),
+                price=float(q.get("current", 0)),
+                prev_close=float(q.get("last_close", 0)),
+                open_px=float(q.get("open", 0)),
+                high=float(q.get("high", 0)),
+                low=float(q.get("low", 0)),
+                pct=float(q.get("percent", 0)),
+                chg=float(q.get("chg", 0)),
+                turnover_rate=float(q.get("turnover_rate") or 0),
+                amplitude=float(q.get("amplitude") or 0),
+                volume=float(q.get("volume", 0)),
+                amount=float(q.get("amount", 0)),
+                market_cap=float(q.get("market_capital", 0)),
+                float_market_cap=float(q.get("float_market_capital", 0)),
+                volume_ratio=float(q.get("volume_ratio") or 0),
+                pe=float(q.get("pe_ttm") or 0),
+                limit_up=float(q.get("limit_up", 0)),
+                limit_down=float(q.get("limit_down", 0)),
+                avg_price=float(q.get("avg_price") or 0),
+            )
+        except (ValueError, TypeError):
+            return None

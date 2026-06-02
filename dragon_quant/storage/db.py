@@ -457,11 +457,11 @@ def update_dragon_review(trade_date: str, code: str,
             _ensure_schema(conn)
             conn.execute(
                 "UPDATE dragons SET "
-                "buy_date = COALESCE(?, buy_date), "
-                "buy_price = COALESCE(?, buy_price), "
-                "max_return_5d = COALESCE(?, max_return_5d), "
-                "max_drawdown_5d = COALESCE(?, max_drawdown_5d), "
-                "max_return_hold_days = COALESCE(?, max_return_hold_days), "
+                "buy_date = ?, "
+                "buy_price = ?, "
+                "max_return_5d = ?, "
+                "max_drawdown_5d = ?, "
+                "max_return_hold_days = ?, "
                 "review_status = ? "
                 "WHERE trade_date = ? AND code = ?",
                 (buy_date, buy_price, max_return_5d, max_drawdown_5d,
@@ -470,6 +470,160 @@ def update_dragon_review(trade_date: str, code: str,
             conn.commit()
         finally:
             conn.close()
+
+
+# --- Review Web UI 查询 ---
+
+def query_dragons(filters: dict = None,
+                  sort_by: str = "composite_score",
+                  sort_dir: str = "desc") -> list[dict]:
+    """灵活查询 dragons 表（供 Web UI /api/dragons 使用）。
+
+    Args:
+        filters 支持的 key:
+            code_like, name_like: LIKE 模糊匹配
+            date_from, date_to: trade_date 范围
+            score_min, score_max: composite_score 范围
+            return_min, return_max: max_return_5d 范围
+            status: list[str] 过滤 review_status
+        sort_by: 排序字段
+        sort_dir: asc / desc
+    """
+    if filters is None:
+        filters = {}
+
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+
+        sql = (
+            "SELECT trade_date, code, name, scan_id, rank, composite_score, "
+            "board_count, open_px, close_px, high_px, low_px, pct, "
+            "turnover_rate, amount, market_cap, concepts_json, report_text, "
+            "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
+            "max_return_hold_days, review_status, version "
+            "FROM dragons"
+        )
+        params: list = []
+        conditions: list[str] = []
+
+        if filters.get("code_like"):
+            conditions.append("code LIKE ?")
+            params.append(f"%{filters['code_like']}%")
+        if filters.get("name_like"):
+            conditions.append("name LIKE ?")
+            params.append(f"%{filters['name_like']}%")
+        if filters.get("date_from"):
+            conditions.append("trade_date >= ?")
+            params.append(filters["date_from"])
+        if filters.get("date_to"):
+            conditions.append("trade_date <= ?")
+            params.append(filters["date_to"])
+        if "score_min" in filters:
+            conditions.append("composite_score >= ?")
+            params.append(filters["score_min"])
+        if "score_max" in filters:
+            conditions.append("composite_score <= ?")
+            params.append(filters["score_max"])
+        if "return_min" in filters:
+            conditions.append("COALESCE(max_return_5d, -9999) >= ?")
+            params.append(filters["return_min"])
+        if "return_max" in filters:
+            conditions.append("COALESCE(max_return_5d, 9999) <= ?")
+            params.append(filters["return_max"])
+        if "drawdown_min" in filters:
+            conditions.append("COALESCE(max_drawdown_5d, -9999) >= ?")
+            params.append(filters["drawdown_min"])
+        if "drawdown_max" in filters:
+            conditions.append("COALESCE(max_drawdown_5d, 9999) <= ?")
+            params.append(filters["drawdown_max"])
+        if filters.get("status"):
+            placeholders = ",".join("?" * len(filters["status"]))
+            conditions.append(f"review_status IN ({placeholders})")
+            params.extend(filters["status"])
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        # 排序字段白名单
+        ALLOWED = {
+            "trade_date", "code", "name", "rank", "composite_score",
+            "board_count", "pct", "buy_date", "buy_price",
+            "max_return_5d", "max_drawdown_5d", "max_return_hold_days",
+            "review_status",
+        }
+        order_col = sort_by if sort_by in ALLOWED else "composite_score"
+        order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+        sql += f" ORDER BY {order_col} {order_dir} NULLS LAST"
+
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "trade_date": r[0], "code": r[1], "name": r[2],
+                "scan_id": r[3], "rank": r[4], "composite_score": r[5],
+                "board_count": r[6], "open_px": r[7], "close_px": r[8],
+                "high_px": r[9], "low_px": r[10], "pct": r[11],
+                "turnover_rate": r[12], "amount": r[13], "market_cap": r[14],
+                "concepts": json.loads(r[15]) if r[15] else [],
+                "report_text": r[16] or "",
+                "buy_date": r[17], "buy_price": r[18],
+                "max_return_5d": r[19], "max_drawdown_5d": r[20],
+                "max_return_hold_days": r[21],
+                "review_status": r[22],
+                "version": r[23] or "",
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def get_review_summary() -> dict:
+    """返回 dragons 表中的汇总统计（供 Web UI /api/summary 使用）。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        total = conn.execute("SELECT COUNT(*) FROM dragons").fetchone()[0]
+
+        completed = conn.execute(
+            "SELECT COUNT(*) FROM dragons WHERE review_status = 'completed'"
+        ).fetchone()[0]
+
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM dragons WHERE review_status = 'pending'"
+        ).fetchone()[0]
+
+        avg_row = conn.execute(
+            "SELECT AVG(max_return_5d) FROM dragons WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
+        ).fetchone()
+
+        win_row = conn.execute(
+            "SELECT COUNT(*) FROM dragons WHERE review_status = 'completed' AND max_return_5d > 0"
+        ).fetchone()
+
+        best = conn.execute(
+            "SELECT code, name, max_return_5d FROM dragons "
+            "WHERE review_status = 'completed' AND max_return_5d IS NOT NULL "
+            "ORDER BY max_return_5d DESC LIMIT 1"
+        ).fetchone()
+
+        avg_return = round(avg_row[0], 2) if avg_row and avg_row[0] is not None else None
+        win_count = win_row[0] if win_row else 0
+        completed_count = completed if completed else 0
+        win_rate = round(win_count / completed_count * 100, 1) if completed_count > 0 else None
+
+        return {
+            "total": total,
+            "completed": completed,
+            "pending": pending,
+            "avg_return": avg_return,
+            "win_rate": win_rate,
+            "best_stock_code": best[0] if best else None,
+            "best_stock_name": best[1] if best else None,
+            "best_return": round(best[2], 2) if best and best[2] is not None else None,
+        }
+    finally:
+        conn.close()
 
 
 def get_scan_stocks(scan_id: str) -> list[dict]:

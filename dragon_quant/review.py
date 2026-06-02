@@ -3,7 +3,8 @@ Review 模块 — 龙头回测验证
 
 对 dragons 表中的入选龙头进行回测：
 1. 寻找入选日后第一次断板日的日K最低价作为买入价
-2. 计算买入后 5 个交易日的最大收益和最大回撤
+2. 计算买入后收益窗口内的最大收益
+3. 计算从买入日到最大收益出现日之间的最大回撤
 
 用法：
     python -m dragon_quant review [--date 20260519] [--top 5] [--force]
@@ -28,7 +29,8 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
     流程：
     1. 拉取该 code 最近 20 天日K
     2. 从 trade_date 次日开始找第一个非涨停日 → 买入日
-    3. 计算买入后 5 日内最大收益和最大回撤
+    3. 计算买入后收益窗口内最大收益
+    4. 计算买入日至最大收益出现日之间的最大回撤
 
     返回：
     {
@@ -78,11 +80,13 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
     buy_price = entry_k["low"]  # 断板日最低价作为买入价
 
     # 2. 构建交易日历，找买入后 5 日
-    end_date = (datetime.strptime(buy_date, "%Y-%m-%d") + timedelta(days=10)).strftime("%Y-%m-%d")
+    # A 股 T+1：买入当天不能卖，最少持有 2 天 → 跳过买入日及次日
+    end_date = (datetime.strptime(buy_date, "%Y-%m-%d") + timedelta(days=15)).strftime("%Y-%m-%d")
     calendar = build_trade_calendar(buy_date, end_date)
 
-    # 买入后 5 个交易日
-    future_dates = sorted([d for d in calendar if d > buy_date])[:5]
+    # 买入后第 2 个交易日开始算收益（跳过买入日 + T+1 日）
+    after_buy = sorted([d for d in calendar if d > buy_date])
+    future_dates = after_buy[1:5]  # 第 2~5 个交易日，共 4 天
     if not future_dates:
         return {
             "buy_date": buy_date, "buy_price": buy_price,
@@ -102,13 +106,15 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
             "status": "completed",
         }
 
-    max_high = max(k["high"] for k in future_klines)
-    min_low = min(k["low"] for k in future_klines)
-
     # 找最大收益出现日 → 持有交易日数
     peak_k = max(future_klines, key=lambda k: k["high"])
+    max_high = peak_k["high"]
     peak_date = peak_k["date"]
     hold_days = sum(1 for d in calendar if buy_date < d <= peak_date)
+
+    # 最大回撤改为只统计“买入日至最大收益出现日”窗口
+    drawdown_klines = [k for k in klines if buy_date <= k["date"] <= peak_date]
+    min_low = min(k["low"] for k in drawdown_klines) if drawdown_klines else buy_price
 
     max_return = round((max_high - buy_price) / buy_price * 100, 2)
     max_drawdown = round((min_low - buy_price) / buy_price * 100, 2)

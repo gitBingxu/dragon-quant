@@ -38,7 +38,7 @@ class TestReviewDragon(unittest.TestCase):
     # ── 成功路径 ──
 
     def test_review_completed_calculation(self):
-        """买入后 5 日收益/回撤计算正确"""
+        """最大回撤只统计到最大收益出现日，不含峰值后的更低点"""
         trade_date = "2026-05-19"
 
         klines = [
@@ -62,11 +62,12 @@ class TestReviewDragon(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["buy_date"], "2026-05-20")
         self.assertEqual(result["buy_price"], 11.5)
-        # 5 日内 high=16.0, low=10.5，买入价 11.5
+        # 峰值出现在 2026-05-25，峰值后 2026-05-26 的更低点 10.5 不应计入回撤
         expected_return = round((16.0 - 11.5) / 11.5 * 100, 2)
-        expected_drawdown = round((10.5 - 11.5) / 11.5 * 100, 2)
+        expected_drawdown = 0.0
         self.assertAlmostEqual(result["max_return_5d"], expected_return, places=1)
         self.assertAlmostEqual(result["max_drawdown_5d"], expected_drawdown, places=1)
+        self.assertEqual(result["max_return_hold_days"], 3)
 
     def test_review_buy_date_filter_5_days(self):
         """只用买入后 5 个交易日，不会多用"""
@@ -92,8 +93,41 @@ class TestReviewDragon(unittest.TestCase):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
         self.assertEqual(result["status"], "completed")
-        expected_return = round((12.0 - 9.5) / 9.5 * 100, 2)
-        expected_drawdown = round((9.0 - 9.5) / 9.5 * 100, 2)
+        # 收益窗口实际为买入后第 2~5 个交易日：05-27/05-28/05-29/06-01
+        # 因此不会使用 06-02 的 high=13.0；峰值日为 05-27，回撤窗口只统计到 05-27
+        expected_return = round((11.0 - 9.5) / 9.5 * 100, 2)
+        expected_drawdown = 0.0
+        self.assertAlmostEqual(result["max_return_5d"], expected_return, places=1)
+        self.assertAlmostEqual(result["max_drawdown_5d"], expected_drawdown, places=1)
+        self.assertEqual(result["max_return_hold_days"], 2)
+
+    def test_review_drawdown_includes_t1_low_before_peak(self):
+        """最大回撤应覆盖买入日至峰值日，包含被收益窗口跳过的 T+1 低点"""
+        trade_date = "2026-05-19"
+
+        klines = [
+            _mk_kbar("2026-05-19", 9.0, 9.9, 9.9, 8.9, 10.0),
+            _mk_kbar("2026-05-20", 10.0, 10.8, 11.5, 10.0, 9.1),   # 买入日 @ 10.0
+            _mk_kbar("2026-05-21", 10.8, 9.0, 9.5, 8.5, -16.7),    # T+1，更低低点，应计入回撤
+            _mk_kbar("2026-05-22", 9.0, 11.5, 12.0, 10.2, 27.8),
+            _mk_kbar("2026-05-25", 11.5, 13.5, 14.0, 10.8, 17.4),  # 峰值日
+            _mk_kbar("2026-05-26", 13.5, 8.5, 13.6, 7.5, -37.0),   # 峰值后新低，不应计入回撤
+            _mk_kbar("2026-05-27", 8.5, 9.0, 9.5, 8.0, 5.9),
+        ]
+
+        mock_provider = MagicMock()
+        mock_provider.get_kline.return_value = klines
+
+        with patch("dragon_quant.review.build_trade_calendar",
+                   return_value=self._calendar):
+            result = review_dragon("000001", trade_date, provider=mock_provider)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["buy_date"], "2026-05-20")
+        self.assertEqual(result["buy_price"], 10.0)
+        self.assertEqual(result["max_return_hold_days"], 3)
+        expected_return = round((14.0 - 10.0) / 10.0 * 100, 2)
+        expected_drawdown = round((8.5 - 10.0) / 10.0 * 100, 2)
         self.assertAlmostEqual(result["max_return_5d"], expected_return, places=1)
         self.assertAlmostEqual(result["max_drawdown_5d"], expected_drawdown, places=1)
 

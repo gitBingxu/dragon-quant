@@ -6,7 +6,7 @@
 
 ## 这是什么
 
-一套纯 Python 3 的 A 股龙头筛选系统，依赖 `playwright` 用于东财反爬兜底。从当日涨停榜出发，通过**带动性、抗跌性、领涨性、资金承接**四个维度评估涨停股的龙头质量，加权综合分排名输出。
+一套纯 Python 3 的 A 股龙头筛选系统，依赖 `playwright` 做 Cookie 自动获取与 Web 侧辅助能力。从当日涨停榜出发，通过**带动性、抗跌性、领涨性、资金承接**四个维度评估涨停股的龙头质量，加权综合分排名输出；同时支持日志查询、SQLite 持久化、龙头回测与 Web UI 可视化。
 
 数据源：东方财富 + 雪球 + 腾讯公开 API，不依赖任何付费行情接口。
 
@@ -58,16 +58,17 @@ Cookie 文件位置：
 dragon_quant/
 ├── __init__.py / __main__.py    # 入口
 ├── cli.py                       # argparse CLI
-├── orchestrator.py              # 编排主流程 (Phase A→G)
+├── orchestrator.py              # 编排主流程 (Phase A→F)
+├── data.py                      # 原子数据查询 API
 ├── rate_limit.py                # 分组并发调度器
 ├── analyze.py                   # 子进程打分入口（已实现，被主进程内打分取代）
 │
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC (6 抽象方法)
-│   ├── eastmoney.py             # 东财 — JSONP + urllib/browser 双通道
+│   ├── eastmoney.py             # 东财 — JSONP + urllib/curl + DNS 多 IP 轮询
 │   ├── xueqiu.py                # 雪球 — 需 Cookie
 │   ├── tencent.py               # 腾讯 — 零认证 + fallback
-│   ├── browser.py               # Playwright 浏览器共享会话（东财兜底）
+│   ├── browser.py               # Playwright 浏览器会话（Cookie 获取/辅助请求）
 │   └── cookie.py                # Cookie 管理 + CLI
 │
 ├── scorers/                     # 四维评分器（✅ 已实现）
@@ -92,19 +93,22 @@ dragon_quant/
 │   └── trading.py               # 交易日历 + 涨停判断 + 买入日定位
 │
 ├── review.py                    # ✅ 已实现 — 龙头回测验证
+├── web_ui/                      # ✅ 已实现 — 回测结果 Web UI
+│   ├── server.py                # stdlib HTTPServer 服务端
+│   └── index.html               # 前端页面
 └── models/
-    └── types.py                 # dataclass 数据模型
+   └── types.py                 # dataclass 数据模型
 ```
 
 ---
 
 ## 执行流程
 
-编排器 `orchestrator.run_scan()` 分 7 个阶段：
+编排器 `orchestrator.run_scan()` 分 6 个阶段：
 
 | Phase | 做什么 | 调用次数 | 关键点 |
 |-------|--------|---------|--------|
-| **A** 板块排行 | 东财·概念板块涨跌幅 Top10 | 2 次 | JSONP，urllib 失败自动走 browser 兜底 |
+| **A** 板块排行 | 东财·概念板块涨跌幅 Top10 | 2 次 | JSONP，urllib 失败自动走 curl 兜底 + DNS 多 IP 轮询 |
 | **B** 候选筛选 | 每领涨板块取前5成分股，过滤 ST + 双创 | 20 次 | 去重 + 多概念跟踪 |
 | **C** 连板+排序 | 雪球日K → 算连板天数 → 按(概念数, 连板数)排序取 Top25 | N+1 次 | 涨停阈值 ≥9.9% |
 | **D** 并发加载 | 板块5分K + 个股5分K + 腾讯批量行情 | ~50 次 | RateLimiter 8 线程并发 |
@@ -150,10 +154,10 @@ dragon_quant/
 
 当前 Chrome UA 版本：147。如果大面积失效，更新到最新 Chrome 版本号即可。
 
-**浏览器兜底通道**：urllib 失败时走 Playwright `APIRequestContext.fetch()` 重试。
-- 使用 Chromium HTTP 栈（TLS 指纹同 Chrome），不受 CORS 限制
-- Cookie 从本地文件注入，与 urllib 路径共享同一 Cookie 状态
-- 无页面加载开销，首请求 ≤ 3 秒（Chromium 冷启动时间）
+**当前反爬策略**：
+- 东财主链路为 `urllib` + `curl` 双通道，配合 DNS 多 IP 轮询绕过坏掉的 CDN 节点
+- `browser.py` 仍保留，主要用于 Cookie 自动获取与浏览器侧辅助请求
+- 雪球和东财都依赖本地 Cookie；接口异常时优先检查 Cookie 是否失效
 
 ---
 
@@ -162,13 +166,13 @@ dragon_quant/
 ### ✅ 已完成
 - 数据模型（types.py）
 - 全部 3 个 Provider（东财/雪球/腾讯），含完整反爬 Header
-- Playwright 浏览器兜底通道 `browser.py`（东财 urllib 失败时自动降级）
+- Playwright 浏览器能力（Cookie 自动获取 + 浏览器侧辅助请求）
 - Cookie 管理（手动设置 + Playwright 自动获取）
 - RateLimiter 分组并发调度（`workers` 参数控制线程数）
 - DataCache 内存+本地双重缓存 + 快照导出
 - Orchestrator 编排全流程（Phase A→F 完整贯通，主进程直接打分）
 - 5 日去重：同一标的 5 个交易日内只写入 dragons 一次
-- CLI 入口 + `__main__.py` 入口（scan / logs / data / storage / review）
+- CLI 入口 + `__main__.py` 入口（scan / logs / data / review / storage）
 - 四维评分器 `scorers/`（drive.py / anti_drop.py / leadership.py / absorption.py）
 - 结构化日志 `logging/`（ScanLogger + ReportBuilder 自然语言报告）
 - Logger 全链路打点（Provider/HTTP 层自动记录每次接口调用的耗时与成败）
@@ -177,21 +181,21 @@ dragon_quant/
 - 扫描结果持久化（results JSON / 报告文本 / latest.json 快照）
 - 数据管理 CLI（`storage status/size/clear` 子命令）
 - 交易日历工具 `utils/trading.py`（基于雪球日K，不依赖外部假期表）
-- 龙头回测模块 `review.py`（一字板跳过 + 5~20 日窗口自动筛选 + 回撤计算）
+- 龙头回测模块 `review.py`（一字板跳过 + 5~20 日窗口自动筛选 + 峰值前回撤计算）
+- Web UI：`dragon-quant review --ui` / `--ui-only` 查看回测结果与汇总统计
 - dragons 表 `version` 字段，记录入库时的 dragon_quant 版本号
 - 版本号集中管理 `_version.py`，发布脚本自动同步
 - 加密发布流程（`encrypt_token.sh` + `publish_token.enc` + `--passwd` 解密）
-- 全量 154 个单元测试覆盖 14 个模块
+- 全量 159 个单元测试覆盖核心模块
 
 ### ⚠️ 待完成（按优先级）
 
 1. **单票分析 CLI** — `dragon-quant analyze <code>` 子命令
    - `analyze.py` 作为子进程入口已实现骨架，但缺少 `sector_name_map` 等元数据注入
 
-2. **东财 push2his CDN** — 历史 K 线接口仍有个别 CDN 节点（如 `14.103.188.89`）返回空响应
-   - 不影响主流程，评分数据可以从好节点获取
-   - 可用 DNS 轮询策略覆盖 push2his 域名
-   - `browser.py` Playwright 兜底已拆掉，不再需要
+2. **东财历史 K 线稳定性观察**
+   - 历史 K 线链路仍需持续观察东财 CDN 节点稳定性
+   - 当前已通过 TLSv1.2 + `curl` + DNS 多 IP 轮询显著降低空响应概率
 
 ### 📝 已知修复（2026-05）
 - `leadership.py` `_normal_cdf_approx` 正负号反了，已修正
@@ -221,10 +225,10 @@ python -m dragon_quant review --date 20260519 --top 5
 python -m dragon_quant review --force --date 20260519
 ```
 
-回测逻辑：从 dragons 表读取 pending 龙头 → 自动过滤入选日距今 >5 且 <20 交易日 → 拉取日K → 找入选后第一个非一字板日（high!=low）以最低价买入 → 计算买入后 5 日内最大收益/回撤 → 写入 DB。每条 dragon 记录入库时的 dragon_quant 版本号写入 `version` 字段，方便按版本分组回溯策略效果。
+回测逻辑：从 dragons 表读取 pending 龙头 → 自动过滤入选日距今约 5~20 个交易日 → 拉取日K → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 按收益观察窗口计算 `max_return_5d` 与 `max_return_hold_days` → 再按“买入日至最大收益出现日”窗口计算 `max_drawdown_5d` → 写入 DB。每条 dragon 记录入库时的 `dragon_quant` 版本号写入 `version` 字段，方便按版本分组回溯策略效果。
 
 ### 必须遵守的约束
-- **运行时依赖**：`playwright` 为必选依赖，用于东财接口浏览器兜底通道 + Cookie 自动获取；其余模块仅使用 Python 3 标准库。`pyproject.toml` 中声明 `playwright` 为 dependency。
+- **运行时依赖**：`playwright` 为必选依赖，用于 Cookie 自动获取与浏览器侧辅助能力；其余模块仅使用 Python 3 标准库。`pyproject.toml` 中声明 `playwright` 为 dependency。
 - **Playwright 安装**：`pip install playwright && playwright install chromium`
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 环境变量覆盖，默认按平台存（macOS → `~/Library/Application Support/dragon-quant`，Linux → `~/.local/share/dragon-quant`，Win → `%APPDATA%/dragon-quant`）
 - **线程安全**：DataCache 的操作持有 `threading.Lock`

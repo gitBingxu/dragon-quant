@@ -651,7 +651,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 if last_info:
                     last_date, old_rank = last_info
                     if trade_days_between(last_date, scan_date_fmt, calendar) < 5:
-                        # 新 rank 更好（数字更小）→ 更新；否则跳过
+                        # 新 rank 更好（数字更小）→ 覆写所有字段；否则跳过
                         if old_rank is not None and new_rank < old_rank:
                             updated_count += 1
                             # 继续处理，让 save_dragons 的 INSERT OR REPLACE 更新记录

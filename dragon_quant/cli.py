@@ -193,12 +193,28 @@ def _cmd_review(args):
         else:
             date_str = d
 
+    # --ui-only: 只启动 UI
+    if args.ui_only:
+        _cmd_review_ui(args)
+        return
+
+    # 正常回测
     run_review(
         trade_date=date_str,
         top_n=args.top,
         force=args.force,
         verbose=True,
     )
+
+    # --ui: 回测后启动 UI
+    if args.ui:
+        _cmd_review_ui(args)
+
+
+def _cmd_review_ui(args):
+    """启动 Web UI 服务器"""
+    from web_ui.server import start_server
+    start_server(port=args.port, open_browser=not args.no_browser)
 
 
 def _cmd_storage(args):
@@ -343,6 +359,10 @@ def main():
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
     rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
     rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
+    rev_p.add_argument("--ui", action="store_true", help="回测后启动 Web UI")
+    rev_p.add_argument("--ui-only", action="store_true", help="仅启动 Web UI（不执行回测）")
+    rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
+    rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     # storage 子命令
     st_p = sub.add_parser("storage", help="持久化数据管理")

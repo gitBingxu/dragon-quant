@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dragon Quant — 龙头回测面板</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d3a;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --gold: #d2991d;
+    --accent: #1f6feb;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    padding: 24px 32px; min-height: 100vh;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+  h1 .icon { font-size: 26px; }
+
+  /* 汇总卡片 */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .summary .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; text-align: center;
+  }
+  .summary .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .summary .card .value { font-size: 26px; font-weight: 700; }
+  .summary .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .value.up { color: var(--green); }
+  .value.down { color: var(--red); }
+  .value.muted { color: var(--muted); }
+
+  /* 筛选栏 */
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
+    padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    align-items: center;
+  }
+  .toolbar input, .toolbar select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none;
+  }
+  .toolbar input:focus, .toolbar select:focus { border-color: var(--accent); }
+  .toolbar input { width: 110px; }
+  .toolbar input.wide { width: 80px; }
+  .toolbar label { font-size: 12px; color: var(--muted); margin-right: -4px; }
+  .toolbar button {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 7px 16px; font-size: 13px; cursor: pointer; transition: opacity .15s;
+  }
+  .toolbar button:hover { opacity: 0.85; }
+  .toolbar .count { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .toolbar .count strong { color: var(--text); }
+
+  /* 表格 */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+  thead { background: #1e2130; }
+  th {
+    padding: 10px 12px; text-align: left; font-weight: 600; color: var(--muted);
+    cursor: pointer; user-select: none; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: #1e2130; z-index: 1;
+  }
+  th:hover { color: var(--text); }
+  th.sorted { color: var(--blue); }
+  th .arrow { margin-left: 2px; font-size: 11px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e2130; }
+  tr:hover td { background: #1e2130; }
+  .score { font-weight: 600; }
+  .ret-up { color: var(--green); }
+  .ret-down { color: var(--red); }
+  .tag {
+    display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 500;
+  }
+  .tag-ok { background: #1a3a2a; color: var(--green); }
+  .tag-pend { background: #3a2a0a; color: var(--gold); }
+  .tag-err { background: #3a1a2a; color: var(--red); }
+  .tag-none { background: #222; color: var(--muted); }
+
+  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: 14px; }
+
+  /* 分页 */
+  .pager {
+    display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+    padding: 14px; font-size: 13px; color: var(--muted);
+  }
+  .pager select {
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; font-size: 13px; outline: none;
+  }
+  .pager button {
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 13px;
+  }
+  .pager button:disabled { opacity: 0.3; cursor: default; }
+  .pager button:hover:not(:disabled) { border-color: var(--accent); }
+  .pager .total { margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<h1><span class="icon">🐉</span> 龙头回测面板</h1>
+
+<!-- 汇总卡片 -->
+<div class="summary" id="summary"></div>
+
+<!-- 筛选栏 -->
+<div class="toolbar">
+  <input type="text" id="f-code" placeholder="代码" class="wide">
+  <input type="text" id="f-name" placeholder="名称">
+  <input type="text" id="f-date-from" placeholder="入选从" class="wide" title="入选日期起 (YYYY-MM-DD)">
+  <span style="color:var(--muted)">→</span>
+  <input type="text" id="f-date-to" placeholder="入选至" class="wide" title="入选日期止 (YYYY-MM-DD)">
+  <input type="text" id="f-score-min" placeholder="分≥" class="wide" title="综合分下限">
+  <input type="text" id="f-score-max" placeholder="分≤" class="wide" title="综合分上限">
+  <input type="text" id="f-ret-min" placeholder="收益≥%" class="wide" title="最大收益率下限">
+  <input type="text" id="f-ret-max" placeholder="收益≤%" class="wide" title="最大收益率上限">
+  <input type="text" id="f-dd-min" placeholder="回撤≥%" class="wide" title="最大回撤率下限">
+  <input type="text" id="f-dd-max" placeholder="回撤≤%" class="wide" title="最大回撤率上限">
+  <select id="f-status">
+    <option value="completed" selected>已完成</option>
+    <option value="">全部状态</option>
+    <option value="pending">待回测</option>
+    <option value="no_entry">无介入日</option>
+    <option value="error">错误</option>
+  </select>
+  <select id="f-sort">
+    <option value="composite_score">综合分</option>
+    <option value="max_return_5d">最大收益</option>
+    <option value="max_drawdown_5d">最大回撤</option>
+    <option value="trade_date">入选日期</option>
+    <option value="code">代码</option>
+    <option value="buy_date">买入日</option>
+    <option value="pct">涨停涨幅</option>
+    <option value="board_count">连板数</option>
+  </select>
+  <select id="f-sort-dir">
+    <option value="desc">降序</option>
+    <option value="asc">升序</option>
+  </select>
+  <button onclick="applyFilters()">🔍 查询</button>
+  <span class="count">共 <strong id="row-count">0</strong> 条</span>
+</div>
+
+<!-- 表格 -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th data-sort="code">代码</th>
+        <th data-sort="name">名称</th>
+        <th data-sort="trade_date">入选日</th>
+        <th data-sort="rank">排名</th>
+        <th data-sort="composite_score">综合分</th>
+        <th data-sort="board_count">连板</th>
+        <th data-sort="pct">涨停%</th>
+        <th>概念</th>
+        <th data-sort="buy_date">买入日</th>
+        <th data-sort="buy_price">买入价</th>
+        <th data-sort="max_return_5d">最大收益%</th>
+        <th data-sort="max_drawdown_5d">最大回撤%</th>
+        <th data-sort="max_return_hold_days">持有天</th>
+        <th data-sort="review_status">状态</th>
+      </tr>
+    </thead>
+    <tbody id="table-body">
+      <tr><td colspan="14" class="empty">加载中…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="pager" id="pager"></div>
+
+<script>
+// ============ 全局状态 ============
+let pageSize = 25;
+let allData = [];
+let currentPage = 1;
+let currentSort = { by: 'composite_score', dir: 'desc' };
+
+// ============ 页面初始化 ============
+document.addEventListener('DOMContentLoaded', () => {
+  loadSummary();
+  loadData();
+
+  // 表头点击排序
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (currentSort.by === col) {
+        currentSort.dir = currentSort.dir === 'desc' ? 'asc' : 'desc';
+      } else {
+        currentSort.by = col;
+        currentSort.dir = 'desc';
+      }
+      document.getElementById('f-sort').value = col;
+      document.getElementById('f-sort-dir').value = currentSort.dir;
+      sortAndRender();
+    });
+  });
+
+  // 回车触发查询
+  document.querySelectorAll('.toolbar input').forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') applyFilters(); });
+    el.addEventListener('input', debounce(applyFilters, 300));
+  });
+  ['f-sort', 'f-sort-dir', 'f-status'].forEach(id => {
+    document.getElementById(id).addEventListener('change', applyFilters);
+  });
+
+  function debounce(fn, ms) {
+    let timer;
+    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+  }
+});
+
+// ============ API 调用 ============
+async function loadSummary() {
+  try {
+    const res = await fetch('/api/summary');
+    const s = await res.json();
+    document.getElementById('summary').innerHTML = `
+      <div class="card">
+        <div class="label">总记录</div>
+        <div class="value muted">${s.total ?? 0}</div>
+      </div>
+      <div class="card">
+        <div class="label">已完成</div>
+        <div class="value">${s.completed ?? 0}</div>
+      </div>
+      <div class="card">
+        <div class="label">待回测</div>
+        <div class="value">${s.pending ?? 0}</div>
+      </div>
+      <div class="card">
+        <div class="label">平均收益</div>
+        <div class="value ${s.avg_return > 0 ? 'up' : s.avg_return < 0 ? 'down' : 'muted'}">${fmtPct(s.avg_return)}</div>
+      </div>
+      <div class="card">
+        <div class="label">胜率</div>
+        <div class="value up">${s.win_rate != null ? s.win_rate.toFixed(1) + '%' : '—'}</div>
+        <div class="sub">收益>0 比例</div>
+      </div>
+      <div class="card">
+        <div class="label">最佳</div>
+        <div class="value up">${s.best_stock_name || '—'}</div>
+        <div class="sub">${s.best_stock_code || ''} ${s.best_return != null ? fmtPct(s.best_return) : ''}</div>
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById('summary').innerHTML = '';
+  }
+}
+
+async function loadData() {
+  document.getElementById('table-body').innerHTML = '<tr><td colspan="14" class="empty">加载中…</td></tr>';
+  applyFilters();
+}
+
+function applyFilters() {
+  const params = new URLSearchParams();
+
+  const code = document.getElementById('f-code').value.trim();
+  if (code) params.set('code', code);
+  const name = document.getElementById('f-name').value.trim();
+  if (name) params.set('name', name);
+  const df = document.getElementById('f-date-from').value.trim();
+  if (df) params.set('date_from', df);
+  const dt = document.getElementById('f-date-to').value.trim();
+  if (dt) params.set('date_to', dt);
+  const smin = document.getElementById('f-score-min').value.trim();
+  if (smin) params.set('score_min', smin);
+  const smax = document.getElementById('f-score-max').value.trim();
+  if (smax) params.set('score_max', smax);
+  const rmin = document.getElementById('f-ret-min').value.trim();
+  if (rmin) params.set('return_min', rmin);
+  const rmax = document.getElementById('f-ret-max').value.trim();
+  if (rmax) params.set('return_max', rmax);
+  const dmin = document.getElementById('f-dd-min').value.trim();
+  if (dmin) params.set('drawdown_min', dmin);
+  const dmax = document.getElementById('f-dd-max').value.trim();
+  if (dmax) params.set('drawdown_max', dmax);
+  const st = document.getElementById('f-status').value;
+  if (st) params.set('status', st);
+
+  const sortBy = document.getElementById('f-sort').value;
+  const sortDir = document.getElementById('f-sort-dir').value;
+  currentSort = { by: sortBy, dir: sortDir };
+
+  params.set('sort_by', sortBy);
+  params.set('sort_dir', sortDir);
+
+  fetch('/api/dragons?' + params.toString())
+    .then(r => r.json())
+    .then(resp => {
+      allData = resp.data || [];
+      currentPage = 1;
+      renderTable();
+    })
+    .catch(e => {
+      document.getElementById('table-body').innerHTML = `<tr><td colspan="14" class="empty">加载失败: ${e}</td></tr>`;
+    });
+}
+
+function sortAndRender() {
+  // 客户端排序
+  const by = currentSort.by;
+  const dir = currentSort.dir;
+  allData.sort((a, b) => {
+    let va = a[by], vb = b[by];
+    if (va == null) va = -Infinity;
+    if (vb == null) vb = -Infinity;
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va < vb) return dir === 'asc' ? -1 : 1;
+    if (va > vb) return dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+  currentPage = 1;
+  renderTable();
+}
+
+// ============ 渲染 ============
+function renderTable() {
+  const start = (currentPage - 1) * pageSize;
+  const page = allData.slice(start, start + pageSize);
+
+  document.getElementById('row-count').textContent = allData.length;
+
+  const tbody = document.getElementById('table-body');
+  if (page.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="14" class="empty">暂无数据</td></tr>';
+    document.getElementById('pager').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = page.map(r => `
+    <tr>
+      <td>${esc(r.code)}</td>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.trade_date)}</td>
+      <td>${r.rank ?? '—'}</td>
+      <td class="score">${r.composite_score?.toFixed(1) ?? '—'}</td>
+      <td>${r.board_count ?? '—'}</td>
+      <td>${r.pct != null ? r.pct.toFixed(2) + '%' : '—'}</td>
+      <td>${esc((r.concepts || []).slice(0, 3).join(' · '))}</td>
+      <td>${esc(r.buy_date) || '—'}</td>
+      <td>${r.buy_price != null ? r.buy_price.toFixed(2) : '—'}</td>
+      <td class="${r.max_return_5d > 0 ? 'ret-up' : r.max_return_5d < 0 ? 'ret-down' : ''}">${fmtPct(r.max_return_5d)}</td>
+      <td class="${r.max_drawdown_5d > 0 ? 'ret-up' : r.max_drawdown_5d < 0 ? 'ret-down' : ''}">${fmtPct(r.max_drawdown_5d)}</td>
+      <td>${r.max_return_hold_days ?? '—'}</td>
+      <td>${statusTag(r.review_status)}</td>
+    </tr>
+  `).join('');
+
+  // 分页
+  const totalPages = Math.ceil(allData.length / pageSize) || 1;
+  document.getElementById('pager').innerHTML = `
+    <span class="total">共 <strong>${allData.length}</strong> 条</span>
+    <select onchange="changePageSize(this.value)">
+      <option value="10" ${pageSize === 10 ? 'selected' : ''}>10 条/页</option>
+      <option value="25" ${pageSize === 25 ? 'selected' : ''}>25 条/页</option>
+      <option value="50" ${pageSize === 50 ? 'selected' : ''}>50 条/页</option>
+      <option value="100" ${pageSize === 100 ? 'selected' : ''}>100 条/页</option>
+    </select>
+    <button onclick="goPage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>上一页</button>
+    <span>第 ${currentPage} / ${totalPages} 页</span>
+    <button onclick="goPage(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>下一页</button>
+  `;
+
+  // 表头排序标记
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.classList.toggle('sorted', th.dataset.sort === currentSort.by);
+    const arrow = th.querySelector('.arrow');
+    if (th.dataset.sort === currentSort.by) {
+      if (!arrow) th.innerHTML += `<span class="arrow">${currentSort.dir === 'asc' ? '▲' : '▼'}</span>`;
+    } else {
+      if (arrow) arrow.remove();
+    }
+  });
+}
+
+function changePageSize(n) {
+  pageSize = parseInt(n) || 25;
+  currentPage = 1;
+  renderTable();
+}
+
+function goPage(n) {
+  const total = Math.ceil(allData.length / pageSize);
+  if (n < 1 || n > total) return;
+  currentPage = n;
+  renderTable();
+  window.scrollTo(0, 280);
+}
+
+// ============ 工具函数 ============
+function esc(s) { return s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function fmtPct(v) { return v != null ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '—'; }
+function statusTag(s) {
+  switch (s) {
+    case 'completed': return '<span class="tag tag-ok">已完成</span>';
+    case 'pending': return '<span class="tag tag-pend">待回测</span>';
+    case 'no_entry': return '<span class="tag tag-none">无介入</span>';
+    case 'error': return '<span class="tag tag-err">错误</span>';
+    default: return esc(s);
+  }
+}
+</script>
+</body>
+</html>

@@ -7,7 +7,7 @@ include = ["dragon_quant", "dragon_quant.*", "web_ui", "web_ui.*"]
 
 [project]
 name = "dragon-quant"
-version = "0.1.11"
+version = "0.2.0"
 description = "龙头战法四维量化筛选系统 — A股涨停板龙头识别工具"
 readme = "README.md"
 license = "MIT"

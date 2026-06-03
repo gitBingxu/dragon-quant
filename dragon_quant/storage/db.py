@@ -598,7 +598,10 @@ def get_review_summary() -> dict:
         ).fetchone()
 
         win_row = conn.execute(
-            "SELECT COUNT(*) FROM dragons WHERE review_status = 'completed' AND max_return_5d > 0"
+            "SELECT COUNT(*) FROM dragons "
+            "WHERE review_status = 'completed' "
+            "AND max_return_5d > 0 "
+            "AND max_drawdown_5d > -5.0"
         ).fetchone()
 
         best = conn.execute(

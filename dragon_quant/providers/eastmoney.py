@@ -244,11 +244,12 @@ class EastMoneyProvider(StockProvider):
             "pn": "1", "pz": "500",
             "po": "0" if asc else "1",  # 0=跌幅榜 1=涨幅榜
             "ut": _get_ut_token(),
-            "dect": "1", "wbp2u": "|0|0|0|web",
+            "dect": "1", "timil": "1", "wbp2u": "|0|0|0|web",
             "cb": "jQuery_dq",
+            "_": str(int(time.time() * 1000)),
         }
         qs = urllib.parse.urlencode(params)
-        url = f"{BASE}/api/qt/clist/get?{qs}"
+        url = f"{BASE}/webguest/api/qt/clist/get?{qs}"
         data = _fetch(url, REFERERS["ranking"],
                       logger=self._logger, endpoint="sector_ranking")
         if not data:
@@ -284,6 +285,7 @@ class EastMoneyProvider(StockProvider):
             "ut": _get_ut_token(),
             "wbp2u": "|0|0|0|web",
             "cb": "jQuery_dq",
+            "_": str(int(time.time() * 1000)),
         }
         qs = urllib.parse.urlencode(params)
         url = f"{BASE}/api/qt/clist/get?{qs}"
@@ -322,6 +324,8 @@ class EastMoneyProvider(StockProvider):
             "lmt": str(bars),
             "beg": "0",
             "end": "20500101",
+            "smplmt": "460",
+            "_": str(int(time.time() * 1000)),
         }
         qs = urllib.parse.urlencode(params)
         url = f"{BASE_HIS}/api/qt/stock/kline/get?{qs}"

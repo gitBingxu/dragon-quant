@@ -1,8 +1,12 @@
 """
-RateLimiter — 按 (provider, endpoint) 分组的并发调度器
+RateLimiter — 按 provider 分组的并发调度器
 
-核心规则：同一 provider + 同一 endpoint 的任务排队串行，
-          不同 key 的任务自由并发。
+核心规则：同一 provider 的任务排队串行，
+          不同 provider 的任务自由并发。
+
+设计意图：不同 provider 打的是不同公司 / CDN 服务器，
+        并发互不影响；同一 provider 打到同一 CDN 基础设施，
+        必须串行防止触发反爬 / WAF 限流。
 """
 
 import queue
@@ -26,7 +30,8 @@ class _SerialQueue:
 
     def submit(self, fn: Callable, *args, **kwargs) -> Future:
         future: Future = Future()
-        self._queue.put((fn, args, kwargs, future))
+        ep = kwargs.pop("_endpoint", "")
+        self._queue.put((fn, args, kwargs, future, ep))
         self._maybe_consume()
         return future
 
@@ -42,7 +47,7 @@ class _SerialQueue:
     def _consume_loop(self):
         while True:
             try:
-                fn, args, kwargs, future = self._queue.get_nowait()
+                fn, args, kwargs, future, endpoint = self._queue.get_nowait()
             except queue.Empty:
                 with self._lock:
                     self._running = False
@@ -77,7 +82,7 @@ class RateLimiter:
         self._delay = delay
 
     def _key(self, provider: str, endpoint: str) -> str:
-        return f"{provider}:{endpoint}"
+        return provider
 
     def submit(self, provider: str, endpoint: str, fn: Callable, *args, **kwargs) -> Future:
         """提交一个带分组的任务"""
@@ -86,7 +91,7 @@ class RateLimiter:
             if k not in self._queues:
                 self._queues[k] = _SerialQueue(self._executor, key=k, logger=self._logger, delay=self._delay)
             q = self._queues[k]
-        future = q.submit(fn, *args, **kwargs)
+        future = q.submit(fn, *args, _endpoint=endpoint, **kwargs)
         self._futures.append(future)
         return future
 

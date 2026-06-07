@@ -11,10 +11,8 @@ fix-api — 从目标网站自动捕获 API 请求配置
 
 import json
 import re
-import sys
 import time
 import urllib.parse
-from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 from dragon_quant.config.api_config import (
@@ -23,7 +21,7 @@ from dragon_quant.config.api_config import (
     hardcoded_templates,
     save_single_template,
 )
-from dragon_quant.providers.cookie import get_em
+from dragon_quant.providers.cookie import get_em, set_em
 from dragon_quant.providers.eastmoney import _parse_jsonp, _fetch as em_fetch
 
 DYNAMIC_PARAMS = {
@@ -131,29 +129,6 @@ def _extract_template(url_str: str, request_headers: dict, referer: str) -> Requ
     )
 
 
-def _browser_fetch_parse(page, url_str: str, referer: str) -> Optional[dict]:
-    api = page.context.request
-    try:
-        resp = api.fetch(
-            url_str,
-            headers={
-                "Referer": referer,
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/148.0.0.0 Safari/537.36"
-                ),
-                "Accept": "*/*",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            },
-        )
-        if resp.ok:
-            return _parse_jsonp(resp.text())
-    except Exception:
-        pass
-    return None
-
-
 def _inject_cookies(context, provider: str):
     if provider == "eastmoney":
         cookie_str = get_em()
@@ -211,24 +186,104 @@ def _capture_endpoints(provider: str, headless: bool = True) -> dict[str, Reques
             pw.stop()
             return {}
 
+        def _test_api(page) -> bool:
+            try:
+                return page.evaluate("""() => {
+                    return new Promise((resolve) => {
+                        const ctrl = new AbortController();
+                        const tid = setTimeout(() => { ctrl.abort(); resolve(false); }, 3000);
+                        fetch('https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=5&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14', { signal: ctrl.signal })
+                        .then(r => r.text())
+                        .then(t => { clearTimeout(tid); resolve(t.includes('"data":')); })
+                        .catch(() => { clearTimeout(tid); resolve(false); });
+                    });
+                }""")
+            except Exception:
+                return False
+
+        probe_page = context.new_page()
+        probe_page.goto("https://quote.eastmoney.com/center/hsbk.html",
+                        wait_until="domcontentloaded", timeout=15000)
+        probe_page.wait_for_timeout(2000)
+
+        if not _test_api(probe_page):
+            print("\n  🔐 检测到验证码，正在打开浏览器窗口...")
+            print("     请在浏览器中完成滑动验证/图片验证。")
+            print("     验证通过后程序将自动继续...\n")
+            context.close()
+            browser.close()
+
+            browser = pw.chromium.launch(headless=False)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/148.0.0.0 Safari/537.36"
+                ),
+                locale="zh-CN",
+                timezone_id="Asia/Shanghai",
+            )
+            _inject_cookies(context, provider)
+            page = context.new_page()
+            page.goto("https://quote.eastmoney.com/center/hsbk.html",
+                      wait_until="domcontentloaded", timeout=15000)
+
+            start_time = time.time()
+            while time.time() - start_time < 60:
+                if _test_api(page):
+                    break
+                time.sleep(1)
+
+            raw = context.cookies()
+            if raw:
+                cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in raw)
+                if cookie_str:
+                    set_em(cookie_str)
+
+            page.close()
+            context.close()
+            browser.close()
+
+            browser = pw.chromium.launch(headless=headless)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/148.0.0.0 Safari/537.36"
+                ),
+                locale="zh-CN",
+                timezone_id="Asia/Shanghai",
+            )
+            _inject_cookies(context, provider)
+
+        probe_page.close()
+
         for page_cfg in pages_config:
             page_url = page_cfg["url"]
             endpoints = page_cfg["endpoints"]
             print(f"\n  📄 访问 {page_url}")
 
             page = context.new_page()
-
-            captured_requests: list[tuple[str, dict, str]] = []
-            # referer for this page's requests
             page_referer = page_url
 
-            def _on_request(request):
-                captured_requests.append((request.url, request.headers, page_referer))
+            captured_responses: list[tuple[str, dict, str, str]] = []
 
-            page.on("request", _on_request)
+            def _on_response(response):
+                try:
+                    body = response.text()
+                    captured_responses.append((
+                        response.url,
+                        response.request.headers,
+                        page_referer,
+                        body,
+                    ))
+                except Exception:
+                    pass
+
+            page.on("response", _on_response)
 
             try:
-                page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
+                page.goto(page_url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
             except Exception as e:
                 print(f"     ⚠️ 页面加载异常: {e}")
@@ -242,7 +297,8 @@ def _capture_endpoints(provider: str, headless: bool = True) -> dict[str, Reques
                 response_check = ep_cfg["response_check"]
 
                 candidates = [
-                    (url, hdrs, ref) for url, hdrs, ref in captured_requests
+                    (url, hdrs, ref, body)
+                    for url, hdrs, ref, body in captured_responses
                     if host in url and path_contains in url
                 ]
 
@@ -251,8 +307,8 @@ def _capture_endpoints(provider: str, headless: bool = True) -> dict[str, Reques
                     continue
 
                 found = False
-                for url_str, req_headers, ref in candidates:
-                    data = _browser_fetch_parse(page, url_str, ref)
+                for url_str, req_headers, ref, body in candidates:
+                    data = _parse_jsonp(body)
                     if data and response_check(data):
                         tpl = _extract_template(url_str, req_headers, ref)
                         all_templates[ep_name] = tpl
@@ -262,8 +318,14 @@ def _capture_endpoints(provider: str, headless: bool = True) -> dict[str, Reques
 
                 if not found:
                     print(f"     ❌ {ep_name}: 找到 {len(candidates)} 个候选请求但响应不匹配")
-                    for url_str, _, _ in candidates[:3]:
-                        print(f"        ↳ {url_str[:100]}...")
+                    for url_str, _, _, body in candidates[:3]:
+                        data = _parse_jsonp(body)
+                        if data is None:
+                            print(f"        ↳ {url_str[:90]}... [非 JSONP]")
+                        else:
+                            top_keys = list(data.keys())
+                            data_info = list(data.get("data", {}).keys()) if isinstance(data.get("data"), dict) else type(data.get("data")).__name__
+                            print(f"        ↳ {url_str[:90]}... [keys={top_keys}, data={data_info}]")
 
         context.close()
         browser.close()

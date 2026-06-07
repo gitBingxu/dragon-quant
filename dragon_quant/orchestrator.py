@@ -40,6 +40,10 @@ STATISTICAL_CONCEPT_PREFIXES = (
 
 FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
 
+# 资金承接（跨板块虹吸）相关：领跌板块数量与板块5分K长度
+DOWN_SECTOR_COUNT = 30
+SECTOR_5MIN_BARS = 300  # 约覆盖 5 个交易日（48根/日），留冗余
+
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
     """过滤：非ST、非双创(30/68)、非北交所(8/92)"""
@@ -331,11 +335,11 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     top10_up = [s for s in em.get_sector_ranking(asc=False)
                 if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
     top10_down = [s for s in em.get_sector_ranking(asc=True)
-                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
+                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:DOWN_SECTOR_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     if verbose:
         print(f"   前10涨: {len(top10_up)} 个板块")
-        print(f"   前10跌: {len(top10_down)} 个板块")
+        print(f"   前{DOWN_SECTOR_COUNT}跌: {len(top10_down)} 个板块")
 
     if not top10_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
@@ -355,7 +359,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     em.get_sector_components(sc, page=1))))
+                                     em.get_sector_components(sc, all_pages=True))))
     limiter.wait_all()
 
     for s in top10_up:
@@ -399,12 +403,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     concepts=[s.name], primary_sector=s.code,
                 )
 
-    # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
+    # 提交领跌板块成分股请求（资金承接用，过 RateLimiter 防封）
     for s in top10_down:
         limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     em.get_sector_components(sc, page=1))))
+                                     em.get_sector_components(sc, all_pages=True))))
     limiter.wait_all()
 
     for s in top10_down:
@@ -457,13 +461,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("⏳ Phase D — 并发加载")
 
-    # T1: 板块5分K（20个板块）
+    # T1: 板块5分K（领涨10 + 领跌N）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
         limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"kline:5min:sector:{sc}",
-                                     em.get_sector_5min_kline(sc))))
+                                     em.get_sector_5min_kline(sc, bars=SECTOR_5MIN_BARS))))
 
     # T2: 候选股分时K线（只拉 top_n 只）
     for r in ranking:

@@ -87,21 +87,31 @@ class ReportBuilder:
         voice_raw = bd.get("voice_raw", {})
         if voice_raw:
             total = voice_raw.get("total", 0)
+            scoring_total = voice_raw.get("scoring_total", total)
+            sample_limit = voice_raw.get("sample_limit", scoring_total)
             lu = voice_raw.get("limit_up", 0)
-            if lu / max(total, 1) >= 0.10:
+            denom = max(scoring_total, 1)
+            if lu / denom >= 0.10:
                 level = "极强"
-            elif lu / max(total, 1) >= 0.05:
+            elif lu / denom >= 0.05:
                 level = "较强"
             elif lu > 0:
                 level = "一般"
             else:
                 level = "无"
-            lines.append(f"    - 板块共鸣({voice:.0f})：{sector_label}板块共 {total} 只票，共 {lu} 只票涨停，板块共鸣度{level}；")
+            if scoring_total < total:
+                lines.append(
+                    f"    - 板块共鸣({voice:.0f})：{sector_label}板块全量共 {total} 只票，带动性评分按涨跌幅居前 {scoring_total} 只样本（上限 {sample_limit}）计算，其中 {lu} 只票涨停，板块共鸣度{level}；"
+                )
+            else:
+                lines.append(f"    - 板块共鸣({voice:.0f})：{sector_label}板块共 {total} 只票，共 {lu} 只票涨停，板块共鸣度{level}；")
 
         # ─ 小弟跟风详情
         follow_raw = bd.get("follow_raw", {})
         if follow_raw:
             total = follow_raw.get("total", 0)
+            scoring_total = follow_raw.get("scoring_total", total)
+            sample_limit = follow_raw.get("sample_limit", scoring_total)
             strong = follow_raw.get("strong", 0)
             down = follow_raw.get("down", 0)
             if follow >= 80:
@@ -112,7 +122,12 @@ class ReportBuilder:
                 level = "一般"
             else:
                 level = "弱"
-            lines.append(f"    - 小弟跟风({follow:.0f})：{sector_label}板块共 {total} 只票，其中 {strong} 只涨幅超过 3%，{down} 只股票下跌，跟风属性{level}；")
+            if scoring_total < total:
+                lines.append(
+                    f"    - 小弟跟风({follow:.0f})：{sector_label}板块全量共 {total} 只票，跟风评分按涨跌幅居前 {scoring_total} 只样本（上限 {sample_limit}）计算，其中 {strong} 只涨幅超过 3%，{down} 只股票下跌，跟风属性{level}；"
+                )
+            else:
+                lines.append(f"    - 小弟跟风({follow:.0f})：{sector_label}板块共 {total} 只票，其中 {strong} 只涨幅超过 3%，{down} 只股票下跌，跟风属性{level}；")
 
         # ─ 封板力度详情
         seal_rank = board_det.get("seal_rank", "?")

@@ -228,6 +228,8 @@ def _parse_kline_items(raw_items: list[str]) -> list[KBar]:
 
 class EastMoneyProvider(StockProvider):
 
+    COMPONENTS_PAGE_SIZE = 50
+
     @property
     def name(self) -> str:
         return "eastmoney"
@@ -271,14 +273,15 @@ class EastMoneyProvider(StockProvider):
 
     # ─── 板块成分股 ───
 
-    def get_sector_components(self, sector_code: str, page: int = 1) -> list[StockInfo]:
-        """板块成分股，按涨跌幅降序"""
+    def _get_sector_components_page(self, sector_code: str, page: int = 1,
+                                    page_size: int = COMPONENTS_PAGE_SIZE) -> list[StockInfo]:
+        """获取单页板块成分股，按涨跌幅降序。"""
         params = {
             "np": "1", "fltt": "1", "invt": "2",
             "fs": f"b:{sector_code}+f:!",
             "fields": "f12,f14,f3,f2,f4,f8",
             "fid": "f3",
-            "pn": str(page), "pz": "50",
+            "pn": str(page), "pz": str(page_size),
             "po": "1",
             "dect": "1",
             "ut": _get_ut_token(),
@@ -306,6 +309,36 @@ class EastMoneyProvider(StockProvider):
                 price=_safe_float(d.get("f2", 0)),
             ))
         return result
+
+    def get_sector_components(self, sector_code: str, page: int = 1,
+                              all_pages: bool = False,
+                              page_size: int = COMPONENTS_PAGE_SIZE) -> list[StockInfo]:
+        """板块成分股，按涨跌幅降序。支持单页与全量分页聚合。"""
+        if not all_pages:
+            return self._get_sector_components_page(sector_code, page=page, page_size=page_size)
+
+        all_items: list[StockInfo] = []
+        seen_codes: set[str] = set()
+        current_page = max(page, 1)
+        max_pages = 20
+
+        for _ in range(max_pages):
+            page_items = self._get_sector_components_page(
+                sector_code, page=current_page, page_size=page_size
+            )
+            if not page_items:
+                break
+
+            for item in page_items:
+                if item.code and item.code not in seen_codes:
+                    seen_codes.add(item.code)
+                    all_items.append(item)
+
+            if len(page_items) < page_size:
+                break
+            current_page += 1
+
+        return all_items
 
     # ─── 板块 5 分钟 K 线 ───
 

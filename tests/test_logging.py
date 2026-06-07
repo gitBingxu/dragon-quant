@@ -146,6 +146,30 @@ class TestReportBuilder(unittest.TestCase):
         self.assertIn("600519", report)
         self.assertIn("85.0", report)
 
+    def test_build_stock_report_drive_mentions_total_and_scoring_sample(self):
+        report = self.reporter.build_stock_report(
+            code="600519", name="贵州茅台",
+            composite_score=85.0,
+            dimensions={
+                "drive": {
+                    "score": 88.0,
+                    "details": {
+                        "best_day_detail": {
+                            "voice": 90.0,
+                            "follow": 80.0,
+                            "board_leadership": 70.0,
+                            "voice_raw": {"total": 286, "scoring_total": 50, "sample_limit": 50, "limit_up": 6},
+                            "follow_raw": {"total": 286, "scoring_total": 50, "sample_limit": 50, "strong": 12, "down": 3},
+                            "board_detail": {"board_time": None, "is_yiziban": False, "sector_limit_up_total": 6},
+                        }
+                    },
+                }
+            },
+            primary_sector_name="白酒"
+        )
+        self.assertIn("全量共 286 只票", report)
+        self.assertIn("居前 50 只样本", report)
+
 
 if __name__ == "__main__":
     unittest.main()

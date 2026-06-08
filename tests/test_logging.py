@@ -170,6 +170,52 @@ class TestReportBuilder(unittest.TestCase):
         self.assertIn("全量共 286 只票", report)
         self.assertIn("居前 50 只样本", report)
 
+    def test_build_stock_report_absorption_fallback_reason(self):
+        report = self.reporter.build_stock_report(
+            code="600519", name="贵州茅台",
+            composite_score=60.0,
+            dimensions={
+                "absorption": {
+                    "score": 50.0,
+                    "details": {"fallback_reason": "目标板块5分K不足"},
+                }
+            },
+            primary_sector_name="白酒",
+        )
+        self.assertIn("资金承接", report)
+        self.assertIn("目标板块5分K不足", report)
+
+    def test_build_stock_report_absorption_single_sector_no_etc(self):
+        report = self.reporter.build_stock_report(
+            code="600519", name="贵州茅台",
+            composite_score=60.0,
+            dimensions={
+                "absorption": {
+                    "score": 50.0,
+                    "details": {
+                        "event_count": 1,
+                        "all_events": [
+                            {
+                                "dive_time": "5月8日 13:00",
+                                "rally_time": "5月8日 13:10",
+                                "time_diff_min": 10,
+                                "target_pct": 0.4,
+                                "fleeing_sectors": [{"name": "白酒"}],
+                            }
+                        ],
+                    },
+                }
+            },
+            primary_sector_name="锂矿概念",
+        )
+        # fewshot 对齐：单板块时不出现“等板块”
+        self.assertNotIn("等板块", report)
+        self.assertIn("白酒板块跳水", report)
+        # 0.4% 仍视为“小幅拉伸”
+        self.assertIn("小幅拉伸", report)
+        # fewshot 示例不输出“间隔xx分钟”
+        self.assertNotIn("间隔", report)
+
 
 if __name__ == "__main__":
     unittest.main()

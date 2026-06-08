@@ -250,7 +250,8 @@ class ReportBuilder:
         score = d.get("score", 0)
         event_count = details.get("event_count", 0)
         all_events = details.get("all_events", [])
-        reason = details.get("fallback_reason", "")
+        # 兼容历史字段：absorption scorer 早期使用 reason，后续统一为 fallback_reason
+        reason = details.get("fallback_reason") or details.get("reason") or ""
 
         parts = [f"- 💰 资金承接({score:.0f}): "]
 
@@ -270,38 +271,50 @@ class ReportBuilder:
         rally_time1 = evt1.get("rally_time", "")
         time_diff1 = evt1.get("time_diff_min", 0)
         fleeing1 = evt1.get("fleeing_sectors", [])
-        fleeing_names1 = "、".join([f.get("name", f.get("code", "?")) for f in fleeing1[:3]])
+        fleeing_names_list1 = [f.get("name", f.get("code", "?")) for f in fleeing1[:3]]
+        fleeing_names1 = "、".join(fleeing_names_list1)
         target_pct1 = evt1.get("target_pct", 0)
 
+        # fewshot 对齐：0.4% 也归类为“小幅拉伸”
         if abs(target_pct1) >= 1.5:
             stretch1 = "大幅拉伸"
-        elif abs(target_pct1) >= 0.5:
+        elif abs(target_pct1) >= 0.3:
             stretch1 = "迎来小幅拉伸"
         else:
             stretch1 = "拉伸"
 
-        parts.append(f"{dive_time1} {fleeing_names1} 等板块跳水，")
-        parts.append(f"{rally_time1} {sector_label}{stretch1}（+{target_pct1}%，间隔{time_diff1:.0f}分钟）")
+        # fewshot 对齐：
+        # - 单一板块："白酒板块跳水"
+        # - 多板块："白酒、煤炭等板块跳水"
+        if len(fleeing_names_list1) <= 1:
+            parts.append(f"{dive_time1} {fleeing_names1}板块跳水，")
+        else:
+            parts.append(f"{dive_time1} {fleeing_names1}等板块跳水，")
+        # fewshot 示例不输出“间隔xx分钟”
+        parts.append(f"{rally_time1} {sector_label}{stretch1}（+{target_pct1}%）")
 
         # 第二事件
         if len(all_events) >= 2:
             evt2 = all_events[1]
             dive_time2 = evt2.get("dive_time", "")
             rally_time2 = evt2.get("rally_time", "")
-            time_diff2 = evt2.get("time_diff_min", 0)
             fleeing2 = evt2.get("fleeing_sectors", [])
-            fleeing_names2 = "、".join([f.get("name", f.get("code", "?")) for f in fleeing2[:2]])
+            fleeing_names_list2 = [f.get("name", f.get("code", "?")) for f in fleeing2[:2]]
+            fleeing_names2 = "、".join(fleeing_names_list2)
             target_pct2 = evt2.get("target_pct", 0)
 
             if abs(target_pct2) >= 1.5:
                 stretch2 = "继续大幅拉伸"
-            elif abs(target_pct2) >= 0.5:
+            elif abs(target_pct2) >= 0.3:
                 stretch2 = "继续小幅拉伸"
             else:
                 stretch2 = "继续拉伸"
 
-            parts.append(f"，{dive_time2} {fleeing_names2} 跳水，")
-            parts.append(f"{rally_time2} {sector_label}{stretch2}（+{target_pct2}%，间隔{time_diff2:.0f}分钟）")
+            if len(fleeing_names_list2) <= 1:
+                parts.append(f"，{dive_time2} {fleeing_names2}板块跳水，")
+            else:
+                parts.append(f"，{dive_time2} {fleeing_names2}等板块跳水，")
+            parts.append(f"{rally_time2} {sector_label}{stretch2}（+{target_pct2}%）")
 
         parts.append("；")
         return "".join(parts)

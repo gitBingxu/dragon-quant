@@ -10,7 +10,7 @@ from dragon_quant.rate_limit import RateLimiter
 class TestRateLimiter(unittest.TestCase):
 
     def test_same_key_serialized(self):
-        """同 (provider, endpoint) 的任务必须串行执行"""
+        """同 provider 的任务必须串行执行"""
         limiter = RateLimiter(max_workers=4)
         order = []
         lock = threading.Lock()
@@ -24,6 +24,25 @@ class TestRateLimiter(unittest.TestCase):
         limiter.submit("xueqiu", "kline", task, "A")
         limiter.submit("xueqiu", "kline", task, "B")
         limiter.submit("xueqiu", "kline", task, "C")
+        results = limiter.wait_all(timeout=5)
+
+        self.assertEqual(results, ["A", "B", "C"])
+
+    def test_same_provider_diff_endpoint_serialized(self):
+        """同 provider 不同 endpoint 的任务也必须串行执行"""
+        limiter = RateLimiter(max_workers=4)
+        order = []
+        lock = threading.Lock()
+
+        def task(name, delay=0.05):
+            time.sleep(delay)
+            with lock:
+                order.append(name)
+            return name
+
+        limiter.submit("xueqiu", "kline", task, "A", delay=0.05)
+        limiter.submit("xueqiu", "minute_kline", task, "B", delay=0.05)
+        limiter.submit("xueqiu", "quote", task, "C", delay=0.05)
         results = limiter.wait_all(timeout=5)
 
         self.assertEqual(results, ["A", "B", "C"])

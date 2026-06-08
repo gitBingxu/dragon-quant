@@ -86,7 +86,7 @@ def _curl_request(url: str, headers: dict, resolve_ip: str = "") -> Optional[str
     return None
 
 
-def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[dict]:
+def _fetch(url: str, referer: str, logger=None, endpoint: str = "", extra_headers: dict = None) -> Optional[dict]:
     """JSONP GET 请求
 
     优先 urllib，curl 兜底。DNS 多 IP 轮询绕过坏掉的 CDN 节点。
@@ -98,6 +98,8 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
         return None
 
     headers = dict(HEADERS)
+    if extra_headers:
+        headers.update(extra_headers)
     headers["Referer"] = referer
     headers["Cookie"] = cookie
 
@@ -229,6 +231,73 @@ def _get_ut_token() -> str:
     return _UT_CACHE
 
 
+_TEMPLATE_CACHE: dict[str, tuple] = {}
+_TEMPLATE_SOURCE: dict[str, str] = {}
+
+
+def _get_template(endpoint: str) -> tuple:
+    from dragon_quant.config.api_config import (
+        load_templates, hardcoded_templates, save_templates,
+    )
+    if endpoint in _TEMPLATE_CACHE:
+        return _TEMPLATE_CACHE[endpoint]
+
+    local = load_templates("eastmoney")
+    if local and endpoint in local:
+        _TEMPLATE_CACHE[endpoint] = (local[endpoint], "local")
+        _TEMPLATE_SOURCE[endpoint] = "local"
+        return _TEMPLATE_CACHE[endpoint]
+
+    hardcoded = hardcoded_templates("eastmoney")
+    if endpoint in hardcoded:
+        tpl = hardcoded[endpoint]
+        if not load_templates("eastmoney"):
+            save_templates("eastmoney", hardcoded_templates("eastmoney"))
+        _TEMPLATE_CACHE[endpoint] = (tpl, "hardcoded")
+        _TEMPLATE_SOURCE[endpoint] = "hardcoded"
+        return _TEMPLATE_CACHE[endpoint]
+
+    raise ValueError(f"Unknown endpoint: eastmoney/{endpoint}")
+
+
+def _do_fetch_with_fallback(endpoint: str, dynamic_params: dict, referer: str,
+                            logger=None) -> Optional[dict]:
+    tpl, source = _get_template(endpoint)
+    url = tpl.build_url(**dynamic_params)
+    extra_headers = tpl.build_headers(referer)
+
+    data = _fetch(url, referer, logger=logger, endpoint=endpoint,
+                  extra_headers=extra_headers)
+    if data is not None:
+        return data
+
+    if source == "local":
+        from dragon_quant.config.api_config import (
+            hardcoded_templates, save_single_template,
+        )
+        hardcoded = hardcoded_templates("eastmoney")
+        if endpoint in hardcoded:
+            hc_tpl = hardcoded[endpoint]
+            hc_url = hc_tpl.build_url(**dynamic_params)
+            hc_headers = hc_tpl.build_headers(referer)
+            data2 = _fetch(hc_url, referer, logger=logger,
+                          endpoint=f"{endpoint}_hc",
+                          extra_headers=hc_headers)
+            if data2 is not None:
+                save_single_template("eastmoney", endpoint, hc_tpl)
+                _TEMPLATE_CACHE[endpoint] = (hc_tpl, "hardcoded")
+                _TEMPLATE_SOURCE[endpoint] = "hardcoded"
+                print(f"  \U0001f4a1 {endpoint}: 本地 config 失效, 已回退至包内硬编码",
+                      file=sys.stderr)
+                return data2
+
+    print(f"  \u274c eastmoney/{endpoint}: 请求失败，请运行 fix-api 修复:",
+          file=sys.stderr)
+    print(f"       python -m dragon_quant fix-api --provider eastmoney",
+          file=sys.stderr)
+    return None
+
+
 def _parse_kline_items(raw_items: list[str]) -> list[KBar]:
     """解析东财 K 线文本行 → KBar 列表"""
     result = []
@@ -264,21 +333,19 @@ class EastMoneyProvider(StockProvider):
 
     def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
         """概念板块排行 po=1 涨幅榜 / po=0 跌幅榜"""
-        params = {
-            "np": "1", "fltt": "1", "invt": "2",
+        dynamic = {
             "fs": "m:90+t:3",
             "fields": "f12,f14,f3,f4,f8,f104",
             "fid": "f3",
             "pn": "1", "pz": "500",
-            "po": "0" if asc else "1",  # 0=跌幅榜 1=涨幅榜
+            "po": "0" if asc else "1",
             "ut": _get_ut_token(),
-            "dect": "1", "wbp2u": "|0|0|0|web",
-            "cb": "jQuery_dq",
         }
-        qs = urllib.parse.urlencode(params)
-        url = f"{BASE}/api/qt/clist/get?{qs}"
-        data = _fetch(url, REFERERS["ranking"],
-                      logger=self._logger, endpoint="sector_ranking")
+        data = _do_fetch_with_fallback(
+            "sector_ranking", dynamic,
+            referer=REFERERS["ranking"],
+            logger=self._logger,
+        )
         if not data:
             return []
 
@@ -302,22 +369,20 @@ class EastMoneyProvider(StockProvider):
     def _get_sector_components_page(self, sector_code: str, page: int = 1,
                                     page_size: int = COMPONENTS_PAGE_SIZE) -> list[StockInfo]:
         """获取单页板块成分股，按涨跌幅降序。"""
-        params = {
+        dynamic = {
             "np": "1", "fltt": "1", "invt": "2",
             "fs": f"b:{sector_code}+f:!",
             "fields": "f12,f14,f3,f2,f4,f8",
             "fid": "f3",
             "pn": str(page), "pz": str(page_size),
             "po": "1",
-            "dect": "1",
             "ut": _get_ut_token(),
-            "wbp2u": "|0|0|0|web",
-            "cb": "jQuery_dq",
         }
-        qs = urllib.parse.urlencode(params)
-        url = f"{BASE}/api/qt/clist/get?{qs}"
-        data = _fetch(url, REFERERS["components"],
-                      logger=self._logger, endpoint="sector_components")
+        data = _do_fetch_with_fallback(
+            "sector_components", dynamic,
+            referer=REFERERS["components"],
+            logger=self._logger,
+        )
         if not data:
             return []
 
@@ -370,23 +435,20 @@ class EastMoneyProvider(StockProvider):
 
     def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
         """概念板块 5 分钟 K 线"""
-        params = {
-            "cb": "jQuery_dq",
+        dynamic = {
             "secid": f"90.{sector_code}",
-            "ut": _get_ut_token(),
+            "klt": "5",
+            "lmt": str(bars),
             "fields1": "f1,f2,f3,f4,f5,f6",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            "klt": "5",
-            "fqt": "1",
-            "lmt": str(bars),
-            "beg": "0",
-            "end": "20500101",
+            "ut": _get_ut_token(),
         }
-        qs = urllib.parse.urlencode(params)
-        url = f"{BASE_HIS}/api/qt/stock/kline/get?{qs}"
         referer = REFERERS["kline"].format(code=sector_code)
-        data = _fetch(url, referer,
-                      logger=self._logger, endpoint="sector_5min_kline")
+        data = _do_fetch_with_fallback(
+            "sector_5min_kline", dynamic,
+            referer=referer,
+            logger=self._logger,
+        )
         if not data:
             return []
 

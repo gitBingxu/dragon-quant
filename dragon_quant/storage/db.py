@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS scan_stocks (
     dim_leadership  REAL,
     dim_absorption  REAL,
     report_text     TEXT,
+    open_px         REAL,
+    close_px        REAL,
+    high_px         REAL,
+    low_px          REAL,
+    pct             REAL,
+    turnover_rate   REAL,
+    amount          REAL,
+    market_cap      REAL,
     UNIQUE(scan_id, code)
 );
 
@@ -113,6 +121,21 @@ def _ensure_schema(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE scan_stocks ADD COLUMN report_text TEXT;")
     except sqlite3.OperationalError:
         pass
+    # scan_stocks 行情快照字段（用于当日并集重建 dragons）
+    for col in [
+        "open_px REAL",
+        "close_px REAL",
+        "high_px REAL",
+        "low_px REAL",
+        "pct REAL",
+        "turnover_rate REAL",
+        "amount REAL",
+        "market_cap REAL",
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE scan_stocks ADD COLUMN {col};")
+        except sqlite3.OperationalError:
+            pass
     _migrate_dragons(conn)
 
 
@@ -181,12 +204,22 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
                     dims.get("leadership", {}).get("score"),
                     dims.get("absorption", {}).get("score"),
                     s.get("report_text", ""),
+                    s.get("open_px"),
+                    s.get("close_px"),
+                    s.get("high_px"),
+                    s.get("low_px"),
+                    s.get("pct"),
+                    s.get("turnover_rate"),
+                    s.get("amount"),
+                    s.get("market_cap"),
                 ))
 
             conn.executemany(
-                "INSERT INTO scan_stocks(scan_id, code, name, rank, composite_score, "
-                "board_count, concepts_json, dim_drive, dim_anti_drop, dim_leadership, dim_absorption, report_text) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO scan_stocks("
+                "scan_id, code, name, rank, composite_score, "
+                "board_count, concepts_json, dim_drive, dim_anti_drop, dim_leadership, dim_absorption, report_text, "
+                "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -278,8 +311,81 @@ def get_scans_by_date(scan_date: str) -> list[dict]:
         conn.close()
 
 
-def save_dragons(trade_date: str, scan_id: str, dragons: list[dict], version: str = ""):
-    """保存或更新 top_n 到 dragons 表中"""
+def delete_scans_by_date_topn(scan_date: str, top_n: int) -> int:
+    """删除指定日期 + top_n 的所有扫描 run（硬删除）。
+
+    Returns:
+        删除的 scans 数量。
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            rows = conn.execute(
+                "SELECT id FROM scans WHERE scan_date = ? AND top_n = ?",
+                (scan_date, top_n),
+            ).fetchall()
+            scan_ids = [r[0] for r in rows]
+            if not scan_ids:
+                return 0
+
+            placeholders = ",".join(["?"] * len(scan_ids))
+            conn.execute(f"DELETE FROM scan_stocks WHERE scan_id IN ({placeholders})", scan_ids)
+            conn.execute(f"DELETE FROM scan_logs WHERE scan_id IN ({placeholders})", scan_ids)
+            conn.execute(f"DELETE FROM scans WHERE id IN ({placeholders})", scan_ids)
+            conn.commit()
+            return len(scan_ids)
+        finally:
+            conn.close()
+
+
+def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
+    """返回某日期下所有扫描 run 的贡献明细（scan_stocks join scans）。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT "
+            "  s.id, s.top_n, s.created_at, "
+            "  ss.code, ss.name, ss.rank, ss.composite_score, ss.board_count, "
+            "  ss.concepts_json, ss.report_text, "
+            "  ss.open_px, ss.close_px, ss.high_px, ss.low_px, ss.pct, "
+            "  ss.turnover_rate, ss.amount, ss.market_cap "
+            "FROM scans s "
+            "JOIN scan_stocks ss ON ss.scan_id = s.id "
+            "WHERE s.scan_date = ?",
+            (scan_date,),
+        ).fetchall()
+
+        result = []
+        for r in rows:
+            result.append({
+                "scan_id": r[0],
+                "scan_top_n": r[1],
+                "scan_created_at": r[2],
+                "code": r[3],
+                "name": r[4],
+                "rank": r[5],
+                "composite_score": r[6],
+                "board_count": r[7],
+                "concepts": json.loads(r[8]) if r[8] else [],
+                "report_text": r[9] or "",
+                "open_px": r[10],
+                "close_px": r[11],
+                "high_px": r[12],
+                "low_px": r[13],
+                "pct": r[14],
+                "turnover_rate": r[15],
+                "amount": r[16],
+                "market_cap": r[17],
+            })
+        return result
+    finally:
+        conn.close()
+
+
+def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
+    """保存或更新 dragons（UPSERT，不覆盖 review 字段）。"""
     with _lock:
         conn = _connect()
         try:
@@ -292,34 +398,212 @@ def save_dragons(trade_date: str, scan_id: str, dragons: list[dict], version: st
                     trade_date,
                     s.get("code", ""),
                     s.get("name", ""),
-                    scan_id,
-                    i + 1,  # rank
+                    s.get("scan_id", ""),
+                    s.get("rank", i + 1),
                     s.get("composite_score", 0),
                     s.get("board_count", 0),
-                    s.get("open_px", 0),
-                    s.get("close_px", 0),
-                    s.get("high_px", 0),
-                    s.get("low_px", 0),
-                    s.get("pct", 0),
-                    s.get("turnover_rate", 0),
-                    s.get("amount", 0),
-                    s.get("market_cap", 0),
+                    s.get("open_px"),
+                    s.get("close_px"),
+                    s.get("high_px"),
+                    s.get("low_px"),
+                    s.get("pct"),
+                    s.get("turnover_rate"),
+                    s.get("amount"),
+                    s.get("market_cap"),
                     json.dumps(concepts, ensure_ascii=False),
                     s.get("report_text", ""),
                     version,
                 ))
             
             conn.executemany(
-                "INSERT OR REPLACE INTO dragons("
+                "INSERT INTO dragons("
                 "trade_date, code, name, scan_id, rank, composite_score, board_count, "
                 "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-                "concepts_json, report_text, version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "concepts_json, report_text, version"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(trade_date, code) DO UPDATE SET "
+                "name=excluded.name, "
+                "scan_id=excluded.scan_id, "
+                "rank=excluded.rank, "
+                "composite_score=excluded.composite_score, "
+                "board_count=excluded.board_count, "
+                "open_px=COALESCE(excluded.open_px, dragons.open_px), "
+                "close_px=COALESCE(excluded.close_px, dragons.close_px), "
+                "high_px=COALESCE(excluded.high_px, dragons.high_px), "
+                "low_px=COALESCE(excluded.low_px, dragons.low_px), "
+                "pct=COALESCE(excluded.pct, dragons.pct), "
+                "turnover_rate=COALESCE(excluded.turnover_rate, dragons.turnover_rate), "
+                "amount=COALESCE(excluded.amount, dragons.amount), "
+                "market_cap=COALESCE(excluded.market_cap, dragons.market_cap), "
+                "concepts_json=excluded.concepts_json, "
+                "report_text=excluded.report_text, "
+                "version=excluded.version",
                 rows,
             )
             conn.commit()
         finally:
             conn.close()
+
+
+def get_dragon_meta(trade_date: str, code: str) -> Optional[dict]:
+    """返回指定 trade_date+code 的 rank/review_status，用于重建逻辑。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT rank, review_status FROM dragons WHERE trade_date = ? AND code = ?",
+            (trade_date, code),
+        ).fetchone()
+        if not row:
+            return None
+        return {"rank": row[0], "review_status": row[1]}
+    finally:
+        conn.close()
+
+
+def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str]) -> int:
+    """删除某 trade_date 下不在 keep_codes 内且 review_status='pending' 的记录。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            if not keep_codes:
+                cur = conn.execute(
+                    "DELETE FROM dragons WHERE trade_date = ? AND review_status = 'pending'",
+                    (trade_date,),
+                )
+                conn.commit()
+                return cur.rowcount
+
+            placeholders = ",".join(["?"] * len(keep_codes))
+            params = [trade_date] + sorted(keep_codes)
+            cur = conn.execute(
+                f"DELETE FROM dragons WHERE trade_date = ? AND review_status = 'pending' AND code NOT IN ({placeholders})",
+                params,
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+
+def rebuild_dragons_for_date(
+    trade_date: str,
+    *,
+    version: str,
+    calendar: set[str],
+    apply_5day_gate: bool = True,
+    keep_completed: bool = True,
+) -> dict:
+    """按 trade_date 重建 dragons 为“当日所有扫描结果的并集”物化。
+
+    注意：该过程会对 dragons 做 UPSERT，并会清理不再属于并集的 pending 记录。
+
+    Returns:
+        {"contrib_codes": int, "upserted": int, "kept": int, "deleted": int}
+    """
+    from dragon_quant.utils.trading import trade_days_between
+
+    contribs = list_scan_stock_contributions_by_date(trade_date)
+    if not contribs:
+        deleted = delete_pending_dragons_not_in(trade_date, set())
+        return {"contrib_codes": 0, "upserted": 0, "kept": 0, "deleted": deleted}
+
+    # 选“最佳贡献”：rank 最小 -> 分数最高 -> created_at 最新
+    best_by_code: dict[str, dict] = {}
+    for c in contribs:
+        code = c.get("code")
+        if not code:
+            continue
+        cur = best_by_code.get(code)
+        if not cur:
+            best_by_code[code] = c
+            continue
+
+        r1 = c.get("rank") if c.get("rank") is not None else 9999
+        r0 = cur.get("rank") if cur.get("rank") is not None else 9999
+        if r1 != r0:
+            if r1 < r0:
+                best_by_code[code] = c
+            continue
+        s1 = c.get("composite_score") if c.get("composite_score") is not None else 0
+        s0 = cur.get("composite_score") if cur.get("composite_score") is not None else 0
+        if s1 != s0:
+            if s1 > s0:
+                best_by_code[code] = c
+            continue
+        if (c.get("scan_created_at") or "") > (cur.get("scan_created_at") or ""):
+            best_by_code[code] = c
+
+    keep_codes: set[str] = set()
+    to_upsert: list[dict] = []
+    kept = 0
+    gate_blocked = 0
+    gate_kept_existing = 0
+    gate_blocked_samples: list[str] = []
+
+    for code, b in best_by_code.items():
+        new_rank = b.get("rank") if b.get("rank") is not None else 9999
+
+        allow_upsert = True
+        if apply_5day_gate:
+            last_info = get_last_entry_with_rank(code)
+            if last_info:
+                last_date, old_rank = last_info
+                if last_date and trade_days_between(last_date, trade_date, calendar) < 5:
+                    if old_rank is not None and new_rank < old_rank:
+                        allow_upsert = True
+                    else:
+                        allow_upsert = False
+
+        if allow_upsert:
+            keep_codes.add(code)
+            to_upsert.append({
+                "code": code,
+                "name": b.get("name", ""),
+                "scan_id": b.get("scan_id", ""),
+                "rank": new_rank,
+                "composite_score": b.get("composite_score") or 0,
+                "board_count": b.get("board_count") or 0,
+                "open_px": b.get("open_px"),
+                "close_px": b.get("close_px"),
+                "high_px": b.get("high_px"),
+                "low_px": b.get("low_px"),
+                "pct": b.get("pct"),
+                "turnover_rate": b.get("turnover_rate"),
+                "amount": b.get("amount"),
+                "market_cap": b.get("market_cap"),
+                "concepts": b.get("concepts", []),
+                "report_text": b.get("report_text", ""),
+            })
+        else:
+            meta = get_dragon_meta(trade_date, code)
+            if meta:
+                # 同日已存在记录，则保留（不更新）
+                keep_codes.add(code)
+                kept += 1
+                gate_kept_existing += 1
+            else:
+                gate_blocked += 1
+                if len(gate_blocked_samples) < 10:
+                    gate_blocked_samples.append(code)
+
+    if keep_completed:
+        # completed 的永远不删，但 delete_pending 只删 pending，本身无需加进 keep_codes。
+        pass
+
+    if to_upsert:
+        save_dragons(trade_date, to_upsert, version=version)
+    deleted = delete_pending_dragons_not_in(trade_date, keep_codes)
+    return {
+        "contrib_codes": len(best_by_code),
+        "upserted": len(to_upsert),
+        "kept": kept,
+        "deleted": deleted,
+        "gate_blocked": gate_blocked,
+        "gate_kept_existing": gate_kept_existing,
+        "gate_blocked_samples": gate_blocked_samples,
+    }
 
 def get_dragons(trade_date: str) -> list[dict]:
     """获取某日的 dragons 数据"""
@@ -598,7 +882,10 @@ def get_review_summary() -> dict:
         ).fetchone()
 
         win_row = conn.execute(
-            "SELECT COUNT(*) FROM dragons WHERE review_status = 'completed' AND max_return_5d > 0"
+            "SELECT COUNT(*) FROM dragons "
+            "WHERE review_status = 'completed' "
+            "AND max_return_5d > 0 "
+            "AND max_drawdown_5d > -5.0"
         ).fetchone()
 
         best = conn.execute(

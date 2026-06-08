@@ -35,7 +35,9 @@ class StockProvider(ABC):
         ...
 
     @abstractmethod
-    def get_sector_components(self, sector_code: str, page: int = 1) -> list[StockInfo]:
+    def get_sector_components(self, sector_code: str, page: int = 1,
+                              all_pages: bool = False,
+                              page_size: int = 50) -> list[StockInfo]:
         """获取概念板块成分股列表（按涨跌幅降序）"""
         ...
 

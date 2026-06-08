@@ -32,9 +32,15 @@
     background: var(--card); border: 1px solid var(--border); border-radius: 8px;
     padding: 16px 20px; text-align: center;
   }
-  .summary .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .summary .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   .summary .card .value { font-size: 26px; font-weight: 700; }
   .summary .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .summary .card .hint {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 1px solid var(--border); color: var(--muted);
+    font-size: 11px; line-height: 1; cursor: help;
+  }
   .value.up { color: var(--green); }
   .value.down { color: var(--red); }
   .value.muted { color: var(--muted); }
@@ -246,9 +252,9 @@ async function loadSummary() {
         <div class="value ${s.avg_return > 0 ? 'up' : s.avg_return < 0 ? 'down' : 'muted'}">${fmtPct(s.avg_return)}</div>
       </div>
       <div class="card">
-        <div class="label">胜率</div>
+        <div class="label">胜率 <span class="hint" title="胜率 = 已完成回测中 (最大收益 > 0 且 最大回撤 > -5%) 的占比" aria-label="胜率口径说明">?</span></div>
         <div class="value up">${s.win_rate != null ? s.win_rate.toFixed(1) + '%' : '—'}</div>
-        <div class="sub">收益>0 比例</div>
+        <div class="sub">收益&gt;0 且回撤&gt;-5% 占比</div>
       </div>
       <div class="card">
         <div class="label">最佳</div>

@@ -207,3 +207,80 @@ class TestGetReviewSummary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDragonsRebuildUnion(unittest.TestCase):
+    """验证：同日多次扫描并集 + force 替换 topN 贡献 + 不删除 completed"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_union_and_force_replace(self):
+        # 注意：db 层每次操作会主动 close 连接；因此这里必须用 side_effect 每次返回新连接。
+        with patch("dragon_quant.storage.db._connect", side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+
+            # 同日两次 top5 + 一次 top10
+            day = "2026-06-05"
+            scan1 = "20260605_100000_5_a"
+            scan2 = "20260605_100500_5_b"
+            scan3 = "20260605_101000_10_c"
+
+            def mk(code, rank, score):
+                return {
+                    "code": code,
+                    "name": code,
+                    "rank": rank,
+                    "composite_score": score,
+                    "board_count": 1,
+                    "concepts": [],
+                    "dimensions": {},
+                    "report_text": "",
+                }
+
+            db.save_scan(scan1, day, 1.0, 5, 5, 1, [mk(c, i + 1, 90 - i) for i, c in enumerate(list("abcde"))])
+            db.save_scan(scan2, day, 1.0, 5, 5, 1, [mk(c, i + 1, 80 - i) for i, c in enumerate(list("abxyz"))])
+            db.save_scan(scan3, day, 1.0, 10, 5, 1, [mk(c, i + 1, 70 - i) for i, c in enumerate(list("abcdefghij"))])
+
+            # 先给 e 标记 completed，确保后续删除 pending 时不删它
+            db.save_dragons(day, [{
+                "code": "e", "name": "e", "scan_id": scan1, "rank": 5,
+                "composite_score": 86, "board_count": 1, "concepts": [], "report_text": "",
+            }], version="")
+            conn = sqlite3.connect(self._db_path)
+            try:
+                conn.execute("UPDATE dragons SET review_status='completed' WHERE trade_date=? AND code='e'", (day,))
+                conn.commit()
+            finally:
+                conn.close()
+
+            # calendar: 简化为包含 day 以及 30 天内一堆日期，避免 5 日 gate 干扰
+            calendar = {day, "2026-06-04", "2026-06-03", "2026-06-02", "2026-06-01"}
+            stats = db.rebuild_dragons_for_date(day, version="x", calendar=calendar, apply_5day_gate=False)
+            self.assertGreaterEqual(stats["upserted"], 1)
+
+            # 并集应包含 a..j + x,y,z（e 也应在）
+            rows = db.get_dragons(day)
+            codes = {r["code"] for r in rows}
+            for c in list("abcdefghij") + list("xyz"):
+                self.assertIn(c, codes)
+            self.assertIn("e", codes)
+
+            # force 替换 top5：删除旧 top5 runs，然后写一个新的 top5=abcdn
+            deleted = db.delete_scans_by_date_topn(day, 5)
+            self.assertEqual(deleted, 2)
+            scan4 = "20260605_110000_5_force"
+            db.save_scan(scan4, day, 1.0, 5, 5, 1, [mk(c, i + 1, 60 - i) for i, c in enumerate(list("abcdn"))])
+
+            db.rebuild_dragons_for_date(day, version="x", calendar=calendar, apply_5day_gate=False)
+            rows2 = db.get_dragons(day)
+            codes2 = {r["code"] for r in rows2}
+            # top10 贡献仍在（a..j），top5 贡献已替换，新出现 n
+            self.assertIn("n", codes2)
+            # e 是 completed，不应因为不在贡献并集而被删除
+            self.assertIn("e", codes2)

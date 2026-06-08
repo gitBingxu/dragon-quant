@@ -110,6 +110,11 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
     MAX_RETRIES = 2
     last_error = None
 
+    # 说明：这里会做 "urllib → curl" 的两级兜底，并且会换 IP 重试。
+    # 为了避免“明明最终成功但日志里刷满 error”的错觉：
+    # - 只有在全部重试都失败时，才用 logger.api(... ok=False) 记一条 error；
+    # - 中间过程的失败，用 logger.warn 记到 api_attempt:* 分类下（不计入 api_stats）。
+
     for attempt in range(MAX_RETRIES):
         ip = ips[attempt % len(ips)]
 
@@ -133,13 +138,19 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
             data = _parse_jsonp(raw)
             if logger:
                 logger.api("eastmoney", endpoint, ok=data is not None,
-                           elapsed_ms=elapsed, note=f"urllib@{ip}")
+                           elapsed_ms=elapsed, note=f"urllib@{ip}", attempt=attempt + 1)
             return data
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if logger:
-                logger.api("eastmoney", endpoint, ok=False,
-                           elapsed_ms=elapsed, error=str(e))
+                logger.warn(
+                    f"api_attempt:eastmoney:{endpoint}",
+                    f"eastmoney/{endpoint} urllib@{ip} 失败，将尝试 curl 兜底 (attempt={attempt + 1}/{MAX_RETRIES})",
+                    elapsed_ms=elapsed,
+                    error=str(e),
+                    attempt=attempt + 1,
+                    note=f"urllib@{ip}",
+                )
             print(f"  ⚠️ urllib@{ip} 失败: {e}", file=sys.stderr)
             last_error = e
 
@@ -152,20 +163,35 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "") -> Optional[
                 data = _parse_jsonp(raw)
                 if logger:
                     logger.api("eastmoney", endpoint, ok=data is not None,
-                               elapsed_ms=elapsed, note=f"curl@{ip}")
+                               elapsed_ms=elapsed, note=f"curl@{ip}", attempt=attempt + 1)
                 return data
             raise RuntimeError("curl 返回空数据")
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if logger:
-                logger.api("eastmoney", endpoint, ok=False,
-                           elapsed_ms=elapsed, error=f"curl:{e}")
+                logger.warn(
+                    f"api_attempt:eastmoney:{endpoint}",
+                    f"eastmoney/{endpoint} curl@{ip} 失败，将换 IP 重试 (attempt={attempt + 1}/{MAX_RETRIES})",
+                    elapsed_ms=elapsed,
+                    error=f"curl:{e}",
+                    attempt=attempt + 1,
+                    note=f"curl@{ip}",
+                )
             last_error = e
 
         # 非最后一次尝试，等待后换 IP
         if attempt < MAX_RETRIES - 1:
             time.sleep(1.0)
 
+    if logger:
+        logger.api(
+            "eastmoney",
+            endpoint,
+            ok=False,
+            elapsed_ms=0,
+            error=str(last_error) if last_error else "unknown",
+            attempts=MAX_RETRIES,
+        )
     print(f"  ⚠️ 东财请求失败 (重试{MAX_RETRIES}次): {last_error}", file=sys.stderr)
     return None
 

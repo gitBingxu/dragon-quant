@@ -43,7 +43,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     if not primary_sector:
         return ScoreResult(
             dim="absorption", score=50.0, weight=0.25,
-            details={"fallback": True, "reason": "未指定主板块"}
+            details={"fallback": True, "fallback_reason": "未指定主板块"}
         )
 
     # 加载目标板块 5 分 K
@@ -51,7 +51,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     if len(target_klines) < 6:
         return ScoreResult(
             dim="absorption", score=50.0, weight=0.25,
-            details={"fallback": True, "reason": "目标板块5分K不足"}
+            details={"fallback": True, "fallback_reason": "目标板块5分K不足"}
         )
 
     # 加载其他板块 5 分 K
@@ -68,7 +68,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     if not other_klines_map:
         return ScoreResult(
             dim="absorption", score=50.0, weight=0.25,
-            details={"fallback": True, "reason": "无其他板块5分K数据"}
+            details={"fallback": True, "fallback_reason": "无其他板块5分K数据"}
         )
 
     # ─── Step 1: 滑动窗口检测虹吸事件 ───

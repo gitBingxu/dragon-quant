@@ -11,6 +11,9 @@ from dragon_quant.models.types import ScoreResult, KBar, StockInfo, Candidate
 from dragon_quant.cache.data_cache import DataCache
 
 
+DRIVE_SAMPLE_LIMIT = 50
+
+
 def score(code: str, cache: DataCache, candidate_pool: Optional[list[Candidate]] = None,
           primary_sector: str = "") -> ScoreResult:
     """
@@ -238,25 +241,47 @@ def _score_limit_up_day(lu: dict, primary_sector: str,
 
 # ─── 子因子 A: 板块共鸣 ───
 
+
+def _resolve_component_pct(comp: StockInfo, quote_map: dict) -> float:
+    pct_val = comp.pct
+    if pct_val == 0.0 and comp.code in quote_map:
+        pct_val = quote_map[comp.code].pct
+    return pct_val
+
+
+def _active_components(components: list[StockInfo], quote_map: dict,
+                       limit: int = DRIVE_SAMPLE_LIMIT) -> list[StockInfo]:
+    ranked = sorted(
+        components,
+        key=lambda comp: (_resolve_component_pct(comp, quote_map), comp.code),
+        reverse=True,
+    )
+    return ranked[:limit]
+
 def _voice_score(sector_code: str, components: list[StockInfo],
                  quote_map: dict) -> tuple[float, dict]:
     """同行业涨停家数占比 → (score, raw_counts)"""
+    total = len(components)
+    scoring_components = _active_components(components, quote_map)
+    scoring_total = len(scoring_components)
     limit_up_codes = []
-    for comp in components:
-        pct_val = comp.pct
-        if pct_val == 0.0 and comp.code in quote_map:
-            pct_val = quote_map[comp.code].pct
+    for comp in scoring_components:
+        pct_val = _resolve_component_pct(comp, quote_map)
         if pct_val >= 9.9:
             limit_up_codes.append(comp.code)
 
-    total = len(components)
     limit_up_count = len(limit_up_codes)
-    if total == 0:
-        return 0.0, {"total": 0, "limit_up": 0}
+    if scoring_total == 0:
+        return 0.0, {"total": total, "scoring_total": 0, "sample_limit": DRIVE_SAMPLE_LIMIT, "limit_up": 0}
 
-    ratio = limit_up_count / total
+    ratio = limit_up_count / scoring_total
     score = min(ratio / 0.10, 1.0) * 100
-    return score, {"total": total, "limit_up": limit_up_count}
+    return score, {
+        "total": total,
+        "scoring_total": scoring_total,
+        "sample_limit": DRIVE_SAMPLE_LIMIT,
+        "limit_up": limit_up_count,
+    }
 
 
 # ─── 子因子 B: 跟风力度 ───
@@ -264,15 +289,15 @@ def _voice_score(sector_code: str, components: list[StockInfo],
 def _follow_score(sector_code: str, components: list[StockInfo],
                   quote_map: dict) -> tuple[float, dict]:
     """涨幅 >3% 但未涨停的占比 → (score, raw_counts)"""
+    total = len(components)
+    scoring_components = _active_components(components, quote_map)
+    scoring_total = len(scoring_components)
     limit_up_codes = set()
     strong_count = 0
     down_count = 0
-    total = len(components)
 
-    for comp in components:
-        pct_val = comp.pct
-        if pct_val == 0.0 and comp.code in quote_map:
-            pct_val = quote_map[comp.code].pct
+    for comp in scoring_components:
+        pct_val = _resolve_component_pct(comp, quote_map)
         if pct_val >= 9.9:
             limit_up_codes.add(comp.code)
         elif pct_val > 3.0:
@@ -280,13 +305,28 @@ def _follow_score(sector_code: str, components: list[StockInfo],
         if pct_val < 0:
             down_count += 1
 
-    non_limit_total = total - len(limit_up_codes)
+    non_limit_total = scoring_total - len(limit_up_codes)
     if non_limit_total == 0:
-        return 0.0, {"total": total, "strong": strong_count, "down": down_count, "limit_up": len(limit_up_codes)}
+        score = 100.0 if scoring_total > 0 else 0.0
+        return score, {
+            "total": total,
+            "scoring_total": scoring_total,
+            "sample_limit": DRIVE_SAMPLE_LIMIT,
+            "strong": strong_count,
+            "down": down_count,
+            "limit_up": len(limit_up_codes),
+        }
 
     ratio = strong_count / non_limit_total
     score = min(ratio / 0.15, 1.0) * 100
-    return score, {"total": total, "strong": strong_count, "down": down_count, "limit_up": len(limit_up_codes)}
+    return score, {
+        "total": total,
+        "scoring_total": scoring_total,
+        "sample_limit": DRIVE_SAMPLE_LIMIT,
+        "strong": strong_count,
+        "down": down_count,
+        "limit_up": len(limit_up_codes),
+    }
 
 
 # ─── 子因子 C: 封板决策力 ───
@@ -349,7 +389,7 @@ def _seal_rank_score(lu: dict, peers: list[dict]) -> tuple[float, int]:
 def _early_time_score(board_time: Optional[str]) -> float:
     """C2: 离散阶梯封板时间分"""
     if not board_time:
-        return 10.0  # 一字板或无时间
+        return 1.0  # 一字板或无时间
 
     h = int(board_time.split(":")[0])
     m = int(board_time.split(":")[1])

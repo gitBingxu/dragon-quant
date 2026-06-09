@@ -40,6 +40,10 @@ STATISTICAL_CONCEPT_PREFIXES = (
 
 FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
 
+# 资金承接（跨板块虹吸）相关：领跌板块数量与板块5分K长度
+DOWN_SECTOR_COUNT = 30
+SECTOR_5MIN_BARS = 300  # 约覆盖 5 个交易日（48根/日），留冗余
+
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
     """过滤：非ST、非双创(30/68)、非北交所(8/92)"""
@@ -331,11 +335,11 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     top10_up = [s for s in em.get_sector_ranking(asc=False)
                 if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
     top10_down = [s for s in em.get_sector_ranking(asc=True)
-                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
+                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:DOWN_SECTOR_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     if verbose:
         print(f"   前10涨: {len(top10_up)} 个板块")
-        print(f"   前10跌: {len(top10_down)} 个板块")
+        print(f"   前{DOWN_SECTOR_COUNT}跌: {len(top10_down)} 个板块")
 
     if not top10_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
@@ -355,7 +359,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     em.get_sector_components(sc, page=1))))
+                                     em.get_sector_components(sc, all_pages=True))))
     limiter.wait_all()
 
     for s in top10_up:
@@ -399,12 +403,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     concepts=[s.name], primary_sector=s.code,
                 )
 
-    # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
+    # 提交领跌板块成分股请求（资金承接用，过 RateLimiter 防封）
     for s in top10_down:
         limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     em.get_sector_components(sc, page=1))))
+                                     em.get_sector_components(sc, all_pages=True))))
     limiter.wait_all()
 
     for s in top10_down:
@@ -457,13 +461,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("⏳ Phase D — 并发加载")
 
-    # T1: 板块5分K（20个板块）
+    # T1: 板块5分K（领涨10 + 领跌N）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
         limiter.submit("eastmoney", "em",
                        lambda sc=s.code: (
                            cache.set(f"kline:5min:sector:{sc}",
-                                     em.get_sector_5min_kline(sc))))
+                                     em.get_sector_5min_kline(sc, bars=SECTOR_5MIN_BARS))))
 
     # T2: 候选股分时K线（只拉 top_n 只）
     for r in ranking:
@@ -591,7 +595,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         # ── 持久化 ──
         timestamp = output["timestamp"]
-        scan_id = f"{timestamp[:8]}_{top_n}"  # 20260519_25，同日期同 top_n 自动覆盖
+        # scan_id 必须唯一（支持同日多次扫描并集）；包含毫秒+短随机后缀避免同秒碰撞
+        import uuid
+        scan_id = f"{timestamp}_{top_n}_{int(time.time() * 1000) % 1000:03d}_{uuid.uuid4().hex[:6]}"
 
         # 结构化日志 → SQLite
         try:
@@ -613,10 +619,36 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         output["report_path"] = str(report_path)
 
         # SQLite 持久化
-        scan_date = scan_id[:8]
+        scan_date = timestamp[:8]
         scan_date_fmt = f"{scan_date[:4]}-{scan_date[4:6]}-{scan_date[6:8]}"
         try:
             from dragon_quant.storage import db
+
+            # --force：替换“当日 topN 贡献集合” → 硬删除旧的同日同 top_n scan runs
+            if force:
+                db.delete_scans_by_date_topn(scan_date_fmt, top_n)
+
+            # 将行情快照写入 scan_stocks（用于后续当日并集重建 dragons）
+            all_quotes = cache.get("quotes:batch") or []
+            quote_map = {q.code: q for q in all_quotes} if all_quotes else {}
+            stocks_for_db = []
+            for r in display_list:
+                code = r.get("code")
+                rr = r.copy()
+                q = quote_map.get(code)
+                if q:
+                    rr.update({
+                        "open_px": q.open_px,
+                        "close_px": q.price,
+                        "high_px": q.high,
+                        "low_px": q.low,
+                        "pct": q.pct,
+                        "turnover_rate": q.turnover_rate,
+                        "amount": q.amount,
+                        "market_cap": q.market_cap,
+                    })
+                stocks_for_db.append(rr)
+
             db.save_scan(
                 scan_id=scan_id,
                 scan_date=scan_date_fmt,
@@ -624,65 +656,40 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 top_n=top_n,
                 candidates_n=candidates_n,
                 workers=workers,
-                stocks=results[:top_n],
+                stocks=stocks_for_db,
                 raw_output=json.dumps(output, ensure_ascii=False)
             )
-            
-            # 保存 top_n 详细信息到 dragons 表
-            # 从缓存的 quotes:batch 提取个股行情快照
-            all_quotes = cache.get("quotes:batch") or []
-            quote_map = {q.code: q for q in all_quotes} if all_quotes else {}
-            
-            # 构建交易日历（5 日去重用）
-            from dragon_quant.utils.trading import build_trade_calendar, trade_days_between
+
+            # 重建当日 dragons：当日所有扫描（不同 topN、多次）的并集（仍保留 5 日去重门禁）
+            from dragon_quant.utils.trading import build_trade_calendar
             cal_start = (datetime.now(bj_tz) - timedelta(days=30)).strftime("%Y-%m-%d")
             cal_end = now.strftime("%Y-%m-%d")
             calendar = build_trade_calendar(cal_start, cal_end)
+            rebuild_stats = db.rebuild_dragons_for_date(
+                scan_date_fmt,
+                version=__version__,
+                calendar=calendar,
+                apply_5day_gate=True,
+                keep_completed=True,
+            )
+            if verbose:
+                print(
+                    f"  🧱 dragons 重建: contrib={rebuild_stats.get('contrib_codes',0)} "
+                    f"upsert={rebuild_stats.get('upserted',0)} "
+                    f"kept={rebuild_stats.get('kept',0)} "
+                    f"deleted={rebuild_stats.get('deleted',0)}"
+                )
 
-            dragons_to_save = []
-            skipped_count = 0
-            updated_count = 0
-            for i, r in enumerate(display_list):
-                code = r["code"]
-                new_rank = i + 1  # 与 save_dragons 中 rank = i + 1 一致
-
-                # 5 日去重：该 code 上次入选距今 < 5 个交易日
-                last_info = db.get_last_entry_with_rank(code)
-                if last_info:
-                    last_date, old_rank = last_info
-                    if trade_days_between(last_date, scan_date_fmt, calendar) < 5:
-                        # 新 rank 更好（数字更小）→ 覆写所有字段；否则跳过
-                        if old_rank is not None and new_rank < old_rank:
-                            updated_count += 1
-                            # 继续处理，让 save_dragons 的 INSERT OR REPLACE 更新记录
-                        else:
-                            skipped_count += 1
-                            continue
-
-                quote = quote_map.get(code)
-                dragon_data = r.copy()  # 复制基础评分数据
-                if quote:
-                    dragon_data.update({
-                        "open_px": quote.open_px,
-                        "close_px": quote.price, # quote.price 是现价/收盘价
-                        "high_px": quote.high,
-                        "low_px": quote.low,
-                        "pct": quote.pct,
-                        "turnover_rate": quote.turnover_rate,
-                        "amount": quote.amount,
-                        "market_cap": quote.market_cap,
-                    })
-                dragons_to_save.append(dragon_data)
-
-            if verbose and (skipped_count > 0 or updated_count > 0):
-                parts = []
-                if skipped_count > 0:
-                    parts.append(f"跳过 {skipped_count} 只")
-                if updated_count > 0:
-                    parts.append(f"更新 {updated_count} 只(rank 提升)")
-                print(f"  🚫 5 日内去重: {', '.join(parts)}")
-                
-            db.save_dragons(scan_date_fmt, scan_id, dragons_to_save, version=__version__)
+                # 5 日去重 gate 的更细粒度提示（只在 verbose 下输出）
+                gate_blocked = rebuild_stats.get("gate_blocked", 0) or 0
+                gate_kept_existing = rebuild_stats.get("gate_kept_existing", 0) or 0
+                if gate_blocked or gate_kept_existing:
+                    samples = rebuild_stats.get("gate_blocked_samples", []) or []
+                    sample_str = ("，例如: " + ",".join(samples)) if samples else ""
+                    print(
+                        f"  🚫 5 日去重: 本次并集候选中 {gate_blocked} 只被 gate 拦截(且当日无旧记录){sample_str}; "
+                        f"{gate_kept_existing} 只被 gate 拦截但因当日已有记录而保留"
+                    )
             
         except Exception as e:
             if verbose:

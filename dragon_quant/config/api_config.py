@@ -35,7 +35,12 @@ class RequestTemplate:
     def build_url(self, **dynamic_params) -> str:
         params = {**self.fixed_params, **dynamic_params}
         if "cb" not in params:
-            params["cb"] = "jQuery_dq"
+            # 尽量对齐东财前端 JSONP callback 命名，降低风控概率
+            # 形如：jQuery112307663912278618489_1780992936600
+            # 注：callback 名称不会影响我们 _parse_jsonp 的解析。
+            ts = int(time.time() * 1000)
+            pseudo_rand = int(str(ts)[-6:]) * 123457  # 仅用于仿真格式，无安全意义
+            params["cb"] = f"jQuery{pseudo_rand}_{ts}"
         if "_" not in params:
             params["_"] = str(int(time.time() * 1000))
         qs = urllib.parse.urlencode(params)
@@ -146,7 +151,7 @@ def hardcoded_templates(provider: str) -> dict[str, RequestTemplate]:
                 base="https://push2.eastmoney.com",
                 path="/api/qt/clist/get",
                 fixed_params={
-                    "np": "1", "fltt": "1", "invt": "2",
+                    "np": "1", "fltt": "2", "invt": "2",
                     "dect": "1",
                 },
                 headers={},

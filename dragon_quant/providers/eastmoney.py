@@ -20,8 +20,9 @@ HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Pragma": "no-cache",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-    "sec-ch-ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+    # 与 fix-api / 真实浏览器请求保持一致（Chrome 148）
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not.A/Brand";v="99"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"macOS"',
     "Sec-Fetch-Dest": "script",
@@ -31,6 +32,7 @@ HEADERS = {
 
 REFERERS = {
     "ranking": "https://quote.eastmoney.com/center/hsbk.html",
+    # 旧 referer（部分环境仍可用）
     "components": "https://quote.eastmoney.com/center/gridlist.html",
     "kline": "https://quote.eastmoney.com/bk/90.{code}.html",
 }
@@ -105,9 +107,11 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "", extra_header
 
     parsed = urllib.parse.urlparse(url)
     host = parsed.hostname
-    ips = _resolve_ips(host)
-    if not ips:
-        ips = [host]  # DNS 失败，用原始 hostname
+    resolved_ips = _resolve_ips(host)
+    # 关键：永远先尝试“hostname 直连”（让系统 DNS/HappyEyeballs 选择健康节点），
+    # 再尝试 IP 绑定轮询（绕过坏 CDN 节点）。
+    # 否则当 getaddrinfo 恰好只返回一个坏 IP 时，会导致每次都命中同一坏节点。
+    ips = [host] + [ip for ip in resolved_ips if ip != host]
 
     MAX_RETRIES = 2
     last_error = None
@@ -194,7 +198,12 @@ def _fetch(url: str, referer: str, logger=None, endpoint: str = "", extra_header
             error=str(last_error) if last_error else "unknown",
             attempts=MAX_RETRIES,
         )
-    print(f"  ⚠️ 东财请求失败 (重试{MAX_RETRIES}次): {last_error}", file=sys.stderr)
+    err_msg = str(last_error) if last_error else "unknown"
+    # 经验：东财 WAF 经常对“过期/不完整 cookie”直接空响应（curl:52 / Remote end closed）。
+    # 这类错误与网络不同，最有效的处理是刷新 Cookie。
+    if "Empty reply from server" in err_msg or "Remote end closed connection" in err_msg:
+        err_msg += " | 可能是东财 Cookie 失效/不完整，请先刷新：python -m dragon_quant.providers.cookie fetch --source em"
+    print(f"  ⚠️ 东财请求失败 (重试{MAX_RETRIES}次): {err_msg}", file=sys.stderr)
     return None
 
 
@@ -370,19 +379,51 @@ class EastMoneyProvider(StockProvider):
                                     page_size: int = COMPONENTS_PAGE_SIZE) -> list[StockInfo]:
         """获取单页板块成分股，按涨跌幅降序。"""
         dynamic = {
-            "np": "1", "fltt": "1", "invt": "2",
-            "fs": f"b:{sector_code}+f:!",
+            # 对齐真实浏览器请求：fltt=2、fs=b:BKxxxx（不附加 +f:!）
+            # fltt=2 在东财多个页面链路里更常见，能显著降低被风控/返回非 JSONP 的概率。
+            "np": "1", "fltt": "2", "invt": "2",
+            "fs": f"b:{sector_code}",
+            # 仍保留我们业务所需的最小字段集
             "fields": "f12,f14,f3,f2,f4,f8",
             "fid": "f3",
             "pn": str(page), "pz": str(page_size),
             "po": "1",
             "ut": _get_ut_token(),
         }
-        data = _do_fetch_with_fallback(
-            "sector_components", dynamic,
-            referer=REFERERS["components"],
-            logger=self._logger,
-        )
+
+        # 近期东财对 Referer 更敏感：真实页面常来自 data.eastmoney.com/bkzj 或 quote.eastmoney.com/bk。
+        # 这里做轻量 fallback：优先 data.bkzj，其次 quote bk 页面，最后回退历史 gridlist。
+        referers = [
+            f"https://data.eastmoney.com/bkzj/{sector_code}.html",
+            REFERERS["kline"].format(code=sector_code),
+            REFERERS["components"],
+        ]
+
+        data = None
+        for ref in referers:
+            data = _do_fetch_with_fallback(
+                "sector_components", dynamic,
+                referer=ref,
+                logger=self._logger,
+            )
+            diffs = (data or {}).get("data", {}).get("diff") if isinstance(data, dict) else None
+            if diffs:
+                break
+
+        # 兼容旧链路：如果仍失败，再尝试一次旧 fs 表达式（b:BKxxxx+f:!）
+        if not data or not (data.get("data", {}) or {}).get("diff"):
+            dynamic2 = dict(dynamic)
+            dynamic2["fs"] = f"b:{sector_code}+f:!"
+            for ref in referers:
+                data = _do_fetch_with_fallback(
+                    "sector_components", dynamic2,
+                    referer=ref,
+                    logger=self._logger,
+                )
+                diffs = (data or {}).get("data", {}).get("diff") if isinstance(data, dict) else None
+                if diffs:
+                    break
+
         if not data:
             return []
 

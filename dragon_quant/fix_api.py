@@ -97,7 +97,7 @@ TEST_PARAMS = {
         "fid": "f3",
         "pn": "1", "pz": "5",
         "po": "1",
-        "np": "1", "fltt": "1", "invt": "2",
+        "np": "1", "fltt": "2", "invt": "2",
     },
     "sector_5min_kline": {
         "secid": "90.BK0883",

@@ -45,7 +45,7 @@ def _browser_cookies(url: str) -> str:
     with sync_playwright() as p:
         b = p.chromium.launch(headless=False)
         ctx = b.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
             locale="zh-CN", timezone_id="Asia/Shanghai")
         page = ctx.new_page()
         page.goto(url, wait_until="domcontentloaded")
@@ -58,23 +58,31 @@ def _browser_cookies(url: str) -> str:
         success = False
         
         while time.time() - start_time < 60:
-            # 东财中心页如果正常，通常会有 class 为 listview 的表格或者 id 为 table_wrapper 的元素
-            # 但最直接的是，如果滑块存在，页面会被遮挡。
-            # 我们直接向页面注入 JS，尝试获取一个东财的 API，如果返回正常 JSON/JSONP，说明 Cookie 已通
+            # 通过“板块成分股”链路验证 Cookie 是否真正可用（更贴近运行时请求）。
+            # 注：不依赖 ut/cb 参数，返回包含 "data" 即认为通过。
             try:
-                # 尝试通过 fetch 请求一个必须带有有效 cookie 才能访问的接口
-                # 比如板块排行的接口
                 is_valid = page.evaluate("""() => {
                     return new Promise((resolve) => {
                         const ctrl = new AbortController();
                         const tid = setTimeout(() => { ctrl.abort(); resolve(false); }, 3000);
-                        fetch('https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14', { signal: ctrl.signal })
-                        .then(r => r.text())
-                        .then(t => { clearTimeout(tid); resolve(t.includes('"data":')); })
-                        .catch(() => { clearTimeout(tid); resolve(false); });
+                        const urls = [
+                          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f3&fs=b:BK1145&fields=f12,f14',
+                          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f3&fs=b:BK0883&fields=f12,f14'
+                        ];
+                        const tryOne = (i) => {
+                          if (i >= urls.length) { clearTimeout(tid); resolve(false); return; }
+                          fetch(urls[i], { signal: ctrl.signal })
+                            .then(r => r.text())
+                            .then(t => {
+                              if (t.includes('"data":') || t.includes('"diff":')) { clearTimeout(tid); resolve(true); }
+                              else { tryOne(i + 1); }
+                            })
+                            .catch(() => { tryOne(i + 1); });
+                        };
+                        tryOne(0);
                     });
                 }""")
-                
+
                 if is_valid:
                     success = True
                     break
@@ -96,7 +104,8 @@ def _browser_cookies(url: str) -> str:
     return "; ".join(f"{c['name']}={c['value']}" for c in raw)
 
 def fetch_em() -> str:
-    c = _browser_cookies("https://quote.eastmoney.com/center/hsbk.html")
+    # data.eastmoney.com 的 bkzj 页面更接近板块成分股真实链路，能拿到更“完整”的 cookie
+    c = _browser_cookies("https://data.eastmoney.com/bkzj/BK1145.html")
     if c: set_em(c); return c
     print("⚠️ 东财 Cookie 获取失败"); return ""
 

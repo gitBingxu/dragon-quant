@@ -40,6 +40,9 @@ STATISTICAL_CONCEPT_PREFIXES = (
 
 FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
 
+RANK_UP_COUNT = 8     # 领涨板块取前 8（候选筛选 + 5分K）
+RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
+
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
     """过滤：非ST、非双创(30/68)、非北交所(8/92)"""
@@ -320,7 +323,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     tx = providers["tencent"]
 
     cache = DataCache()
-    limiter = RateLimiter(max_workers=workers, logger=logger)
+    # 东财接口强反爬：push2/push2his 串行 + 每次调用间隔 0.6~1s 随机延迟降低封禁风险
+    limiter = RateLimiter(max_workers=workers, logger=logger,
+                          provider_delays={"eastmoney": (0.6, 1.0)})
 
     # ────────────────────────────────────────────
     # Phase A: 板块排行
@@ -329,13 +334,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         print("📊 Phase A — 板块排行")
 
     top10_up = [s for s in em.get_sector_ranking(asc=False)
-                if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
+                if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:RANK_UP_COUNT]
     top10_down = [s for s in em.get_sector_ranking(asc=True)
-                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:10]
+                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:RANK_DOWN_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     if verbose:
-        print(f"   前10涨: {len(top10_up)} 个板块")
-        print(f"   前10跌: {len(top10_down)} 个板块")
+        print(f"   领涨 {len(top10_up)} 个板块")
+        print(f"   领跌 {len(top10_down)} 个板块")
 
     if not top10_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
@@ -457,7 +462,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("⏳ Phase D — 并发加载")
 
-    # T1: 板块5分K（20个板块）
+    # T1: 板块5分K（领涨8 + 领跌20 = 28 个板块）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
         limiter.submit("eastmoney", "em",

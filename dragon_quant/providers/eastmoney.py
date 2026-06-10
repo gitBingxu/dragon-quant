@@ -1,28 +1,37 @@
 """
 东财 Provider — 概念板块排行 / 成分股 / 板块5分K
-所有请求 JSONP 格式，带完整反爬 Header
+
+请求链路（重构后）：
+  curl 子进程为统一主通道（系统 TLS 指纹，支持并发，轻量）
+  → 失败按指数退避重试
+  → 连续失败降级到 Playwright 浏览器兜底（browser.py）
+
+反爬要点：
+  - 严格对齐 east_money.md 的请求头（Chrome 148）与查询参数
+  - 动态 ut token（失败回退硬编码）
+  - 请求间随机延迟 + 失败指数退避
+  - 分域 Cookie：push2（排行/成分股）用 get_em()，push2his（5分K）用 get_em_his()
 """
 
-import json, re, socket, ssl, subprocess, sys, time
-import urllib.request, urllib.parse
+import json, random, re, subprocess, sys, time
+import urllib.parse
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
 from dragon_quant.providers.base import StockProvider
-from dragon_quant.providers.cookie import get_em
+from dragon_quant.providers.cookie import get_em, get_em_his
 
-BASE = "https://push2.eastmoney.com"
-BASE_HIS = "https://push2his.eastmoney.com"
+BASE = "https://push2.eastmoney.com"       # 板块排行 / 成分股
+BASE_HIS = "https://push2his.eastmoney.com"  # 板块5分K
 
-# 东财请求头模板 — 固定值
+# 东财请求头模板 — 与 east_money.md 对齐（Chrome 148）
 HEADERS = {
     "Accept": "*/*",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Pragma": "no-cache",
-    # 与 fix-api / 真实浏览器请求保持一致（Chrome 148）
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-    "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not.A/Brand";v="99"',
+    "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"macOS"',
     "Sec-Fetch-Dest": "script",
@@ -31,24 +40,17 @@ HEADERS = {
 }
 
 REFERERS = {
-    "ranking": "https://quote.eastmoney.com/center/hsbk.html",
-    # 旧 referer（部分环境仍可用）
-    "components": "https://quote.eastmoney.com/center/gridlist.html",
+    "ranking": "https://quote.eastmoney.com/center/gridlist.html",
+    "components": "https://data.eastmoney.com/bkzj/{code}.html",
     "kline": "https://quote.eastmoney.com/bk/90.{code}.html",
 }
 
-# 东财部分 CDN 节点对 TLSv1.3 发空响应，强制 TLSv1.2
-_SSL_CTX = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-_SSL_CTX.maximum_version = ssl.TLSVersion.TLSv1_2
+# 前端 ut token（来自 east_money.md）
+_UT_DEFAULT = "fa5fd1943c7b386f172d6893dbfba10b"  # 行情/K线（push2 排行、push2his 5分K）
+_UT_COMPONENTS = "8dec03ba335b81bf4ebdf7b29ec27d15"  # 板块成分股资金流页
 
-
-def _resolve_ips(host: str) -> list[str]:
-    """解析 host 的所有 IPv4 地址（去重），失败返回空列表"""
-    try:
-        addrs = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
-        return list(dict.fromkeys(a[4][0] for a in addrs))
-    except Exception:
-        return []
+MAX_RETRIES = 3
+CURL_TIMEOUT = 15
 
 
 def _safe_float(v, default=0.0):
@@ -59,28 +61,19 @@ def _safe_float(v, default=0.0):
         return default
 
 
-def _curl_request(url: str, headers: dict, resolve_ip: str = "") -> Optional[str]:
-    """用 curl 发送 HTTP 请求（绕过 Python TLS 指纹限制）。
-
-    东财 WAF 检测 Python ssl（LibreSSL）的 TLS 指纹并直接断开连接。
-    curl 使用系统 libcurl + SecureTransport TLS，指纹与浏览器一致。
-    可指定 resolve_ip 绑定到特定 CDN 节点。
-    """
-    cmd = ["curl", "-s", "--max-time", "15", "--http1.1", "--tlsv1.2", "--tls-max", "1.2", "-X", "GET"]
-    if resolve_ip:
-        host = urllib.parse.urlparse(url).hostname
-        cmd += ["--resolve", f"{host}:443:{resolve_ip}"]
+def _curl_request(url: str, headers: dict) -> Optional[str]:
+    """用 curl 发送 HTTP GET（系统 TLS 指纹，接近浏览器，足以过东财 WAF）。"""
+    cmd = ["curl", "-s", "--max-time", str(CURL_TIMEOUT), "-X", "GET"]
     for k, v in headers.items():
         cmd += ["-H", f"{k}: {v}"]
     cmd.append(url)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=CURL_TIMEOUT + 5)
         if result.returncode == 0 and result.stdout:
             return result.stdout
-        else:
-            err = result.stderr.strip()
-            reason = err[:200] if err else f"rc={result.returncode}, stdout空"
-            print(f"  ⚠️ curl 失败: {reason}", file=sys.stderr)
+        err = result.stderr.strip()
+        reason = err[:200] if err else f"rc={result.returncode}, stdout空"
+        print(f"  ⚠️ curl 失败: {reason}", file=sys.stderr)
     except FileNotFoundError:
         print("  ⚠️ curl 不可用", file=sys.stderr)
     except Exception as e:
@@ -88,122 +81,68 @@ def _curl_request(url: str, headers: dict, resolve_ip: str = "") -> Optional[str
     return None
 
 
-def _fetch(url: str, referer: str, logger=None, endpoint: str = "", extra_headers: dict = None) -> Optional[dict]:
+def _browser_fallback(url: str, referer: str) -> Optional[str]:
+    """curl 连续失败后的浏览器兜底（Playwright 真实 Chromium HTTP 栈）。"""
+    try:
+        from dragon_quant.providers import browser
+        if not browser.is_available():
+            return None
+        return browser.get_browser().fetch_jsonp(url, referer)
+    except Exception as e:
+        print(f"  ⚠️ 浏览器兜底失败: {e}", file=sys.stderr)
+        return None
+
+
+def _fetch(url: str, referer: str, cookie: str,
+           logger=None, endpoint: str = "") -> Optional[dict]:
     """JSONP GET 请求
 
-    优先 urllib，curl 兜底。DNS 多 IP 轮询绕过坏掉的 CDN 节点。
-    最多重试 2 次，每次尝试不同 IP。
+    curl 主通道 + 指数退避重试，连续失败后浏览器兜底。
+    cookie 由调用方按域名传入（push2 / push2his 分开）。
     """
-    cookie = get_em()
     if not cookie:
-        print("\u26a0\ufe0f 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch --source em", file=sys.stderr)
+        print("⚠️ 东财 Cookie 未设置，请先 python -m dragon_quant.providers.cookie fetch", file=sys.stderr)
         return None
 
     headers = dict(HEADERS)
-    if extra_headers:
-        headers.update(extra_headers)
     headers["Referer"] = referer
     headers["Cookie"] = cookie
 
-    parsed = urllib.parse.urlparse(url)
-    host = parsed.hostname
-    resolved_ips = _resolve_ips(host)
-    # 关键：永远先尝试“hostname 直连”（让系统 DNS/HappyEyeballs 选择健康节点），
-    # 再尝试 IP 绑定轮询（绕过坏 CDN 节点）。
-    # 否则当 getaddrinfo 恰好只返回一个坏 IP 时，会导致每次都命中同一坏节点。
-    ips = [host] + [ip for ip in resolved_ips if ip != host]
-
-    MAX_RETRIES = 2
     last_error = None
-
-    # 说明：这里会做 "urllib → curl" 的两级兜底，并且会换 IP 重试。
-    # 为了避免“明明最终成功但日志里刷满 error”的错觉：
-    # - 只有在全部重试都失败时，才用 logger.api(... ok=False) 记一条 error；
-    # - 中间过程的失败，用 logger.warn 记到 api_attempt:* 分类下（不计入 api_stats）。
-
     for attempt in range(MAX_RETRIES):
-        ip = ips[attempt % len(ips)]
-
-        # 1) urllib，绑定到指定 IP
-        ip_headers = dict(headers)
-        if ip != host:
-            ip_headers["Host"] = host
-            ip_netloc = f"[{ip}]" if ":" in ip else ip
-            if parsed.port:
-                ip_netloc += f":{parsed.port}"
-            ip_url = parsed._replace(netloc=ip_netloc).geturl()
-        else:
-            ip_url = url
-
-        req = urllib.request.Request(ip_url, headers=ip_headers)
         t0 = time.time()
-        try:
-            with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
-                raw = resp.read().decode("utf-8")
-            elapsed = (time.time() - t0) * 1000
+        raw = _curl_request(url, headers)
+        elapsed = (time.time() - t0) * 1000
+        if raw:
             data = _parse_jsonp(raw)
-            if logger:
-                logger.api("eastmoney", endpoint, ok=data is not None,
-                           elapsed_ms=elapsed, note=f"urllib@{ip}", attempt=attempt + 1)
-            return data
-        except Exception as e:
-            elapsed = (time.time() - t0) * 1000
-            if logger:
-                logger.warn(
-                    f"api_attempt:eastmoney:{endpoint}",
-                    f"eastmoney/{endpoint} urllib@{ip} 失败，将尝试 curl 兜底 (attempt={attempt + 1}/{MAX_RETRIES})",
-                    elapsed_ms=elapsed,
-                    error=str(e),
-                    attempt=attempt + 1,
-                    note=f"urllib@{ip}",
-                )
-            print(f"  ⚠️ urllib@{ip} 失败: {e}", file=sys.stderr)
-            last_error = e
-
-        # 2) 兜底：curl，绑定到同一 IP
-        t0 = time.time()
-        try:
-            raw = _curl_request(url, headers, resolve_ip=ip if ip != host else "")
-            if raw:
-                elapsed = (time.time() - t0) * 1000
-                data = _parse_jsonp(raw)
+            if data is not None:
                 if logger:
-                    logger.api("eastmoney", endpoint, ok=data is not None,
-                               elapsed_ms=elapsed, note=f"curl@{ip}", attempt=attempt + 1)
+                    logger.api("eastmoney", endpoint, ok=True,
+                               elapsed_ms=elapsed, note=f"curl#{attempt + 1}")
                 return data
-            raise RuntimeError("curl 返回空数据")
-        except Exception as e:
-            elapsed = (time.time() - t0) * 1000
-            if logger:
-                logger.warn(
-                    f"api_attempt:eastmoney:{endpoint}",
-                    f"eastmoney/{endpoint} curl@{ip} 失败，将换 IP 重试 (attempt={attempt + 1}/{MAX_RETRIES})",
-                    elapsed_ms=elapsed,
-                    error=f"curl:{e}",
-                    attempt=attempt + 1,
-                    note=f"curl@{ip}",
-                )
-            last_error = e
-
-        # 非最后一次尝试，等待后换 IP
+            last_error = "JSONP 解析失败"
+        else:
+            last_error = "curl 空响应"
+        if logger:
+            logger.api("eastmoney", endpoint, ok=False,
+                       elapsed_ms=elapsed, error=f"{last_error}")
+        # 指数退避 + 随机抖动，降低频率特征
         if attempt < MAX_RETRIES - 1:
-            time.sleep(1.0)
+            time.sleep((0.5 * (2 ** attempt)) + random.uniform(0, 0.4))
 
-    if logger:
-        logger.api(
-            "eastmoney",
-            endpoint,
-            ok=False,
-            elapsed_ms=0,
-            error=str(last_error) if last_error else "unknown",
-            attempts=MAX_RETRIES,
-        )
-    err_msg = str(last_error) if last_error else "unknown"
-    # 经验：东财 WAF 经常对“过期/不完整 cookie”直接空响应（curl:52 / Remote end closed）。
-    # 这类错误与网络不同，最有效的处理是刷新 Cookie。
-    if "Empty reply from server" in err_msg or "Remote end closed connection" in err_msg:
-        err_msg += " | 可能是东财 Cookie 失效/不完整，请先刷新：python -m dragon_quant.providers.cookie fetch --source em"
-    print(f"  ⚠️ 东财请求失败 (重试{MAX_RETRIES}次): {err_msg}", file=sys.stderr)
+    # 浏览器兜底
+    t0 = time.time()
+    raw = _browser_fallback(url, referer)
+    elapsed = (time.time() - t0) * 1000
+    if raw:
+        data = _parse_jsonp(raw)
+        if logger:
+            logger.api("eastmoney", endpoint, ok=data is not None,
+                       elapsed_ms=elapsed, note="browser")
+        if data is not None:
+            return data
+
+    print(f"  ⚠️ 东财请求失败 (curl重试{MAX_RETRIES}次+浏览器兜底): {last_error}", file=sys.stderr)
     return None
 
 
@@ -212,11 +151,13 @@ def _parse_jsonp(raw: str) -> Optional[dict]:
     m = re.search(r"\((\{.*\})\)", raw, re.DOTALL)
     if not m:
         return None
-    return json.loads(m.group(1))
+    try:
+        return json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
 
 
 _UT_CACHE = ""
-_UT_DEFAULT = "fa5fd1943c7b386f172d6893dbfba10b"
 
 
 def _get_ut_token() -> str:
@@ -240,82 +181,17 @@ def _get_ut_token() -> str:
     return _UT_CACHE
 
 
-_TEMPLATE_CACHE: dict[str, tuple] = {}
-_TEMPLATE_SOURCE: dict[str, str] = {}
-
-
-def _get_template(endpoint: str) -> tuple:
-    from dragon_quant.config.api_config import (
-        load_templates, hardcoded_templates, save_templates,
-    )
-    if endpoint in _TEMPLATE_CACHE:
-        return _TEMPLATE_CACHE[endpoint]
-
-    local = load_templates("eastmoney")
-    if local and endpoint in local:
-        _TEMPLATE_CACHE[endpoint] = (local[endpoint], "local")
-        _TEMPLATE_SOURCE[endpoint] = "local"
-        return _TEMPLATE_CACHE[endpoint]
-
-    hardcoded = hardcoded_templates("eastmoney")
-    if endpoint in hardcoded:
-        tpl = hardcoded[endpoint]
-        if not load_templates("eastmoney"):
-            save_templates("eastmoney", hardcoded_templates("eastmoney"))
-        _TEMPLATE_CACHE[endpoint] = (tpl, "hardcoded")
-        _TEMPLATE_SOURCE[endpoint] = "hardcoded"
-        return _TEMPLATE_CACHE[endpoint]
-
-    raise ValueError(f"Unknown endpoint: eastmoney/{endpoint}")
-
-
-def _do_fetch_with_fallback(endpoint: str, dynamic_params: dict, referer: str,
-                            logger=None) -> Optional[dict]:
-    tpl, source = _get_template(endpoint)
-    url = tpl.build_url(**dynamic_params)
-    extra_headers = tpl.build_headers(referer)
-
-    data = _fetch(url, referer, logger=logger, endpoint=endpoint,
-                  extra_headers=extra_headers)
-    if data is not None:
-        return data
-
-    if source == "local":
-        from dragon_quant.config.api_config import (
-            hardcoded_templates, save_single_template,
-        )
-        hardcoded = hardcoded_templates("eastmoney")
-        if endpoint in hardcoded:
-            hc_tpl = hardcoded[endpoint]
-            hc_url = hc_tpl.build_url(**dynamic_params)
-            hc_headers = hc_tpl.build_headers(referer)
-            data2 = _fetch(hc_url, referer, logger=logger,
-                          endpoint=f"{endpoint}_hc",
-                          extra_headers=hc_headers)
-            if data2 is not None:
-                save_single_template("eastmoney", endpoint, hc_tpl)
-                _TEMPLATE_CACHE[endpoint] = (hc_tpl, "hardcoded")
-                _TEMPLATE_SOURCE[endpoint] = "hardcoded"
-                print(f"  \U0001f4a1 {endpoint}: 本地 config 失效, 已回退至包内硬编码",
-                      file=sys.stderr)
-                return data2
-
-    print(f"  \u274c eastmoney/{endpoint}: 请求失败，请运行 fix-api 修复:",
-          file=sys.stderr)
-    print(f"       python -m dragon_quant fix-api --provider eastmoney",
-          file=sys.stderr)
-    return None
-
-
 def _parse_kline_items(raw_items: list[str]) -> list[KBar]:
-    """解析东财 K 线文本行 → KBar 列表"""
+    """解析东财 K 线文本行 → KBar 列表
+
+    格式: 时间,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
+    """
     result = []
     for line in raw_items:
         parts = line.split(",")
         if len(parts) < 11:
             continue
         try:
-            # 格式: 时间,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
             ts = int(time.mktime(time.strptime(parts[0].strip(), "%Y-%m-%d %H:%M"))) * 1000
             result.append(KBar(
                 timestamp=ts,
@@ -332,29 +208,29 @@ def _parse_kline_items(raw_items: list[str]) -> list[KBar]:
 
 class EastMoneyProvider(StockProvider):
 
-    COMPONENTS_PAGE_SIZE = 50
-
     @property
     def name(self) -> str:
         return "eastmoney"
 
-    # ─── 板块涨跌幅排行 ───
+    # ─── 板块涨跌幅排行（push2，fltt=1，f3=406→4.06%）───
 
     def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
         """概念板块排行 po=1 涨幅榜 / po=0 跌幅榜"""
-        dynamic = {
+        params = {
+            "np": "1", "fltt": "1", "invt": "2",
             "fs": "m:90+t:3",
             "fields": "f12,f14,f3,f4,f8,f104",
             "fid": "f3",
             "pn": "1", "pz": "500",
-            "po": "0" if asc else "1",
+            "po": "0" if asc else "1",  # 0=跌幅榜 1=涨幅榜
             "ut": _get_ut_token(),
+            "dect": "1", "wbp2u": "|0|0|0|web",
+            "cb": "jQuery_dq",
         }
-        data = _do_fetch_with_fallback(
-            "sector_ranking", dynamic,
-            referer=REFERERS["ranking"],
-            logger=self._logger,
-        )
+        qs = urllib.parse.urlencode(params)
+        url = f"{BASE}/api/qt/clist/get?{qs}"
+        data = _fetch(url, REFERERS["ranking"], get_em(),
+                      logger=self._logger, endpoint="sector_ranking")
         if not data:
             return []
 
@@ -373,57 +249,28 @@ class EastMoneyProvider(StockProvider):
             ))
         return result
 
-    # ─── 板块成分股 ───
+    # ─── 板块成分股（push2，fltt=2，f3=19.99 已是百分数）───
 
-    def _get_sector_components_page(self, sector_code: str, page: int = 1,
-                                    page_size: int = COMPONENTS_PAGE_SIZE) -> list[StockInfo]:
-        """获取单页板块成分股，按涨跌幅降序。"""
-        dynamic = {
-            # 对齐真实浏览器请求：fltt=2、fs=b:BKxxxx（不附加 +f:!）
-            # fltt=2 在东财多个页面链路里更常见，能显著降低被风控/返回非 JSONP 的概率。
-            "np": "1", "fltt": "2", "invt": "2",
-            "fs": f"b:{sector_code}",
-            # 仍保留我们业务所需的最小字段集
-            "fields": "f12,f14,f3,f2,f4,f8",
+    def get_sector_components(self, sector_code: str, page: int = 1) -> list[StockInfo]:
+        """板块成分股，按涨跌幅降序"""
+        params = {
+            "cb": "jQuery_dq",
             "fid": "f3",
-            "pn": str(page), "pz": str(page_size),
             "po": "1",
-            "ut": _get_ut_token(),
+            "pz": "50",
+            "pn": str(page),
+            "np": "1",
+            "fltt": "2",
+            "invt": "2",
+            "ut": _UT_COMPONENTS,
+            "fs": f"b:{sector_code}",
+            "fields": "f12,f14,f2,f3,f1,f13",
         }
-
-        # 近期东财对 Referer 更敏感：真实页面常来自 data.eastmoney.com/bkzj 或 quote.eastmoney.com/bk。
-        # 这里做轻量 fallback：优先 data.bkzj，其次 quote bk 页面，最后回退历史 gridlist。
-        referers = [
-            f"https://data.eastmoney.com/bkzj/{sector_code}.html",
-            REFERERS["kline"].format(code=sector_code),
-            REFERERS["components"],
-        ]
-
-        data = None
-        for ref in referers:
-            data = _do_fetch_with_fallback(
-                "sector_components", dynamic,
-                referer=ref,
-                logger=self._logger,
-            )
-            diffs = (data or {}).get("data", {}).get("diff") if isinstance(data, dict) else None
-            if diffs:
-                break
-
-        # 兼容旧链路：如果仍失败，再尝试一次旧 fs 表达式（b:BKxxxx+f:!）
-        if not data or not (data.get("data", {}) or {}).get("diff"):
-            dynamic2 = dict(dynamic)
-            dynamic2["fs"] = f"b:{sector_code}+f:!"
-            for ref in referers:
-                data = _do_fetch_with_fallback(
-                    "sector_components", dynamic2,
-                    referer=ref,
-                    logger=self._logger,
-                )
-                diffs = (data or {}).get("data", {}).get("diff") if isinstance(data, dict) else None
-                if diffs:
-                    break
-
+        qs = urllib.parse.urlencode(params)
+        url = f"{BASE}/api/qt/clist/get?{qs}"
+        referer = REFERERS["components"].format(code=sector_code)
+        data = _fetch(url, referer, get_em(),
+                      logger=self._logger, endpoint="sector_components")
         if not data:
             return []
 
@@ -437,59 +284,31 @@ class EastMoneyProvider(StockProvider):
                 code=d.get("f12", ""),
                 name=d.get("f14", ""),
                 sector_code=sector_code,
-                pct=_safe_float(d.get("f3", 0)) / 100.0,
+                pct=_safe_float(d.get("f3", 0)),
                 price=_safe_float(d.get("f2", 0)),
             ))
         return result
 
-    def get_sector_components(self, sector_code: str, page: int = 1,
-                              all_pages: bool = False,
-                              page_size: int = COMPONENTS_PAGE_SIZE) -> list[StockInfo]:
-        """板块成分股，按涨跌幅降序。支持单页与全量分页聚合。"""
-        if not all_pages:
-            return self._get_sector_components_page(sector_code, page=page, page_size=page_size)
-
-        all_items: list[StockInfo] = []
-        seen_codes: set[str] = set()
-        current_page = max(page, 1)
-        max_pages = 20
-
-        for _ in range(max_pages):
-            page_items = self._get_sector_components_page(
-                sector_code, page=current_page, page_size=page_size
-            )
-            if not page_items:
-                break
-
-            for item in page_items:
-                if item.code and item.code not in seen_codes:
-                    seen_codes.add(item.code)
-                    all_items.append(item)
-
-            if len(page_items) < page_size:
-                break
-            current_page += 1
-
-        return all_items
-
-    # ─── 板块 5 分钟 K 线 ───
+    # ─── 板块 5 分钟 K 线（push2his）───
 
     def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
         """概念板块 5 分钟 K 线"""
-        dynamic = {
+        params = {
+            "cb": "jQuery_dq",
             "secid": f"90.{sector_code}",
-            "klt": "5",
-            "lmt": str(bars),
+            "ut": _get_ut_token(),
             "fields1": "f1,f2,f3,f4,f5,f6",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            "ut": _get_ut_token(),
+            "klt": "5",
+            "fqt": "1",
+            "end": "20500101",
+            "lmt": str(bars),
         }
+        qs = urllib.parse.urlencode(params)
+        url = f"{BASE_HIS}/api/qt/stock/kline/get?{qs}"
         referer = REFERERS["kline"].format(code=sector_code)
-        data = _do_fetch_with_fallback(
-            "sector_5min_kline", dynamic,
-            referer=referer,
-            logger=self._logger,
-        )
+        data = _fetch(url, referer, get_em_his(),
+                      logger=self._logger, endpoint="sector_5min_kline")
         if not data:
             return []
 

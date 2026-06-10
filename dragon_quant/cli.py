@@ -181,6 +181,11 @@ def _cmd_data(args):
         result = fetch_cookies(source=args.source)
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
+    elif args.data_action == "cookie-set":
+        from dragon_quant.providers.cookie import set_em, set_em_his, set_xq
+        setters = {"em": set_em, "em_his": set_em_his, "xq": set_xq}
+        setters[args.source](args.cookie)
+
 
 def _cmd_review(args):
     """龙头回测命令"""
@@ -360,6 +365,11 @@ def main():
     data_subs.add_parser("cookie-status", help="查看 Cookie 状态")
     cf_p = data_subs.add_parser("cookie-fetch", help="刷新 Cookie")
     cf_p.add_argument("--source", default="all", choices=["all", "eastmoney", "xueqiu"])
+
+    cs_p = data_subs.add_parser("cookie-set", help="手动设置 Cookie")
+    cs_p.add_argument("--cookie", "-c", required=True, help="完整 Cookie 字符串")
+    cs_p.add_argument("--source", required=True, choices=["em", "em_his", "xq"],
+                      help="em=东财push2 em_his=东财push2his xq=雪球")
 
     # review 子命令
     rev_p = sub.add_parser("review", help="龙头回测验证")

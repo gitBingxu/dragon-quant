@@ -10,16 +10,31 @@ RateLimiter — 按 provider 分组的并发调度器
 """
 
 import queue
+import random
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
+
+# delay 可以是固定秒数，也可以是 (min, max) 随机区间
+DelaySpec = Union[float, tuple]
+
+
+def _resolve_delay(delay: DelaySpec) -> float:
+    """将 delay 规格解析为本次实际休眠秒数。
+
+    - float → 原值
+    - (min, max) → [min, max] 内随机（用于降低请求频率特征，防封）
+    """
+    if isinstance(delay, (tuple, list)) and len(delay) == 2:
+        return random.uniform(delay[0], delay[1])
+    return delay
 
 
 class _SerialQueue:
     """单 key 任务队列 — 串行消费"""
 
-    def __init__(self, executor: ThreadPoolExecutor, key: str = "", logger=None, delay: float = 0.3):
+    def __init__(self, executor: ThreadPoolExecutor, key: str = "", logger=None, delay: DelaySpec = 0.3):
         self._executor = executor
         self._lock = threading.Lock()
         self._queue: queue.Queue = queue.Queue()
@@ -59,8 +74,9 @@ class _SerialQueue:
                 future.set_result(result)
             except BaseException as e:
                 future.set_exception(e)
-            if self._delay > 0:
-                time.sleep(self._delay)
+            sleep_s = _resolve_delay(self._delay)
+            if sleep_s > 0:
+                time.sleep(sleep_s)
 
 
 class RateLimiter:
@@ -73,13 +89,16 @@ class RateLimiter:
         limiter.wait_all()
     """
 
-    def __init__(self, max_workers: int = 8, logger=None, delay: float = 0.3):
+    def __init__(self, max_workers: int = 8, logger=None, delay: DelaySpec = 0.3,
+                 provider_delays: Optional[dict] = None):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._queues: dict[str, _SerialQueue] = {}
         self._lock = threading.Lock()
         self._futures: list[Future] = []
         self._logger = logger
         self._delay = delay
+        # 按 provider 覆盖延迟规格，如东财用 (0.6, 1.0) 随机区间降低封禁风险
+        self._provider_delays = provider_delays or {}
 
     def _key(self, provider: str, endpoint: str) -> str:
         return provider
@@ -89,7 +108,8 @@ class RateLimiter:
         k = self._key(provider, endpoint)
         with self._lock:
             if k not in self._queues:
-                self._queues[k] = _SerialQueue(self._executor, key=k, logger=self._logger, delay=self._delay)
+                delay = self._provider_delays.get(provider, self._delay)
+                self._queues[k] = _SerialQueue(self._executor, key=k, logger=self._logger, delay=delay)
             q = self._queues[k]
         future = q.submit(fn, *args, _endpoint=endpoint, **kwargs)
         self._futures.append(future)

@@ -26,3 +26,6 @@ logs/
 
 # 临时数据
 /tmp/lsa_*.json
+
+# 含敏感 Cookie 的接口参考（ut/ct 鉴权字段）
+dragon_quant/providers/east_money.md

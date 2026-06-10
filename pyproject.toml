@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["dragon_quant", "dragon_quant.*", "web_ui", "web_ui.*"]
 
+[tool.setuptools.package-data]
+web_ui = ["*.html"]
+
 [project]
 name = "dragon-quant"
 version = "0.2.2"

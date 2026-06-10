@@ -81,17 +81,27 @@ def get_sector_ranking(asc: bool = False) -> list[SectorPerformance]:
     return em.get_sector_ranking(asc=asc)
 
 
-def get_sector_components(sector_code: str) -> list[StockInfo]:
+def get_sector_components(sector_code: str, page: int = 1,
+                          all_pages: bool = False,
+                          page_size: int = 50) -> list[StockInfo]:
     """获取概念板块成分股列表（按涨跌幅降序）
 
     Args:
         sector_code: 板块代码，如 "BK0487"
+        page: 页码（默认第一页）
+        all_pages: 是否自动拉取全量分页
+        page_size: 每页大小
     Returns:
         list[StockInfo] 成分股列表
     """
     providers = _get_providers()
     em = providers["eastmoney"]
-    return em.get_sector_components(sector_code)
+    return em.get_sector_components(
+        sector_code,
+        page=page,
+        all_pages=all_pages,
+        page_size=page_size,
+    )
 
 
 def get_sector_5min_kline(sector_code: str, bars: int = 100) -> list[KBar]:

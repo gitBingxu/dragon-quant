@@ -119,6 +119,25 @@ dragon-quant data batch-quote --codes 600172,000001,002409
 dragon-quant data cookie-status    # 查看 Cookie 状态
 dragon-quant data cookie-fetch     # 刷新全部 Cookie
 dragon-quant data cookie-fetch --source xueqiu  # 只刷新雪球
+
+# 手动设置 Cookie（推荐兜底方案）
+# 适用场景：Playwright 自动获取失败/被风控；或你已经在浏览器里抓到了可用 Cookie。
+#
+# 1) 从浏览器开发者工具（Network）里复制请求头中的 Cookie（整段）
+# 2) 写入本地（注意：Cookie 属于敏感信息，请勿提交到仓库/群聊）
+
+# 设置东财 Cookie
+python3 -m dragon_quant.providers.cookie set --source em --cookie 'qgqp_b_id=...; st_nvi=...; nid18=...'
+
+# 设置雪球 Cookie
+python3 -m dragon_quant.providers.cookie set --source xq --cookie 'xq_a_token=...; xq_is_login=1; u=...'
+
+# 查看是否生效
+python3 -m dragon_quant.providers.cookie status --show
+
+# Cookie 文件默认位置（macOS）
+# ~/Library/Application Support/dragon-quant/cookies/eastmoney
+# ~/Library/Application Support/dragon-quant/cookies/xueqiu
 ```
 
 ### `review` — 龙头回测

@@ -7,6 +7,7 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
   dragon-quant review [--date DATE] [--top N] [--force]
   dragon-quant storage {status,size,clear} [options]
+  dragon-quant fix-api [--provider eastmoney] [--show-browser]
 """
 
 import argparse
@@ -222,6 +223,12 @@ def _cmd_review_ui(args):
     start_server(port=args.port, open_browser=not args.no_browser)
 
 
+def _cmd_fix_api(args):
+    """修复 API 配置命令"""
+    from dragon_quant.fix_api import fix_api
+    fix_api(provider=args.fix_provider, headless=not args.show_browser)
+
+
 def _cmd_storage(args):
     """存储管理命令"""
     mgr = StorageManager()
@@ -388,6 +395,13 @@ def main():
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
     clear_p.add_argument("--days", type=int, default=None, help="保留最近N天")
 
+    # fix-api 子命令
+    fix_p = sub.add_parser("fix-api", help="从目标网站自动捕获并修复 API 配置")
+    fix_p.add_argument("--provider", dest="fix_provider", default="eastmoney",
+                       choices=["eastmoney"], help="要修复的 provider (默认: eastmoney)")
+    fix_p.add_argument("--show-browser", action="store_true",
+                       help="显示浏览器窗口 (默认无头运行)")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -400,6 +414,8 @@ def main():
         _cmd_storage(args)
     elif args.command == "review":
         _cmd_review(args)
+    elif args.command == "fix-api":
+        _cmd_fix_api(args)
 
     else:
         parser.print_help()

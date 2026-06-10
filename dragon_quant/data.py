@@ -207,10 +207,11 @@ def fetch_cookies(source: str = "all") -> dict:
             "xueqiu": {"ok": True, "length": 567},
         }
     """
-    from dragon_quant.providers.cookie import fetch_em, fetch_xq, get_em, get_xq
+    from dragon_quant.providers.cookie import fetch_em, fetch_em_his, fetch_xq, get_em, get_xq
 
     if source in ("all", "eastmoney"):
-        fetch_em()
+        fetch_em()      # push2 域（板块排行 / 成分股）
+        fetch_em_his()  # push2his 域（板块5分K）
     if source in ("all", "xueqiu"):
         fetch_xq()
 

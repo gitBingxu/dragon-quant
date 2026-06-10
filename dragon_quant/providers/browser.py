@@ -1,5 +1,5 @@
 """
-共享浏览器会话 — 东财接口 playwright 兜底通道
+共享浏览器会话 — 东财接口 curl 失败后的 Playwright 兜底通道
 
 用法:
   from dragon_quant.providers.browser import get_browser, close_browser
@@ -10,7 +10,7 @@
 设计:
   - 所有 Playwright 操作跑在专用后台线程，避免 greenlet 线程切换问题
   - 使用 Playwright APIRequestContext 发请求（浏览器 HTTP 栈，无 CORS 限制）
-  - 启动时从 cookie 文件注入东财 Cookie，与 urllib 路径共享同一 Cookie 状态
+  - 按目标域名注入对应 Cookie：push2his → get_em_his()，其余 → get_em()
   - 首次 fetch 时自动启动浏览器并导航到东财主站
 """
 
@@ -18,7 +18,15 @@ import atexit
 import queue
 import threading
 import time
+import urllib.parse
 from typing import Optional
+
+# 与 eastmoney.py / cookie.py 统一的 UA（Chrome 148）
+UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/148.0.0.0 Safari/537.36"
+)
 
 
 class _WorkItem:
@@ -114,35 +122,32 @@ class BrowserSession:
             raise
 
         context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/147.0.0.0 Safari/537.36"
-            ),
+            user_agent=UA,
             locale="zh-CN",
             timezone_id="Asia/Shanghai",
         )
         self._page = context.new_page()
         self._pw = playwright
 
-        # 注入东财 Cookie（从本地 cookie 文件加载到浏览器上下文）
+        # 注入东财两个域的 Cookie（push2 / push2his 各一份，均落到 .eastmoney.com）
         try:
-            from dragon_quant.providers.cookie import get_em
-            cookie_str = get_em()
-            if cookie_str:
-                cookies = []
+            from dragon_quant.providers.cookie import get_em, get_em_his
+            cookies = []
+            for cookie_str in (get_em(), get_em_his()):
+                if not cookie_str:
+                    continue
                 for part in cookie_str.split(";"):
                     part = part.strip()
                     if "=" in part:
                         name, value = part.split("=", 1)
                         cookies.append({
-                            "name": name,
-                            "value": value,
+                            "name": name.strip(),
+                            "value": value.strip(),
                             "domain": ".eastmoney.com",
                             "path": "/",
                         })
-                if cookies:
-                    context.add_cookies(cookies)
+            if cookies:
+                context.add_cookies(cookies)
         except Exception:
             pass
 
@@ -160,18 +165,14 @@ class BrowserSession:
             url,
             headers={
                 "Referer": referer,
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/147.0.0.0 Safari/537.36"
-                ),
+                "User-Agent": UA,
                 "Accept": "*/*",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "sec-ch-ua": '"Chromium";v="147", "Google Chrome";v="147", "Not)A;Brand";v="99"',
+                "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
                 "sec-ch-ua-mobile": "?0",
                 "sec-ch-ua-platform": '"macOS"',
                 "Sec-Fetch-Dest": "script",
-                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Mode": "no-cors",
                 "Sec-Fetch-Site": "same-site",
             },
         )

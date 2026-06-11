@@ -161,6 +161,30 @@ dragon-quant review --ui-only --port 8765
 
 从 `dragons` 表中读取 pending 龙头 → 自动过滤入选日距今约 5~20 个交易日的记录 → 拉取日K → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 用收益观察窗口计算 `max_return_5d` 与 `max_return_hold_days` → 再按“买入日至最大收益出现日”窗口计算 `max_drawdown_5d` → 写入 DB。每条 dragon 记录入库时的 `dragon_quant` 版本号会写入 `version` 字段，方便按版本回溯策略效果。
 
+回测时会对每只 pending 个股自动追加一段**量价分析**（见下方 `vpa`），结论同步写入 `vpa_analysis` 表。
+
+### `vpa` — 量价分析
+
+```bash
+# 对单只个股做量价分析（默认写入 vpa_analysis 表）
+dragon-quant vpa --code 600519
+
+# 指定数据源与拉取根数
+dragon-quant vpa --code 600519 --source xueqiu --days 60
+
+# 仅输出不写库
+dragon-quant vpa --code 600519 --no-save
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--code` | （必填）| 股票代码，如 600519 |
+| `--source` | xueqiu | 数据源 xueqiu / tencent |
+| `--days` | 60 | 拉取日 K 线根数 |
+| `--no-save` | - | 不写入数据库 |
+
+独立于四维评分体系与编排器的量价分析模块，基于「多空博弈 + 量能验证」原则，对个股做量价健康度验证。当前内置 4 个因子：**量额灵敏度**（高位看额、低位看量）、**趋势量价验证**（涨放量/调缩量）、**突破放量验证**、**量价背离**（缩量新高=动能衰竭）。输出量价健康度（0-100）+ 偏多/中性/偏空信号 + 每个因子的判断依据，定位为「验证器」而非买卖指令。因子以插件式注册表组织，新增因子无需改动引擎/CLI/review。
+
 ### `storage` — 数据管理
 
 ```bash
@@ -344,6 +368,11 @@ dragon_quant/
 │   ├── anti_drop.py     # 抗跌性
 │   ├── leadership.py    # 领涨性
 │   └── absorption.py    # 资金承接
+├── vpa/                 # 量价分析（独立模块，插件式因子）
+│   ├── engine.py        # analyze() 编排
+│   ├── report.py        # 报告渲染
+│   ├── types.py         # FactorResult / VPAReport
+│   └── factors/         # 量价因子（量额/趋势/突破/背离）
 ├── models/
 │   └── types.py         # 数据模型（KBar, Quote, ScoreResult...）
 ├── cache/

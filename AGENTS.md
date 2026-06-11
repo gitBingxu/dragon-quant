@@ -77,6 +77,17 @@ dragon_quant/
 │   ├── leadership.py            # 领涨性 (25%)
 │   └── absorption.py            # 资金承接 (25%)
 │
+├── vpa/                         # ✅ 已实现 — 量价分析（独立模块，不依赖 scorer/编排器）
+│   ├── engine.py                # analyze(code) 编排：拉K线→跑因子→汇总健康度/信号
+│   ├── types.py                 # FactorResult / VPAReport
+│   ├── report.py                # 报告渲染（完整版 / review块 / 单行）
+│   └── factors/                 # 插件式因子注册表 FACTORS
+│       ├── base.py              # 因子签名约定 + 共享工具
+│       ├── vol_amount.py        # 量额灵敏度（高位看额、低位看量）
+│       ├── trend_verify.py      # 趋势量价验证（涨放量/调缩量）
+│       ├── breakout.py          # 突破放量验证
+│       └── divergence.py        # 量价背离（缩量新高=动能衰竭）
+│
 ├── cache/
 │   └── data_cache.py            # 内存+本地双重缓存
 │
@@ -172,12 +183,16 @@ dragon_quant/
 - DataCache 内存+本地双重缓存 + 快照导出
 - Orchestrator 编排全流程（Phase A→F 完整贯通，主进程直接打分）
 - 5 日去重：同一标的 5 个交易日内只写入 dragons 一次
-- CLI 入口 + `__main__.py` 入口（scan / logs / data / review / storage）
+- CLI 入口 + `__main__.py` 入口（scan / logs / data / review / vpa / storage）
 - 四维评分器 `scorers/`（drive.py / anti_drop.py / leadership.py / absorption.py）
+- 量价分析模块 `vpa/`（独立、可扩展、不依赖 scorer/编排器；插件式因子注册表 FACTORS）
+  - 4 个因子：量额灵敏度 / 趋势量价验证 / 突破放量验证 / 量价背离，输出量价健康度+信号+判断依据
+  - CLI `dragon-quant vpa --code <code>`；review 回测后对每只 pending 个股追加量价分析
+  - 独立表 `vpa_analysis` 持久化（`db.upsert_vpa`），不复用 dragons 字段
 - 结构化日志 `logging/`（ScanLogger + ReportBuilder 自然语言报告）
 - Logger 全链路打点（Provider/HTTP 层自动记录每次接口调用的耗时与成败）
 - 统一持久化路径 `storage/`（paths.py + db.py + manager.py）
-- SQLite 持久化（scans / scan_stocks / dragons / scan_logs 四表）
+- SQLite 持久化（scans / scan_stocks / dragons / scan_logs / vpa_analysis 五表）
 - 扫描结果持久化（results JSON / 报告文本 / latest.json 快照）
 - 数据管理 CLI（`storage status/size/clear` 子命令）
 - 交易日历工具 `utils/trading.py`（基于雪球日K，不依赖外部假期表）
@@ -186,7 +201,7 @@ dragon_quant/
 - dragons 表 `version` 字段，记录入库时的 dragon_quant 版本号
 - 版本号集中管理 `_version.py`，发布脚本自动同步
 - 加密发布流程（`encrypt_token.sh` + `publish_token.enc` + `--passwd` 解密）
-- 全量 159 个单元测试覆盖核心模块
+- 全量 186 个单元测试覆盖核心模块（含 `tests/test_vpa.py` 量价因子与引擎）
 
 ### ⚠️ 待完成（按优先级）
 

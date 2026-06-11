@@ -104,6 +104,24 @@ CREATE INDEX IF NOT EXISTS idx_scan_logs_scan ON scan_logs(scan_id);
 CREATE INDEX IF NOT EXISTS idx_scan_logs_category ON scan_logs(category);
 CREATE INDEX IF NOT EXISTS idx_scan_logs_level ON scan_logs(level);
 CREATE INDEX IF NOT EXISTS idx_scan_logs_code ON scan_logs(code);
+
+CREATE TABLE IF NOT EXISTS vpa_analysis (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date    TEXT NOT NULL,
+    code          TEXT NOT NULL,
+    name          TEXT,
+    source        TEXT,
+    health_score  REAL,
+    signal        TEXT,
+    summary       TEXT,
+    factors_json  TEXT,
+    version       TEXT DEFAULT '',
+    created_at    TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vpa_date ON vpa_analysis(trade_date);
+CREATE INDEX IF NOT EXISTS idx_vpa_code ON vpa_analysis(code);
 """
 
 
@@ -756,8 +774,41 @@ def update_dragon_review(trade_date: str, code: str,
             conn.close()
 
 
-# --- Review Web UI 查询 ---
+# --- 量价分析（VPA）持久化 ---
 
+def upsert_vpa(trade_date: str, code: str,
+               name: str = "",
+               source: str = "",
+               health_score: Optional[float] = None,
+               signal: str = "",
+               summary: str = "",
+               factors_json: Optional[str] = None,
+               version: str = ""):
+    """写入/更新单条量价分析结果（按 trade_date + code 去重覆盖）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute(
+                "INSERT INTO vpa_analysis "
+                "(trade_date, code, name, source, health_score, signal, "
+                " summary, factors_json, version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(trade_date, code) DO UPDATE SET "
+                "name=excluded.name, source=excluded.source, "
+                "health_score=excluded.health_score, signal=excluded.signal, "
+                "summary=excluded.summary, factors_json=excluded.factors_json, "
+                "version=excluded.version, "
+                "created_at=datetime('now','localtime')",
+                (trade_date, code, name, source, health_score, signal,
+                 summary, factors_json, version),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# --- Review Web UI 查询 ---
 def query_dragons(filters: dict = None,
                   sort_by: str = "composite_score",
                   sort_dir: str = "desc") -> list[dict]:

@@ -129,6 +129,37 @@ def review_dragon(code: str, trade_date: str, provider: Optional[XueqiuProvider]
     }
 
 
+def _run_vpa(code: str, name: str, trade_date: str, verbose: bool = True) -> None:
+    """对单只个股做量价分析并打印 + 入库（异常隔离，不影响回测主流程）。"""
+    try:
+        import json
+        from dragon_quant.vpa import analyze
+        from dragon_quant.vpa.report import render_block
+        from dragon_quant._version import __version__
+
+        report = analyze(code)
+        if verbose:
+            print(render_block(report))
+
+        if not report.fallback:
+            factors = [
+                {"name": f.name, "title": f.title, "signal": f.signal,
+                 "score": f.score, "note": f.note,
+                 "evidence": f.evidence, "details": f.details}
+                for f in report.factors
+            ]
+            db.upsert_vpa(
+                trade_date=trade_date, code=code, name=name,
+                source=report.source, health_score=report.health_score,
+                signal=report.signal, summary=report.summary,
+                factors_json=json.dumps(factors, ensure_ascii=False),
+                version=__version__,
+            )
+    except Exception as ex:
+        if verbose:
+            print(f"   量价: ⚠️ 分析失败: {ex}", file=sys.stderr)
+
+
 def run_review(trade_date: Optional[str] = None,
                top_n: Optional[int] = None,
                force: bool = False,
@@ -206,6 +237,9 @@ def run_review(trade_date: Optional[str] = None,
                 print("无可介入日 ❌")
             else:
                 print(f"错误: {r.get('error', '?')}")
+
+        # 量价分析（独立模块，异常隔离，不影响回测主流程）
+        _run_vpa(code, name, td, verbose=verbose)
 
         # 写入 DB
         try:

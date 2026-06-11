@@ -223,6 +223,40 @@ def _cmd_review_ui(args):
     start_server(port=args.port, open_browser=not args.no_browser)
 
 
+def _cmd_vpa(args):
+    """个股量价分析命令"""
+    import json
+    from datetime import datetime
+    from dragon_quant.vpa import analyze
+    from dragon_quant.vpa.report import render
+    from dragon_quant._version import __version__
+
+    report = analyze(args.code, source=args.source, days=args.days)
+    print(render(report))
+
+    if not args.no_save and not report.fallback:
+        from dragon_quant.storage import db
+        factors = [
+            {"name": f.name, "title": f.title, "signal": f.signal,
+             "score": f.score, "note": f.note,
+             "evidence": f.evidence, "details": f.details}
+            for f in report.factors
+        ]
+        try:
+            db.upsert_vpa(
+                trade_date=datetime.now().strftime("%Y-%m-%d"),
+                code=report.code,
+                source=report.source,
+                health_score=report.health_score,
+                signal=report.signal,
+                summary=report.summary,
+                factors_json=json.dumps(factors, ensure_ascii=False),
+                version=__version__,
+            )
+        except Exception as ex:
+            print(f"⚠️ 写入数据库失败: {ex}", file=sys.stderr)
+
+
 def _cmd_fix_api(args):
     """修复 API 配置命令"""
     from dragon_quant.fix_api import fix_api
@@ -381,6 +415,13 @@ def main():
     rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
     rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
+    # vpa 子命令
+    vpa_p = sub.add_parser("vpa", help="个股量价分析")
+    vpa_p.add_argument("--code", required=True, help="股票代码，如 600519")
+    vpa_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"])
+    vpa_p.add_argument("--days", type=int, default=60, help="拉取日K线根数 (默认60)")
+    vpa_p.add_argument("--no-save", action="store_true", help="不写入数据库")
+
     # storage 子命令
     st_p = sub.add_parser("storage", help="持久化数据管理")
     st_subs = st_p.add_subparsers(dest="storage_action")
@@ -414,6 +455,8 @@ def main():
         _cmd_storage(args)
     elif args.command == "review":
         _cmd_review(args)
+    elif args.command == "vpa":
+        _cmd_vpa(args)
     elif args.command == "fix-api":
         _cmd_fix_api(args)
 

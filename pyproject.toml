@@ -5,9 +5,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["dragon_quant", "dragon_quant.*", "web_ui", "web_ui.*"]
 
+[tool.setuptools.package-data]
+web_ui = ["dist/**/*"]
+
 [project]
 name = "dragon-quant"
-version = "0.2.4"
+version = "0.3.0"
 description = "龙头战法四维量化筛选系统 — A股涨停板龙头识别工具"
 readme = "README.md"
 license = "MIT"

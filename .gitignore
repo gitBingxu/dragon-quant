@@ -2,8 +2,12 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
+
+# 前端
+web_ui/frontend/node_modules/
+web_ui/frontend/dist/
 
 # 日志
 logs/

@@ -809,6 +809,60 @@ def upsert_vpa(trade_date: str, code: str,
 
 
 # --- Review Web UI 查询 ---
+def _parse_version(v: str, parts: Optional[int] = None) -> Optional[tuple]:
+    """解析版本号字符串为整数元组，无法解析返回 None。
+
+    "1.2.3" -> (1, 2, 3)；"1" -> (1,)；"v0.2.4" 前导 v 会被忽略。
+    parts 指定截断/补齐到几位（不足补 0，超过则截断）。
+    """
+    if not v:
+        return None
+    v = v.strip().lstrip("vV")
+    if not v:
+        return None
+    nums: list[int] = []
+    for seg in v.split("."):
+        seg = seg.strip()
+        if seg == "":
+            continue
+        try:
+            nums.append(int(seg))
+        except ValueError:
+            return None
+    if not nums:
+        return None
+    if parts is not None:
+        nums = (nums + [0] * parts)[:parts]
+    return tuple(nums)
+
+
+def _version_in_range(version: str,
+                      vmin: Optional[str],
+                      vmax: Optional[str]) -> bool:
+    """按用户输入的精度比较版本号是否落在 [vmin, vmax] 内。
+
+    用户输入位数决定比较精度：输入 "2" 只比 major，"2.1" 比 major.minor，
+    依此类推；超过 3 位只看前三位。空界限表示该侧不限制。
+    """
+    for bound, is_min in ((vmin, True), (vmax, False)):
+        if not bound:
+            continue
+        precision = min(len([s for s in bound.strip().lstrip("vV").split(".") if s != ""]), 3)
+        if precision <= 0:
+            continue
+        b = _parse_version(bound, precision)
+        rec = _parse_version(version, precision)
+        if b is None:
+            continue
+        if rec is None:
+            return False
+        if is_min and rec < b:
+            return False
+        if not is_min and rec > b:
+            return False
+    return True
+
+
 def query_dragons(filters: dict = None,
                   sort_by: str = "composite_score",
                   sort_dir: str = "desc") -> list[dict]:
@@ -892,7 +946,7 @@ def query_dragons(filters: dict = None,
         sql += f" ORDER BY {order_col} {order_dir} NULLS LAST"
 
         rows = conn.execute(sql, params).fetchall()
-        return [
+        result = [
             {
                 "trade_date": r[0], "code": r[1], "name": r[2],
                 "scan_id": r[3], "rank": r[4], "composite_score": r[5],
@@ -909,6 +963,16 @@ def query_dragons(filters: dict = None,
             }
             for r in rows
         ]
+
+        # 版本号范围过滤（语义化比较，需在 Python 端处理）
+        vmin = filters.get("version_min")
+        vmax = filters.get("version_max")
+        if vmin or vmax:
+            result = [
+                d for d in result
+                if _version_in_range(d["version"], vmin, vmax)
+            ]
+        return result
     finally:
         conn.close()
 

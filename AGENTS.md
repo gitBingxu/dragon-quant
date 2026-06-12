@@ -105,8 +105,9 @@ dragon_quant/
 │
 ├── review.py                    # ✅ 已实现 — 龙头回测验证
 ├── web_ui/                      # ✅ 已实现 — 回测结果 Web UI
-│   ├── server.py                # stdlib HTTPServer 服务端
-│   └── index.html               # 前端页面
+│   ├── server.py                # stdlib HTTPServer 服务端（托管 dist 静态资源 + /api）
+│   ├── dist/                    # Vite 构建产物（提交入库，随包分发）
+│   └── frontend/                # 前端源码（Vite + React + TS + Mantine）
 └── models/
    └── types.py                 # dataclass 数据模型
 ```
@@ -239,6 +240,21 @@ python -m dragon_quant review --date 20260519 --top 5
 # 强制重算
 python -m dragon_quant review --force --date 20260519
 ```
+
+### Web UI 前端构建
+
+回测面板已用 **Vite + React + TypeScript + Mantine** 重构，源码在 `web_ui/frontend/`，
+构建产物输出到 `web_ui/dist/`（已提交入库，随 wheel 分发）。运行期仅靠 Python stdlib
+托管 `dist` 静态资源，**不需要 Node**；只有改前端源码时才需重新构建：
+
+```bash
+cd web_ui/frontend
+npm install        # 首次
+npm run build      # 生成 ../dist
+npm run dev        # 开发模式，/api 自动代理到 127.0.0.1:8765
+```
+
+后端 API（`/api/dragons`、`/api/summary`）保持不变，前端改动不影响 Python 逻辑。
 
 回测逻辑：从 dragons 表读取 pending 龙头 → 自动过滤入选日距今约 5~20 个交易日 → 拉取日K → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 按收益观察窗口计算 `max_return_5d` 与 `max_return_hold_days` → 再按“买入日至最大收益出现日”窗口计算 `max_drawdown_5d` → 写入 DB。每条 dragon 记录入库时的 `dragon_quant` 版本号写入 `version` 字段，方便按版本分组回溯策略效果。
 

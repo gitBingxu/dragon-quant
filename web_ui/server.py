@@ -10,7 +10,6 @@ Web UI 服务器 — 龙头回测数据可视化
 """
 
 import json
-import os
 import sys
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -20,7 +19,35 @@ from urllib.parse import urlparse, parse_qs
 
 # 项目根目录（web_ui 的父级）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_HTML_PATH = Path(__file__).resolve().parent / "index.html"
+# Vite 构建产物目录（前端源码在 web_ui/frontend，构建到此）
+_DIST_DIR = (Path(__file__).resolve().parent / "dist").resolve()
+
+# 静态资源扩展名 → Content-Type
+_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".map": "application/json; charset=utf-8",
+}
+
+_BUILD_HINT = (
+    "<html><body style='font-family:sans-serif;padding:40px'>"
+    "<h1>Web UI 尚未构建</h1>"
+    "<p>请先构建前端产物：</p>"
+    "<pre>cd web_ui/frontend\nnpm install\nnpm run build</pre>"
+    "</body></html>"
+)
 
 
 def _get_db():
@@ -31,12 +58,21 @@ def _get_db():
     return db
 
 
-def _load_html() -> str:
-    """加载 HTML 模板"""
-    if _HTML_PATH.exists():
-        return _HTML_PATH.read_text(encoding="utf-8")
-    # 兜底：内联最小 HTML
-    return "<html><body><h1>Web UI — index.html 未找到</h1></body></html>"
+def _resolve_static(path: str) -> Optional[Path]:
+    """将 URL 路径解析为 dist 内的安全文件路径。
+
+    做目录边界校验，禁止 `..` 路径穿越；越界或不存在返回 None。
+    """
+    rel = path.lstrip("/")
+    if not rel:
+        return None
+    candidate = (_DIST_DIR / rel).resolve()
+    # 边界校验：必须仍在 dist 目录内
+    if candidate != _DIST_DIR and _DIST_DIR not in candidate.parents:
+        return None
+    if candidate.is_file():
+        return candidate
+    return None
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
@@ -46,29 +82,55 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
+        # 保留原始 path 用于静态资源匹配；api 路由用去尾斜杠版本
+        raw_path = parsed.path
+        path = raw_path.rstrip("/") or "/"
 
         try:
-            if path == "/":
-                self._serve_html()
-            elif path == "/api/dragons":
+            if path == "/api/dragons":
                 self._serve_api_dragons(parse_qs(parsed.query))
             elif path == "/api/summary":
                 self._serve_api_summary()
-            else:
+            elif path.startswith("/api/"):
                 self._send_json({"error": "not found"}, 404)
+            else:
+                self._serve_static(raw_path)
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
     # ---------- 响应工具 ----------
 
-    def _serve_html(self):
-        html = _load_html()
-        body = html.encode("utf-8")
+    def _serve_static(self, raw_path: str):
+        """托管 dist 静态资源；未命中文件则回退 SPA 入口 index.html。"""
+        index = _DIST_DIR / "index.html"
+        if not index.is_file():
+            body = _BUILD_HINT.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        target = _resolve_static(raw_path)
+        # 命中具体静态文件 → 直接返回；否则回退 index.html（SPA 入口）
+        if target is None:
+            target = index
+            cache = "no-cache, no-store, must-revalidate"
+        else:
+            # 带哈希的 assets 可长缓存，其余不缓存
+            cache = (
+                "public, max-age=31536000, immutable"
+                if "/assets/" in raw_path
+                else "no-cache"
+            )
+
+        body = target.read_bytes()
+        ctype = _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
 
@@ -186,6 +248,14 @@ def _parse_filters(params: dict) -> dict:
     status = _first(params, "status")
     if status:
         f["status"] = [s.strip() for s in status.split(",") if s.strip()]
+
+    vmin = _first(params, "version_min")
+    if vmin:
+        f["version_min"] = vmin.strip()
+
+    vmax = _first(params, "version_max")
+    if vmax:
+        f["version_max"] = vmax.strip()
 
     return f
 

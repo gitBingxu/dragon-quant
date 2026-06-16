@@ -64,13 +64,57 @@ _DNS_CACHE: dict[str, tuple[list[str], float]] = {}
 _DNS_TTL = 300  # 秒
 _DNS_LOCK = threading.Lock()
 
+# DoH（DNS over HTTPS）多源，用于扩充 CDN 节点池（系统 DNS 单次通常只返回 1 个 IP）
+_DOH_ENDPOINTS = [
+    "https://dns.alidns.com/resolve",
+    "https://doh.pub/dns-query",
+    "https://dns.google/resolve",
+    "https://cloudflare-dns.com/dns-query",
+]
+
 
 def _host_of(url: str) -> str:
     return urllib.parse.urlparse(url).hostname or ""
 
 
+def _doh_resolve(host: str) -> list[str]:
+    """通过多个 DoH 服务并发查询 host 的 A 记录，合并去重。失败的源忽略。"""
+    ips: list[str] = []
+
+    def _query(endpoint: str):
+        out: list[str] = []
+        try:
+            r = subprocess.run(
+                ["curl", "-s", "--max-time", "5",
+                 "-H", "accept: application/dns-json",
+                 f"{endpoint}?name={host}&type=A"],
+                capture_output=True, text=True, timeout=8,
+            )
+            data = json.loads(r.stdout or "{}")
+            for ans in data.get("Answer", []):
+                if ans.get("type") == 1:  # A 记录
+                    ip = ans.get("data", "")
+                    if ip:
+                        out.append(ip)
+        except Exception:
+            pass
+        return out
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(_DOH_ENDPOINTS)) as ex:
+        for res in ex.map(_query, _DOH_ENDPOINTS):
+            for ip in res:
+                if ip not in ips:
+                    ips.append(ip)
+    return ips
+
+
 def _resolve_ips(host: str) -> list[str]:
-    """解析 host 的全部 A 记录 IP（带 TTL 缓存）。失败返回空列表（回退系统 DNS）。"""
+    """解析 host 的 CDN 节点 IP 池（系统 DNS + DoH 多源合并，带 TTL 缓存）。
+
+    系统 DNS 单次通常只返回 1 个 IP，叠加 DoH 多源可拿到更多东财 CDN 节点，
+    供 _curl_request 轮询切换。解析失败返回空列表（上层回退系统 DNS 直连）。
+    """
     now = time.time()
     with _DNS_LOCK:
         cached = _DNS_CACHE.get(host)
@@ -85,6 +129,10 @@ def _resolve_ips(host: str) -> list[str]:
                 ips.append(ip)
     except Exception:
         ips = []
+    # 叠加 DoH 多源节点
+    for ip in _doh_resolve(host):
+        if ip not in ips:
+            ips.append(ip)
     random.shuffle(ips)  # 打散，分散节点压力
     with _DNS_LOCK:
         _DNS_CACHE[host] = (ips, now)
@@ -97,6 +145,21 @@ def _safe_float(v, default=0.0):
         return float(v)
     except (ValueError, TypeError):
         return default
+
+
+def _is_valid_response(raw: str) -> bool:
+    """判断 curl 响应是否为有效东财数据（排除 502/网关 HTML 等坏节点响应）。
+
+    东财正常返回为 JSONP（jQuery_xxx({...})）或裸 JSON；CDN 坏节点常返回
+    502 Bad Gateway 等 HTML 页面，应视为无效并切换下一节点。
+    """
+    if not raw:
+        return False
+    head = raw.lstrip()[:512].lower()
+    if head.startswith("<") or "<html" in head or "bad gateway" in head:
+        return False
+    # 含 JSON/JSONP 特征即认为有效
+    return ("{" in raw and "}" in raw)
 
 
 def _curl_once(url: str, headers: dict, resolve_ip: Optional[str] = None) -> Optional[str]:
@@ -123,24 +186,25 @@ def _curl_once(url: str, headers: dict, resolve_ip: Optional[str] = None) -> Opt
 def _curl_request(url: str, headers: dict) -> Optional[str]:
     """用 curl 发送 HTTP GET，按 CDN 节点逐个轮询。
 
-    依次尝试该域名解析出的每个 CDN 节点 IP，任一节点返回非空即成功；
-    某节点空响应/超时则立即换下一个节点。所有节点都失败时抛
-    EastMoneyAllNodesDown（上层据此判定本机出口 IP 被风控并退出）。
+    依次尝试该域名解析出的每个 CDN 节点 IP，任一节点返回有效响应即成功；
+    某节点空响应/超时/返回 502 等坏响应则立即换下一个节点。所有节点都失败
+    时抛 EastMoneyAllNodesDown（上层据此判定本机出口 IP 被风控并退出）。
     """
     host = _host_of(url)
     ips = _resolve_ips(host)
     if not ips:
         # 解析失败 → 回退系统 DNS 直连一次
         raw = _curl_once(url, headers)
-        if raw:
+        if _is_valid_response(raw):
             return raw
         raise EastMoneyAllNodesDown(host)
 
     for ip in ips:
         raw = _curl_once(url, headers, resolve_ip=ip)
-        if raw:
+        if _is_valid_response(raw):
             return raw
-        print(f"  ⚠️ 东财节点 {ip} 空响应，切换下一节点...", file=sys.stderr)
+        reason = "502/无效响应" if raw else "空响应"
+        print(f"  ⚠️ 东财节点 {ip} {reason}，切换下一节点...", file=sys.stderr)
     raise EastMoneyAllNodesDown(host)
 
 

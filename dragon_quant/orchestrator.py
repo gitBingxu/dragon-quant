@@ -323,9 +323,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     tx = providers["tencent"]
 
     cache = DataCache()
-    # 东财接口强反爬：push2/push2his 串行 + 每次调用间隔 0.6~1s 随机延迟降低封禁风险
+    # 东财接口强反爬：push2/push2his 串行 + 每次调用间隔 1.5~2.5s 随机延迟降低封禁风险
     limiter = RateLimiter(max_workers=workers, logger=logger,
-                          provider_delays={"eastmoney": (0.6, 1.0)})
+                          provider_delays={"eastmoney": (1.5, 2.5)})
 
     # ────────────────────────────────────────────
     # Phase A: 板块排行
@@ -666,6 +666,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
                 quote = quote_map.get(code)
                 dragon_data = r.copy()  # 复制基础评分数据
+                dragon_data["scan_id"] = scan_id
                 if quote:
                     dragon_data.update({
                         "open_px": quote.open_px,
@@ -687,7 +688,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     parts.append(f"更新 {updated_count} 只(rank 提升)")
                 print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
-            db.save_dragons(scan_date_fmt, scan_id, dragons_to_save, version=__version__)
+            db.save_dragons(scan_date_fmt, dragons_to_save, version=__version__)
             
         except Exception as e:
             if verbose:

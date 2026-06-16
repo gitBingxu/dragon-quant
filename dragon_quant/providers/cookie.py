@@ -25,6 +25,22 @@ UA = (
     "Chrome/148.0.0.0 Safari/537.36"
 )
 
+# 过码探测必须带的完整反爬头（与 eastmoney.py 正式抓取链路一致）。
+# 缺失这些头时东财 WAF 会直接拦截/返回空，导致过码后仍探测不到 rc:0。
+_PROBE_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "User-Agent": UA,
+    "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "Sec-Fetch-Dest": "script",
+    "Sec-Fetch-Mode": "no-cors",
+    "Sec-Fetch-Site": "same-site",
+}
+
 
 def _ensure():
     COOKIE_DIR.mkdir(parents=True, exist_ok=True)
@@ -146,6 +162,21 @@ def _try_auto_slider(page) -> bool:
         return False
 
 
+def _slider_gone(page) -> bool:
+    """所有已知滑块手柄都不存在/不可见时视为过码（兜底判定）。"""
+    try:
+        for sel in _SLIDER_SELECTORS:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    return False
+            except Exception:
+                continue
+        return True
+    except Exception:
+        return False
+
+
 def _browser_cookies(url: str, probe_url: str,
                      headless: bool = True, auto_slider: bool = False) -> str:
     """打开页面，（可选自动过滑块/人工过滑块），提取 Cookie。
@@ -192,13 +223,13 @@ def _browser_cookies(url: str, probe_url: str,
                     cur_cookie = "; ".join(
                         f"{c['name']}={c['value']}" for c in ctx.cookies()
                     )
+                    cmd = ["curl", "-s", "--max-time", "8", "-b", cur_cookie,
+                           "-H", f"Referer: {url}"]
+                    for hk, hv in _PROBE_HEADERS.items():
+                        cmd += ["-H", f"{hk}: {hv}"]
+                    cmd.append(probe_url)
                     r = subprocess.run(
-                        ["curl", "-s", "--max-time", "8",
-                         "-b", cur_cookie,
-                         "-H", f"Referer: {url}",
-                         "-H", f"User-Agent: {UA}",
-                         probe_url],
-                        capture_output=True, text=True, timeout=12,
+                        cmd, capture_output=True, text=True, timeout=12,
                     )
                     text = r.stdout or ""
                     if '"data":' in text and '"rc":0' in text:
@@ -206,6 +237,10 @@ def _browser_cookies(url: str, probe_url: str,
                         break
                 except Exception:
                     pass
+                # 兜底：接口探测偶发失败时，若滑块手柄已消失也判定过码
+                if auto_slider and _slider_gone(page):
+                    success = True
+                    break
                 time.sleep(1.5)
 
             if success:

@@ -13,7 +13,7 @@
   - 分域 Cookie：push2（排行/成分股）用 get_em()，push2his（5分K）用 get_em_his()
 """
 
-import json, random, re, subprocess, sys, time
+import json, os, random, re, socket, subprocess, sys, threading, time
 import urllib.parse
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -49,8 +49,46 @@ REFERERS = {
 _UT_DEFAULT = "fa5fd1943c7b386f172d6893dbfba10b"  # 行情/K线（push2 排行、push2his 5分K）
 _UT_COMPONENTS = "8dec03ba335b81bf4ebdf7b29ec27d15"  # 板块成分股资金流页
 
-MAX_RETRIES = 3
 CURL_TIMEOUT = 15
+
+
+class EastMoneyAllNodesDown(Exception):
+    """一次请求把某域名所有 CDN 节点 IP 都试完仍空响应/超时。
+
+    通常意味着本机出口 IP 已被东财风控（换 CDN 节点无效），需切换 IP 后重试。
+    """
+
+
+# host → (ip 列表, 解析时间戳)，进程内短缓存，避免每次请求重复解析
+_DNS_CACHE: dict[str, tuple[list[str], float]] = {}
+_DNS_TTL = 300  # 秒
+_DNS_LOCK = threading.Lock()
+
+
+def _host_of(url: str) -> str:
+    return urllib.parse.urlparse(url).hostname or ""
+
+
+def _resolve_ips(host: str) -> list[str]:
+    """解析 host 的全部 A 记录 IP（带 TTL 缓存）。失败返回空列表（回退系统 DNS）。"""
+    now = time.time()
+    with _DNS_LOCK:
+        cached = _DNS_CACHE.get(host)
+        if cached and now - cached[1] < _DNS_TTL:
+            return list(cached[0])
+    ips: list[str] = []
+    try:
+        for info in socket.getaddrinfo(host, 443, family=socket.AF_INET,
+                                       proto=socket.IPPROTO_TCP):
+            ip = info[4][0]
+            if ip not in ips:
+                ips.append(ip)
+    except Exception:
+        ips = []
+    random.shuffle(ips)  # 打散，分散节点压力
+    with _DNS_LOCK:
+        _DNS_CACHE[host] = (ips, now)
+    return list(ips)
 
 
 def _safe_float(v, default=0.0):
@@ -61,9 +99,13 @@ def _safe_float(v, default=0.0):
         return default
 
 
-def _curl_request(url: str, headers: dict) -> Optional[str]:
-    """用 curl 发送 HTTP GET（系统 TLS 指纹，接近浏览器，足以过东财 WAF）。"""
+def _curl_once(url: str, headers: dict, resolve_ip: Optional[str] = None) -> Optional[str]:
+    """发送单次 curl GET。resolve_ip 不为空时用 --resolve 强制连指定 CDN 节点。"""
     cmd = ["curl", "-s", "--max-time", str(CURL_TIMEOUT), "-X", "GET"]
+    if resolve_ip:
+        host = _host_of(url)
+        if host:
+            cmd += ["--resolve", f"{host}:443:{resolve_ip}"]
     for k, v in headers.items():
         cmd += ["-H", f"{k}: {v}"]
     cmd.append(url)
@@ -71,14 +113,35 @@ def _curl_request(url: str, headers: dict) -> Optional[str]:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=CURL_TIMEOUT + 5)
         if result.returncode == 0 and result.stdout:
             return result.stdout
-        err = result.stderr.strip()
-        reason = err[:200] if err else f"rc={result.returncode}, stdout空"
-        print(f"  ⚠️ curl 失败: {reason}", file=sys.stderr)
     except FileNotFoundError:
         print("  ⚠️ curl 不可用", file=sys.stderr)
     except Exception as e:
         print(f"  ⚠️ curl 异常: {e}", file=sys.stderr)
     return None
+
+
+def _curl_request(url: str, headers: dict) -> Optional[str]:
+    """用 curl 发送 HTTP GET，按 CDN 节点逐个轮询。
+
+    依次尝试该域名解析出的每个 CDN 节点 IP，任一节点返回非空即成功；
+    某节点空响应/超时则立即换下一个节点。所有节点都失败时抛
+    EastMoneyAllNodesDown（上层据此判定本机出口 IP 被风控并退出）。
+    """
+    host = _host_of(url)
+    ips = _resolve_ips(host)
+    if not ips:
+        # 解析失败 → 回退系统 DNS 直连一次
+        raw = _curl_once(url, headers)
+        if raw:
+            return raw
+        raise EastMoneyAllNodesDown(host)
+
+    for ip in ips:
+        raw = _curl_once(url, headers, resolve_ip=ip)
+        if raw:
+            return raw
+        print(f"  ⚠️ 东财节点 {ip} 空响应，切换下一节点...", file=sys.stderr)
+    raise EastMoneyAllNodesDown(host)
 
 
 def _browser_fallback(url: str, referer: str) -> Optional[str]:
@@ -97,7 +160,8 @@ def _fetch(url: str, referer: str, cookie: str,
            logger=None, endpoint: str = "") -> Optional[dict]:
     """JSONP GET 请求
 
-    curl 主通道 + 指数退避重试，连续失败后浏览器兜底。
+    curl 按 CDN 节点逐个轮询（见 _curl_request）；所有 CDN 节点都空响应
+    时判定本机出口 IP 已被东财风控，打印提示并立即终止整个脚本。
     cookie 由调用方按域名传入（push2 / push2his 分开）。
     """
     if not cookie:
@@ -108,29 +172,39 @@ def _fetch(url: str, referer: str, cookie: str,
     headers["Referer"] = referer
     headers["Cookie"] = cookie
 
-    last_error = None
-    for attempt in range(MAX_RETRIES):
-        t0 = time.time()
+    t0 = time.time()
+    try:
         raw = _curl_request(url, headers)
+    except EastMoneyAllNodesDown as e:
         elapsed = (time.time() - t0) * 1000
-        if raw:
-            data = _parse_jsonp(raw)
-            if data is not None:
-                if logger:
-                    logger.api("eastmoney", endpoint, ok=True,
-                               elapsed_ms=elapsed, note=f"curl#{attempt + 1}")
-                return data
-            last_error = "JSONP 解析失败"
-        else:
-            last_error = "curl 空响应"
         if logger:
             logger.api("eastmoney", endpoint, ok=False,
-                       elapsed_ms=elapsed, error=f"{last_error}")
-        # 指数退避 + 随机抖动，降低频率特征
-        if attempt < MAX_RETRIES - 1:
-            time.sleep((0.5 * (2 ** attempt)) + random.uniform(0, 0.4))
+                       elapsed_ms=elapsed, error="all_cdn_nodes_down")
+        print(
+            "\n⛔ 东财所有 CDN 节点均空响应，当前出口 IP 大概率已被风控/封禁。\n"
+            "   请切换 IP（VPN/代理/重拨）后重新运行 scan。\n"
+            f"   （故障域名: {e}）",
+            file=sys.stderr,
+        )
+        # 在 RateLimiter 子线程中，sys.exit 无法终止主进程，用 os._exit 强制退出
+        os._exit(2)
 
-    # 浏览器兜底
+    elapsed = (time.time() - t0) * 1000
+    if raw:
+        data = _parse_jsonp(raw)
+        if data is not None:
+            if logger:
+                logger.api("eastmoney", endpoint, ok=True,
+                           elapsed_ms=elapsed, note="curl")
+            return data
+        last_error = "JSONP 解析失败"
+    else:
+        last_error = "curl 空响应"
+    if logger:
+        logger.api("eastmoney", endpoint, ok=False,
+                   elapsed_ms=elapsed, error=last_error)
+
+    # 解析失败（非节点全挂）→ 浏览器兜底
     t0 = time.time()
     raw = _browser_fallback(url, referer)
     elapsed = (time.time() - t0) * 1000
@@ -142,7 +216,7 @@ def _fetch(url: str, referer: str, cookie: str,
         if data is not None:
             return data
 
-    print(f"  ⚠️ 东财请求失败 (curl重试{MAX_RETRIES}次+浏览器兜底): {last_error}", file=sys.stderr)
+    print(f"  ⚠️ 东财请求失败 (CDN 轮询+浏览器兜底): {last_error}", file=sys.stderr)
     return None
 
 

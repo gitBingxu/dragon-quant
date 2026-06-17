@@ -319,13 +319,16 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     providers = create_providers(logger=logger)
     em = providers["eastmoney"]
+    ths = providers["ths"]
     xq = providers["xueqiu"]
     tx = providers["tencent"]
 
     cache = DataCache()
-    # 东财接口强反爬：push2/push2his 串行 + 每次调用间隔 0.6~1s 随机延迟降低封禁风险
+    # 东财接口强反爬：push2/push2his 串行 + 每次调用间隔 1.5~2.5s 随机延迟降低封禁风险
+    # 同花顺无强反爬：低延迟即可
     limiter = RateLimiter(max_workers=workers, logger=logger,
-                          provider_delays={"eastmoney": (0.6, 1.0)})
+                          provider_delays={"eastmoney": (1.5, 2.5),
+                                           "ths": (0.3, 0.6)})
 
     # ────────────────────────────────────────────
     # Phase A: 板块排行
@@ -333,9 +336,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("📊 Phase A — 板块排行")
 
-    top10_up = [s for s in em.get_sector_ranking(asc=False)
+    top10_up = [s for s in ths.get_sector_ranking(asc=False)
                 if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:RANK_UP_COUNT]
-    top10_down = [s for s in em.get_sector_ranking(asc=True)
+    top10_down = [s for s in ths.get_sector_ranking(asc=True)
                   if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:RANK_DOWN_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     if verbose:
@@ -357,10 +360,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 提交前10涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     for s in top10_up:
-        limiter.submit("eastmoney", "em",
+        limiter.submit("ths", "ths",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     em.get_sector_components(sc, page=1))))
+                                     ths.get_sector_components(sc, page=1))))
     limiter.wait_all()
 
     for s in top10_up:
@@ -406,10 +409,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
     for s in top10_down:
-        limiter.submit("eastmoney", "em",
+        limiter.submit("ths", "ths",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     em.get_sector_components(sc, page=1))))
+                                     ths.get_sector_components(sc, page=1))))
     limiter.wait_all()
 
     for s in top10_down:
@@ -465,10 +468,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # T1: 板块5分K（领涨8 + 领跌20 = 28 个板块）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
-        limiter.submit("eastmoney", "em",
+        limiter.submit("ths", "ths",
                        lambda sc=s.code: (
                            cache.set(f"kline:5min:sector:{sc}",
-                                     em.get_sector_5min_kline(sc))))
+                                     ths.get_sector_5min_kline(sc))))
 
     # T2: 候选股分时K线（只拉 top_n 只）
     for r in ranking:
@@ -666,6 +669,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
                 quote = quote_map.get(code)
                 dragon_data = r.copy()  # 复制基础评分数据
+                dragon_data["scan_id"] = scan_id
                 if quote:
                     dragon_data.update({
                         "open_px": quote.open_px,
@@ -687,7 +691,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     parts.append(f"更新 {updated_count} 只(rank 提升)")
                 print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
-            db.save_dragons(scan_date_fmt, scan_id, dragons_to_save, version=__version__)
+            db.save_dragons(scan_date_fmt, dragons_to_save, version=__version__)
             
         except Exception as e:
             if verbose:

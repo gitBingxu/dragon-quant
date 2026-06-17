@@ -7,7 +7,6 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
   dragon-quant review [--date DATE] [--top N] [--force]
   dragon-quant storage {status,size,clear} [options]
-  dragon-quant fix-api [--provider eastmoney] [--show-browser]
 """
 
 import argparse
@@ -257,12 +256,6 @@ def _cmd_vpa(args):
             print(f"⚠️ 写入数据库失败: {ex}", file=sys.stderr)
 
 
-def _cmd_fix_api(args):
-    """修复 API 配置命令"""
-    from dragon_quant.fix_api import fix_api
-    fix_api(provider=args.fix_provider, headless=not args.show_browser)
-
-
 def _cmd_storage(args):
     """存储管理命令"""
     mgr = StorageManager()
@@ -377,7 +370,7 @@ def main():
     sector_p.add_argument("--asc", action="store_true", help="跌幅榜（默认涨幅榜）")
 
     comp_p = data_subs.add_parser("components", help="板块成分股")
-    comp_p.add_argument("--sector", required=True, help="板块代码，如 BK0487")
+    comp_p.add_argument("--sector", required=True, help="同花顺概念板块 6 位代码，如 301558")
 
     kline_p = data_subs.add_parser("kline", help="个股日K线")
     kline_p.add_argument("--code", required=True, help="股票代码")
@@ -397,8 +390,10 @@ def main():
     bq_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"])
 
     data_subs.add_parser("cookie-status", help="查看 Cookie 状态")
-    cf_p = data_subs.add_parser("cookie-fetch", help="刷新 Cookie")
-    cf_p.add_argument("--source", default="all", choices=["all", "eastmoney", "xueqiu"])
+    cf_p = data_subs.add_parser("cookie-fetch",
+                                help="刷新 Cookie（默认仅雪球；东财需显式 --source eastmoney）")
+    cf_p.add_argument("--source", default="all", choices=["all", "eastmoney", "xueqiu"],
+                      help="all=仅雪球(默认) eastmoney=东财 xueqiu=雪球")
 
     cs_p = data_subs.add_parser("cookie-set", help="手动设置 Cookie")
     cs_p.add_argument("--cookie", "-c", required=True, help="完整 Cookie 字符串")
@@ -436,13 +431,6 @@ def main():
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
     clear_p.add_argument("--days", type=int, default=None, help="保留最近N天")
 
-    # fix-api 子命令
-    fix_p = sub.add_parser("fix-api", help="从目标网站自动捕获并修复 API 配置")
-    fix_p.add_argument("--provider", dest="fix_provider", default="eastmoney",
-                       choices=["eastmoney"], help="要修复的 provider (默认: eastmoney)")
-    fix_p.add_argument("--show-browser", action="store_true",
-                       help="显示浏览器窗口 (默认无头运行)")
-
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -457,8 +445,6 @@ def main():
         _cmd_review(args)
     elif args.command == "vpa":
         _cmd_vpa(args)
-    elif args.command == "fix-api":
-        _cmd_fix_api(args)
 
     else:
         parser.print_help()

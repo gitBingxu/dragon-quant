@@ -6,9 +6,9 @@
 
 ## 这是什么
 
-一套纯 Python 3 的 A 股龙头筛选系统，依赖 `playwright` 做 Cookie 自动获取与 Web 侧辅助能力。从当日涨停榜出发，通过**带动性、抗跌性、领涨性、资金承接**四个维度评估涨停股的龙头质量，加权综合分排名输出；同时支持日志查询、SQLite 持久化、龙头回测与 Web UI 可视化。
+一套纯 Python 3 的 A 股龙头筛选系统，依赖 `playwright` 做 Cookie 自动获取与 Web 侧辅助能力（含同花顺概念排行页渲染）。从当日涨停榜出发，通过**带动性、抗跌性、领涨性、资金承接**四个维度评估涨停股的龙头质量，加权综合分排名输出；同时支持日志查询、SQLite 持久化、龙头回测与 Web UI 可视化。
 
-数据源：东方财富 + 雪球 + 腾讯公开 API，不依赖任何付费行情接口。
+数据源：同花顺（板块共振数据）+ 雪球 + 腾讯公开 API，不依赖任何付费行情接口。东财 provider 仍保留但默认不参与扫描。
 
 ---
 
@@ -32,23 +32,24 @@ python -m dragon_quant storage clear --results --days 7  # 保留7天内结果
 
 ### 前置条件
 
-Cookie 必须先配好，否则东财和雪球接口返回空数据：
+板块共振数据（概念排行 / 成分股 / 板块分时）已改用**同花顺**，**无需 Cookie**（概念排行页用 playwright 渲染）。个股数据仍依赖雪球，需配雪球 Cookie：
 
 ```bash
 # 查看状态
-python -c "from dragon_quant.providers.cookie import get_em, get_xq; print(f'东财: {bool(get_em())}, 雪球: {bool(get_xq())}')"
+python -c "from dragon_quant.providers.cookie import get_xq; print(f'雪球: {bool(get_xq())}')"
 
-# 手动设置（推荐）
-python -m dragon_quant.providers.cookie set --cookie "qgqp_b_id=...; st_nvi=..." --source em
+# 手动设置雪球 Cookie（推荐）
 python -m dragon_quant.providers.cookie set --cookie "xq_a_token=...; xq_is_login=1; u=..." --source xq
 
 # 自动获取（需要 playwright）
-python -m dragon_quant.providers.cookie fetch --source all
+python -m dragon_quant.providers.cookie fetch --source xq
 ```
 
+> 东财 provider 仍保留但默认不参与扫描。`cookie-fetch` 默认（`all`）只刷新雪球，东财需显式 `--source eastmoney`。
+
 Cookie 文件位置：
-- 东财：`~/Library/Application Support/dragon-quant/cookies/eastmoney`
 - 雪球：`~/Library/Application Support/dragon-quant/cookies/xueqiu`
+- 东财（保留备用）：`~/Library/Application Support/dragon-quant/cookies/eastmoney`
 
 ---
 
@@ -65,10 +66,11 @@ dragon_quant/
 │
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC (6 抽象方法)
-│   ├── eastmoney.py             # 东财 — JSONP + urllib/curl + DNS 多 IP 轮询
+│   ├── ths.py                   # 同花顺 — 概念排行(playwright渲染)/成分股(HTML)/板块分时聚合5分K
+│   ├── eastmoney.py             # 东财 — JSONP + curl + DoH 多节点轮询（保留，默认不参与扫描）
 │   ├── xueqiu.py                # 雪球 — 需 Cookie
 │   ├── tencent.py               # 腾讯 — 零认证 + fallback
-│   ├── browser.py               # Playwright 浏览器会话（Cookie 获取/辅助请求）
+│   ├── browser.py               # Playwright 浏览器会话（页面渲染/Cookie 获取/辅助请求）
 │   └── cookie.py                # Cookie 管理 + CLI
 │
 ├── scorers/                     # 四维评分器（✅ 已实现）
@@ -120,10 +122,10 @@ dragon_quant/
 
 | Phase | 做什么 | 调用次数 | 关键点 |
 |-------|--------|---------|--------|
-| **A** 板块排行 | 东财·概念板块涨跌幅 Top10 | 2 次 | JSONP，urllib 失败自动走 curl 兜底 + DNS 多 IP 轮询 |
-| **B** 候选筛选 | 每领涨板块取前5成分股，过滤 ST + 双创 | 20 次 | 去重 + 多概念跟踪 |
+| **A** 板块排行 | 同花顺·概念板块涨跌幅榜（涨幅 Top8 + 跌幅 Top20）| 2 次 | playwright 渲染资金流排行页，解析涨跌幅 |
+| **B** 候选筛选 | 每领涨板块取前5成分股，过滤 ST + 双创 | 20 次 | 同花顺详情页 HTML 解析；去重 + 多概念跟踪 |
 | **C** 连板+排序 | 雪球日K → 算连板天数 → 按(概念数, 连板数)排序取 Top25 | N+1 次 | 涨停阈值 ≥9.9% |
-| **D** 并发加载 | 板块5分K + 个股5分K + 腾讯批量行情 | ~50 次 | RateLimiter 8 线程并发 |
+| **D** 并发加载 | 板块5分K(同花顺分时聚合) + 个股5分K + 腾讯批量行情 | ~50 次 | RateLimiter 多线程并发 |
 | **E** 四维打分 | 主进程直接调用 4 个 scorer，逐个候选股评分 | N×4 次 | 评分器接口见下方 |
 | **F** 输出+持久化 | 加权排序 + 自然语言报告 + SQLite 持久化 + 5 日去重 | — | scan_id={日期}_{top_n} 自动覆盖 / dragons 5 日去重 |
 
@@ -152,24 +154,31 @@ dragon_quant/
 不同 key 之间 → 自由并发
 ```
 
-用法：`limiter.submit("eastmoney", "sector_5min", fn, arg)` 之后 `limiter.wait_all()`
+用法：`limiter.submit("ths", "ths", fn, arg)` 之后 `limiter.wait_all()`
 
 ---
 
 ## 反爬要点
 
-**8 个必须请求头**（每个 HTTP 请求都带）：Cookie, User-Agent, sec-ch-ua, sec-ch-ua-platform, Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site, Referer
+### 同花顺（板块共振主数据源，无需 Cookie）
+- 概念排行：`data.10jqka.com.cn/funds/gnzjl/`（涨跌幅 JS 填充，playwright 渲染读表）。`order=desc` 涨幅榜 / `order=asc` 跌幅榜
+- 成分股：`q.10jqka.com.cn/gn/detail/code/{6位code}/`（GBK HTML 表格，第1页约10只）
+- 板块分时：`d.10jqka.com.cn/v6/time/48_{innerCode}/last.js`（JSONP，1分钟粒度，provider 内聚合5分K）
+- 两套代码：URL 用 6 位 code（如 301558），行情接口用 innerCode（如 885611），映射在详情页 `<input id="clid">`，进程内缓存
+- 注意：概念排行的 `ajax` 翻页接口有 hexin-v 反爬（仅成分股 all_pages 时尝试）
 
-- 东财 Referer：`https://quote.eastmoney.com/center/hsbk.html`（排行）/ `gridlist.html`（成分股）/ 动态 `bk/90.BKxxx.html`（K线）
-- 雪球 Referer：`https://xueqiu.com/S/{SH/SZ}{code}`
-- 腾讯 Referer：不需要（零认证）
+### 雪球（个股，需 Cookie）
+- Referer：`https://xueqiu.com/S/{SH/SZ}{code}`
 
-当前 Chrome UA 版本：147。如果大面积失效，更新到最新 Chrome 版本号即可。
+### 腾讯（零认证）
+- 不需要 Referer
 
-**当前反爬策略**：
-- 东财主链路为 `urllib` + `curl` 双通道，配合 DNS 多 IP 轮询绕过坏掉的 CDN 节点
-- `browser.py` 仍保留，主要用于 Cookie 自动获取与浏览器侧辅助请求
-- 雪球和东财都依赖本地 Cookie；接口异常时优先检查 Cookie 是否失效
+### 东财（保留备用，默认不参与扫描）
+- 主链路 `curl` + DoH 多 CDN 节点轮询；全节点失败判定出口 IP 被风控并 fail-fast
+- Referer：`gridlist.html`（排行/成分股）/ 动态 `bk/90.BKxxx.html`（K线）
+- 依赖本地 Cookie（push2 / push2his 分域）
+
+当前 Chrome UA 版本：同花顺 120 / 东财 148。如大面积失效，更新到最新 Chrome 版本号即可。
 
 ---
 
@@ -177,8 +186,9 @@ dragon_quant/
 
 ### ✅ 已完成
 - 数据模型（types.py）
-- 全部 3 个 Provider（东财/雪球/腾讯），含完整反爬 Header
-- Playwright 浏览器能力（Cookie 自动获取 + 浏览器侧辅助请求）
+- 全部 4 个 Provider（同花顺/东财/雪球/腾讯），含完整反爬 Header
+- 同花顺 provider（`ths.py`）：概念排行(playwright渲染)/成分股(HTML)/板块分时聚合5分K，对齐东财接口契约，scan/data 主流程已切换至此
+- Playwright 浏览器能力（Cookie 自动获取 + 页面渲染 + 浏览器侧辅助请求）
 - Cookie 管理（手动设置 + Playwright 自动获取）
 - RateLimiter 分组并发调度（`workers` 参数控制线程数）
 - DataCache 内存+本地双重缓存 + 快照导出
@@ -291,7 +301,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult:
 ```
 
 ### Cookie 失效处理
-东财 Cookie 有时效性（通常几小时到1天），雪球 Cookie 有效期较长（几天到数周）。如果接口返回空数据或 403，先检查 Cookie 状态。
+板块数据已改用同花顺（无需 Cookie），不再有东财 Cookie 失效问题。个股数据依赖雪球 Cookie（有效期较长，几天到数周）。如果个股 K 线/行情返回空数据或 403，先检查雪球 Cookie 状态。东财 provider 保留备用，如需启用其 Cookie 用 `cookie-fetch --source eastmoney`。
 
 ### Git 规范
 - 仓库：`gitBingxu/dragon-quant`

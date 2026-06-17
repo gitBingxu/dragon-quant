@@ -2,7 +2,7 @@
 
 **龙头战法四维量化筛选系统** — A 股涨停板龙头识别工具
 
-基于东方财富、雪球、腾讯三大公开数据源，对涨停候选股进行四维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
+基于同花顺、雪球、腾讯三大公开数据源，对涨停候选股进行四维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
 
 ## 📊 龙头回测成绩单
 
@@ -102,8 +102,8 @@ dragon-quant logs clear --days 7
 dragon-quant data sector          # 涨幅榜
 dragon-quant data sector --asc    # 跌幅榜
 
-# 板块成分股
-dragon-quant data components --sector BK0487
+# 板块成分股（同花顺概念板块 6 位代码）
+dragon-quant data components --sector 301558
 
 # 个股日 K 线
 dragon-quant data kline --code 600172 [--source xueqiu] [--days 20]
@@ -115,10 +115,10 @@ dragon-quant data minute --code 600172
 dragon-quant data quote --code 600172
 dragon-quant data batch-quote --codes 600172,000001,002409
 
-# Cookie 管理
+# Cookie 管理（同花顺无需 Cookie；东财已非主流程，按需刷新）
 dragon-quant data cookie-status    # 查看 Cookie 状态
-dragon-quant data cookie-fetch     # 刷新全部 Cookie
-dragon-quant data cookie-fetch --source xueqiu  # 只刷新雪球
+dragon-quant data cookie-fetch     # 默认仅刷新雪球
+dragon-quant data cookie-fetch --source eastmoney  # 显式刷新东财
 
 # 手动设置 Cookie（推荐兜底方案）
 # 适用场景：Playwright 自动获取失败/被风控；或你已经在浏览器里抓到了可用 Cookie。
@@ -236,9 +236,9 @@ from dragon_quant.data import (
 )
 
 # 板块
-sectors = get_sector_ranking()                 # 涨幅榜
-stocks = get_sector_components("BK0487")       # 成分股
-skline = get_sector_5min_kline("BK0487")       # 板块 5 分 K
+sectors = get_sector_ranking()                 # 涨幅榜（同花顺）
+stocks = get_sector_components("301558")       # 成分股（同花顺 6 位代码）
+skline = get_sector_5min_kline("301558")       # 板块 5 分 K（同花顺分时聚合）
 
 # 个股
 kline = get_kline("600172", source="xueqiu", days=30)
@@ -248,8 +248,8 @@ quotes = batch_get_quotes(["600172", "000001", "002409"])
 
 # Cookie 管理
 status = cookie_status()                       # 查看 Cookie 是否有效
-fetch_cookies()                                # 刷新全部 Cookie
-fetch_cookies(source="xueqiu")                 # 只刷新雪球 Cookie
+fetch_cookies()                                # 默认仅刷新雪球（同花顺无需 Cookie）
+fetch_cookies(source="eastmoney")              # 显式刷新东财 Cookie
 ```
 
 ### 日志查询
@@ -316,9 +316,11 @@ result = clear_logs(days=7)  # {"cleared": 3, "kept": 2, "files_removed": [...]}
 
 | 数据源 | 用途 | 接口数 |
 |---|---|---|
-| 东方财富 | 板块排行、成分股、板块 5 分 K（urllib/curl + DNS 多 IP 轮询）| 3 |
+| 同花顺 | 概念板块排行、成分股、板块分时（聚合 5 分 K）| 3 |
 | 雪球 | 日 K 线、1 分 K 线、历史日 K | 3 |
 | 腾讯 | 实时行情、批量行情 | 2 |
+
+> 说明：板块共振相关数据（概念排行 / 成分股 / 板块 5 分 K）主流程已由**同花顺**提供；东财 provider 仍保留，但默认不参与扫描，可作回退。同花顺这些接口无需 Cookie。
 
 ## 设计思想
 
@@ -334,7 +336,7 @@ result = clear_logs(days=7)  # {"cleared": 3, "kept": 2, "files_removed": [...]}
 ├──────────┴──────────────────────┤
 │  DataCache + RateLimiter        │  ← 内存/本地双缓存 + 限流
 ├─────────────────────────────────┤
-│  Provider 适配层                 │  ← 东财 / 雪球 / 腾讯
+│  Provider 适配层                 │  ← 同花顺 / 雪球 / 腾讯（+东财保留）
 └─────────────────────────────────┘
 ```
 
@@ -353,15 +355,16 @@ dragon_quant/
 ├── __init__.py          # 公共 API 导出
 ├── __main__.py          # python -m 入口
 ├── _version.py          # 版本号集中管理
-├── cli.py               # CLI 命令（scan/logs/data/review/storage）
+├── cli.py               # CLI 命令（scan/logs/data/review/vpa/storage）
 ├── orchestrator.py      # 编排器（Phase A→F）
 ├── data.py              # 原子数据查询 API
 ├── providers/           # 数据源适配器
 │   ├── base.py          # StockProvider 抽象接口
-│   ├── eastmoney.py     # 东方财富（urllib + curl + DNS 多 IP 轮询）
+│   ├── ths.py           # 同花顺（概念排行/成分股/板块分时聚合 5 分 K）
+│   ├── eastmoney.py     # 东方财富（保留，默认不参与扫描）
 │   ├── xueqiu.py        # 雪球
 │   ├── tencent.py       # 腾讯
-│   ├── browser.py       # Playwright 浏览器会话（Cookie 获取/辅助请求）
+│   ├── browser.py       # Playwright 浏览器会话（页面渲染/Cookie 获取/辅助请求）
 │   └── cookie.py        # Cookie 管理
 ├── scorers/             # 四维评分器
 │   ├── drive.py         # 带动性
@@ -473,6 +476,7 @@ if quote:
 ### 场景 4：API 返回 400/空数据 → 刷新 Cookie
 
 当 scan() 或数据查询返回 400 错误、空数据时，通常是 Cookie 过期了。刷新后重试即可。
+（注：板块数据已改用同花顺，无需 Cookie；个股 K 线/行情依赖雪球 Cookie。）
 
 ```python
 from dragon_quant.data import cookie_status, fetch_cookies
@@ -482,9 +486,9 @@ status = cookie_status()
 for source, info in status.items():
     print(f"{source}: {'✅ 有效' if info['ok'] else '❌ 过期'} ({info['length']}字符)")
 
-# 如果东财或雪球过期，刷新
-if not status["eastmoney"]["ok"] or not status["xueqiu"]["ok"]:
-    print("Cookie 过期，正在刷新...")
+# 如果雪球过期，刷新（默认仅刷新雪球）
+if not status["xueqiu"]["ok"]:
+    print("雪球 Cookie 过期，正在刷新...")
     fetch_cookies()
     # 刷新后重新检查
     new_status = cookie_status()
@@ -508,7 +512,7 @@ print("今日最强板块:")
 for s in sectors:
     print(f"  {s.name} ({s.code}) | +{s.pct:.2f}%")
 
-# 看龙头板块的涨停分布
+# 看龙头板块的涨停分布（s.code 为同花顺概念 6 位代码）
 if sectors:
     stocks = get_sector_components(sectors[0].code)
     up_limit = [s for s in stocks if s.pct and s.pct >= 9.9]

@@ -79,6 +79,27 @@ class BrowserSession:
                     self._started = False
         return None
 
+    def render_text(self, url: str, wait_selector: str = "",
+                    timeout_ms: int = 15000) -> Optional[str]:
+        """导航到 url，渲染后返回页面 HTML（page.content()）。
+
+        wait_selector 非空时等待该选择器出现（JS 动态内容填充完成）。
+        用于同花顺概念排行等涨跌幅由 JS 填充的页面。
+        """
+        for attempt in range(2):
+            self.ensure()
+            try:
+                result = self._exec(self._do_render, url, wait_selector, timeout_ms)
+                if result is not None:
+                    return result
+            except Exception as e:
+                print(f"  ⚠️ 浏览器渲染失败: {e}")
+                try:
+                    self._exec(self._cleanup_impl)
+                except Exception:
+                    self._started = False
+        return None
+
     def close(self):
         try:
             self._exec(self._cleanup_impl)
@@ -179,6 +200,16 @@ class BrowserSession:
         if resp.ok:
             return resp.text()
         return None
+
+    def _do_render(self, url: str, wait_selector: str, timeout_ms: int) -> Optional[str]:
+        """在浏览器线程导航并渲染页面，返回渲染后的 HTML。"""
+        self._page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        if wait_selector:
+            try:
+                self._page.wait_for_selector(wait_selector, timeout=timeout_ms)
+            except Exception:
+                pass  # 选择器超时也返回当前内容，由上层解析容错
+        return self._page.content()
 
     def _cleanup_impl(self):
         if not self._page:

@@ -29,6 +29,7 @@ def _cmd_scan(args):
         workers=args.workers,
         verbose=True,
         force=args.force,
+        scorers=args.scorers,
     )
 
 
@@ -71,6 +72,26 @@ def _cmd_scan_history(args):
             print(json.dumps({
                 "error": f"未找到 {date_str} 的扫描记录",
             }, ensure_ascii=False, indent=2))
+
+
+def _cmd_blacklist(args):
+    """概念板块黑名单管理"""
+    from dragon_quant.storage import db
+    action = getattr(args, "blacklist_action", None)
+    if action == "add":
+        db.add_sector_blacklist(args.name)
+        print(f"✅ 已加入黑名单: {args.name}")
+    elif action == "remove":
+        db.remove_sector_blacklist(args.name)
+        print(f"✅ 已移除黑名单: {args.name}")
+    else:  # list / 默认
+        names = db.get_sector_blacklist()
+        if names:
+            print(f"概念板块黑名单（{len(names)} 个）:")
+            for n in names:
+                print(f"  - {n}")
+        else:
+            print("黑名单为空")
 
 
 def _cmd_logs(args):
@@ -329,6 +350,8 @@ def main():
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
     shared.add_argument("--workers", type=int, default=2, help="并发线程数 (默认2)")
     shared.add_argument("--force", action="store_true", help="强制执行 (跳过交易时段拦截和缓存)")
+    shared.add_argument("--scorers", choices=["v1", "v2"], default="v1",
+                        help="评分体系: v1=旧四维 / v2=新五维识别真龙 (默认v1)")
 
     parser = argparse.ArgumentParser(
         description="龙头战法四维量化筛选系统",
@@ -400,6 +423,15 @@ def main():
     cs_p.add_argument("--source", required=True, choices=["em", "em_his", "xq"],
                       help="em=东财push2 em_his=东财push2his xq=雪球")
 
+    # blacklist 子命令（概念板块黑名单，拉取领涨/领跌板块时过滤）
+    bl_p = sub.add_parser("blacklist", help="概念板块黑名单管理")
+    bl_subs = bl_p.add_subparsers(dest="blacklist_action")
+    bl_subs.add_parser("list", help="列出黑名单")
+    bl_add_p = bl_subs.add_parser("add", help="新增黑名单概念")
+    bl_add_p.add_argument("name", help="概念名称（子串匹配，如 次新股）")
+    bl_rm_p = bl_subs.add_parser("remove", help="移除黑名单概念")
+    bl_rm_p.add_argument("name", help="概念名称")
+
     # review 子命令
     rev_p = sub.add_parser("review", help="龙头回测验证")
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
@@ -445,6 +477,8 @@ def main():
         _cmd_review(args)
     elif args.command == "vpa":
         _cmd_vpa(args)
+    elif args.command == "blacklist":
+        _cmd_blacklist(args)
 
     else:
         parser.print_help()

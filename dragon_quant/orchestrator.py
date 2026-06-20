@@ -800,14 +800,17 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 new_rank = i + 1  # 与 save_dragons 中 rank = i + 1 一致
 
                 # 5 日去重：该 code 上次入选距今 < 5 个交易日
+                #   仅对「跨日」(last_date 严格早于当天) 重复入选去重；
+                #   last_date == 当天 表示同日另一评分器版本已写入，放行以便 save_dragons 合并版本
                 last_info = db.get_last_entry_with_rank(code)
                 if last_info:
                     last_date, old_rank = last_info
-                    if trade_days_between(last_date, scan_date_fmt, calendar) < 5:
+                    if last_date < scan_date_fmt and \
+                            trade_days_between(last_date, scan_date_fmt, calendar) < 5:
                         # 新 rank 更好（数字更小）→ 覆写所有字段；否则跳过
                         if old_rank is not None and new_rank < old_rank:
                             updated_count += 1
-                            # 继续处理，让 save_dragons 的 INSERT OR REPLACE 更新记录
+                            # 继续处理，让 save_dragons 的 UPSERT 更新记录
                         else:
                             skipped_count += 1
                             continue
@@ -836,7 +839,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     parts.append(f"更新 {updated_count} 只(rank 提升)")
                 print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
-            db.save_dragons(scan_date_fmt, dragons_to_save, version=__version__)
+            db.save_dragons(scan_date_fmt, dragons_to_save,
+                            version=__version__, scorer_version=scorers)
             
         except Exception as e:
             if verbose:

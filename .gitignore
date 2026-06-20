@@ -22,7 +22,10 @@ logs/
 # 环境
 .env
 *.local
-.trae/
+.trae/*
+!.trae/skills/
+.trae/skills/*
+!.trae/skills/codemap/
 
 # 雪球 Cookie 缓存
 ~/.lsa_xq_cookies

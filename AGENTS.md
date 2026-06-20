@@ -243,6 +243,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 仓库：`gitBingxu/dragon-quant`；main 合入需 CODEOWNERS 审批。
 - Commit 风格：中文 + emoji 前缀（见 git log）。
 - **文档同步（强制）**：每次提交涉及功能/命令/接口/数据源/表结构变更时，**必须在同一 commit 内同步更新 `AGENTS.md` 与 `README.md`**，保证文档与代码一致；纯文档或纯内部重构可酌情豁免。
+- **代码地图（codemap）**：模块结构/调用链/数据流有较大调整后，用 `/codemap` skill（`.trae/skills/codemap/`）生成或刷新 `CODEMAP.md`（执行路径、任务导航、不变式），供 agent 与人快速导航。
 
 ---
 

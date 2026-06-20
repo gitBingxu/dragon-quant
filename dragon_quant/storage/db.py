@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS dragons (
     max_return_5d   REAL,
     max_drawdown_5d REAL,
     review_status   TEXT DEFAULT 'pending',
+    scorer_version  TEXT DEFAULT 'v1',
     UNIQUE(trade_date, code)
 );
 
@@ -176,6 +177,7 @@ def _migrate_dragons(conn: sqlite3.Connection):
         "review_status TEXT DEFAULT 'pending'",
         "version TEXT DEFAULT ''",
         "max_return_hold_days INTEGER",
+        "scorer_version TEXT DEFAULT 'v1'",
     ]
     for col in COLUMNS:
         try:
@@ -186,6 +188,11 @@ def _migrate_dragons(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE scans ADD COLUMN raw_output TEXT;")
     except sqlite3.OperationalError:
         pass
+    # 存量回填：评分器版本为空的历史记录统一置为 v1（幂等，多次执行无副作用）
+    conn.execute(
+        "UPDATE dragons SET scorer_version = 'v1' "
+        "WHERE scorer_version IS NULL OR scorer_version = ''"
+    )
     _seed_blacklist(conn)
     conn.commit()
 
@@ -463,8 +470,13 @@ def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
         conn.close()
 
 
-def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
-    """保存或更新 dragons（UPSERT，不覆盖 review 字段）。"""
+def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
+                 scorer_version: str = "v1"):
+    """保存或更新 dragons（UPSERT，不覆盖 review 字段）。
+
+    scorer_version: 本次评分器版本（"v1"/"v2"）。同一 (trade_date, code) 多次写入时，
+    已存版本与本次版本求并集去重，固定输出 "v1"/"v2"/"v1_v2"（v1 在前）。
+    """
     with _lock:
         conn = _connect()
         try:
@@ -492,14 +504,15 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
                     json.dumps(concepts, ensure_ascii=False),
                     s.get("report_text", ""),
                     version,
+                    scorer_version,
                 ))
             
             conn.executemany(
                 "INSERT INTO dragons("
                 "trade_date, code, name, scan_id, rank, composite_score, board_count, "
                 "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-                "concepts_json, report_text, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "concepts_json, report_text, version, scorer_version"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(trade_date, code) DO UPDATE SET "
                 "name=excluded.name, "
                 "scan_id=excluded.scan_id, "
@@ -516,7 +529,15 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
                 "market_cap=COALESCE(excluded.market_cap, dragons.market_cap), "
                 "concepts_json=excluded.concepts_json, "
                 "report_text=excluded.report_text, "
-                "version=excluded.version",
+                "version=excluded.version, "
+                # 评分器版本并集合并：已存版本 ∪ 本次版本 → v1/v2/v1_v2（v1 在前）
+                "scorer_version=CASE "
+                "WHEN (instr(COALESCE(dragons.scorer_version,''),'v1')>0 OR excluded.scorer_version='v1') "
+                "AND (instr(COALESCE(dragons.scorer_version,''),'v2')>0 OR excluded.scorer_version='v2') "
+                "THEN 'v1_v2' "
+                "WHEN (instr(COALESCE(dragons.scorer_version,''),'v1')>0 OR excluded.scorer_version='v1') "
+                "THEN 'v1' "
+                "ELSE 'v2' END",
                 rows,
             )
             conn.commit()

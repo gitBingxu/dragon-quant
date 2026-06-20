@@ -122,7 +122,16 @@ CREATE TABLE IF NOT EXISTS vpa_analysis (
 
 CREATE INDEX IF NOT EXISTS idx_vpa_date ON vpa_analysis(trade_date);
 CREATE INDEX IF NOT EXISTS idx_vpa_code ON vpa_analysis(code);
+
+CREATE TABLE IF NOT EXISTS sector_blacklist (
+    name        TEXT PRIMARY KEY,
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+);
 """
+
+# 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
+# 如需屏蔽特定行业，用 `blacklist add` 维护）。
+_BLACKLIST_SEED: list[str] = []
 
 
 def _connect() -> sqlite3.Connection:
@@ -177,7 +186,18 @@ def _migrate_dragons(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE scans ADD COLUMN raw_output TEXT;")
     except sqlite3.OperationalError:
         pass
+    _seed_blacklist(conn)
     conn.commit()
+
+
+def _seed_blacklist(conn: sqlite3.Connection):
+    """首次建表时灌入默认概念黑名单种子（幂等，已存在则跳过）。"""
+    for name in _BLACKLIST_SEED:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO sector_blacklist(name) VALUES (?)", (name,))
+        except sqlite3.OperationalError:
+            pass
 
 
 def init_db():
@@ -185,6 +205,47 @@ def init_db():
         conn = _connect()
         try:
             _ensure_schema(conn)
+        finally:
+            conn.close()
+
+
+# ─── 概念板块黑名单 ───
+
+def get_sector_blacklist() -> list[str]:
+    """返回概念板块黑名单名称列表（拉取领涨/领跌板块时按此过滤）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            rows = conn.execute("SELECT name FROM sector_blacklist").fetchall()
+            return [r[0] for r in rows]
+        finally:
+            conn.close()
+
+
+def add_sector_blacklist(name: str):
+    """新增一个黑名单概念（幂等）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute(
+                "INSERT OR IGNORE INTO sector_blacklist(name) VALUES (?)",
+                (name.strip(),))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def remove_sector_blacklist(name: str):
+    """移除一个黑名单概念。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute("DELETE FROM sector_blacklist WHERE name = ?",
+                         (name.strip(),))
+            conn.commit()
         finally:
             conn.close()
 

@@ -8,7 +8,7 @@
 
 一套纯 Python 3 的 A 股龙头筛选系统。从当日涨停榜出发，评估涨停股的龙头质量并加权排名输出；同时支持日志查询、SQLite 持久化、龙头回测与 Web UI 可视化。
 
-系统内置**两套评分体系**，由 `--scorers` 开关切换，并存互不影响：
+系统内置**两套评分体系**，分别由 `scan`（v1）与 `scan_v2`（v2）命令触发，并存互不影响：
 
 - **v1（旧四维，默认）**：带动性 35% / 领涨性 25% / 抗跌性 15% / 资金承接 25%，简单加权求和。
 - **v2（新五维「识别真龙」）**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，**门槛+加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。详见《评分器Refactor.md》。
@@ -29,10 +29,10 @@ python -m dragon_quant
 python -m dragon_quant scan --top 25 --candidates 5 --workers 2
 
 # 使用 v2 五维「识别真龙」评分器
-python -m dragon_quant scan --scorers v2 --top 5
+python -m dragon_quant scan_v2 --top 5
 
 # 强制执行（跳过交易时段拦截 + DB 缓存）
-python -m dragon_quant scan --scorers v2 --force
+python -m dragon_quant scan_v2 --force
 
 # 概念板块黑名单管理（拉取领涨/领跌板块时过滤）
 python -m dragon_quant blacklist list
@@ -71,7 +71,7 @@ Cookie 文件位置：
 ```
 dragon_quant/
 ├── __init__.py / __main__.py    # 入口
-├── cli.py                       # argparse CLI（scan/logs/data/review/vpa/storage/blacklist）
+├── cli.py                       # argparse CLI（scan/scan_v2/logs/data/review/vpa/storage/blacklist）
 ├── orchestrator.py              # 编排主流程 (Phase A→F)，含 v1/v2 双分支
 ├── data.py                      # 原子数据查询 API
 ├── rate_limit.py                # 分组并发调度器
@@ -242,6 +242,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 ### Git 规范
 - 仓库：`gitBingxu/dragon-quant`；main 合入需 CODEOWNERS 审批。
 - Commit 风格：中文 + emoji 前缀（见 git log）。
+- **文档同步（强制）**：每次提交涉及功能/命令/接口/数据源/表结构变更时，**必须在同一 commit 内同步更新 `AGENTS.md` 与 `README.md`**，保证文档与代码一致；纯文档或纯内部重构可酌情豁免。
 
 ---
 
@@ -249,7 +250,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### ✅ 已完成
 - v1 四维评分器 `scorers/`（drive/anti_drop/leadership/absorption）
-- **v2 五维「识别真龙」评分器 `scorers_v2/`**（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），CLI `--scorers v2` 切换
+- **v2 五维「识别真龙」评分器 `scorers_v2/`**（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan_v2` 命令触发
 - 4 个 Provider（同花顺/东财/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 curl+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）
 - DB 概念板块黑名单表 + CLI `blacklist` 管理

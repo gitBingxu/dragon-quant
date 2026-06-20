@@ -18,7 +18,7 @@ from dragon_quant.storage.manager import StorageManager
 
 
 def _cmd_scan(args):
-    """扫描命令"""
+    """扫描命令（v1 四维评分器）"""
     if args.date:
         _cmd_scan_history(args)
         return
@@ -29,7 +29,23 @@ def _cmd_scan(args):
         workers=args.workers,
         verbose=True,
         force=args.force,
-        scorers=args.scorers,
+        scorers="v1",
+    )
+
+
+def _cmd_scan_v2(args):
+    """扫描命令（v2 五维「识别真龙」评分器）"""
+    if args.date:
+        _cmd_scan_history(args)
+        return
+
+    orchestrate_scan(
+        top_n=args.top,
+        candidates_n=args.candidates,
+        workers=args.workers,
+        verbose=True,
+        force=args.force,
+        scorers="v2",
     )
 
 
@@ -350,19 +366,23 @@ def main():
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
     shared.add_argument("--workers", type=int, default=2, help="并发线程数 (默认2)")
     shared.add_argument("--force", action="store_true", help="强制执行 (跳过交易时段拦截和缓存)")
-    shared.add_argument("--scorers", choices=["v1", "v2"], default="v1",
-                        help="评分体系: v1=旧四维 / v2=新五维识别真龙 (默认v1)")
 
     parser = argparse.ArgumentParser(
-        description="龙头战法四维量化筛选系统",
+        description="龙头战法量化筛选系统",
     )
     parser.set_defaults(command="scan")
     sub = parser.add_subparsers(dest="command")
 
-    # scan 子命令
-    scan_p = sub.add_parser("scan", help="批量扫描龙头股", parents=[shared])
+    # scan 子命令（v1 四维评分器）
+    scan_p = sub.add_parser("scan", help="批量扫描龙头股（v1 四维）", parents=[shared])
     scan_p.add_argument("--date", default=None,
                         help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
+
+    # scan_v2 子命令（v2 五维「识别真龙」评分器）
+    scan_v2_p = sub.add_parser("scan_v2", help="批量扫描龙头股（v2 五维识别真龙）",
+                               parents=[shared])
+    scan_v2_p.add_argument("--date", default=None,
+                           help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
 
     # logs 子命令
     logs_p = sub.add_parser("logs", help="日志查询与管理")
@@ -467,6 +487,8 @@ def main():
 
     if args.command == "scan":
         _cmd_scan(args)
+    elif args.command == "scan_v2":
+        _cmd_scan_v2(args)
     elif args.command == "logs":
         _cmd_logs(args)
     elif args.command == "data":

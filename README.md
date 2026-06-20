@@ -4,7 +4,7 @@
 
 基于同花顺、雪球、腾讯三大公开数据源，对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
 
-内置**两套评分体系**，由 `--scorers` 开关切换、并存互不影响：
+内置**两套评分体系**，分别由 `scan`（v1）与 `scan_v2`（v2）命令触发、并存互不影响：
 
 - **v1（默认，四维加权）**：带动性 35% / 领涨性 25% / 抗跌性 15% / 资金承接 25%，简单加权求和。
 - **v2（五维「识别真龙」）**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。详见仓库内《评分器Refactor.md》。
@@ -47,10 +47,10 @@ playwright install chromium
 dragon-quant scan --top 5
 
 # v2 五维「识别真龙」
-dragon-quant scan --scorers v2 --top 5
+dragon-quant scan_v2 --top 5
 
 # 强制执行（跳过交易时段拦截 + DB 缓存）
-dragon-quant scan --scorers v2 --force
+dragon-quant scan_v2 --force
 
 # 龙头回测 + Web UI
 dragon-quant review --ui
@@ -75,21 +75,21 @@ Cookie 文件位置：`~/Library/Application Support/dragon-quant/cookies/{xueqi
 
 ## CLI 命令大全
 
-### `scan` — 扫榜
+### `scan` / `scan_v2` — 扫榜
 
 ```bash
-dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--scorers v1|v2] [--force]
+dragon-quant scan    [--top 25] [--candidates 5] [--workers 2] [--force]   # v1 四维
+dragon-quant scan_v2 [--top 25] [--candidates 5] [--workers 2] [--force]   # v2 五维识别真龙
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--top` | 25 | 最终输出的候选股数量 |
-| `--candidates` | 5 | 每个板块取前 N 只（仅 v1；v2 取当日全部涨停股）|
+| `--candidates` | 5 | 每个板块取前 N 只（仅 `scan`；`scan_v2` 取当日全部涨停股）|
 | `--workers` | 2 | 并发线程数 |
-| `--scorers` | v1 | 评分体系：`v1` 四维 / `v2` 五维识别真龙 |
 | `--force` | - | 跳过交易时段拦截与 DB 缓存 |
 
-输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/`。
+两命令参数一致，区别仅在评分体系：`scan` 走 v1 四维，`scan_v2` 走 v2 五维「识别真龙」。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/`。
 
 ### `blacklist` — 概念板块黑名单
 

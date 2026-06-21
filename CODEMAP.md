@@ -30,10 +30,11 @@ cli.main 分发                              cli.py:488 (scan) / :490 (scan_v2)
   Phase C 连板+排序                         orchestrator.py:511
     _compute_consecutive_boards            orchestrator.py:65
     v2 额外 _compute_5day_return → fived_pct  orchestrator.py:81
+    按(连板,概念数)降序，ranking=全候选池(不截断)  orchestrator.py:530
 
   Phase D 并发预填(RateLimiter)             orchestrator.py:540  (cache 键见 §三)
 
-  Phase E 打分                              orchestrator.py:599
+  Phase E 打分（对候选池全部个股，v1/v2 均不截断）  orchestrator.py:599
     v1: _score_one      → 四维加权          orchestrator.py:130 / 调用 :626
     v2: _score_one_v2   → aggregator.evaluate  orchestrator.py:182 / 调用 :622
 

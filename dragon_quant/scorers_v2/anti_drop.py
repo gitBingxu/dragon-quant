@@ -7,6 +7,7 @@ txt："大盘跳水时它能横盘稳住，大盘一旦企稳它第一个起飞 
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from dragon_quant.cache.data_cache import DataCache
@@ -59,6 +60,7 @@ def _antidrop_vs(base: list[KBar], stock: list[KBar]) -> tuple[float, dict]:
     # ── 横盘稳住：各跳水段按基准跌幅加权 ──
     hold_num = 0.0
     hold_den = 0.0
+    dip_events = []
     for a, b in segs:
         gx_a, gx_b = g_x[a], g_x[b]
         gs_a, gs_b = g_s[a], g_s[b]
@@ -72,16 +74,34 @@ def _antidrop_vs(base: list[KBar], stock: list[KBar]) -> tuple[float, dict]:
         s_hold_seg = clip((1.0 - ratio) * 100.0)
         hold_num += s_hold_seg * d_x
         hold_den += d_x
+        dip_events.append({
+            "start_time": _fmt_minute_bucket(axis[a]),
+            "bottom_time": _fmt_minute_bucket(axis[b]),
+            "base_drop_pct": round((gx_b - gx_a) * 100, 2),
+            "stock_change_pct": round((gs_b - gs_a) * 100, 2),
+            "stock_drop_pct": round(d_s * 100, 2),
+            "hold_score": round(s_hold_seg, 2),
+            "base_drop_abs": round(d_x * 100, 2),
+        })
     s_hold = (hold_num / hold_den) if hold_den > 0 else R.ANTIDROP_NEUTRAL
 
     # ── 率先起飞：取最深跳水段的底部 b，看个股领先见底 + 反弹更猛 ──
     deepest = max(segs, key=lambda ab: (g_x[ab[0]] - g_x[ab[1]])
                   if None not in (g_x[ab[0]], g_x[ab[1]]) else -1)
     s_rebound = _rebound(g_x, g_s, deepest[1])
+    deepest_event = None
+    if dip_events:
+        deepest_event = max(dip_events, key=lambda e: e.get("base_drop_abs", 0))
 
     s_dim = clip(s_hold * R.HOLD_W + s_rebound * R.REBOUND_W)
     return s_dim, {"n_dip_seg": len(segs), "s_hold": round(s_hold, 2),
-                   "s_rebound": round(s_rebound, 2)}
+                   "s_rebound": round(s_rebound, 2),
+                   "dip_events": dip_events[:3],
+                   "deepest_event": deepest_event}
+
+
+def _fmt_minute_bucket(bucket: int) -> str:
+    return datetime.fromtimestamp(bucket * 60).strftime("%H:%M")
 
 
 def _dip_segments(g_x: list[Optional[float]]) -> list[tuple[int, int]]:

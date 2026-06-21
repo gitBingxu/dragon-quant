@@ -12,7 +12,7 @@ from dragon_quant.scorers_v2 import evaluate, rank_verdicts
 from dragon_quant.scorers_v2 import registry as R
 from dragon_quant.scorers_v2.base import (
     clip, desc_rank_score, common_minute_axis, gain_curve)
-from dragon_quant.scorers_v2 import leadership, liquidity, drive
+from dragon_quant.scorers_v2 import leadership, liquidity, drive, anti_drop
 
 
 def _min_bars(pre, pcts, start="2026-06-19 09:30"):
@@ -123,6 +123,21 @@ class TestLiquidityYizi(unittest.TestCase):
 
 class TestDrivePulse(unittest.TestCase):
 
+    def test_early_seal_details_include_time_and_bid_volume(self):
+        cache = DataCache()
+        stock = _min_bars(10.0, [0, 2, 5, 10, 10, 10])
+        cache.set("kline:1min:600001", stock)
+        comps = [StockInfo(code="600001", name="龙头", sector_code="BK1",
+                           pct=10, price=11)]
+        q = _quote("600001", 10.0, 11.0, bid1=12345)
+
+        s, d = drive._early_seal("600001", cache, "BK1", comps, {"600001": q})
+
+        self.assertEqual(s, 100.0)
+        self.assertTrue(d["sealed"])
+        self.assertEqual(d["seal_time"], "09:33")
+        self.assertEqual(d["bid1_volume"], 12345)
+
     def test_pure_follower_zero(self):
         """纯跟风票（板块先拉、个股后跟，无主动带动）→ lead 子因子 0 分。"""
         cache = DataCache()
@@ -132,6 +147,51 @@ class TestDrivePulse(unittest.TestCase):
         s, d = drive._lead_sector(stock, sector)
         self.assertEqual(d["n_lead"], 0)
         self.assertEqual(s, 0.0)
+
+    def test_lead_sector_records_lead_event_details(self):
+        stock = _min_bars(10.0, [0, 0, 0, 0, 1.5, 3.5, 4.0, 4.0, 4.0, 4.0])
+        sector = _min_bars(100.0, [0, 0, 0, 0, 0.05, 0.45, 0.50, 0.50, 0.50, 0.50])
+
+        s, d = drive._lead_sector(stock, sector)
+
+        self.assertGreater(s, 0)
+        self.assertEqual(d["n_lead"], 1)
+        event = d["lead_events"][0]
+        self.assertEqual(event["event_time"], "09:32")
+        self.assertIn("stock_gain_pct", event)
+        self.assertIn("sector_gain_pct", event)
+        self.assertGreater(event["stock_gain_pct"], 0)
+        self.assertGreater(event["sector_gain_pct"], 0)
+
+    def test_lead_sector_records_follow_event_details(self):
+        sector = _min_bars(100.0, [0, 0, 0, 0.4, 0.7, 0.7, 0.7, 1.1, 1.1, 1.1])
+        stock = _min_bars(10.0, [0, 0, 0, 0, 0, 0, 0, 3.2, 4.0, 4.0])
+
+        s, d = drive._lead_sector(stock, sector)
+
+        self.assertEqual(s, 0.0)
+        self.assertGreaterEqual(d["n_follow"], 1)
+        event = d["follow_events"][0]
+        self.assertEqual(event["sector_event_time"], "09:34")
+        self.assertIn("stock_follow_time", event)
+        self.assertGreater(event["sector_gain_pct"], 0)
+        self.assertGreater(event["stock_gain_pct"], 0)
+
+
+class TestAntiDropDetails(unittest.TestCase):
+
+    def test_antidrop_records_dip_event_details(self):
+        base = _min_bars(3000.0, [0, -0.1, -0.2, -0.8, -0.7, -0.6, -0.5])
+        stock = _min_bars(10.0, [0, 0.1, 0.1, 0.0, 0.2, 0.3, 0.3])
+
+        s, d = anti_drop._antidrop_vs(base, stock)
+
+        self.assertGreater(s, 0)
+        event = d["dip_events"][0]
+        self.assertEqual(event["start_time"], "09:30")
+        self.assertEqual(event["bottom_time"], "09:33")
+        self.assertLess(event["base_drop_pct"], 0)
+        self.assertIn("stock_change_pct", event)
 
 
 class TestAggregator(unittest.TestCase):

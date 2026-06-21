@@ -392,7 +392,7 @@ class ReportBuilder:
             lines.append(f"- ⛔ 一票否决: {reject_reason}")
         lines.append(f"- 🐉 带动性({s('drive'):.0f}): {self._v2_drive(dims.get('drive', {}))}")
         lines.append(f"- 📊 领涨性({s('leadership'):.0f}): {self._v2_lead(dims.get('leadership', {}))}")
-        lines.append(f"- 🛡️ 抗跌性({s('anti_drop'):.0f}): {self._v2_anti(dims.get('anti_drop', {}))}")
+        lines.append(f"- 🛡️ 抗跌性({s('anti_drop'):.0f}): {self._v2_anti(dims.get('anti_drop', {}), primary_sector_name)}")
         lines.append(f"- 💧 流动性({s('liquidity'):.0f}): {self._v2_liq(dims.get('liquidity', {}))}")
         lines.append(f"- 💰 资金承接({s('absorption'):.0f}): {self._v2_abs(dims.get('absorption', {}))}")
         return "\n".join(lines)
@@ -401,12 +401,36 @@ class ReportBuilder:
     def _v2_drive(d: dict) -> str:
         det = d.get("details", {})
         early = det.get("s_early", 0)
+        early_det = det.get("early", {})
         lead = det.get("lead", {})
         voice = det.get("voice", {})
-        return (f"封板最早{early:.0f}/带动板块{det.get('s_lead', 0):.0f}"
-                f"(带动{lead.get('n_lead', 0)}次,被带{lead.get('n_follow', 0)}次)"
-                f"/板块共鸣{det.get('s_voice', 0):.0f}"
-                f"(涨停{voice.get('n_limit', 0)}/强势{voice.get('n_strong', 0)})")
+
+        if early_det.get("sealed"):
+            seal = (f"{early_det.get('seal_time', '时间缺失')}封板，"
+                    f"封单量{ReportBuilder._fmt_hands(early_det.get('bid1_volume', 0))}，"
+                    f"涨停池第{early_det.get('rank', '-')}/{early_det.get('pool_size', '-')}" )
+        else:
+            seal = f"未识别到稳定封板，涨停池{early_det.get('pool_size', 0)}只"
+
+        lead_parts = []
+        for e in lead.get("lead_events", [])[:2]:
+            lead_parts.append(
+                f"{e.get('event_time', '-')}个股拉升{ReportBuilder._fmt_pct(e.get('stock_gain_pct', 0))}，"
+                f"随后板块拉升{ReportBuilder._fmt_pct(e.get('sector_gain_pct', 0))}"
+            )
+        for e in lead.get("follow_events", [])[:2]:
+            lead_parts.append(
+                f"{e.get('sector_event_time', '-')}板块先拉升{ReportBuilder._fmt_pct(e.get('sector_gain_pct', 0))}，"
+                f"{e.get('stock_follow_time', '-')}个股跟随{ReportBuilder._fmt_pct(e.get('stock_gain_pct', 0))}"
+            )
+        lead_desc = "；".join(lead_parts) if lead_parts else (
+            f"带动{lead.get('n_lead', 0)}次，被带{lead.get('n_follow', 0)}次"
+        )
+
+        return (f"封板最早{early:.0f}：{seal}；"
+                f"带动板块{det.get('s_lead', 0):.0f}：{lead_desc}；"
+                f"板块共鸣{det.get('s_voice', 0):.0f}："
+                f"涨停{voice.get('n_limit', 0)}只/强势{voice.get('n_strong', 0)}只")
 
     @staticmethod
     def _v2_lead(d: dict) -> str:
@@ -416,11 +440,15 @@ class ReportBuilder:
                 f"排名{det.get('pct_rank', '-')}/{det.get('pct_n', '-')})")
 
     @staticmethod
-    def _v2_anti(d: dict) -> str:
+    def _v2_anti(d: dict, primary_sector_name: str = "") -> str:
         det = d.get("details", {})
         if det.get("degraded"):
             return "数据不足，给中性分"
-        return f"大盘维度{det.get('s_market', 0):.0f}/板块维度{det.get('s_sector', 0):.0f}"
+        market = ReportBuilder._fmt_dip_event(det.get("market", {}), "大盘", "跳水")
+        sector_label = primary_sector_name or "主板块"
+        sector = ReportBuilder._fmt_dip_event(det.get("sector", {}), sector_label, "回落")
+        return (f"大盘维度{det.get('s_market', 0):.0f}：{market}；"
+                f"板块维度{det.get('s_sector', 0):.0f}：{sector}")
 
     @staticmethod
     def _v2_liq(d: dict) -> str:
@@ -436,9 +464,71 @@ class ReportBuilder:
         det = d.get("details", {})
         if det.get("fallback") or det.get("event_count", 0) == 0:
             return det.get("fallback_reason", "暂无显著虹吸信号")
-        be = det.get("best_event", {})
-        return (f"检测到{det.get('event_count', 0)}次虹吸"
-                f"(目标拉升{be.get('target_pct', 0)}%,出逃{be.get('fleeing_count', 0)}个板块)")
+        be = det.get("best_event") or (det.get("all_events") or [{}])[0]
+        fleeing = be.get("fleeing_sectors", [])
+        names = ReportBuilder._fmt_fleeing_sectors(fleeing)
+        return (f"检测到{det.get('event_count', 0)}次资金承接；"
+                f"{be.get('dive_time', '时间缺失')} {names}板块跳水"
+                f"(平均{ReportBuilder._fmt_pct(be.get('fleeing_avg_drop', 0))})，"
+                f"{be.get('rally_time', '时间缺失')} 目标板块拉升"
+                f"{ReportBuilder._fmt_pct(be.get('target_pct', 0))}，承接上述板块出逃资金")
+
+    @staticmethod
+    def _fmt_hands(v) -> str:
+        try:
+            vol = float(v or 0)
+        except (TypeError, ValueError):
+            vol = 0.0
+        if vol >= 10000:
+            return f"{vol / 10000:.1f}万手"
+        return f"{vol:.0f}手"
+
+    @staticmethod
+    def _fmt_pct(v) -> str:
+        try:
+            pct = float(v or 0)
+        except (TypeError, ValueError):
+            pct = 0.0
+        return f"{pct:+.2f}%"
+
+    @staticmethod
+    def _fmt_dip_event(det: dict, label: str, verb: str) -> str:
+        if det.get("degraded"):
+            return det.get("reason", "数据不足")
+        if det.get("no_dip"):
+            return f"{label}无有效{verb}段"
+        event = det.get("deepest_event") or (det.get("dip_events") or [{}])[0]
+        if not event:
+            return f"{label}无有效{verb}段"
+        base_drop = event.get("base_drop_pct", 0)
+        stock_chg = event.get("stock_change_pct", 0)
+        perf = ReportBuilder._anti_perf_desc(base_drop, stock_chg)
+        return (f"{event.get('start_time', '-')}-{event.get('bottom_time', '-')} "
+                f"{label}{verb}{ReportBuilder._fmt_pct(base_drop)}，"
+                f"该股同期{ReportBuilder._fmt_pct(stock_chg)}（{perf}）")
+
+    @staticmethod
+    def _anti_perf_desc(base_drop, stock_chg) -> str:
+        try:
+            base = float(base_drop or 0)
+            stock = float(stock_chg or 0)
+        except (TypeError, ValueError):
+            return "表现未知"
+        if stock > 0:
+            return "逆势上涨"
+        if abs(stock) < abs(base):
+            return "明显少跌"
+        return "跟随回落"
+
+    @staticmethod
+    def _fmt_fleeing_sectors(fleeing: list[dict]) -> str:
+        if not fleeing:
+            return "多个"
+        parts = []
+        for s in fleeing[:3]:
+            parts.append(f"{s.get('name', s.get('code', '未知'))}({ReportBuilder._fmt_pct(s.get('drop_pct', 0))})")
+        suffix = "等" if len(fleeing) > 3 else ""
+        return "、".join(parts) + suffix
 
     def build_summary_report_v2(self, ranking: list[dict]) -> str:
         """五维全量排名表（v2）。"""

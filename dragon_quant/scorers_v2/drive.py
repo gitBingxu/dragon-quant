@@ -7,6 +7,7 @@ txt："它一涨停整个板块的小弟全都跟风高潮 / 观察哪支股票�
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from dragon_quant.cache.data_cache import DataCache
@@ -59,15 +60,25 @@ def _early_seal(code, cache, sector, components, qmap) -> tuple[float, dict]:
                 pool[c] = t
     if code not in pool:
         # 本股未封板（或无1分K）→ 0
-        return 0.0, {"sealed": False, "pool_size": len(pool)}
+        q = qmap.get(code)
+        return 0.0, {"sealed": False, "pool_size": len(pool),
+                     "bid1_volume": q.bid1_volume if q else 0,
+                     "bid1_price": q.bid1_price if q else 0}
+    q = qmap.get(code)
+    seal_minute = pool[code]
+    detail = {"sealed": True, "seal_minute": seal_minute,
+              "seal_time": _fmt_minute_bucket(seal_minute),
+              "bid1_volume": q.bid1_volume if q else 0,
+              "bid1_price": q.bid1_price if q else 0,
+              "limit_up": q.limit_up if q else 0}
     if len(pool) == 1:
-        return 100.0, {"sealed": True, "rank": 1, "pool_size": 1}
+        return 100.0, {**detail, "rank": 1, "pool_size": 1}
     # 封板时点升序排名（越早 rank 越小）
     order = sorted(pool.items(), key=lambda kv: kv[1])
     rank = [c for c, _ in order].index(code) + 1
     n = len(pool)
     s = (1.0 - rank / n) * 100.0
-    return clip(s), {"sealed": True, "rank": rank, "pool_size": n}
+    return clip(s), {**detail, "rank": rank, "pool_size": n}
 
 
 def _first_seal_minute(minute: list[KBar], limit_up: float) -> Optional[int]:
@@ -77,6 +88,10 @@ def _first_seal_minute(minute: list[KBar], limit_up: float) -> Optional[int]:
         if bar.close >= limit_up - eps:
             return bar.timestamp // 60_000
     return None
+
+
+def _fmt_minute_bucket(bucket: int) -> str:
+    return datetime.fromtimestamp(bucket * 60).strftime("%H:%M")
 
 
 # ─── 子因子②：带动板块（脉冲-跟随因果检测）───
@@ -94,22 +109,24 @@ def _lead_sector(stock: list[KBar], sector: list[KBar]) -> tuple[float, dict]:
     follow_th = R.SECTOR_FOLLOW_PCT / 100.0
 
     # ① 识别个股拉升脉冲起点 t0
-    thrusts: list[int] = []
+    thrusts: list[dict] = []
     # 开盘跳空/一字高开
     if g_s[0] is not None and g_s[0] >= thrust:
-        thrusts.append(0)
+        thrusts.append({"start": 0, "trigger": 0})
     last_peak = -10
     for t in range(w, n):
         if g_s[t] is None or g_s[t - w] is None:
             continue
         dh = g_s[t] - g_s[t - w]
         if dh >= thrust and (t - last_peak) > w:
-            thrusts.append(t - w)
+            thrusts.append({"start": t - w, "trigger": t})
             last_peak = t
 
     n_lead = 0
     n_follow = 0
-    for t0 in thrusts:
+    lead_events = []
+    for thrust_event in thrusts:
+        t0 = thrust_event["start"]
         if g_b[t0] is None:
             continue
         # ② 板块跟随振幅
@@ -122,11 +139,14 @@ def _lead_sector(stock: list[KBar], sector: list[KBar]) -> tuple[float, dict]:
         no_frontrun = (g_b[t0] - min(pre)) < follow_th if pre else True
         if dh_b >= follow_th and no_frontrun:
             n_lead += 1
+            lead_events.append(_build_lead_event(axis, g_s, g_b, t0,
+                                                 thrust_event.get("trigger", t0), L))
         elif dh_b >= follow_th and not no_frontrun:
             n_follow += 1
 
     # ④ 也检测「板块先达标、个股后拉」的被带动
-    n_follow += _count_follow_events(g_s, g_b, n, w, L, thrust, follow_th)
+    follow_events = _detect_follow_events(axis, g_s, g_b, n, w, L, thrust, follow_th)
+    n_follow += len(follow_events)
 
     # ⑤ 打分
     if n_lead == 0:
@@ -143,24 +163,54 @@ def _lead_sector(stock: list[KBar], sector: list[KBar]) -> tuple[float, dict]:
 
     return s_lead, {"n_lead": n_lead, "n_follow": n_follow,
                     "n_thrust": len(thrusts), "bonus": bonus,
-                    "suspect_follower": n_lead == 0 and n_follow > 0}
+                    "suspect_follower": n_lead == 0 and n_follow > 0,
+                    "lead_events": lead_events[:3],
+                    "follow_events": follow_events[:3]}
 
 
-def _count_follow_events(g_s, g_b, n, w, L, thrust, follow_th) -> int:
+def _build_lead_event(axis, g_s, g_b, t0: int, trigger: int, L: int) -> dict:
+    """构造“个股先拉、板块跟随”的报告事件。"""
+    end = min(len(axis), t0 + L + 1)
+    sector_points = [(i, g_b[i]) for i in range(t0 + 1, end) if g_b[i] is not None]
+    stock_points = [(i, g_s[i]) for i in range(t0, end) if g_s[i] is not None]
+    sector_peak_idx, sector_peak = max(sector_points, key=lambda kv: kv[1]) if sector_points else (t0, g_b[t0])
+    stock_peak_idx, stock_peak = max(stock_points, key=lambda kv: kv[1]) if stock_points else (trigger, g_s[trigger])
+    stock_base = g_s[t0] or 0.0
+    sector_base = g_b[t0] or 0.0
+    return {
+        "event_time": _fmt_minute_bucket(axis[t0]),
+        "trigger_time": _fmt_minute_bucket(axis[trigger]),
+        "stock_peak_time": _fmt_minute_bucket(axis[stock_peak_idx]),
+        "sector_peak_time": _fmt_minute_bucket(axis[sector_peak_idx]),
+        "stock_gain_pct": round(((stock_peak or stock_base) - stock_base) * 100, 2),
+        "sector_gain_pct": round(((sector_peak or sector_base) - sector_base) * 100, 2),
+    }
+
+
+def _detect_follow_events(axis, g_s, g_b, n, w, L, thrust, follow_th) -> list[dict]:
     """板块先拉、个股随后跟（个股被带动）。"""
-    cnt = 0
+    events = []
     last = -10
     for t in range(w, n):
         if g_b[t] is None or g_b[t - w] is None:
             continue
-        if (g_b[t] - g_b[t - w]) >= follow_th and (t - last) > w:
-            t0 = t - w
-            seg = [g_s[t0 + k] for k in range(1, L + 1)
-                   if t0 + k < n and g_s[t0 + k] is not None]
-            if seg and g_s[t0] is not None and (max(seg) - g_s[t0]) >= thrust:
-                cnt += 1
-                last = t
-    return cnt
+        if (g_b[t] - g_b[t - w]) < follow_th or (t - last) <= w:
+            continue
+        t0 = t - w
+        seg = [g_s[t0 + k] for k in range(1, L + 1)
+               if t0 + k < n and g_s[t0 + k] is not None]
+        if seg and g_s[t0] is not None and (max(seg) - g_s[t0]) >= thrust:
+            stock_peak_offset, stock_peak = max(enumerate(seg, start=1), key=lambda kv: kv[1])
+            stock_follow_idx = min(t0 + stock_peak_offset, n - 1)
+            events.append({
+                "sector_event_time": _fmt_minute_bucket(axis[t0]),
+                "sector_trigger_time": _fmt_minute_bucket(axis[t]),
+                "stock_follow_time": _fmt_minute_bucket(axis[stock_follow_idx]),
+                "sector_gain_pct": round((g_b[t] - g_b[t0]) * 100, 2),
+                "stock_gain_pct": round((stock_peak - g_s[t0]) * 100, 2),
+            })
+            last = t
+    return events
 
 
 def _corr_bonus(g_s, g_b, L) -> float:

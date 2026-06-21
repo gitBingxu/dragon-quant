@@ -216,6 +216,86 @@ class TestReportBuilder(unittest.TestCase):
         # fewshot 示例不输出“间隔xx分钟”
         self.assertNotIn("间隔", report)
 
+    def test_build_stock_report_v2_mentions_event_details(self):
+        report = self.reporter.build_stock_report_v2(
+            code="600519", name="贵州茅台",
+            concepts=["白酒"], composite_score=88.0,
+            primary_sector_name="白酒",
+            is_true_dragon=True,
+            dimensions={
+                "drive": {
+                    "score": 82,
+                    "details": {
+                        "s_early": 90,
+                        "early": {
+                            "sealed": True, "seal_time": "09:35",
+                            "bid1_volume": 123000, "rank": 1, "pool_size": 5,
+                        },
+                        "s_lead": 75,
+                        "lead": {
+                            "n_lead": 1, "n_follow": 1,
+                            "lead_events": [{
+                                "event_time": "10:02",
+                                "stock_gain_pct": 2.4,
+                                "sector_gain_pct": 0.8,
+                            }],
+                            "follow_events": [{
+                                "sector_event_time": "10:41",
+                                "stock_follow_time": "10:47",
+                                "sector_gain_pct": 0.7,
+                                "stock_gain_pct": 2.1,
+                            }],
+                        },
+                        "s_voice": 65,
+                        "voice": {"n_limit": 3, "n_strong": 12},
+                    },
+                },
+                "leadership": {"score": 80, "details": {}},
+                "anti_drop": {
+                    "score": 70,
+                    "details": {
+                        "s_market": 72,
+                        "s_sector": 65,
+                        "market": {"deepest_event": {
+                            "start_time": "10:27", "bottom_time": "10:36",
+                            "base_drop_pct": -0.82, "stock_change_pct": 0.15,
+                        }},
+                        "sector": {"deepest_event": {
+                            "start_time": "13:42", "bottom_time": "13:49",
+                            "base_drop_pct": -1.10, "stock_change_pct": -0.20,
+                        }},
+                    },
+                },
+                "liquidity": {"score": 75, "details": {}},
+                "absorption": {
+                    "score": 68,
+                    "details": {
+                        "event_count": 2,
+                        "best_event": {
+                            "dive_time": "6月18日 10:15",
+                            "rally_time": "6月18日 10:25",
+                            "target_pct": 1.8,
+                            "fleeing_avg_drop": -1.2,
+                            "fleeing_sectors": [
+                                {"name": "煤炭", "drop_pct": -1.1},
+                                {"name": "有色", "drop_pct": -1.3},
+                            ],
+                        },
+                    },
+                },
+            },
+        )
+
+        self.assertIn("09:35封板", report)
+        self.assertIn("封单量12.3万手", report)
+        self.assertIn("10:02个股拉升+2.40%", report)
+        self.assertIn("10:41板块先拉升+0.70%", report)
+        self.assertIn("大盘跳水-0.82%", report)
+        self.assertIn("该股同期+0.15%", report)
+        self.assertIn("白酒回落-1.10%", report)
+        self.assertIn("煤炭(-1.10%)", report)
+        self.assertIn("承接上述板块出逃资金", report)
+
 
 if __name__ == "__main__":
     unittest.main()

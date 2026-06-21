@@ -38,8 +38,6 @@ STATISTICAL_CONCEPT_PREFIXES = (
     "最近多板", "东方财富热股",
 )
 
-FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
-
 RANK_UP_COUNT = 8     # 领涨板块取前 8（候选筛选 + 5分K）
 RANK_UP_COUNT_V2 = 5  # scorers_v2：领涨板块取前 5（候选为板块内当日涨停股）
 RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
@@ -526,9 +524,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     market_kline = xq.get_kline(market_code, days=30)
     cache.set(f"kline:day:{market_code}", market_kline)
 
-    # 排序 — 固定取 FULL_EVAL_COUNT 只做四维评分（连板优先）
+    # 排序（连板优先）后对候选池全部个股评分，不再截断
     candidate_pool.sort(key=lambda c: (c.board_count, len(c.concepts)), reverse=True)
-    ranking = candidate_pool[:FULL_EVAL_COUNT]
+    ranking = candidate_pool
     logger.phase("C", f"评分候选池", total=len(ranking))
 
     if verbose:

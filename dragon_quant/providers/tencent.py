@@ -79,6 +79,8 @@ def _parse_gtimg_quote(line: str) -> Optional[Quote]:
             pe=float(fields[39]),
             limit_up=float(fields[47]), limit_down=float(fields[48]),
             avg_price=float(fields[51]),
+            bid1_price=float(fields[9]), bid1_volume=float(fields[10]),
+            ask1_volume=float(fields[20]),
         )
     except (ValueError, IndexError):
         return None

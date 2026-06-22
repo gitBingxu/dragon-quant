@@ -38,9 +38,8 @@ STATISTICAL_CONCEPT_PREFIXES = (
     "最近多板", "东方财富热股",
 )
 
-FULL_EVAL_COUNT = 25  # 每次扫描固定对前 25 只候选做四维评分
-
 RANK_UP_COUNT = 8     # 领涨板块取前 8（候选筛选 + 5分K）
+RANK_UP_COUNT_V2 = 5  # scorers_v2：领涨板块取前 5（候选为板块内当日涨停股）
 RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
 
 
@@ -178,6 +177,38 @@ def _score_one(cand: Candidate, cache: DataCache,
     }
 
 
+def _score_one_v2(cand: Candidate, cache: DataCache,
+                  candidate_pool: list[Candidate],
+                  all_sector_codes: list[str],
+                  sector_name_map: dict[str, str],
+                  logger) -> dict:
+    """scorers_v2 五维评分 + 门槛/加权聚合（输出兼容 _score_one 结构）。"""
+    from dragon_quant.scorers_v2 import evaluate
+
+    verdict = evaluate(
+        cand.code, cache,
+        candidate_pool=candidate_pool,
+        primary_sector=cand.primary_sector,
+        all_sector_codes=all_sector_codes,
+        sector_name_map=sector_name_map,
+    )
+    dims = {}
+    for dim_name, sr in verdict.dims.items():
+        dims[dim_name] = {"score": sr.score, "weight": sr.weight, "details": sr.details}
+        logger.scorer(dim_name, cand.code, score=sr.score, weight=sr.weight,
+                      **sr.details)
+
+    return {
+        "code": cand.code, "name": cand.name,
+        "concepts": cand.concepts, "board_count": cand.board_count,
+        "primary_sector": cand.primary_sector,
+        "primary_sector_name": sector_name_map.get(cand.primary_sector, ""),
+        "composite_score": verdict.composite, "dimensions": dims,
+        "is_true_dragon": verdict.is_true_dragon,
+        "reject_reason": verdict.reject_reason,
+    }
+
+
 def _print_cached_output(output_data: dict, top_n: int):
     """打印来自 raw_output 的缓存结果"""
     print(f"\n{'═'*56}")
@@ -236,7 +267,8 @@ def _get_trade_date() -> Optional[str]:
 # ════════════════════════════════════════════════════════════
 
 def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
-         verbose: bool = True, force: bool = False) -> dict:
+         verbose: bool = True, force: bool = False,
+         scorers: str = "v1") -> dict:
     """龙头战法完整扫描 — Programmtic API
 
     返回结构化 dict:
@@ -265,6 +297,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     """
     bj_tz = timezone(timedelta(hours=8))
     now = datetime.now(bj_tz)
+    use_v2 = (scorers == "v2")
+    rank_up_count = RANK_UP_COUNT_V2 if use_v2 else RANK_UP_COUNT
     
     # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
     is_trading_day = now.weekday() < 5
@@ -336,14 +370,35 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("📊 Phase A — 板块排行")
 
-    top10_up = [s for s in ths.get_sector_ranking(asc=False)
-                if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:RANK_UP_COUNT]
-    top10_down = [s for s in ths.get_sector_ranking(asc=True)
-                  if not any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES)][:RANK_DOWN_COUNT]
+    # 概念板块黑名单（DB 可配置，叠加统计型概念前缀过滤）
+    try:
+        from dragon_quant.storage import db as _db
+        blacklist = _db.get_sector_blacklist()
+    except Exception as e:
+        if verbose:
+            print(f"  ⚠️ 读取板块黑名单失败，忽略: {e}", file=sys.stderr)
+        blacklist = []
+
+    def _sector_ok(s) -> bool:
+        if any(s.name.startswith(p) for p in STATISTICAL_CONCEPT_PREFIXES):
+            return False
+        if any(bw and bw in s.name for bw in blacklist):
+            return False
+        return True
+
+    # 一次抓取全部概念排行（provider 内已多页+本地排序），本地切涨幅/跌幅榜，
+    # 避免重复抓 8 页（desc/asc 数据相同）。
+    ranking_all = [s for s in ths.get_sector_ranking(asc=False) if _sector_ok(s)]
+    top10_up = ranking_all[:rank_up_count]
+    top10_down = sorted(ranking_all, key=lambda s: s.pct)[:RANK_DOWN_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
     if verbose:
-        print(f"   领涨 {len(top10_up)} 个板块")
-        print(f"   领跌 {len(top10_down)} 个板块")
+        print(f"   领涨 {len(top10_up)} 个板块:")
+        for s in top10_up:
+            print(f"     ↑ {s.name}({s.code})  {s.pct:+.2f}%")
+        print(f"   领跌 {len(top10_down)} 个板块:")
+        for s in top10_down:
+            print(f"     ↓ {s.name}({s.code})  {s.pct:+.2f}%")
 
     if not top10_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
@@ -359,11 +414,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     sector_filtered: dict[str, list[StockInfo]] = {}
 
     # 提交前10涨板块成分股请求（过 RateLimiter 防 burst 反爬）
+    #   v2: all_pages=True 翻页到 ≈50 只，供 leadership 涨幅分位用更大样本
     for s in top10_up:
         limiter.submit("ths", "ths",
                        lambda sc=s.code: (
                            cache.set(f"sector:components:{sc}",
-                                     ths.get_sector_components(sc, page=1))))
+                                     ths.get_sector_components(sc, page=1,
+                                                               all_pages=use_v2))))
     limiter.wait_all()
 
     for s in top10_up:
@@ -372,11 +429,18 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         filtered = [c for c in components if _is_valid_candidate(c)]
         sector_filtered[s.code] = filtered
 
-    # 收集需要拉K线的唯一股票（每板块前 pre_n 只）
+    # 收集需要拉K线的唯一股票
+    #   v1: 每板块前 pre_n 只（按成分股原序）
+    #   v2: 每板块当日所有涨停个股（pct ≥ LIMIT_UP_PCT）
     unique_codes: dict[str, StockInfo] = {}
     pre_n = max(candidates_n * 2, 10)
+    LIMIT_UP_PCT = 9.9
     for s in top10_up:
-        for stock in sector_filtered[s.code][:pre_n]:
+        if use_v2:
+            picks = [st for st in sector_filtered[s.code] if st.pct >= LIMIT_UP_PCT]
+        else:
+            picks = sector_filtered[s.code][:pre_n]
+        for stock in picks:
             if stock.code not in unique_codes:
                 unique_codes[stock.code] = stock
 
@@ -393,11 +457,19 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         klines = cache.get(f"kline:day:{code}") or []
         stock.five_day_return = _compute_5day_return(klines)
 
-    # 每个板块按5日累计涨幅重排，取前N
+    # 候选构建：
+    #   v1: 每板块按5日累计涨幅重排取前 candidates_n
+    #   v2: 取每板块当日所有涨停个股（不截断）
     for s in top10_up:
         pre_list = [st for st in sector_filtered[s.code] if st.code in unique_codes]
-        pre_list.sort(key=lambda c: c.five_day_return, reverse=True)
-        top_n_stocks = pre_list[:candidates_n]
+        if use_v2:
+            top_n_stocks = [st for st in pre_list if st.pct >= LIMIT_UP_PCT]
+            if verbose:
+                print(f"   [{s.name}] 涨停候选 {len(top_n_stocks)} 只"
+                      f"（成分股{len(sector_filtered[s.code])}只）")
+        else:
+            pre_list.sort(key=lambda c: c.five_day_return, reverse=True)
+            top_n_stocks = pre_list[:candidates_n]
         for stock in top_n_stocks:
             if stock.code in all_candidates:
                 all_candidates[stock.code].concepts.append(s.name)
@@ -443,15 +515,18 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     for c in candidate_pool:
         kline = cache.get(f"kline:day:{c.code}") or []
         c.board_count = _compute_consecutive_boards(kline)
+        # v2: 5日总涨幅写入候选（leadership 涨幅分位用），复用日K
+        if use_v2:
+            c.fived_pct = _compute_5day_return(kline)
 
     # 拉大盘日K线（上证指数 000001 的 K 线用于跳水日检测）
     market_code = "000001"
     market_kline = xq.get_kline(market_code, days=30)
     cache.set(f"kline:day:{market_code}", market_kline)
 
-    # 排序 — 固定取 FULL_EVAL_COUNT 只做四维评分（连板优先）
+    # 排序（连板优先）后对候选池全部个股评分，不再截断
     candidate_pool.sort(key=lambda c: (c.board_count, len(c.concepts)), reverse=True)
-    ranking = candidate_pool[:FULL_EVAL_COUNT]
+    ranking = candidate_pool
     logger.phase("C", f"评分候选池", total=len(ranking))
 
     if verbose:
@@ -465,22 +540,45 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("⏳ Phase D — 并发加载")
 
-    # T1: 板块5分K（领涨8 + 领跌20 = 28 个板块）
+    # T1: 板块5分K
+    #   v1: 当日5分K（provider 内聚合）
+    #   v2: 近10交易日历史5分K（虹吸回看），并额外拉主板块当日1分K（带动/抗跌基准）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
-        limiter.submit("ths", "ths",
-                       lambda sc=s.code: (
-                           cache.set(f"kline:5min:sector:{sc}",
-                                     ths.get_sector_5min_kline(sc))))
+        if use_v2:
+            limiter.submit("ths", "ths",
+                           lambda sc=s.code: (
+                               cache.set(f"kline:5min:sector:{sc}",
+                                         ths.get_sector_5min_kline_history(sc, days=10))))
+        else:
+            limiter.submit("ths", "ths",
+                           lambda sc=s.code: (
+                               cache.set(f"kline:5min:sector:{sc}",
+                                         ths.get_sector_5min_kline(sc))))
+    if use_v2:
+        # 主板块当日1分K（领涨板块即可，带动/板块抗跌基准）
+        for s in top10_up:
+            limiter.submit("ths", "ths",
+                           lambda sc=s.code: (
+                               cache.set(f"kline:1min:sector:{sc}",
+                                         ths.get_sector_1min_kline(sc))))
 
-    # T2: 候选股分时K线（只拉 top_n 只）
-    for r in ranking:
+    # T2: 候选股分时K线
+    #   v1: 只拉 ranking（top_n 评分池）
+    #   v2: 拉全部候选（均为涨停股，含 drive 封板池对比所需的同板块涨停股）
+    minute_targets = candidate_pool if use_v2 else ranking
+    for r in minute_targets:
         limiter.submit("xueqiu", "minute_kline",
                        lambda c=r.code: (
                            cache.set(f"kline:1min:{c}",
                                      xq.get_minute_kline(c))))
+    if use_v2:
+        # 大盘当日1分K（抗跌性大盘基准）
+        limiter.submit("xueqiu", "minute_kline",
+                       lambda: cache.set("kline:1min:000001",
+                                         xq.get_minute_kline("000001")))
 
-    # T3: 腾讯批量行情
+    # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
     all_codes = set()
     for sc_list in sector_components.values():
         for s in sc_list:
@@ -499,7 +597,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # Phase E: 主进程打分 — 只对 top_n 只
     # ────────────────────────────────────────────
     if verbose:
-        print("🔨 Phase E — 四维打分")
+        print("🔨 Phase E — 五维打分" if use_v2 else "🔨 Phase E — 四维打分")
 
     # 注入元数据到缓存（供 scorer 读取）
     cache.set("__meta__:candidates", [
@@ -513,20 +611,37 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     sector_name_map = {s.code: s.name for s in all_sectors}
     cache.set("__meta__:sector_name_map", sector_name_map)
 
+    # v2 用全候选池做板块内对比（连板/涨幅分位、封板池）；v1 用 ranking
+    peer_pool = candidate_pool if use_v2 else ranking
     results = []
     for cand in ranking:
         try:
-            sr = _score_one(cand, cache, ranking, [s.code for s in top10_down],
-                           sector_name_map, logger)
+            if use_v2:
+                sr = _score_one_v2(cand, cache, peer_pool,
+                                   [s.code for s in top10_down],
+                                   sector_name_map, logger)
+            else:
+                sr = _score_one(cand, cache, ranking, [s.code for s in top10_down],
+                               sector_name_map, logger)
             results.append(sr)
             if verbose:
                 dims = sr.get("dimensions", {})
-                print(f"  {cand.code} {cand.name:6s}  "
-                      f"综合={sr['composite_score']:5.1f}  "
-                      f"带动={dims.get('drive',{}).get('score',0):5.1f}  "
-                      f"抗跌={dims.get('anti_drop',{}).get('score',0):5.1f}  "
-                      f"领涨={dims.get('leadership',{}).get('score',0):5.1f}  "
-                      f"承接={dims.get('absorption',{}).get('score',0):5.1f}")
+                if use_v2:
+                    print(f"  {cand.code} {cand.name:6s}  "
+                          f"综合={sr['composite_score']:5.1f}  "
+                          f"{'✓真龙' if sr.get('is_true_dragon') else '✗'}  "
+                          f"带动={dims.get('drive',{}).get('score',0):5.1f}  "
+                          f"领涨={dims.get('leadership',{}).get('score',0):5.1f}  "
+                          f"抗跌={dims.get('anti_drop',{}).get('score',0):5.1f}  "
+                          f"流动={dims.get('liquidity',{}).get('score',0):5.1f}  "
+                          f"承接={dims.get('absorption',{}).get('score',0):5.1f}")
+                else:
+                    print(f"  {cand.code} {cand.name:6s}  "
+                          f"综合={sr['composite_score']:5.1f}  "
+                          f"带动={dims.get('drive',{}).get('score',0):5.1f}  "
+                          f"抗跌={dims.get('anti_drop',{}).get('score',0):5.1f}  "
+                          f"领涨={dims.get('leadership',{}).get('score',0):5.1f}  "
+                          f"承接={dims.get('absorption',{}).get('score',0):5.1f}")
         except Exception as e:
             if verbose:
                 print(f"  ⚠️ {cand.code} 打分失败: {e}", file=sys.stderr)
@@ -558,13 +673,24 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         # 提前初始化 Reporter，并为所有结果生成报告，存入 r["report_text"] 以便持久化
         reporter = ReportBuilder(logger)
         for r in results:
-            r["report_text"] = reporter.build_stock_report(
-                r["code"], r.get("name", ""),
-                r.get("board_count", 0), r.get("concepts", []),
-                composite_score=r.get("composite_score", 0),
-                dimensions=r.get("dimensions", {}),
-                primary_sector_name=r.get("primary_sector_name", ""),
-            )
+            if use_v2:
+                r["report_text"] = reporter.build_stock_report_v2(
+                    r["code"], r.get("name", ""),
+                    r.get("board_count", 0), r.get("concepts", []),
+                    composite_score=r.get("composite_score", 0),
+                    dimensions=r.get("dimensions", {}),
+                    primary_sector_name=r.get("primary_sector_name", ""),
+                    is_true_dragon=r.get("is_true_dragon", False),
+                    reject_reason=r.get("reject_reason"),
+                )
+            else:
+                r["report_text"] = reporter.build_stock_report(
+                    r["code"], r.get("name", ""),
+                    r.get("board_count", 0), r.get("concepts", []),
+                    composite_score=r.get("composite_score", 0),
+                    dimensions=r.get("dimensions", {}),
+                    primary_sector_name=r.get("primary_sector_name", ""),
+                )
 
         output["ranking"] = results  # 返回全部评分结果
 
@@ -579,16 +705,30 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             print(f"\n{'═'*56}")
             print(f"🐉 龙头战法扫描完成 ({elapsed:.0f}s)")
             print(f"{'═'*56}")
-            print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
-            print("-" * 56)
-            for r in display_list:
-                dims = r.get("dimensions", {})
-                print(f"{r['code']:8s} {r.get('name', ''):8s} "
-                      f"{r['composite_score']:6.1f}  "
-                      f"{dims.get('drive', {}).get('score', 0):6.1f}  "
-                      f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
-                      f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
-                      f"{dims.get('absorption', {}).get('score', 0):6.1f}")
+            if use_v2:
+                print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙")
+                print("-" * 64)
+                for r in display_list:
+                    dims = r.get("dimensions", {})
+                    mark = "🐉" if r.get("is_true_dragon") else "✗"
+                    print(f"{r['code']:8s} {r.get('name', ''):8s} "
+                          f"{r['composite_score']:6.1f}  "
+                          f"{dims.get('drive', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('liquidity', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('absorption', {}).get('score', 0):6.1f}   {mark}")
+            else:
+                print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'抗跌':>6s}  {'领涨':>6s}  {'承接':>6s}")
+                print("-" * 56)
+                for r in display_list:
+                    dims = r.get("dimensions", {})
+                    print(f"{r['code']:8s} {r.get('name', ''):8s} "
+                          f"{r['composite_score']:6.1f}  "
+                          f"{dims.get('drive', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('anti_drop', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('leadership', {}).get('score', 0):6.1f}  "
+                          f"{dims.get('absorption', {}).get('score', 0):6.1f}")
 
             print(f"\n{'═'*56}")
             print(f"📋 完整详细报告")
@@ -615,7 +755,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         # 报告文本
         report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
         with open(report_path, "w") as f:
-            f.write(reporter.build_summary_report(display_list))
+            if use_v2:
+                f.write(reporter.build_summary_report_v2(display_list))
+            else:
+                f.write(reporter.build_summary_report(display_list))
             f.write("\n\n")
             f.write(output["report_text"])
         output["report_path"] = str(report_path)
@@ -655,14 +798,17 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 new_rank = i + 1  # 与 save_dragons 中 rank = i + 1 一致
 
                 # 5 日去重：该 code 上次入选距今 < 5 个交易日
+                #   仅对「跨日」(last_date 严格早于当天) 重复入选去重；
+                #   last_date == 当天 表示同日另一评分器版本已写入，放行以便 save_dragons 合并版本
                 last_info = db.get_last_entry_with_rank(code)
                 if last_info:
                     last_date, old_rank = last_info
-                    if trade_days_between(last_date, scan_date_fmt, calendar) < 5:
+                    if last_date < scan_date_fmt and \
+                            trade_days_between(last_date, scan_date_fmt, calendar) < 5:
                         # 新 rank 更好（数字更小）→ 覆写所有字段；否则跳过
                         if old_rank is not None and new_rank < old_rank:
                             updated_count += 1
-                            # 继续处理，让 save_dragons 的 INSERT OR REPLACE 更新记录
+                            # 继续处理，让 save_dragons 的 UPSERT 更新记录
                         else:
                             skipped_count += 1
                             continue
@@ -691,7 +837,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     parts.append(f"更新 {updated_count} 只(rank 提升)")
                 print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
-            db.save_dragons(scan_date_fmt, dragons_to_save, version=__version__)
+            db.save_dragons(scan_date_fmt, dragons_to_save,
+                            version=__version__, scorer_version=scorers)
             
         except Exception as e:
             if verbose:
@@ -703,6 +850,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     return output
 
 
-def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2, force: bool = False):
+def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2,
+             force: bool = False, scorers: str = "v1"):
     """CLI 入口 — 同 scan() 但带 verbose 输出"""
-    scan(top_n=top_n, candidates_n=candidates_n, workers=workers, verbose=True, force=force)
+    scan(top_n=top_n, candidates_n=candidates_n, workers=workers,
+         verbose=True, force=force, scorers=scorers)

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS dragons (
     max_return_5d   REAL,
     max_drawdown_5d REAL,
     review_status   TEXT DEFAULT 'pending',
+    scorer_version  TEXT DEFAULT 'v1',
     UNIQUE(trade_date, code)
 );
 
@@ -122,7 +123,16 @@ CREATE TABLE IF NOT EXISTS vpa_analysis (
 
 CREATE INDEX IF NOT EXISTS idx_vpa_date ON vpa_analysis(trade_date);
 CREATE INDEX IF NOT EXISTS idx_vpa_code ON vpa_analysis(code);
+
+CREATE TABLE IF NOT EXISTS sector_blacklist (
+    name        TEXT PRIMARY KEY,
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+);
 """
+
+# 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
+# 如需屏蔽特定行业，用 `blacklist add` 维护）。
+_BLACKLIST_SEED: list[str] = []
 
 
 def _connect() -> sqlite3.Connection:
@@ -167,6 +177,7 @@ def _migrate_dragons(conn: sqlite3.Connection):
         "review_status TEXT DEFAULT 'pending'",
         "version TEXT DEFAULT ''",
         "max_return_hold_days INTEGER",
+        "scorer_version TEXT DEFAULT 'v1'",
     ]
     for col in COLUMNS:
         try:
@@ -177,7 +188,23 @@ def _migrate_dragons(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE scans ADD COLUMN raw_output TEXT;")
     except sqlite3.OperationalError:
         pass
+    # 存量回填：评分器版本为空的历史记录统一置为 v1（幂等，多次执行无副作用）
+    conn.execute(
+        "UPDATE dragons SET scorer_version = 'v1' "
+        "WHERE scorer_version IS NULL OR scorer_version = ''"
+    )
+    _seed_blacklist(conn)
     conn.commit()
+
+
+def _seed_blacklist(conn: sqlite3.Connection):
+    """首次建表时灌入默认概念黑名单种子（幂等，已存在则跳过）。"""
+    for name in _BLACKLIST_SEED:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO sector_blacklist(name) VALUES (?)", (name,))
+        except sqlite3.OperationalError:
+            pass
 
 
 def init_db():
@@ -185,6 +212,47 @@ def init_db():
         conn = _connect()
         try:
             _ensure_schema(conn)
+        finally:
+            conn.close()
+
+
+# ─── 概念板块黑名单 ───
+
+def get_sector_blacklist() -> list[str]:
+    """返回概念板块黑名单名称列表（拉取领涨/领跌板块时按此过滤）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            rows = conn.execute("SELECT name FROM sector_blacklist").fetchall()
+            return [r[0] for r in rows]
+        finally:
+            conn.close()
+
+
+def add_sector_blacklist(name: str):
+    """新增一个黑名单概念（幂等）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute(
+                "INSERT OR IGNORE INTO sector_blacklist(name) VALUES (?)",
+                (name.strip(),))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def remove_sector_blacklist(name: str):
+    """移除一个黑名单概念。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute("DELETE FROM sector_blacklist WHERE name = ?",
+                         (name.strip(),))
+            conn.commit()
         finally:
             conn.close()
 
@@ -402,8 +470,13 @@ def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
         conn.close()
 
 
-def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
-    """保存或更新 dragons（UPSERT，不覆盖 review 字段）。"""
+def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
+                 scorer_version: str = "v1"):
+    """保存或更新 dragons（UPSERT，不覆盖 review 字段）。
+
+    scorer_version: 本次评分器版本（"v1"/"v2"）。同一 (trade_date, code) 多次写入时，
+    已存版本与本次版本求并集去重，固定输出 "v1"/"v2"/"v1_v2"（v1 在前）。
+    """
     with _lock:
         conn = _connect()
         try:
@@ -431,14 +504,15 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
                     json.dumps(concepts, ensure_ascii=False),
                     s.get("report_text", ""),
                     version,
+                    scorer_version,
                 ))
             
             conn.executemany(
                 "INSERT INTO dragons("
                 "trade_date, code, name, scan_id, rank, composite_score, board_count, "
                 "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-                "concepts_json, report_text, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "concepts_json, report_text, version, scorer_version"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(trade_date, code) DO UPDATE SET "
                 "name=excluded.name, "
                 "scan_id=excluded.scan_id, "
@@ -455,7 +529,15 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = ""):
                 "market_cap=COALESCE(excluded.market_cap, dragons.market_cap), "
                 "concepts_json=excluded.concepts_json, "
                 "report_text=excluded.report_text, "
-                "version=excluded.version",
+                "version=excluded.version, "
+                # 评分器版本并集合并：已存版本 ∪ 本次版本 → v1/v2/v1_v2（v1 在前）
+                "scorer_version=CASE "
+                "WHEN (instr(COALESCE(dragons.scorer_version,''),'v1')>0 OR excluded.scorer_version='v1') "
+                "AND (instr(COALESCE(dragons.scorer_version,''),'v2')>0 OR excluded.scorer_version='v2') "
+                "THEN 'v1_v2' "
+                "WHEN (instr(COALESCE(dragons.scorer_version,''),'v1')>0 OR excluded.scorer_version='v1') "
+                "THEN 'v1' "
+                "ELSE 'v2' END",
                 rows,
             )
             conn.commit()

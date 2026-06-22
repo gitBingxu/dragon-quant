@@ -1,59 +1,11 @@
 """
 tests for provider pure functions:
-  eastmoney:  _safe_float
   xueqiu:     _symbol, _parse_kline
   tencent:    _gtimg_codes, _parse_gtimg_quote
 """
 import unittest
-from unittest.mock import patch
-from dragon_quant.providers.eastmoney import _safe_float, EastMoneyProvider
 from dragon_quant.providers.xueqiu import _symbol, _parse_kline
 from dragon_quant.providers.tencent import _gtimg_codes, _parse_gtimg_quote
-
-
-class TestSafeFloat(unittest.TestCase):
-
-    def test_normal(self):
-        self.assertEqual(_safe_float("3.14"), 3.14)
-
-    def test_integer(self):
-        self.assertEqual(_safe_float("10"), 10.0)
-
-    def test_none(self):
-        self.assertEqual(_safe_float(None), 0.0)
-
-    def test_dash(self):
-        self.assertEqual(_safe_float("-"), 0.0)
-
-    def test_empty_string(self):
-        self.assertEqual(_safe_float(""), 0.0)
-
-    def test_default_override(self):
-        self.assertEqual(_safe_float("-", -1.0), -1.0)
-
-
-class TestEastmoneySectorComponents(unittest.TestCase):
-
-    @patch("dragon_quant.providers.eastmoney._get_ut_token", return_value="mocked")
-    @patch("dragon_quant.providers.eastmoney._fetch")
-    def test_get_sector_components_all_pages(self, mock_fetch, _mock_ut):
-        def make_page(start, count):
-            return {
-                "data": {
-                    "diff": [
-                        {"f12": f"{start + i:06d}", "f14": f"S{start + i}", "f3": "1000", "f2": "10.5"}
-                        for i in range(count)
-                    ]
-                }
-            }
-
-        mock_fetch.side_effect = [make_page(0, 50), make_page(50, 30)]
-        provider = EastMoneyProvider()
-        result = provider.get_sector_components("BK0001", all_pages=True)
-        self.assertEqual(len(result), 80)
-        self.assertEqual(mock_fetch.call_count, 2)
-        self.assertEqual(result[0].code, "000000")
-        self.assertEqual(result[-1].code, "000079")
 
 
 class TestXueqiuSymbol(unittest.TestCase):

@@ -2,6 +2,7 @@
 CLI 入口 — dragon-quant 命令行工具
 
 命令:
+  dragon-quant -v | --version
   dragon-quant scan [--top 5] [--candidates 5] [--workers 2]
   dragon-quant logs {tail,query,clear,list} [options]
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
@@ -18,7 +19,7 @@ from dragon_quant.storage.manager import StorageManager
 
 
 def _cmd_scan(args):
-    """扫描命令"""
+    """扫描命令（v1 四维评分器）"""
     if args.date:
         _cmd_scan_history(args)
         return
@@ -29,6 +30,23 @@ def _cmd_scan(args):
         workers=args.workers,
         verbose=True,
         force=args.force,
+        scorers="v1",
+    )
+
+
+def _cmd_scan_v2(args):
+    """扫描命令（v2 五维「识别真龙」评分器）"""
+    if args.date:
+        _cmd_scan_history(args)
+        return
+
+    orchestrate_scan(
+        top_n=args.top,
+        candidates_n=args.candidates,
+        workers=args.workers,
+        verbose=True,
+        force=args.force,
+        scorers="v2",
     )
 
 
@@ -71,6 +89,26 @@ def _cmd_scan_history(args):
             print(json.dumps({
                 "error": f"未找到 {date_str} 的扫描记录",
             }, ensure_ascii=False, indent=2))
+
+
+def _cmd_blacklist(args):
+    """概念板块黑名单管理"""
+    from dragon_quant.storage import db
+    action = getattr(args, "blacklist_action", None)
+    if action == "add":
+        db.add_sector_blacklist(args.name)
+        print(f"✅ 已加入黑名单: {args.name}")
+    elif action == "remove":
+        db.remove_sector_blacklist(args.name)
+        print(f"✅ 已移除黑名单: {args.name}")
+    else:  # list / 默认
+        names = db.get_sector_blacklist()
+        if names:
+            print(f"概念板块黑名单（{len(names)} 个）:")
+            for n in names:
+                print(f"  - {n}")
+        else:
+            print("黑名单为空")
 
 
 def _cmd_logs(args):
@@ -324,6 +362,8 @@ def _to_dict(obj) -> dict:
 
 
 def main():
+    from dragon_quant._version import __version__
+
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument("--top", type=int, default=25, help="最终候选股数量 (默认25)")
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
@@ -331,15 +371,24 @@ def main():
     shared.add_argument("--force", action="store_true", help="强制执行 (跳过交易时段拦截和缓存)")
 
     parser = argparse.ArgumentParser(
-        description="龙头战法四维量化筛选系统",
+        prog="dragon-quant",
+        description="龙头战法量化筛选系统",
     )
+    parser.add_argument("-v", "--version", action="version",
+                        version=f"%(prog)s {__version__}")
     parser.set_defaults(command="scan")
     sub = parser.add_subparsers(dest="command")
 
-    # scan 子命令
-    scan_p = sub.add_parser("scan", help="批量扫描龙头股", parents=[shared])
+    # scan 子命令（v1 四维评分器）
+    scan_p = sub.add_parser("scan", help="批量扫描龙头股（v1 四维）", parents=[shared])
     scan_p.add_argument("--date", default=None,
                         help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
+
+    # scan_v2 子命令（v2 五维「识别真龙」评分器）
+    scan_v2_p = sub.add_parser("scan_v2", help="批量扫描龙头股（v2 五维识别真龙）",
+                               parents=[shared])
+    scan_v2_p.add_argument("--date", default=None,
+                           help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
 
     # logs 子命令
     logs_p = sub.add_parser("logs", help="日志查询与管理")
@@ -400,6 +449,15 @@ def main():
     cs_p.add_argument("--source", required=True, choices=["em", "em_his", "xq"],
                       help="em=东财push2 em_his=东财push2his xq=雪球")
 
+    # blacklist 子命令（概念板块黑名单，拉取领涨/领跌板块时过滤）
+    bl_p = sub.add_parser("blacklist", help="概念板块黑名单管理")
+    bl_subs = bl_p.add_subparsers(dest="blacklist_action")
+    bl_subs.add_parser("list", help="列出黑名单")
+    bl_add_p = bl_subs.add_parser("add", help="新增黑名单概念")
+    bl_add_p.add_argument("name", help="概念名称（子串匹配，如 次新股）")
+    bl_rm_p = bl_subs.add_parser("remove", help="移除黑名单概念")
+    bl_rm_p.add_argument("name", help="概念名称")
+
     # review 子命令
     rev_p = sub.add_parser("review", help="龙头回测验证")
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
@@ -435,6 +493,8 @@ def main():
 
     if args.command == "scan":
         _cmd_scan(args)
+    elif args.command == "scan_v2":
+        _cmd_scan_v2(args)
     elif args.command == "logs":
         _cmd_logs(args)
     elif args.command == "data":
@@ -445,6 +505,8 @@ def main():
         _cmd_review(args)
     elif args.command == "vpa":
         _cmd_vpa(args)
+    elif args.command == "blacklist":
+        _cmd_blacklist(args)
 
     else:
         parser.print_help()

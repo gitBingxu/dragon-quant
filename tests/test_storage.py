@@ -284,3 +284,65 @@ class TestDragonsRebuildUnion(unittest.TestCase):
             self.assertIn("n", codes2)
             # e 是 completed，不应因为不在贡献并集而被删除
             self.assertIn("e", codes2)
+
+
+class TestSaveDragonsScorerVersion(unittest.TestCase):
+    """验证：dragons.scorer_version 并集合并（v1/v2/v1_v2）+ 默认 v1"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _scorer_version(self, db, trade_date, code):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            r = conn.execute(
+                "SELECT scorer_version FROM dragons WHERE trade_date=? AND code=?",
+                (trade_date, code)).fetchone()
+            return r[0] if r else None
+        finally:
+            conn.close()
+
+    def test_merge_and_default(self):
+        # db 层每次操作主动 close 连接，须用 side_effect 每次返回新连接
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            D = "2026-06-20"
+
+            # 默认参数 → v1
+            db.save_dragons(D, [{"code": "W", "rank": 1}])
+            self.assertEqual(self._scorer_version(db, D, "W"), "v1")
+
+            # v1 → v2 累积合并为 v1_v2
+            db.save_dragons(D, [{"code": "A", "rank": 1}], scorer_version="v1")
+            self.assertEqual(self._scorer_version(db, D, "A"), "v1")
+            db.save_dragons(D, [{"code": "A", "rank": 1}], scorer_version="v2")
+            self.assertEqual(self._scorer_version(db, D, "A"), "v1_v2")
+            # 再写 v1 幂等
+            db.save_dragons(D, [{"code": "A", "rank": 1}], scorer_version="v1")
+            self.assertEqual(self._scorer_version(db, D, "A"), "v1_v2")
+
+            # 顺序无关：先 v2 再 v1 仍输出 v1_v2（v1 在前）
+            db.save_dragons(D, [{"code": "Z", "rank": 1}], scorer_version="v2")
+            db.save_dragons(D, [{"code": "Z", "rank": 1}], scorer_version="v1")
+            self.assertEqual(self._scorer_version(db, D, "Z"), "v1_v2")
+
+    def test_union_two_versions(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            D = "2026-06-20"
+            # v1 出 A,B；v2 出 A,C → A=v1_v2, B=v1, C=v2
+            db.save_dragons(D, [{"code": "A", "rank": 1}, {"code": "B", "rank": 2}],
+                            scorer_version="v1")
+            db.save_dragons(D, [{"code": "A", "rank": 1}, {"code": "C", "rank": 2}],
+                            scorer_version="v2")
+            self.assertEqual(self._scorer_version(db, D, "A"), "v1_v2")
+            self.assertEqual(self._scorer_version(db, D, "B"), "v1")
+            self.assertEqual(self._scorer_version(db, D, "C"), "v2")

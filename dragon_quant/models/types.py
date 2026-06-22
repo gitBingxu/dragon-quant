@@ -57,6 +57,9 @@ class Quote:
     limit_up: float         # 涨停价
     limit_down: float       # 跌停价
     avg_price: float        # 均价
+    bid1_price: float = 0.0    # 买一价（gtimg f[9]）
+    bid1_volume: float = 0.0   # 买一量/封单量（gtimg f[10]，单位手）
+    ask1_volume: float = 0.0   # 卖一量（gtimg f[20]，单位手）
 
 
 @dataclass
@@ -76,6 +79,7 @@ class Candidate:
     name: str
     concepts: list[str] = field(default_factory=list)   # 所属领涨概念列表
     board_count: int = 0                                # 连板高度
+    fived_pct: float = 0.0                              # 5日总涨幅 %（Phase C 写入，leadership 用）
     primary_sector: str = ""                            # 主选板块（涨停股最多的）
     score: float = 0.0                                  # 综合评分（填充后）
 

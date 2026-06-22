@@ -2,6 +2,7 @@
 CLI 入口 — dragon-quant 命令行工具
 
 命令:
+  dragon-quant -v | --version
   dragon-quant scan [--top 5] [--candidates 5] [--workers 2]
   dragon-quant logs {tail,query,clear,list} [options]
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
@@ -361,6 +362,8 @@ def _to_dict(obj) -> dict:
 
 
 def main():
+    from dragon_quant._version import __version__
+
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument("--top", type=int, default=25, help="最终候选股数量 (默认25)")
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
@@ -368,8 +371,11 @@ def main():
     shared.add_argument("--force", action="store_true", help="强制执行 (跳过交易时段拦截和缓存)")
 
     parser = argparse.ArgumentParser(
+        prog="dragon-quant",
         description="龙头战法量化筛选系统",
     )
+    parser.add_argument("-v", "--version", action="version",
+                        version=f"%(prog)s {__version__}")
     parser.set_defaults(command="scan")
     sub = parser.add_subparsers(dest="command")
 

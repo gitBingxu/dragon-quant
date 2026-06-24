@@ -163,7 +163,8 @@ def _run_vpa(code: str, name: str, trade_date: str, verbose: bool = True) -> Non
 def run_review(trade_date: Optional[str] = None,
                top_n: Optional[int] = None,
                force: bool = False,
-               verbose: bool = True) -> list[dict]:
+               verbose: bool = True,
+               source: str = "v1") -> list[dict]:
     """批量执行龙头回测。
 
     默认行为（trade_date 未指定时）：
@@ -175,11 +176,14 @@ def run_review(trade_date: Optional[str] = None,
         top_n: 只回测 top N
         force: True=无视 review_status 全部重算
         verbose: 打印进度
+        source: 回测数据来源体系（v1/v2）
     """
     if force:
-        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n, review_status=None)
+        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n,
+                                         review_status=None, source=source)
     else:
-        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n)
+        entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n,
+                                         source=source)
 
     # 未指定日期时，自动筛选 5~20 交易日内入选的票
     if not trade_date and entries:
@@ -213,7 +217,7 @@ def run_review(trade_date: Optional[str] = None,
         return []
 
     if verbose:
-        print(f"🐉 龙头回测 — 共 {len(entries)} 条待处理\n")
+        print(f"🐉 龙头回测 [{source}] — 共 {len(entries)} 条待处理\n")
 
     provider = XueqiuProvider()
     results = []
@@ -251,6 +255,7 @@ def run_review(trade_date: Optional[str] = None,
                 max_drawdown_5d=r.get("max_drawdown_5d"),
                 max_return_hold_days=r.get("max_return_hold_days"),
                 review_status=r["status"],
+                source=source,
             )
         except Exception as ex:
             if verbose:

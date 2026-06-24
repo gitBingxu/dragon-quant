@@ -298,6 +298,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     bj_tz = timezone(timedelta(hours=8))
     now = datetime.now(bj_tz)
     use_v2 = (scorers == "v2")
+    source = "v2" if use_v2 else "v1"
     rank_up_count = RANK_UP_COUNT_V2 if use_v2 else RANK_UP_COUNT
     
     # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
@@ -322,12 +323,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         try:
             from dragon_quant.storage import db
             # Step 1: 精确匹配当天日期
-            cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n)
+            cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n, source=source)
             # Step 2: 当天无记录 → 用雪球分时K确定最近交易日，查历史记录
             if not cached_scan:
                 trade_date = _get_trade_date()
                 if trade_date and trade_date != scan_date_fmt:
-                    cached_scan = db.get_latest_scan_by_date(trade_date, top_n)
+                    cached_scan = db.get_latest_scan_by_date(trade_date, top_n, source=source)
                     if cached_scan:
                         cache_note = f"（非交易日，使用最近交易日 {trade_date} 的数据）"
             # 命中缓存 → 输出结果（仅 raw_output 非空时）
@@ -337,7 +338,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                         print(f"💡 {cache_note}")
                     else:
                         print(f"💡 发现今日 ({scan_date_fmt}) 已存在 top_n={top_n} 的扫描记录")
-                    print(f"   直接从数据库读取缓存 (ID: {cached_scan['id']})...")
+                    print(f"   直接从数据库读取 {source} 缓存 (ID: {cached_scan['id']})...")
                 output_data = json.loads(cached_scan["raw_output"])
                 output_data["cached"] = True
                 if verbose:
@@ -654,8 +655,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     output = {
         "timestamp": time.strftime("%Y%m%d_%H%M%S"),
+        "source": source,
         "elapsed_s": round(elapsed, 1),
-        "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers},
+        "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers, "scorers": source},
         "sectors": {
             "up": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_up],
             "down": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_down],
@@ -739,13 +741,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         # ── 持久化 ──
         timestamp = output["timestamp"]
-        scan_id = f"{timestamp[:8]}_{top_n}"  # 20260519_25，同日期同 top_n 自动覆盖
+        scan_id = f"{source}_{timestamp[:8]}_{top_n}"  # v1_20260519_25 / v2_20260519_25
 
         # 结构化日志 → SQLite
         try:
             from dragon_quant.storage import db
-            db.save_scan_logs(scan_id, logger.to_dicts())
-            log_count = db.count_scan_logs(scan_id)
+            db.save_scan_logs(scan_id, logger.to_dicts(), source=source)
+            log_count = db.count_scan_logs(scan_id, source=source)
             output["log_count"] = log_count
         except Exception as e:
             if verbose:
@@ -753,7 +755,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             output["log_count"] = len(logger.to_dicts())
 
         # 报告文本
-        report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
+        report_path = RESULTS_DIR / f"scan_report_{source}_{timestamp}.txt"
         with open(report_path, "w") as f:
             if use_v2:
                 f.write(reporter.build_summary_report_v2(display_list))
@@ -764,7 +766,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         output["report_path"] = str(report_path)
 
         # SQLite 持久化
-        scan_date = scan_id[:8]
+        scan_date = timestamp[:8]
         scan_date_fmt = f"{scan_date[:4]}-{scan_date[4:6]}-{scan_date[6:8]}"
         try:
             from dragon_quant.storage import db
@@ -776,7 +778,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 candidates_n=candidates_n,
                 workers=workers,
                 stocks=results[:top_n],
-                raw_output=json.dumps(output, ensure_ascii=False)
+                raw_output=json.dumps(output, ensure_ascii=False),
+                source=source,
             )
             
             # 保存 top_n 详细信息到 dragons 表
@@ -799,8 +802,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
                 # 5 日去重：该 code 上次入选距今 < 5 个交易日
                 #   仅对「跨日」(last_date 严格早于当天) 重复入选去重；
-                #   last_date == 当天 表示同日另一评分器版本已写入，放行以便 save_dragons 合并版本
-                last_info = db.get_last_entry_with_rank(code)
+                #   v1/v2 使用独立 dragons 表，因此同日另一评分器版本不会影响当前体系。
+                last_info = db.get_last_entry_with_rank(code, source=source)
                 if last_info:
                     last_date, old_rank = last_info
                     if last_date < scan_date_fmt and \
@@ -838,7 +841,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
             db.save_dragons(scan_date_fmt, dragons_to_save,
-                            version=__version__, scorer_version=scorers)
+                            version=__version__, source=source)
             
         except Exception as e:
             if verbose:

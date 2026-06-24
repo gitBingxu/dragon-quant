@@ -369,8 +369,29 @@ class TestRunReview(unittest.TestCase):
             mock_provider.get_kline.return_value = []
             run_review(force=True, verbose=False)
         mock_pending.assert_called_once_with(
-            trade_date=None, top_n=None, review_status=None,
+            trade_date=None, top_n=None, review_status=None, source="v1",
         )
+
+    def test_run_review_source_passes_through(self):
+        """source 参数透传到 pending 查询和回测结果更新。"""
+        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
+             patch("dragon_quant.review.db.update_dragon_review") as mock_update, \
+             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls:
+            mock_pending.return_value = [{
+                "code": "000001", "name": "平安银行", "trade_date": "2026-05-19",
+            }]
+            mock_provider = MagicMock()
+            mock_provider_cls.return_value = mock_provider
+            mock_provider.get_kline.return_value = [
+                _mk_kbar("2026-05-18", 10.0, 11.0, 11.0, 10.0, 10.0),
+                _mk_kbar("2026-05-19", 11.0, 12.1, 12.1, 11.0, 10.0),
+                _mk_kbar("2026-05-20", 12.5, 13.0, 13.5, 11.5, 7.5),
+            ]
+
+            run_review(trade_date="2026-05-19", source="v2", verbose=False)
+
+        mock_pending.assert_called_once_with(trade_date="2026-05-19", top_n=None, source="v2")
+        self.assertEqual(mock_update.call_args.kwargs["source"], "v2")
 
     def test_run_review_force_still_filters_window(self):
         """force=True 时仍过滤 5~20 交易日窗口"""

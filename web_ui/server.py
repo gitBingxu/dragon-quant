@@ -90,7 +90,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             if path == "/api/dragons":
                 self._serve_api_dragons(parse_qs(parsed.query))
             elif path == "/api/summary":
-                self._serve_api_summary()
+                self._serve_api_summary(parse_qs(parsed.query))
             elif path.startswith("/api/"):
                 self._send_json({"error": "not found"}, 404)
             else:
@@ -161,13 +161,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
         filters = _parse_filters(params)
         sort_by = _first(params, "sort_by") or "composite_score"
         sort_dir = _first(params, "sort_dir") or "desc"
-        rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir)
+        source = _parse_source(params, getattr(self.server, "default_source", "v1"))
+        rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir, source=source)
         self._send_json({"data": rows, "count": len(rows)})
 
-    def _serve_api_summary(self):
+    def _serve_api_summary(self, params: dict):
         """GET /api/summary — 汇总统计"""
         db = _get_db()
-        summary = db.get_review_summary()
+        source = _parse_source(params, getattr(self.server, "default_source", "v1"))
+        summary = db.get_review_summary(source=source)
         self._send_json(summary)
 
     # ---------- 日志静默 ----------
@@ -181,6 +183,12 @@ def _first(params: dict, key: str) -> Optional[str]:
     """取 query 参数的第一个值"""
     vals = params.get(key, [])
     return vals[0] if vals else None
+
+
+def _parse_source(params: dict, default: str = "v1") -> str:
+    """解析 dragon 体系来源，非法值回退到默认值。"""
+    src = (_first(params, "source") or default or "v1").lower().strip()
+    return src if src in {"v1", "v2"} else "v1"
 
 
 def _parse_filters(params: dict) -> dict:
@@ -260,15 +268,17 @@ def _parse_filters(params: dict) -> dict:
     return f
 
 
-def start_server(port: int = 8765, open_browser: bool = True):
+def start_server(port: int = 8765, open_browser: bool = True, default_source: str = "v1"):
     """启动 HTTP 服务器。
 
     Args:
         port: 监听端口
         open_browser: 是否自动打开浏览器
     """
+    default_source = default_source if default_source in {"v1", "v2"} else "v1"
     server = HTTPServer(("127.0.0.1", port), ReviewHandler)
-    url = f"http://localhost:{port}"
+    server.default_source = default_source
+    url = f"http://localhost:{port}?source={default_source}"
 
     print(f"🐉 Review Web UI 已启动 → {url}")
     print("   按 Ctrl+C 停止服务")
@@ -291,5 +301,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Review Web UI")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--source", default="v1", choices=["v1", "v2"])
     args = p.parse_args()
-    start_server(args.port, open_browser=not args.no_browser)
+    start_server(args.port, open_browser=not args.no_browser, default_source=args.source)

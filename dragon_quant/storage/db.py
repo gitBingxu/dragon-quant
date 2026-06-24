@@ -17,95 +17,28 @@ from dragon_quant.storage.paths import DB_PATH
 
 _lock = threading.Lock()
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS scans (
-    id           TEXT PRIMARY KEY,
-    scan_date    TEXT NOT NULL,
-    elapsed_s    REAL,
-    top_n        INTEGER,
-    candidates_n INTEGER,
-    workers      INTEGER,
-    raw_output   TEXT,
-    created_at   TEXT DEFAULT (datetime('now','localtime'))
-);
+VALID_SOURCES = {"v1", "v2"}
 
-CREATE TABLE IF NOT EXISTS scan_stocks (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_id         TEXT NOT NULL REFERENCES scans(id),
-    code            TEXT NOT NULL,
-    name            TEXT,
-    rank            INTEGER,
-    composite_score REAL,
-    board_count     INTEGER,
-    concepts_json   TEXT,
-    dim_drive       REAL,
-    dim_anti_drop   REAL,
-    dim_leadership  REAL,
-    dim_absorption  REAL,
-    report_text     TEXT,
-    open_px         REAL,
-    close_px        REAL,
-    high_px         REAL,
-    low_px          REAL,
-    pct             REAL,
-    turnover_rate   REAL,
-    amount          REAL,
-    market_cap      REAL,
-    UNIQUE(scan_id, code)
-);
 
-CREATE INDEX IF NOT EXISTS idx_scan_stocks_code ON scan_stocks(code);
-CREATE INDEX IF NOT EXISTS idx_scan_stocks_scan ON scan_stocks(scan_id);
+def _normalize_source(source: str = "v1") -> str:
+    """规范化扫描/回测体系来源，只允许 v1 / v2。"""
+    s = (source or "v1").lower().strip()
+    if s not in VALID_SOURCES:
+        raise ValueError(f"invalid source: {source!r}, expected one of {sorted(VALID_SOURCES)}")
+    return s
 
-CREATE TABLE IF NOT EXISTS dragons (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    trade_date      TEXT NOT NULL,
-    code            TEXT NOT NULL,
-    name            TEXT,
-    scan_id         TEXT,
-    rank            INTEGER,
-    composite_score REAL,
-    board_count     INTEGER,
-    open_px         REAL,
-    close_px        REAL,
-    high_px         REAL,
-    low_px          REAL,
-    pct             REAL,
-    turnover_rate   REAL,
-    amount          REAL,
-    market_cap      REAL,
-    concepts_json   TEXT,
-    report_text     TEXT,
-    version         TEXT DEFAULT '',
-    created_at      TEXT DEFAULT (datetime('now','localtime')),
-    buy_date        TEXT,
-    buy_price       REAL,
-    max_return_5d   REAL,
-    max_drawdown_5d REAL,
-    review_status   TEXT DEFAULT 'pending',
-    scorer_version  TEXT DEFAULT 'v1',
-    UNIQUE(trade_date, code)
-);
 
-CREATE INDEX IF NOT EXISTS idx_dragons_date ON dragons(trade_date);
-CREATE INDEX IF NOT EXISTS idx_dragons_code ON dragons(code);
-CREATE INDEX IF NOT EXISTS idx_dragons_review ON dragons(review_status, trade_date);
+def _tables(source: str = "v1") -> dict[str, str]:
+    """返回指定体系的物理表名。表名只来自白名单 source，安全用于 SQL 拼接。"""
+    s = _normalize_source(source)
+    return {
+        "scans": f"scans_{s}",
+        "scan_stocks": f"scan_stocks_{s}",
+        "scan_logs": f"scan_logs_{s}",
+        "dragons": f"dragons_{s}",
+    }
 
-CREATE TABLE IF NOT EXISTS scan_logs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    scan_id     TEXT NOT NULL,
-    ts          REAL,
-    category    TEXT,
-    level       TEXT,
-    message     TEXT,
-    code        TEXT,
-    data_json   TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_scan_logs_scan ON scan_logs(scan_id);
-CREATE INDEX IF NOT EXISTS idx_scan_logs_category ON scan_logs(category);
-CREATE INDEX IF NOT EXISTS idx_scan_logs_level ON scan_logs(level);
-CREATE INDEX IF NOT EXISTS idx_scan_logs_code ON scan_logs(code);
-
+BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS vpa_analysis (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     trade_date    TEXT NOT NULL,
@@ -143,58 +76,123 @@ def _connect() -> sqlite3.Connection:
 
 
 def _ensure_schema(conn: sqlite3.Connection):
-    conn.executescript(SCHEMA)
-    # 尝试执行升级，如果列已存在会忽略错误
-    try:
-        conn.execute("ALTER TABLE scan_stocks ADD COLUMN report_text TEXT;")
-    except sqlite3.OperationalError:
-        pass
-    # scan_stocks 行情快照字段（用于当日并集重建 dragons）
-    for col in [
-        "open_px REAL",
-        "close_px REAL",
-        "high_px REAL",
-        "low_px REAL",
-        "pct REAL",
-        "turnover_rate REAL",
-        "amount REAL",
-        "market_cap REAL",
-    ]:
-        try:
-            conn.execute(f"ALTER TABLE scan_stocks ADD COLUMN {col};")
-        except sqlite3.OperationalError:
-            pass
-    _migrate_dragons(conn)
-
-
-def _migrate_dragons(conn: sqlite3.Connection):
-    """为 dragons 表新增 review 相关列（幂等）。"""
-    COLUMNS = [
-        "buy_date TEXT",
-        "buy_price REAL",
-        "max_return_5d REAL",
-        "max_drawdown_5d REAL",
-        "review_status TEXT DEFAULT 'pending'",
-        "version TEXT DEFAULT ''",
-        "max_return_hold_days INTEGER",
-        "scorer_version TEXT DEFAULT 'v1'",
-    ]
-    for col in COLUMNS:
-        try:
-            conn.execute(f"ALTER TABLE dragons ADD COLUMN {col};")
-        except sqlite3.OperationalError:
-            pass
-    try:
-        conn.execute("ALTER TABLE scans ADD COLUMN raw_output TEXT;")
-    except sqlite3.OperationalError:
-        pass
-    # 存量回填：评分器版本为空的历史记录统一置为 v1（幂等，多次执行无副作用）
-    conn.execute(
-        "UPDATE dragons SET scorer_version = 'v1' "
-        "WHERE scorer_version IS NULL OR scorer_version = ''"
-    )
+    conn.executescript(BASE_SCHEMA)
+    for source in sorted(VALID_SOURCES):
+        _create_versioned_tables(conn, source)
+        _ensure_dragon_columns(conn, source)
     _seed_blacklist(conn)
     conn.commit()
+
+
+def _ensure_dragon_columns(conn: sqlite3.Connection, source: str):
+    """对已存在的 dragons 分表幂等补列（CREATE IF NOT EXISTS 不会给旧表加列）。"""
+    t = _tables(source)
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t['dragons']})")}
+    if "is_true_dragon" not in cols:
+        conn.execute(f"ALTER TABLE {t['dragons']} ADD COLUMN is_true_dragon INTEGER")
+
+
+def _create_versioned_tables(conn: sqlite3.Connection, source: str):
+    """创建指定扫描体系的物理分表（幂等）。"""
+    s = _normalize_source(source)
+    t = _tables(s)
+    conn.executescript(f"""
+CREATE TABLE IF NOT EXISTS {t['scans']} (
+    id           TEXT PRIMARY KEY,
+    scan_date    TEXT NOT NULL,
+    elapsed_s    REAL,
+    top_n        INTEGER,
+    candidates_n INTEGER,
+    workers      INTEGER,
+    raw_output   TEXT,
+    source       TEXT DEFAULT '{s}',
+    created_at   TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS {t['scan_stocks']} (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id         TEXT NOT NULL REFERENCES {t['scans']}(id),
+    code            TEXT NOT NULL,
+    name            TEXT,
+    rank            INTEGER,
+    composite_score REAL,
+    board_count     INTEGER,
+    concepts_json   TEXT,
+    dim_drive       REAL,
+    dim_anti_drop   REAL,
+    dim_leadership  REAL,
+    dim_absorption  REAL,
+    dim_liquidity   REAL,
+    is_true_dragon  INTEGER,
+    reject_reason   TEXT,
+    report_text     TEXT,
+    open_px         REAL,
+    close_px        REAL,
+    high_px         REAL,
+    low_px          REAL,
+    pct             REAL,
+    turnover_rate   REAL,
+    amount          REAL,
+    market_cap      REAL,
+    source          TEXT DEFAULT '{s}',
+    UNIQUE(scan_id, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_{t['scan_stocks']}_code ON {t['scan_stocks']}(code);
+CREATE INDEX IF NOT EXISTS idx_{t['scan_stocks']}_scan ON {t['scan_stocks']}(scan_id);
+
+CREATE TABLE IF NOT EXISTS {t['dragons']} (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date            TEXT NOT NULL,
+    code                  TEXT NOT NULL,
+    name                  TEXT,
+    scan_id               TEXT,
+    rank                  INTEGER,
+    composite_score       REAL,
+    board_count           INTEGER,
+    open_px               REAL,
+    close_px              REAL,
+    high_px               REAL,
+    low_px                REAL,
+    pct                   REAL,
+    turnover_rate         REAL,
+    amount                REAL,
+    market_cap            REAL,
+    concepts_json         TEXT,
+    report_text           TEXT,
+    is_true_dragon        INTEGER,
+    version               TEXT DEFAULT '',
+    created_at            TEXT DEFAULT (datetime('now','localtime')),
+    buy_date              TEXT,
+    buy_price             REAL,
+    max_return_5d         REAL,
+    max_drawdown_5d       REAL,
+    max_return_hold_days  INTEGER,
+    review_status         TEXT DEFAULT 'pending',
+    source                TEXT DEFAULT '{s}',
+    UNIQUE(trade_date, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_{t['dragons']}_date ON {t['dragons']}(trade_date);
+CREATE INDEX IF NOT EXISTS idx_{t['dragons']}_code ON {t['dragons']}(code);
+CREATE INDEX IF NOT EXISTS idx_{t['dragons']}_review ON {t['dragons']}(review_status, trade_date);
+
+CREATE TABLE IF NOT EXISTS {t['scan_logs']} (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id     TEXT NOT NULL,
+    ts          REAL,
+    category    TEXT,
+    level       TEXT,
+    message     TEXT,
+    code        TEXT,
+    data_json   TEXT,
+    source      TEXT DEFAULT '{s}'
+);
+CREATE INDEX IF NOT EXISTS idx_{t['scan_logs']}_scan ON {t['scan_logs']}(scan_id);
+CREATE INDEX IF NOT EXISTS idx_{t['scan_logs']}_category ON {t['scan_logs']}(category);
+CREATE INDEX IF NOT EXISTS idx_{t['scan_logs']}_level ON {t['scan_logs']}(level);
+CREATE INDEX IF NOT EXISTS idx_{t['scan_logs']}_code ON {t['scan_logs']}(code);
+""")
 
 
 def _seed_blacklist(conn: sqlite3.Connection):
@@ -259,19 +257,22 @@ def remove_sector_blacklist(name: str):
 
 def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
               top_n: int, candidates_n: int, workers: int,
-              stocks: list[dict], raw_output: str = None):
+              stocks: list[dict], raw_output: str = None,
+              source: str = "v1"):
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
+            source = _normalize_source(source)
+            t = _tables(source)
 
             conn.execute(
-                "INSERT OR REPLACE INTO scans(id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (scan_id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output),
+                f"INSERT OR REPLACE INTO {t['scans']}(id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (scan_id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output, source),
             )
 
-            conn.execute("DELETE FROM scan_stocks WHERE scan_id = ?", (scan_id,))
+            conn.execute(f"DELETE FROM {t['scan_stocks']} WHERE scan_id = ?", (scan_id,))
 
             rows = []
             for i, s in enumerate(stocks):
@@ -289,6 +290,9 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
                     dims.get("anti_drop", {}).get("score"),
                     dims.get("leadership", {}).get("score"),
                     dims.get("absorption", {}).get("score"),
+                    dims.get("liquidity", {}).get("score"),
+                    1 if s.get("is_true_dragon") else 0 if "is_true_dragon" in s else None,
+                    s.get("reject_reason"),
                     s.get("report_text", ""),
                     s.get("open_px"),
                     s.get("close_px"),
@@ -298,14 +302,16 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
                     s.get("turnover_rate"),
                     s.get("amount"),
                     s.get("market_cap"),
+                    source,
                 ))
 
             conn.executemany(
-                "INSERT INTO scan_stocks("
+                f"INSERT INTO {t['scan_stocks']}("
                 "scan_id, code, name, rank, composite_score, "
-                "board_count, concepts_json, dim_drive, dim_anti_drop, dim_leadership, dim_absorption, report_text, "
-                "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "board_count, concepts_json, dim_drive, dim_anti_drop, dim_leadership, dim_absorption, "
+                "dim_liquidity, is_true_dragon, reject_reason, report_text, "
+                "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, source"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
 
@@ -314,20 +320,22 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
             conn.close()
 
 
-def list_scans(limit: int = 50) -> list[dict]:
+def list_scans(limit: int = 50, source: str = "v1") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         rows = conn.execute(
             "SELECT id, scan_date, elapsed_s, top_n, candidates_n, workers, created_at "
-            "FROM scans ORDER BY id DESC LIMIT ?",
+            f"FROM {t['scans']} ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [
             {
                 "id": r[0], "scan_date": r[1], "elapsed_s": r[2],
                 "top_n": r[3], "candidates_n": r[4], "workers": r[5],
-                "created_at": r[6],
+                "created_at": r[6], "source": source,
             }
             for r in rows
         ]
@@ -335,14 +343,16 @@ def list_scans(limit: int = 50) -> list[dict]:
         conn.close()
 
 
-def get_latest_scan_by_date(scan_date: str, top_n: int) -> Optional[dict]:
+def get_latest_scan_by_date(scan_date: str, top_n: int, source: str = "v1") -> Optional[dict]:
     """按日期和 top_n 获取最新的一次扫描记录"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         row = conn.execute(
             "SELECT id, scan_date, elapsed_s, top_n, candidates_n, workers, created_at, raw_output "
-            "FROM scans WHERE scan_date = ? AND top_n = ? ORDER BY created_at DESC LIMIT 1",
+            f"FROM {t['scans']} WHERE scan_date = ? AND top_n = ? ORDER BY created_at DESC LIMIT 1",
             (scan_date, top_n)
         ).fetchone()
         if not row:
@@ -350,18 +360,20 @@ def get_latest_scan_by_date(scan_date: str, top_n: int) -> Optional[dict]:
         return {
             "id": row[0], "scan_date": row[1], "elapsed_s": row[2],
             "top_n": row[3], "candidates_n": row[4], "workers": row[5],
-            "created_at": row[6], "raw_output": row[7],
+            "created_at": row[6], "raw_output": row[7], "source": source,
         }
     finally:
         conn.close()
 
-def get_scan(scan_id: str) -> Optional[dict]:
+def get_scan(scan_id: str, source: str = "v1") -> Optional[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         row = conn.execute(
             "SELECT id, scan_date, elapsed_s, top_n, candidates_n, workers, created_at, raw_output "
-            "FROM scans WHERE id = ?",
+            f"FROM {t['scans']} WHERE id = ?",
             (scan_id,),
         ).fetchone()
         if not row:
@@ -369,27 +381,29 @@ def get_scan(scan_id: str) -> Optional[dict]:
         return {
             "id": row[0], "scan_date": row[1], "elapsed_s": row[2],
             "top_n": row[3], "candidates_n": row[4], "workers": row[5],
-            "created_at": row[6], "raw_output": row[7],
+            "created_at": row[6], "raw_output": row[7], "source": source,
         }
     finally:
         conn.close()
 
 
-def get_scans_by_date(scan_date: str) -> list[dict]:
+def get_scans_by_date(scan_date: str, source: str = "v1") -> list[dict]:
     """返回某日期下所有 scan 记录（不同 top_n）。"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         rows = conn.execute(
             "SELECT id, scan_date, elapsed_s, top_n, candidates_n, workers, created_at "
-            "FROM scans WHERE scan_date = ? ORDER BY top_n",
+            f"FROM {t['scans']} WHERE scan_date = ? ORDER BY top_n",
             (scan_date,),
         ).fetchall()
         return [
             {
                 "id": r[0], "scan_date": r[1], "elapsed_s": r[2],
                 "top_n": r[3], "candidates_n": r[4], "workers": r[5],
-                "created_at": r[6],
+                "created_at": r[6], "source": source,
             }
             for r in rows
         ]
@@ -397,7 +411,7 @@ def get_scans_by_date(scan_date: str) -> list[dict]:
         conn.close()
 
 
-def delete_scans_by_date_topn(scan_date: str, top_n: int) -> int:
+def delete_scans_by_date_topn(scan_date: str, top_n: int, source: str = "v1") -> int:
     """删除指定日期 + top_n 的所有扫描 run（硬删除）。
 
     Returns:
@@ -407,8 +421,10 @@ def delete_scans_by_date_topn(scan_date: str, top_n: int) -> int:
         conn = _connect()
         try:
             _ensure_schema(conn)
+            source = _normalize_source(source)
+            t = _tables(source)
             rows = conn.execute(
-                "SELECT id FROM scans WHERE scan_date = ? AND top_n = ?",
+                f"SELECT id FROM {t['scans']} WHERE scan_date = ? AND top_n = ?",
                 (scan_date, top_n),
             ).fetchall()
             scan_ids = [r[0] for r in rows]
@@ -416,20 +432,22 @@ def delete_scans_by_date_topn(scan_date: str, top_n: int) -> int:
                 return 0
 
             placeholders = ",".join(["?"] * len(scan_ids))
-            conn.execute(f"DELETE FROM scan_stocks WHERE scan_id IN ({placeholders})", scan_ids)
-            conn.execute(f"DELETE FROM scan_logs WHERE scan_id IN ({placeholders})", scan_ids)
-            conn.execute(f"DELETE FROM scans WHERE id IN ({placeholders})", scan_ids)
+            conn.execute(f"DELETE FROM {t['scan_stocks']} WHERE scan_id IN ({placeholders})", scan_ids)
+            conn.execute(f"DELETE FROM {t['scan_logs']} WHERE scan_id IN ({placeholders})", scan_ids)
+            conn.execute(f"DELETE FROM {t['scans']} WHERE id IN ({placeholders})", scan_ids)
             conn.commit()
             return len(scan_ids)
         finally:
             conn.close()
 
 
-def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
+def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v1") -> list[dict]:
     """返回某日期下所有扫描 run 的贡献明细（scan_stocks join scans）。"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         rows = conn.execute(
             "SELECT "
             "  s.id, s.top_n, s.created_at, "
@@ -437,8 +455,8 @@ def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
             "  ss.concepts_json, ss.report_text, "
             "  ss.open_px, ss.close_px, ss.high_px, ss.low_px, ss.pct, "
             "  ss.turnover_rate, ss.amount, ss.market_cap "
-            "FROM scans s "
-            "JOIN scan_stocks ss ON ss.scan_id = s.id "
+            f"FROM {t['scans']} s "
+            f"JOIN {t['scan_stocks']} ss ON ss.scan_id = s.id "
             "WHERE s.scan_date = ?",
             (scan_date,),
         ).fetchall()
@@ -464,6 +482,7 @@ def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
                 "turnover_rate": r[15],
                 "amount": r[16],
                 "market_cap": r[17],
+                "source": source,
             })
         return result
     finally:
@@ -471,16 +490,17 @@ def list_scan_stock_contributions_by_date(scan_date: str) -> list[dict]:
 
 
 def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
-                 scorer_version: str = "v1"):
+                 source: str = "v1"):
     """保存或更新 dragons（UPSERT，不覆盖 review 字段）。
 
-    scorer_version: 本次评分器版本（"v1"/"v2"）。同一 (trade_date, code) 多次写入时，
-    已存版本与本次版本求并集去重，固定输出 "v1"/"v2"/"v1_v2"（v1 在前）。
+    source: 本次评分器体系（"v1"/"v2"），写入对应 dragons_v1 / dragons_v2。
     """
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
+            source = _normalize_source(source)
+            t = _tables(source)
             
             rows = []
             for i, s in enumerate(dragons):
@@ -503,41 +523,36 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
                     s.get("market_cap"),
                     json.dumps(concepts, ensure_ascii=False),
                     s.get("report_text", ""),
+                    1 if s.get("is_true_dragon") else 0 if "is_true_dragon" in s else None,
                     version,
-                    scorer_version,
+                    source,
                 ))
             
             conn.executemany(
-                "INSERT INTO dragons("
+                f"INSERT INTO {t['dragons']}("
                 "trade_date, code, name, scan_id, rank, composite_score, board_count, "
                 "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-                "concepts_json, report_text, version, scorer_version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "concepts_json, report_text, is_true_dragon, version, source"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(trade_date, code) DO UPDATE SET "
                 "name=excluded.name, "
                 "scan_id=excluded.scan_id, "
                 "rank=excluded.rank, "
                 "composite_score=excluded.composite_score, "
                 "board_count=excluded.board_count, "
-                "open_px=COALESCE(excluded.open_px, dragons.open_px), "
-                "close_px=COALESCE(excluded.close_px, dragons.close_px), "
-                "high_px=COALESCE(excluded.high_px, dragons.high_px), "
-                "low_px=COALESCE(excluded.low_px, dragons.low_px), "
-                "pct=COALESCE(excluded.pct, dragons.pct), "
-                "turnover_rate=COALESCE(excluded.turnover_rate, dragons.turnover_rate), "
-                "amount=COALESCE(excluded.amount, dragons.amount), "
-                "market_cap=COALESCE(excluded.market_cap, dragons.market_cap), "
+                f"open_px=COALESCE(excluded.open_px, {t['dragons']}.open_px), "
+                f"close_px=COALESCE(excluded.close_px, {t['dragons']}.close_px), "
+                f"high_px=COALESCE(excluded.high_px, {t['dragons']}.high_px), "
+                f"low_px=COALESCE(excluded.low_px, {t['dragons']}.low_px), "
+                f"pct=COALESCE(excluded.pct, {t['dragons']}.pct), "
+                f"turnover_rate=COALESCE(excluded.turnover_rate, {t['dragons']}.turnover_rate), "
+                f"amount=COALESCE(excluded.amount, {t['dragons']}.amount), "
+                f"market_cap=COALESCE(excluded.market_cap, {t['dragons']}.market_cap), "
                 "concepts_json=excluded.concepts_json, "
                 "report_text=excluded.report_text, "
+                "is_true_dragon=excluded.is_true_dragon, "
                 "version=excluded.version, "
-                # 评分器版本并集合并：已存版本 ∪ 本次版本 → v1/v2/v1_v2（v1 在前）
-                "scorer_version=CASE "
-                "WHEN (instr(COALESCE(dragons.scorer_version,''),'v1')>0 OR excluded.scorer_version='v1') "
-                "AND (instr(COALESCE(dragons.scorer_version,''),'v2')>0 OR excluded.scorer_version='v2') "
-                "THEN 'v1_v2' "
-                "WHEN (instr(COALESCE(dragons.scorer_version,''),'v1')>0 OR excluded.scorer_version='v1') "
-                "THEN 'v1' "
-                "ELSE 'v2' END",
+                "source=excluded.source",
                 rows,
             )
             conn.commit()
@@ -545,13 +560,15 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
             conn.close()
 
 
-def get_dragon_meta(trade_date: str, code: str) -> Optional[dict]:
+def get_dragon_meta(trade_date: str, code: str, source: str = "v1") -> Optional[dict]:
     """返回指定 trade_date+code 的 rank/review_status，用于重建逻辑。"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         row = conn.execute(
-            "SELECT rank, review_status FROM dragons WHERE trade_date = ? AND code = ?",
+            f"SELECT rank, review_status FROM {t['dragons']} WHERE trade_date = ? AND code = ?",
             (trade_date, code),
         ).fetchone()
         if not row:
@@ -561,15 +578,17 @@ def get_dragon_meta(trade_date: str, code: str) -> Optional[dict]:
         conn.close()
 
 
-def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str]) -> int:
+def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str], source: str = "v1") -> int:
     """删除某 trade_date 下不在 keep_codes 内且 review_status='pending' 的记录。"""
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
+            source = _normalize_source(source)
+            t = _tables(source)
             if not keep_codes:
                 cur = conn.execute(
-                    "DELETE FROM dragons WHERE trade_date = ? AND review_status = 'pending'",
+                    f"DELETE FROM {t['dragons']} WHERE trade_date = ? AND review_status = 'pending'",
                     (trade_date,),
                 )
                 conn.commit()
@@ -578,7 +597,7 @@ def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str]) -> int:
             placeholders = ",".join(["?"] * len(keep_codes))
             params = [trade_date] + sorted(keep_codes)
             cur = conn.execute(
-                f"DELETE FROM dragons WHERE trade_date = ? AND review_status = 'pending' AND code NOT IN ({placeholders})",
+                f"DELETE FROM {t['dragons']} WHERE trade_date = ? AND review_status = 'pending' AND code NOT IN ({placeholders})",
                 params,
             )
             conn.commit()
@@ -594,6 +613,7 @@ def rebuild_dragons_for_date(
     calendar: set[str],
     apply_5day_gate: bool = True,
     keep_completed: bool = True,
+    source: str = "v1",
 ) -> dict:
     """按 trade_date 重建 dragons 为“当日所有扫描结果的并集”物化。
 
@@ -604,9 +624,10 @@ def rebuild_dragons_for_date(
     """
     from dragon_quant.utils.trading import trade_days_between
 
-    contribs = list_scan_stock_contributions_by_date(trade_date)
+    source = _normalize_source(source)
+    contribs = list_scan_stock_contributions_by_date(trade_date, source=source)
     if not contribs:
-        deleted = delete_pending_dragons_not_in(trade_date, set())
+        deleted = delete_pending_dragons_not_in(trade_date, set(), source=source)
         return {"contrib_codes": 0, "upserted": 0, "kept": 0, "deleted": deleted}
 
     # 选“最佳贡献”：rank 最小 -> 分数最高 -> created_at 最新
@@ -647,7 +668,7 @@ def rebuild_dragons_for_date(
 
         allow_upsert = True
         if apply_5day_gate:
-            last_info = get_last_entry_with_rank(code)
+            last_info = get_last_entry_with_rank(code, source=source)
             if last_info:
                 last_date, old_rank = last_info
                 if last_date and trade_days_between(last_date, trade_date, calendar) < 5:
@@ -677,7 +698,7 @@ def rebuild_dragons_for_date(
                 "report_text": b.get("report_text", ""),
             })
         else:
-            meta = get_dragon_meta(trade_date, code)
+            meta = get_dragon_meta(trade_date, code, source=source)
             if meta:
                 # 同日已存在记录，则保留（不更新）
                 keep_codes.add(code)
@@ -693,8 +714,8 @@ def rebuild_dragons_for_date(
         pass
 
     if to_upsert:
-        save_dragons(trade_date, to_upsert, version=version)
-    deleted = delete_pending_dragons_not_in(trade_date, keep_codes)
+        save_dragons(trade_date, to_upsert, version=version, source=source)
+    deleted = delete_pending_dragons_not_in(trade_date, keep_codes, source=source)
     return {
         "contrib_codes": len(best_by_code),
         "upserted": len(to_upsert),
@@ -705,18 +726,20 @@ def rebuild_dragons_for_date(
         "gate_blocked_samples": gate_blocked_samples,
     }
 
-def get_dragons(trade_date: str) -> list[dict]:
+def get_dragons(trade_date: str, source: str = "v1") -> list[dict]:
     """获取某日的 dragons 数据"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         rows = conn.execute(
             "SELECT code, name, scan_id, rank, composite_score, board_count, "
             "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
             "concepts_json, report_text, "
             "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
-            "max_return_hold_days, review_status, version "
-            "FROM dragons WHERE trade_date = ? ORDER BY composite_score DESC",
+            "max_return_hold_days, review_status, version, is_true_dragon "
+            f"FROM {t['dragons']} WHERE trade_date = ? ORDER BY composite_score DESC",
             (trade_date,),
         ).fetchall()
         
@@ -733,6 +756,8 @@ def get_dragons(trade_date: str) -> list[dict]:
                 "max_return_hold_days": r[20],
                 "review_status": r[21],
                 "version": r[22] or "",
+                "is_true_dragon": bool(r[23]) if r[23] is not None else None,
+                "source": source,
             }
             for r in rows
         ]
@@ -740,13 +765,15 @@ def get_dragons(trade_date: str) -> list[dict]:
         conn.close()
 
 
-def get_last_entry(code: str) -> Optional[str]:
+def get_last_entry(code: str, source: str = "v1") -> Optional[str]:
     """返回该 code 最近一次入选的 trade_date，无记录则返回 None。"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         row = conn.execute(
-            "SELECT trade_date FROM dragons WHERE code = ? "
+            f"SELECT trade_date FROM {t['dragons']} WHERE code = ? "
             "ORDER BY trade_date DESC LIMIT 1",
             (code,),
         ).fetchone()
@@ -755,13 +782,15 @@ def get_last_entry(code: str) -> Optional[str]:
         conn.close()
 
 
-def get_last_entry_with_rank(code: str) -> Optional[tuple]:
+def get_last_entry_with_rank(code: str, source: str = "v1") -> Optional[tuple]:
     """返回该 code 最近一次入选的 (trade_date, rank)，无记录则返回 None。"""
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         row = conn.execute(
-            "SELECT trade_date, rank FROM dragons WHERE code = ? "
+            f"SELECT trade_date, rank FROM {t['dragons']} WHERE code = ? "
             "ORDER BY trade_date DESC LIMIT 1",
             (code,),
         ).fetchone()
@@ -772,7 +801,8 @@ def get_last_entry_with_rank(code: str) -> Optional[tuple]:
 
 def get_pending_dragons(trade_date: Optional[str] = None,
                         top_n: Optional[int] = None,
-                        review_status: Optional[str] = "pending") -> list[dict]:
+                        review_status: Optional[str] = "pending",
+                        source: str = "v1") -> list[dict]:
     """获取待 review 的 dragons 记录。
 
     review_status='pending' 时只取待回测记录；传入 None 则不做状态过滤。
@@ -781,13 +811,15 @@ def get_pending_dragons(trade_date: Optional[str] = None,
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         sql = (
             "SELECT trade_date, code, name, scan_id, rank, composite_score, "
             "board_count, open_px, close_px, high_px, low_px, pct, "
             "turnover_rate, amount, market_cap, concepts_json, report_text, "
             "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
-            "max_return_hold_days, review_status, version "
-            "FROM dragons"
+            "max_return_hold_days, review_status, version, is_true_dragon "
+            f"FROM {t['dragons']}"
         )
         params: list = []
         conditions: list[str] = []
@@ -820,6 +852,8 @@ def get_pending_dragons(trade_date: Optional[str] = None,
                 "max_return_hold_days": r[21],
                 "review_status": r[22],
                 "version": r[23] or "",
+                "is_true_dragon": bool(r[24]) if r[24] is not None else None,
+                "source": source,
             }
             for r in rows
         ]
@@ -833,14 +867,17 @@ def update_dragon_review(trade_date: str, code: str,
                          max_return_5d: Optional[float] = None,
                          max_drawdown_5d: Optional[float] = None,
                          max_return_hold_days: Optional[int] = None,
-                         review_status: str = "completed"):
+                         review_status: str = "completed",
+                         source: str = "v1"):
     """更新单条 dragon 的 review 字段。"""
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
+            source = _normalize_source(source)
+            t = _tables(source)
             conn.execute(
-                "UPDATE dragons SET "
+                f"UPDATE {t['dragons']} SET "
                 "buy_date = ?, "
                 "buy_price = ?, "
                 "max_return_5d = ?, "
@@ -947,7 +984,8 @@ def _version_in_range(version: str,
 
 def query_dragons(filters: dict = None,
                   sort_by: str = "composite_score",
-                  sort_dir: str = "desc") -> list[dict]:
+                  sort_dir: str = "desc",
+                  source: str = "v1") -> list[dict]:
     """灵活查询 dragons 表（供 Web UI /api/dragons 使用）。
 
     Args:
@@ -966,14 +1004,16 @@ def query_dragons(filters: dict = None,
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
 
         sql = (
             "SELECT trade_date, code, name, scan_id, rank, composite_score, "
             "board_count, open_px, close_px, high_px, low_px, pct, "
             "turnover_rate, amount, market_cap, concepts_json, report_text, "
             "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
-            "max_return_hold_days, review_status, version "
-            "FROM dragons"
+            "max_return_hold_days, review_status, version, is_true_dragon "
+            f"FROM {t['dragons']}"
         )
         params: list = []
         conditions: list[str] = []
@@ -1021,9 +1061,9 @@ def query_dragons(filters: dict = None,
             "trade_date", "code", "name", "rank", "composite_score",
             "board_count", "pct", "buy_date", "buy_price",
             "max_return_5d", "max_drawdown_5d", "max_return_hold_days",
-            "review_status",
+            "review_status", "source",
         }
-        order_col = sort_by if sort_by in ALLOWED else "composite_score"
+        order_col = sort_by if sort_by in ALLOWED and sort_by != "source" else "composite_score"
         order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
         sql += f" ORDER BY {order_col} {order_dir} NULLS LAST"
 
@@ -1042,6 +1082,8 @@ def query_dragons(filters: dict = None,
                 "max_return_hold_days": r[21],
                 "review_status": r[22],
                 "version": r[23] or "",
+                "is_true_dragon": bool(r[24]) if r[24] is not None else None,
+                "source": source,
             }
             for r in rows
         ]
@@ -1059,34 +1101,36 @@ def query_dragons(filters: dict = None,
         conn.close()
 
 
-def get_review_summary() -> dict:
+def get_review_summary(source: str = "v1") -> dict:
     """返回 dragons 表中的汇总统计（供 Web UI /api/summary 使用）。"""
     conn = _connect()
     try:
         _ensure_schema(conn)
-        total = conn.execute("SELECT COUNT(*) FROM dragons").fetchone()[0]
+        source = _normalize_source(source)
+        t = _tables(source)
+        total = conn.execute(f"SELECT COUNT(*) FROM {t['dragons']}").fetchone()[0]
 
         completed = conn.execute(
-            "SELECT COUNT(*) FROM dragons WHERE review_status = 'completed'"
+            f"SELECT COUNT(*) FROM {t['dragons']} WHERE review_status = 'completed'"
         ).fetchone()[0]
 
         pending = conn.execute(
-            "SELECT COUNT(*) FROM dragons WHERE review_status = 'pending'"
+            f"SELECT COUNT(*) FROM {t['dragons']} WHERE review_status = 'pending'"
         ).fetchone()[0]
 
         avg_row = conn.execute(
-            "SELECT AVG(max_return_5d) FROM dragons WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
+            f"SELECT AVG(max_return_5d) FROM {t['dragons']} WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
         ).fetchone()
 
         win_row = conn.execute(
-            "SELECT COUNT(*) FROM dragons "
+            f"SELECT COUNT(*) FROM {t['dragons']} "
             "WHERE review_status = 'completed' "
             "AND max_return_5d > 0 "
             "AND max_drawdown_5d > -5.0"
         ).fetchone()
 
         best = conn.execute(
-            "SELECT code, name, max_return_5d FROM dragons "
+            f"SELECT code, name, max_return_5d FROM {t['dragons']} "
             "WHERE review_status = 'completed' AND max_return_5d IS NOT NULL "
             "ORDER BY max_return_5d DESC LIMIT 1"
         ).fetchone()
@@ -1105,19 +1149,23 @@ def get_review_summary() -> dict:
             "best_stock_code": best[0] if best else None,
             "best_stock_name": best[1] if best else None,
             "best_return": round(best[2], 2) if best and best[2] is not None else None,
+            "source": source,
         }
     finally:
         conn.close()
 
 
-def get_scan_stocks(scan_id: str) -> list[dict]:
+def get_scan_stocks(scan_id: str, source: str = "v1") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         rows = conn.execute(
             "SELECT code, name, rank, composite_score, board_count, concepts_json, "
-            "dim_drive, dim_anti_drop, dim_leadership, dim_absorption, report_text "
-            "FROM scan_stocks WHERE scan_id = ? ORDER BY rank",
+            "dim_drive, dim_anti_drop, dim_leadership, dim_absorption, dim_liquidity, "
+            "is_true_dragon, reject_reason, report_text "
+            f"FROM {t['scan_stocks']} WHERE scan_id = ? ORDER BY rank",
             (scan_id,),
         ).fetchall()
         return [
@@ -1127,7 +1175,11 @@ def get_scan_stocks(scan_id: str) -> list[dict]:
                 "concepts": json.loads(r[5]) if r[5] else [],
                 "dim_drive": r[6], "dim_anti_drop": r[7],
                 "dim_leadership": r[8], "dim_absorption": r[9],
-                "report_text": r[10] or "",
+                "dim_liquidity": r[10],
+                "is_true_dragon": bool(r[11]) if r[11] is not None else None,
+                "reject_reason": r[12],
+                "report_text": r[13] or "",
+                "source": source,
             }
             for r in rows
         ]
@@ -1135,22 +1187,26 @@ def get_scan_stocks(scan_id: str) -> list[dict]:
         conn.close()
 
 
-def has_scan(scan_id: str) -> bool:
+def has_scan(scan_id: str, source: str = "v1") -> bool:
     conn = _connect()
     try:
         _ensure_schema(conn)
-        row = conn.execute("SELECT 1 FROM scans WHERE id = ?", (scan_id,)).fetchone()
+        source = _normalize_source(source)
+        t = _tables(source)
+        row = conn.execute(f"SELECT 1 FROM {t['scans']} WHERE id = ?", (scan_id,)).fetchone()
         return row is not None
     finally:
         conn.close()
 
 
-def save_scan_logs(scan_id: str, entries: list[dict]):
+def save_scan_logs(scan_id: str, entries: list[dict], source: str = "v1"):
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            conn.execute("DELETE FROM scan_logs WHERE scan_id = ?", (scan_id,))
+            source = _normalize_source(source)
+            t = _tables(source)
+            conn.execute(f"DELETE FROM {t['scan_logs']} WHERE scan_id = ?", (scan_id,))
 
             rows = []
             for e in entries:
@@ -1162,11 +1218,12 @@ def save_scan_logs(scan_id: str, entries: list[dict]):
                     e.get("message", ""),
                     e.get("code", ""),
                     json.dumps(e.get("data", {}), ensure_ascii=False),
+                    source,
                 ))
 
             conn.executemany(
-                "INSERT INTO scan_logs(scan_id, ts, category, level, message, code, data_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO {t['scan_logs']}(scan_id, ts, category, level, message, code, data_json, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             conn.commit()
@@ -1178,10 +1235,13 @@ def get_scan_logs(scan_id: Optional[str] = None,
                   category: Optional[str] = None,
                   level: Optional[str] = None,
                   code: Optional[str] = None,
-                  tail: int = 200) -> list[dict]:
+                  tail: int = 200,
+                  source: str = "v1") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         conditions = []
         params = []
 
@@ -1206,7 +1266,7 @@ def get_scan_logs(scan_id: Optional[str] = None,
         params.append(tail)
         rows = conn.execute(
             f"SELECT scan_id, ts, category, level, message, code, data_json "
-            f"FROM scan_logs {where} ORDER BY ts DESC LIMIT ?",
+            f"FROM {t['scan_logs']} {where} ORDER BY ts DESC LIMIT ?",
             params,
         ).fetchall()
 
@@ -1215,6 +1275,7 @@ def get_scan_logs(scan_id: Optional[str] = None,
                 "scan_id": r[0], "ts": r[1], "category": r[2],
                 "level": r[3], "message": r[4], "code": r[5],
                 "data": json.loads(r[6]) if r[6] else {},
+                "source": source,
             }
             for r in rows
         ]
@@ -1222,18 +1283,21 @@ def get_scan_logs(scan_id: Optional[str] = None,
         conn.close()
 
 
-def list_scan_log_folders() -> list[dict]:
+def list_scan_log_folders(source: str = "v1") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         rows = conn.execute(
             "SELECT scan_id, COUNT(*) as cnt, MIN(ts) as first_ts, MAX(ts) as last_ts "
-            "FROM scan_logs GROUP BY scan_id ORDER BY scan_id DESC"
+            f"FROM {t['scan_logs']} GROUP BY scan_id ORDER BY scan_id DESC"
         ).fetchall()
         return [
             {
                 "scan_id": r[0], "entries": r[1],
                 "first_ts": r[2], "last_ts": r[3],
+                "source": source,
             }
             for r in rows
         ]
@@ -1241,8 +1305,9 @@ def list_scan_log_folders() -> list[dict]:
         conn.close()
 
 
-def log_summary(scan_id: Optional[str] = None) -> dict:
-    entries = get_scan_logs(scan_id=scan_id, tail=99999)
+def log_summary(scan_id: Optional[str] = None, source: str = "v1") -> dict:
+    source = _normalize_source(source)
+    entries = get_scan_logs(scan_id=scan_id, tail=99999, source=source)
     if not entries:
         return {"error": "无日志"}
 
@@ -1282,27 +1347,32 @@ def log_summary(scan_id: Optional[str] = None) -> dict:
         "api_stats": api_stats,
         "error_count": error_count,
         "scorer_count": scorer_count,
+        "source": source,
     }
 
 
-def count_scan_logs(scan_id: str) -> int:
+def count_scan_logs(scan_id: str, source: str = "v1") -> int:
     conn = _connect()
     try:
         _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
         return conn.execute(
-            "SELECT COUNT(*) FROM scan_logs WHERE scan_id = ?", (scan_id,)
+            f"SELECT COUNT(*) FROM {t['scan_logs']} WHERE scan_id = ?", (scan_id,)
         ).fetchone()[0]
     finally:
         conn.close()
 
 
-def delete_old_scan_logs(cutoff_ts: float) -> int:
+def delete_old_scan_logs(cutoff_ts: float, source: str = "v1") -> int:
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
+            source = _normalize_source(source)
+            t = _tables(source)
             cur = conn.execute(
-                "DELETE FROM scan_logs WHERE ts < ?", (cutoff_ts,)
+                f"DELETE FROM {t['scan_logs']} WHERE ts < ?", (cutoff_ts,)
             )
             conn.commit()
             return cur.rowcount
@@ -1310,12 +1380,14 @@ def delete_old_scan_logs(cutoff_ts: float) -> int:
             conn.close()
 
 
-def delete_all_scan_logs() -> int:
+def delete_all_scan_logs(source: str = "v1") -> int:
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            cur = conn.execute("DELETE FROM scan_logs")
+            source = _normalize_source(source)
+            t = _tables(source)
+            cur = conn.execute(f"DELETE FROM {t['scan_logs']}")
             conn.commit()
             return cur.rowcount
         finally:

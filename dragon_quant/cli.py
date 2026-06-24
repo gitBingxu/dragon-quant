@@ -21,7 +21,7 @@ from dragon_quant.storage.manager import StorageManager
 def _cmd_scan(args):
     """扫描命令（v1 四维评分器）"""
     if args.date:
-        _cmd_scan_history(args)
+        _cmd_scan_history(args, source="v1")
         return
 
     orchestrate_scan(
@@ -37,7 +37,7 @@ def _cmd_scan(args):
 def _cmd_scan_v2(args):
     """扫描命令（v2 五维「识别真龙」评分器）"""
     if args.date:
-        _cmd_scan_history(args)
+        _cmd_scan_history(args, source="v2")
         return
 
     orchestrate_scan(
@@ -50,7 +50,7 @@ def _cmd_scan_v2(args):
     )
 
 
-def _cmd_scan_history(args):
+def _cmd_scan_history(args, source: str = "v1"):
     """查询历史扫描记录"""
     d = args.date
     if len(d) == 8:
@@ -60,34 +60,29 @@ def _cmd_scan_history(args):
         return
 
     from dragon_quant.storage import db
-    scan = db.get_latest_scan_by_date(date_str, args.top)
+    scan = db.get_latest_scan_by_date(date_str, args.top, source=source)
     if scan and scan.get("raw_output"):
         output = json.loads(scan["raw_output"])
         print(json.dumps(output, ensure_ascii=False, indent=2))
     elif scan:
-        # raw_output 为空（旧版本兼容），从 scan_stocks 重构
-        stocks = db.get_scan_stocks(scan["id"])
-        output = {
+        print(json.dumps({
+            "error": "scan raw_output is empty",
             "scan_id": scan["id"],
             "scan_date": scan["scan_date"],
-            "elapsed_s": scan["elapsed_s"],
             "top_n": scan["top_n"],
-            "candidates_n": scan["candidates_n"],
-            "ranking": stocks,
-            "note": "raw_output 缺失，ranking 从 scan_stocks 重构",
-        }
-        print(json.dumps(output, ensure_ascii=False, indent=2))
+            "source": source,
+        }, ensure_ascii=False, indent=2))
     else:
-        scans = db.get_scans_by_date(date_str)
+        scans = db.get_scans_by_date(date_str, source=source)
         if scans:
             tops = sorted(set(s["top_n"] for s in scans))
             print(json.dumps({
-                "error": f"未找到 {date_str} 下 top_n={args.top} 的记录",
+                "error": f"未找到 {date_str} 下 {source} top_n={args.top} 的记录",
                 "available_top_n": tops,
             }, ensure_ascii=False, indent=2))
         else:
             print(json.dumps({
-                "error": f"未找到 {date_str} 的扫描记录",
+                "error": f"未找到 {date_str} 的 {source} 扫描记录",
             }, ensure_ascii=False, indent=2))
 
 
@@ -118,7 +113,7 @@ def _cmd_logs(args):
     )
 
     if args.logs_action == "tail":
-        entries = tail_logs(lines=args.lines)
+        entries = tail_logs(lines=args.lines, source=args.source)
         for e in entries:
             print(json.dumps(e, ensure_ascii=False))
 
@@ -129,17 +124,18 @@ def _cmd_logs(args):
             level=args.level,
             code=args.code,
             tail=args.tail,
+            source=args.source,
         )
         for e in entries:
             print(json.dumps(e, ensure_ascii=False))
 
     elif args.logs_action == "clear":
-        result = clear_logs(days=args.days)
+        result = clear_logs(days=args.days, source=args.source)
         print(f"清除日志: {result['cleared']} 条记录")
         print(f"保留: {result['kept']} 条记录")
 
     elif args.logs_action == "list":
-        folders = list_logs()
+        folders = list_logs(source=args.source)
         if not folders:
             print("(无日志记录)")
         else:
@@ -149,7 +145,7 @@ def _cmd_logs(args):
                 print(f"{f['scan_id']:22s} {f['entries']:6d}")
 
     elif args.logs_action == "summary":
-        summary = log_summary(date=args.date)
+        summary = log_summary(date=args.date, source=args.source)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
@@ -247,6 +243,7 @@ def _cmd_review(args):
         top_n=args.top,
         force=args.force,
         verbose=True,
+        source=args.source,
     )
 
     # --ui: 回测后启动 UI
@@ -257,7 +254,8 @@ def _cmd_review(args):
 def _cmd_review_ui(args):
     """启动 Web UI 服务器"""
     from web_ui.server import start_server
-    start_server(port=args.port, open_browser=not args.no_browser)
+    start_server(port=args.port, open_browser=not args.no_browser,
+                 default_source=getattr(args, "source", "v1"))
 
 
 def _cmd_vpa(args):
@@ -392,6 +390,8 @@ def main():
 
     # logs 子命令
     logs_p = sub.add_parser("logs", help="日志查询与管理")
+    logs_p.add_argument("--source", default="v1", choices=["v1", "v2"],
+                        help="日志来源体系 (默认 v1)")
     logs_subs = logs_p.add_subparsers(dest="logs_action")
 
     tail_p = logs_subs.add_parser("tail", help="查看最新日志")
@@ -463,6 +463,8 @@ def main():
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
     rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
     rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
+    rev_p.add_argument("--source", default="v1", choices=["v1", "v2"],
+                       help="回测数据来源体系：v1=dragons_v1，v2=dragons_v2 (默认 v1)")
     rev_p.add_argument("--ui", action="store_true", help="回测后启动 Web UI")
     rev_p.add_argument("--ui-only", action="store_true", help="仅启动 Web UI（不执行回测）")
     rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")

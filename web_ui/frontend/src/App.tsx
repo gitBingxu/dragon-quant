@@ -12,14 +12,21 @@ import { FilterBar } from "./components/FilterBar";
 import { DragonTable } from "./components/DragonTable";
 
 const DEFAULT_FILTERS: DragonFilters = {
+  source: "v1",
   status: "completed",
   sort_by: "composite_score",
   sort_dir: "desc",
 };
 
+function initialFilters(): DragonFilters {
+  const params = new URLSearchParams(window.location.search);
+  const source = params.get("source") === "v2" ? "v2" : "v1";
+  return { ...DEFAULT_FILTERS, source };
+}
+
 export function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [filters, setFilters] = useState<DragonFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<DragonFilters>(() => initialFilters());
   const [rawData, setRawData] = useState<Dragon[]>([]);
   const [sort, setSort] = useState<{ by: keyof Dragon; dir: "asc" | "desc" }>({
     by: "composite_score",
@@ -32,6 +39,7 @@ export function App() {
     try {
       const resp = await fetchDragons(f);
       setRawData(resp.data || []);
+      fetchSummary(f.source ?? "v1").then(setSummary).catch(() => setSummary(null));
       setSort({ by: f.sort_by as keyof Dragon, dir: f.sort_dir as "asc" | "desc" });
     } catch {
       setRawData([]);
@@ -40,8 +48,7 @@ export function App() {
 
   // 初始加载
   useEffect(() => {
-    fetchSummary().then(setSummary).catch(() => setSummary(null));
-    load(DEFAULT_FILTERS);
+    load(filters);
   }, [load]);
 
   // 筛选变更 → debounce 300ms 触发查询

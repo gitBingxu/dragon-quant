@@ -54,6 +54,8 @@ dragon-quant scan_v2 --force
 
 # 龙头回测 + Web UI
 dragon-quant review --ui
+# 查看 v2 龙头回测面板
+dragon-quant review --ui-only --source v2
 ```
 
 ### 前置条件
@@ -106,12 +108,13 @@ dragon-quant blacklist remove "次新股"
 ```bash
 dragon-quant review                       # 自动筛 5~20 交易日内 pending 票全回测
 dragon-quant review --date 20260519 --top 5
+dragon-quant review --source v2 --date 20260519
 dragon-quant review --force --date 20260519
-dragon-quant review --ui                  # 回测后启动 Web UI
-dragon-quant review --ui-only --port 8765 # 仅看结果
+dragon-quant review --ui --source v2      # 回测后启动 Web UI（默认展示 v2）
+dragon-quant review --ui-only --port 8765 # 仅看结果（默认 v1，可加 --source v2）
 ```
 
-从 `dragons` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回 DB。回测时对每只 pending 个股追加一段**量价分析**，结论写入 `vpa_analysis` 表。
+`--source` 用于选择回测哪套龙头表：`v1` 读取/写回 `dragons_v1`，`v2` 读取/写回 `dragons_v2`。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
 
 ### `vpa` — 量价分析
 
@@ -136,10 +139,10 @@ dragon-quant data cookie-status                        # Cookie 状态
 ### `logs` / `storage` — 日志与数据管理
 
 ```bash
-dragon-quant logs tail [-n 20]
-dragon-quant logs query [--date 20260513] [--category scorer:drive] [--level error] [--code 600172]
-dragon-quant logs summary
-dragon-quant logs clear --days 7
+dragon-quant logs --source v1 tail [-n 20]
+dragon-quant logs --source v2 query [--date 20260513] [--category scorer:drive] [--level error] [--code 600172]
+dragon-quant logs --source v2 summary
+dragon-quant logs --source v1 clear --days 7
 
 dragon-quant storage status      # 存储状态
 dragon-quant storage size        # 磁盘占用
@@ -246,15 +249,24 @@ dragon_quant/
 2. **评分器是 cache 消费者**：统一签名 `score(code, cache, **kwargs) -> ScoreResult`，只读缓存不发请求；编排器 Phase A→D 预填，Phase E 打分。
 3. **并发与限流**：`RateLimiter` 按 provider 串行排队 + 随机延迟，不同 provider 并发。
 4. **结构化日志**：`ScanLogger` 全链路打点，支持按类别/级别/代码查询。
-5. **新旧并存**：v1 与 v2 全程隔离，可灰度对比与回滚。
+5. **新旧并存**：v1 与 v2 除数据拉取与编排器外全程隔离，可灰度对比与回滚。
 
 ## 持久化
 
-SQLite 表：`scans` / `scan_stocks` / `dragons` / `scan_logs` / `vpa_analysis` / `sector_blacklist`。
+SQLite 表分为三类：
 
-`dragons` 表关键字段：
+- v1 体系：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`
+- v2 体系：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
+- 共享表：`vpa_analysis` / `sector_blacklist`
+
+运行时只创建和读写 `*_v1` / `*_v2` 分表，不再创建旧 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；`source` 是唯一版本路由字段。
+
+`dragons_v1` / `dragons_v2` 表关键字段：
+- `source`：固定为 `v1` 或 `v2`。
 - `version`：入库时的包版本号。
-- `scorer_version`：评分器版本（`v1`/`v2`/`v1_v2`）。同一交易日 v1 与 v2 龙头取**并集**写入，重叠股票版本合并为 `v1_v2`（如 v1 出 A,B、v2 出 A,C → A=v1_v2、B=v1、C=v2）。
+- review 字段：`buy_date` / `buy_price` / `max_return_5d` / `max_drawdown_5d` / `max_return_hold_days` / `review_status`，按 source 独立维护。
+
+`scan_stocks_v1` / `scan_stocks_v2` 为同构表，v2 会额外填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
 
 ## License
 

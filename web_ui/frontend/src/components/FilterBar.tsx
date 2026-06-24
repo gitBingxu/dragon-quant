@@ -33,6 +33,11 @@ const STATUS_OPTIONS = [
   { value: "error", label: "错误" },
 ];
 
+const SOURCE_OPTIONS = [
+  { value: "v1", label: "v1 四维" },
+  { value: "v2", label: "v2 五维" },
+];
+
 export function FilterBar({ filters, count, onChange, onSearch }: Props) {
   const [advOpen, advHandlers] = useDisclosure(false);
 
@@ -104,6 +109,16 @@ export function FilterBar({ filters, count, onChange, onSearch }: Props) {
       <Stack gap="sm">
         {/* 可见区：常用筛选 */}
         <Group gap="md" align="center" justify="flex-start" wrap="wrap">
+          <Field label="体系">
+            <Select
+              w={120}
+              size="xs"
+              data={SOURCE_OPTIONS}
+              value={filters.source ?? "v1"}
+              onChange={(v) => onChange({ source: (v === "v2" ? "v2" : "v1") })}
+              allowDeselect={false}
+            />
+          </Field>
           {dateInput("date_from", "入选起", "选择日期")}
           {dateInput("date_to", "入选止", "选择日期")}
           {textInput("return_min", "收益≥%", "下限", 90)}

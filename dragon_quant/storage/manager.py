@@ -100,10 +100,11 @@ class StorageManager:
             from dragon_quant.storage import db
             if days:
                 cutoff_ts = time.time() - days * 86400
-                removed += db.delete_old_scan_logs(cutoff_ts)
+                removed += db.delete_old_scan_logs(cutoff_ts, source="v1")
+                removed += db.delete_old_scan_logs(cutoff_ts, source="v2")
             else:
-                n = db.delete_all_scan_logs()
-                removed += n
+                removed += db.delete_all_scan_logs(source="v1")
+                removed += db.delete_all_scan_logs(source="v2")
         except Exception:
             pass
         return removed

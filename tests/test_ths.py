@@ -145,6 +145,13 @@ class TestInnerCode(unittest.TestCase):
         _INNER_CACHE.clear()
 
     @patch("dragon_quant.providers.ths._curl")
+    def test_industry_code_uses_self_without_request(self, mock_curl):
+        p = THSProvider()
+        self.assertEqual(p._get_inner_code("881140"), "881140")
+        mock_curl.assert_not_called()
+        self.assertEqual(_INNER_CACHE["881140"], "881140")
+
+    @patch("dragon_quant.providers.ths._curl")
     def test_extract_and_cache(self, mock_curl):
         mock_curl.return_value = "<input id='clid' value='885611'>"
         p = THSProvider()

@@ -42,6 +42,54 @@ RANK_UP_COUNT = 8     # 领涨板块取前 8（候选筛选 + 5分K）
 RANK_UP_COUNT_V2 = 5  # scorers_v2：领涨板块取前 5（候选为板块内当日涨停股）
 RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
 
+# 数据源 / 接口中文名（仅用于控制台失败提示）
+PROVIDER_CN = {"ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯", "eastmoney": "东财"}
+ENDPOINT_CN = {
+    "sector_ranking": "获取板块排行",
+    "sector_components": "获取板块内个股",
+    "sector_5min_kline": "获取板块5分K线",
+    "sector_5min_history": "获取板块历史5分K线",
+    "sector_1min_kline": "获取板块1分K线",
+    "kline": "获取个股日K线",
+    "minute_kline": "获取个股分时K线",
+    "batch_quotes": "获取批量行情",
+}
+
+
+def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
+    """打印自上次游标以来新增的 api 失败，按 provider+endpoint 聚合。返回新游标。
+
+    数据源：logger.query(category="api", level="error")，每条 category 形如
+    api:{provider}:{endpoint}，data["error"] 为失败原因，code 为板块/个股代码。
+    """
+    fails = logger.query(category="api", level="error")
+    new = fails[seen_count:]
+    if verbose and new:
+        agg: dict = {}
+        for e in new:
+            parts = e.category.split(":")  # api:provider:endpoint
+            if len(parts) < 3:
+                continue
+            provider, endpoint = parts[1], parts[2]
+            g = agg.setdefault((provider, endpoint),
+                               {"count": 0, "codes": [], "error": ""})
+            g["count"] += 1
+            if e.code:
+                g["codes"].append(e.code)
+            g["error"] = e.data.get("error", "") or g["error"]
+        for (provider, endpoint), g in agg.items():
+            pcn = PROVIDER_CN.get(provider, provider)
+            ecn = ENDPOINT_CN.get(endpoint, endpoint)
+            codes = ""
+            if g["codes"]:
+                shown = ", ".join(g["codes"][:5])
+                more = "…" if len(g["codes"]) > 5 else ""
+                codes = f"（{shown}{more}）"
+            reason = f"：{g['error']}" if g["error"] else ""
+            print(f"   ❌ {pcn}·{ecn} 失败 {g['count']} 次{codes}{reason}",
+                  file=sys.stderr)
+    return len(fails)
+
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
     """过滤：非ST、非双创(30/68)、非北交所(8/92)"""
@@ -365,6 +413,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                           provider_delays={"eastmoney": (1.5, 2.5),
                                            "ths": (0.3, 0.6)})
 
+    # 失败接口提示游标（每个 phase 后增量打印新出现的 api 失败）
+    fail_seen = 0
+
     # ────────────────────────────────────────────
     # Phase A: 板块排行
     # ────────────────────────────────────────────
@@ -401,6 +452,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         for s in top10_down:
             print(f"     ↓ {s.name}({s.code})  {s.pct:+.2f}%")
 
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
+
     if not top10_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
 
@@ -423,6 +476,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                                      ths.get_sector_components(sc, page=1,
                                                                all_pages=use_v2))))
     limiter.wait_all()
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     for s in top10_up:
         components = cache.get(f"sector:components:{s.code}") or []
@@ -452,6 +506,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         limiter.submit("xueqiu", "kline",
                        lambda c=code: cache.set(f"kline:day:{c}", xq.get_kline(c, days=30)))
     limiter.wait_all()
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     # 计算5日累计涨幅
     for code, stock in unique_codes.items():
@@ -487,6 +542,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                            cache.set(f"sector:components:{sc}",
                                      ths.get_sector_components(sc, page=1))))
     limiter.wait_all()
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     for s in top10_down:
         components = cache.get(f"sector:components:{s.code}") or []
@@ -495,9 +551,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     candidate_pool = list(all_candidates.values())
     logger.phase("B", f"候选股筛选", count=len(candidate_pool))
     if verbose:
-        print(f"   候选池: {len(candidate_pool)} 只（去重）")
-        for c in candidate_pool:
-            print(f"     {c.name:6s} {c.code}  概念: {c.concepts}")
+        print(f"   候选池: {len(candidate_pool)} 只（去重），按板块明细:")
+        for s in top10_up:
+            picks = [c for c in sector_filtered[s.code]
+                     if c.code in all_candidates]
+            print(f"     ▎{s.name}({s.code})  {len(picks)} 只")
+            for c in picks:
+                print(f"        {c.code} {c.name}  涨幅{c.pct:+.2f}%")
 
     if not candidate_pool:
         return {"error": "无候选股", "ranking": [], "report_text": ""}
@@ -534,6 +594,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         print(f"   评分候选池: {len(ranking)} 只")
         for r in ranking:
             print(f"     {r.code} {r.name:6s}  概念x{len(r.concepts)}  连板{r.board_count}")
+
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     # ────────────────────────────────────────────
     # Phase D: 并发加载评分数据
@@ -591,8 +653,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     limiter.wait_all()
     logger.phase("D", "并发数据加载完成")
+    prev_seen = fail_seen
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
     if verbose:
-        print(f"   ✅ 全部加载完成")
+        if fail_seen == prev_seen:
+            print(f"   ✅ 全部加载完成")
+        else:
+            print(f"   ⚠️ 数据加载完成（部分接口失败，详见上方）")
 
     # ────────────────────────────────────────────
     # Phase E: 主进程打分 — 只对 top_n 只

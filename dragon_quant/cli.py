@@ -31,6 +31,7 @@ def _cmd_scan(args):
         verbose=True,
         force=args.force,
         scorers="v1",
+        refresh_provider_cache=args.no_cache,
     )
 
 
@@ -47,6 +48,7 @@ def _cmd_scan_v2(args):
         verbose=True,
         force=args.force,
         scorers="v2",
+        refresh_provider_cache=args.no_cache,
     )
 
 
@@ -366,7 +368,10 @@ def main():
     shared.add_argument("--top", type=int, default=25, help="最终候选股数量 (默认25)")
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
     shared.add_argument("--workers", type=int, default=2, help="并发线程数 (默认2)")
-    shared.add_argument("--force", action="store_true", help="强制执行 (跳过交易时段拦截和缓存)")
+    shared.add_argument("--force", action="store_true",
+                        help="强制执行 (跳过交易时段拦截 + DB 结果缓存；仍复用 provider 磁盘缓存)")
+    shared.add_argument("--no-cache", action="store_true",
+                        help="跳过 provider 按交易日磁盘缓存，强制各数据源重新拉取并刷新缓存")
 
     parser = argparse.ArgumentParser(
         prog="dragon-quant",

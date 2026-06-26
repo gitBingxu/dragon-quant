@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+import functools
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -89,6 +90,46 @@ def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
             print(f"   ❌ {pcn}·{ecn} 失败 {g['count']} 次{codes}{reason}",
                   file=sys.stderr)
     return len(fails)
+
+
+def _cache_worth_writing(data) -> bool:
+    """非 None 且（非 list 或 list 非空）才值得写盘，避免缓存 403 空结果。"""
+    if data is None:
+        return False
+    if isinstance(data, list):
+        return len(data) > 0
+    return True
+
+
+def _cached_fetch(limiter, cache, provider, endpoint, key, fetch_fn,
+                  trade_date, *, refresh, volatile, namespace=""):
+    """带交易日磁盘缓存的并发取数：命中则跳过 limiter，未命中提交任务并按需落盘。"""
+    if not refresh and not volatile:
+        if cache.load_for_trade_date(key, trade_date, namespace) is not None:
+            return  # 命中：不进 limiter 队列
+
+    def task():
+        data = fetch_fn()
+        if _cache_worth_writing(data) and not volatile:
+            cache.set_for_trade_date(key, data, trade_date, namespace)
+        else:
+            cache.set(key, data)  # 仅写内存供本轮使用
+    limiter.submit(provider, endpoint, task)
+
+
+def _cached_fetch_sync(cache, key, fetch_fn, trade_date, *,
+                       refresh, volatile, namespace=""):
+    """同步版（不经 limiter）：命中返回缓存，未命中 fetch 并按需落盘。"""
+    if not refresh and not volatile:
+        cached = cache.load_for_trade_date(key, trade_date, namespace)
+        if cached is not None:
+            return cached
+    data = fetch_fn()
+    if _cache_worth_writing(data) and not volatile:
+        cache.set_for_trade_date(key, data, trade_date, namespace)
+    else:
+        cache.set(key, data)
+    return data
 
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
@@ -316,7 +357,7 @@ def _get_trade_date() -> Optional[str]:
 
 def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
          verbose: bool = True, force: bool = False,
-         scorers: str = "v1") -> dict:
+         scorers: str = "v1", refresh_provider_cache: bool = False) -> dict:
     """龙头战法完整扫描 — Programmtic API
 
     返回结构化 dict:
@@ -413,6 +454,19 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                           provider_delays={"eastmoney": (1.5, 2.5),
                                            "ths": (0.3, 0.6)})
 
+    # provider 磁盘缓存命名空间：按交易日复用，避免每次命令重打满同花顺。
+    #   trade_date 优先用雪球分时K确定的最近交易日，失败回退自然日。
+    #   volatile：--force 闯入交易时段时，provider 缓存只用内存不落盘，
+    #             防止盘中波动数据冻结进当日交易日目录污染收盘后复用。
+    trade_date = _get_trade_date() or now.strftime("%Y-%m-%d")
+    volatile = is_trading_day and 9 <= now.hour < 15
+    _cf = functools.partial(_cached_fetch, limiter, cache,
+                            trade_date=trade_date,
+                            refresh=refresh_provider_cache, volatile=volatile)
+    _cf_sync = functools.partial(_cached_fetch_sync, cache,
+                                 trade_date=trade_date,
+                                 refresh=refresh_provider_cache, volatile=volatile)
+
     # 失败接口提示游标（每个 phase 后增量打印新出现的 api 失败）
     fail_seen = 0
 
@@ -439,8 +493,11 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         return True
 
     # 一次抓取全部概念排行（provider 内已多页+本地排序），本地切涨幅/跌幅榜，
-    # 避免重复抓 8 页（desc/asc 数据相同）。
-    ranking_all = [s for s in ths.get_sector_ranking(asc=False) if _sector_ok(s)]
+    # 避免重复抓 8 页（desc/asc 数据相同）。缓存原始榜，黑名单过滤仍在内存做，
+    # 保证黑名单改动即时生效。
+    ranking_raw = _cf_sync("sector:ranking",
+                           lambda: ths.get_sector_ranking(asc=False)) or []
+    ranking_all = [s for s in ranking_raw if _sector_ok(s)]
     top10_up = ranking_all[:rank_up_count]
     top10_down = sorted(ranking_all, key=lambda s: s.pct)[:RANK_DOWN_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
@@ -470,11 +527,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # 提交前10涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     #   v2: all_pages=True 翻页到 ≈50 只，供 leadership 涨幅分位用更大样本
     for s in top10_up:
-        limiter.submit("ths", "ths",
-                       lambda sc=s.code: (
-                           cache.set(f"sector:components:{sc}",
-                                     ths.get_sector_components(sc, page=1,
-                                                               all_pages=use_v2))))
+        _cf("ths", "ths", f"sector:components:{s.code}",
+            (lambda sc=s.code: ths.get_sector_components(sc, page=1,
+                                                         all_pages=use_v2)),
+            namespace=source)
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
@@ -503,8 +559,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print(f"   拉取 {len(unique_codes)} 只个股日K线...")
     for code in unique_codes:
-        limiter.submit("xueqiu", "kline",
-                       lambda c=code: cache.set(f"kline:day:{c}", xq.get_kline(c, days=30)))
+        _cf("xueqiu", "kline", f"kline:day:{code}",
+            lambda c=code: xq.get_kline(c, days=30))
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
@@ -534,19 +590,6 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     code=stock.code, name=stock.name,
                     concepts=[s.name], primary_sector=s.code,
                 )
-
-    # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
-    for s in top10_down:
-        limiter.submit("ths", "ths",
-                       lambda sc=s.code: (
-                           cache.set(f"sector:components:{sc}",
-                                     ths.get_sector_components(sc, page=1))))
-    limiter.wait_all()
-    fail_seen = _report_api_failures(logger, fail_seen, verbose)
-
-    for s in top10_down:
-        components = cache.get(f"sector:components:{s.code}") or []
-        sector_components[s.code] = components
 
     candidate_pool = list(all_candidates.values())
     logger.phase("B", f"候选股筛选", count=len(candidate_pool))
@@ -582,8 +625,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 拉大盘日K线（上证指数 000001 的 K 线用于跳水日检测）
     market_code = "000001"
-    market_kline = xq.get_kline(market_code, days=30)
-    cache.set(f"kline:day:{market_code}", market_kline)
+    market_kline = _cf_sync(f"kline:day:{market_code}",
+                            lambda: xq.get_kline(market_code, days=30)) or []
 
     # 排序（连板优先）后对候选池全部个股评分，不再截断
     candidate_pool.sort(key=lambda c: (c.board_count, len(c.concepts)), reverse=True)
@@ -606,40 +649,35 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # T1: 板块5分K
     #   v1: 当日5分K（provider 内聚合）
     #   v2: 近10交易日历史5分K（虹吸回看），并额外拉主板块当日1分K（带动/抗跌基准）
+    #   口径不同 → 按 source 隔离缓存文件，避免 v1/v2 串味
     all_sectors = top10_up + top10_down
     for s in all_sectors:
         if use_v2:
-            limiter.submit("ths", "ths",
-                           lambda sc=s.code: (
-                               cache.set(f"kline:5min:sector:{sc}",
-                                         ths.get_sector_5min_kline_history(sc, days=10))))
+            _cf("ths", "ths", f"kline:5min:sector:{s.code}",
+                (lambda sc=s.code: ths.get_sector_5min_kline_history(sc, days=10)),
+                namespace=source)
         else:
-            limiter.submit("ths", "ths",
-                           lambda sc=s.code: (
-                               cache.set(f"kline:5min:sector:{sc}",
-                                         ths.get_sector_5min_kline(sc))))
+            _cf("ths", "ths", f"kline:5min:sector:{s.code}",
+                (lambda sc=s.code: ths.get_sector_5min_kline(sc)),
+                namespace=source)
     if use_v2:
         # 主板块当日1分K（领涨板块即可，带动/板块抗跌基准）
         for s in top10_up:
-            limiter.submit("ths", "ths",
-                           lambda sc=s.code: (
-                               cache.set(f"kline:1min:sector:{sc}",
-                                         ths.get_sector_1min_kline(sc))))
+            _cf("ths", "ths", f"kline:1min:sector:{s.code}",
+                (lambda sc=s.code: ths.get_sector_1min_kline(sc)),
+                namespace=source)
 
     # T2: 候选股分时K线
     #   v1: 只拉 ranking（top_n 评分池）
     #   v2: 拉全部候选（均为涨停股，含 drive 封板池对比所需的同板块涨停股）
     minute_targets = candidate_pool if use_v2 else ranking
     for r in minute_targets:
-        limiter.submit("xueqiu", "minute_kline",
-                       lambda c=r.code: (
-                           cache.set(f"kline:1min:{c}",
-                                     xq.get_minute_kline(c))))
+        _cf("xueqiu", "minute_kline", f"kline:1min:{r.code}",
+            lambda c=r.code: xq.get_minute_kline(c))
     if use_v2:
         # 大盘当日1分K（抗跌性大盘基准）
-        limiter.submit("xueqiu", "minute_kline",
-                       lambda: cache.set("kline:1min:000001",
-                                         xq.get_minute_kline("000001")))
+        _cf("xueqiu", "minute_kline", "kline:1min:000001",
+            lambda: xq.get_minute_kline("000001"))
 
     # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
     all_codes = set()
@@ -647,9 +685,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         for s in sc_list:
             all_codes.add(s.code)
     all_codes_list = list(all_codes)[:200]
-    limiter.submit("tencent", "quote",
-                   lambda: cache.set("quotes:batch",
-                                    tx.batch_get_quotes(all_codes_list)))
+    _cf("tencent", "quote", "quotes:batch",
+        lambda: tx.batch_get_quotes(all_codes_list))
 
     limiter.wait_all()
     logger.phase("D", "并发数据加载完成")
@@ -921,7 +958,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
 
 def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2,
-             force: bool = False, scorers: str = "v1"):
+             force: bool = False, scorers: str = "v1",
+             refresh_provider_cache: bool = False):
     """CLI 入口 — 同 scan() 但带 verbose 输出"""
     scan(top_n=top_n, candidates_n=candidates_n, workers=workers,
-         verbose=True, force=force, scorers=scorers)
+         verbose=True, force=force, scorers=scorers,
+         refresh_provider_cache=refresh_provider_cache)

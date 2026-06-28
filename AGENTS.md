@@ -43,6 +43,10 @@ python -m dragon_quant blacklist remove "次新股"
 python -m dragon_quant storage status        # 查看存储状态
 python -m dragon_quant storage size          # 磁盘占用
 python -m dragon_quant storage clear --all   # 清理全部
+
+# 按评分体系回测 / 查看 UI
+python -m dragon_quant review --source v1 --date 20260519
+python -m dragon_quant review --ui-only --source v2
 ```
 
 ### 前置条件
@@ -109,7 +113,7 @@ dragon_quant/
 │   └── reporter.py              # ReportBuilder（v1 四维 + v2 五维报告）
 ├── storage/                     # 统一持久化
 │   ├── paths.py / manager.py
-│   └── db.py                    # SQLite（scans/scan_stocks/dragons/scan_logs/vpa_analysis/sector_blacklist）
+│   └── db.py                    # SQLite（v1/v2 分表 + vpa_analysis/sector_blacklist）
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
 ├── web_ui/                      # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer）
@@ -129,7 +133,7 @@ dragon_quant/
 | **C** 连板+排序 | 雪球日K 算连板天数 → 按(连板,概念数)降序，**对候选池全部评分(不截断)** | — | 额外写 `Candidate.fived_pct`（5日涨幅） |
 | **D** 并发加载 | 板块/个股 K 线 + 腾讯批量行情 | 板块当日5分K + 个股1分K | 板块**历史10日5分K** + 板块**当日1分K** + 大盘1分K + 全候选1分K（封板池）|
 | **E** 打分 | 逐候选股评分（候选池全部，无 Top N 截断） | `_score_one`（四维加权）| `_score_one_v2`（五维门槛+加权 → DragonVerdict）|
-| **F** 输出+持久化 | 排序 + 报告 + SQLite + 5日去重 | 四维报告 | 五维报告 + `scorer_version` 入库 |
+| **F** 输出+持久化 | 排序 + 报告 + SQLite + 5日去重 | 四维报告 + 写 v1 分表 | 五维报告 + 写 v2 分表 |
 
 总耗时约 40-80 秒（取决于网络、并发数、v2 拉取量更大）。
 
@@ -189,17 +193,19 @@ dragon_quant/
 
 | 表 | 用途 | 关键点 |
 |----|------|--------|
-| `scans` | 每轮扫描元信息 | 含 `raw_output` 完整结果 JSON |
-| `scan_stocks` | 每轮全部评分结果 | scan_id 关联 |
-| `dragons` | 入选龙头（最终物化）| `UNIQUE(trade_date, code)`；`version`=包版本号；**`scorer_version`=评分器版本** |
-| `scan_logs` | 结构化日志 | |
+| `scans_v1` / `scans_v2` | 每轮扫描元信息 | 含 `raw_output` 完整结果 JSON；`scan` 只读写 v1，`scan_v2` 只读写 v2 |
+| `scan_stocks_v1` / `scan_stocks_v2` | 每轮全部评分结果 | scan_id 关联；v2 额外填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` |
+| `dragons_v1` / `dragons_v2` | 入选龙头（最终物化）| 各自 `UNIQUE(trade_date, code)`；`version`=包版本号；review 字段按体系独立 |
+| `scan_logs_v1` / `scan_logs_v2` | 结构化日志 | `logs --source v1|v2` 查询对应体系 |
 | `vpa_analysis` | 量价分析 | 独立表，不复用 dragons |
 | `sector_blacklist` | 概念板块黑名单 | 行业切换后默认种子为空 |
 
-### dragons 评分器版本（`scorer_version`）
-- 取值 `v1` / `v2` / `v1_v2`，存量记录迁移时回填 `v1`。
-- **同交易日并集合并**：同一 `(trade_date, code)` 多次写入时版本求并集去重（v1 在前）。如 v1 出 A,B、v2 出 A,C → 当日 A=`v1_v2`、B=`v1`、C=`v2`。合并在 `save_dragons` 的 UPSERT 内用纯 SQL CASE 完成（原子、不破坏批量写）。
-- **5 日去重排除同日**：5 日去重只针对跨日重复入选；同交易日另一版本已写入时放行，以便版本合并。
+### v1/v2 物理分表
+- `scan` 命令的缓存、扫描明细、日志、龙头物化全部读写 `*_v1` 表；`scan_v2` 全部读写 `*_v2` 表，避免同日同 topN 覆盖。
+- `scan_id` 使用 `v1_YYYYMMDD_topN` / `v2_YYYYMMDD_topN` 格式；不要再假设 `scan_id[:8]` 是日期。
+- `dragons_v1` 与 `dragons_v2` 同日同股可以各自保存 rank/score/report/review 状态；运行时不存在跨体系合并态。
+- 5 日去重按 source 独立执行：v1 只看 `dragons_v1`，v2 只看 `dragons_v2`。
+- 运行时只创建和读写 `*_v1` / `*_v2` 分表，不再创建旧 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；`source` 是唯一版本路由字段。
 
 ---
 
@@ -209,10 +215,11 @@ dragon_quant/
 ```bash
 python -m dragon_quant review                        # 自动筛 5~20 交易日内 pending 票全回测
 python -m dragon_quant review --date 20260519 --top 5
-python -m dragon_quant review --ui                   # 回测后启动 Web UI
-python -m dragon_quant review --ui-only              # 仅看结果
+python -m dragon_quant review --source v2 --date 20260519
+python -m dragon_quant review --ui --source v2        # 回测后启动 Web UI，默认展示 v2
+python -m dragon_quant review --ui-only --source v1   # 仅看结果
 ```
-回测逻辑：从 dragons 读 pending → 找入选后第一个非一字板日（`high != low`）最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回 DB。
+回测逻辑：按 `--source` 从 `dragons_v1` 或 `dragons_v2` 读 pending → 找入选后第一个非一字板日（`high != low`）最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 dragons 表。Web UI 的表格与 summary 也按 source 加载，并在页面显示 v1/v2 体系。
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
@@ -231,7 +238,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - **运行时依赖**：`playwright` 为必选（Cookie 自动获取 + 浏览器辅助）；其余仅用 Python 3 标准库。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
-- **新旧并存**：旧 `scorers/` 与 v1 编排路径零改动；v2 全在 `scorers_v2/` + 编排器 v2 分支，可灰度回滚。
+- **v1/v2 并存**：旧四维 `scorers/` 与 v1 编排路径保留；v2 全在 `scorers_v2/` + 编排器 v2 分支；持久化使用 v1/v2 物理分表，可灰度回滚。
 
 ### AI Agent 协作规范
 > **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。** 纯查询类操作（读文件、查数据库、搜索代码）不受此限。
@@ -255,9 +262,9 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 4 个 Provider（同花顺/东财/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 curl+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）
 - DB 概念板块黑名单表 + CLI `blacklist` 管理
-- dragons `scorer_version` 字段 + v1/v2 并集合并写入
+- v1/v2 物理分表（`scans_*` / `scan_stocks_*` / `scan_logs_*` / `dragons_*`）+ `review --source` / Web UI source 切换
 - 量价分析 `vpa/`、结构化日志 `logging/`、统一持久化 `storage/`、交易日历 `utils/trading.py`、龙头回测 `review.py`、Web UI
-- 全量 216 单测通过（含 `tests/test_scorers_v2.py`、`tests/test_storage.py` 版本合并用例）
+- 全量单测覆盖 `tests/test_scorers_v2.py`、`tests/test_storage.py` 等核心路径
 
 ### ⚠️ 待完成/观察
 - 单票分析 CLI `analyze <code>`：子进程入口仅 v1 骨架，缺 `sector_name_map` 等元数据注入；v2 暂只接主进程路径

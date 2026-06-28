@@ -39,8 +39,8 @@ cli.main 分发                              cli.py:488 (scan) / :490 (scan_v2)
     v2: _score_one_v2   → aggregator.evaluate  orchestrator.py:182 / 调用 :622
 
   Phase F 输出+持久化                       orchestrator.py:652
-    5日去重(排除同日)                        orchestrator.py:800
-    db.save_dragons(scorer_version=scorers) orchestrator.py:842
+    5日去重(按 source 隔离，排除同日)          orchestrator.py:804
+    db.save_dragons(source=source)          orchestrator.py:844
 ```
 
 ### v2 评分聚合（Phase E 内部）
@@ -78,8 +78,8 @@ scorers_v2.aggregator.evaluate(code, cache, ...)     scorers_v2/aggregator.py
 | 新增/改数据源接口 | `providers/base.py` + 具体 provider | 同步 orchestrator Phase D 预填 |
 | 改板块数据源(行业/概念) | `providers/ths.py` URL 常量段 | 排行字段铁律 `zdf`，详情页 `/thshy/` |
 | 改候选筛选/排序 | `orchestrator.py` Phase A/B/C | v1/v2 由 `use_v2` 分支 |
-| 改 dragons 表结构 | `storage/db.py` SCHEMA + `_migrate_dragons` | 加列须幂等；读取方按位置索引，新列加末尾 |
-| 改龙头入库/版本合并 | `orchestrator.py` Phase F + `db.save_dragons` | `scorer_version` UPSERT 合并 CASE |
+| 改 dragons 表结构 | `storage/db.py` 的 `DRAGON_SCHEMA_TEMPLATE` / `_ensure_schema` | v1/v2 分表结构须保持一致；读取方按位置索引，新列加末尾 |
+| 改龙头入库/source 路由 | `orchestrator.py` Phase F + `db.save_dragons` | `source` 选择 `dragons_v1` / `dragons_v2`，跨体系互不覆盖 |
 | 加 CLI 命令 | `cli.py` parser + dispatch + `_cmd_*` | 同步 AGENTS.md/README.md |
 | 改回测逻辑 | `review.py` | 读 dragons pending；写 review 字段 + vpa |
 | 改板块黑名单 | `storage/db.py`(表) + `cli.py`(blacklist 命令) | Phase A `_sector_ok` 消费 |
@@ -114,7 +114,7 @@ scorers_v2.aggregator.evaluate(code, cache, ...)     scorers_v2/aggregator.py
 4. **封单单位铁律**：封单强度 = `Quote.bid1_volume` ÷ `Quote.volume`，二者同为腾讯 gtimg「手」，禁与雪球成交量(股)混用（否则 100 倍误差）。
 5. **粒度铁律**：当日盘中时序对比一律 1分K（个股/板块/大盘对齐）；资金承接回看用 5分K 历史。
 6. **板块排行字段铁律**：必须 `field=zdf`（涨跌幅），`tradezdf`(资金流) 无视 order/page；单页 DOM 非严格有序须本地按 pct 排序（ths.py `get_sector_ranking`）。
-7. **dragons 版本合并**：同 `(trade_date, code)` 多次写入 `scorer_version` 并集去重（v1 在前）；5日去重排除同日（orchestrator.py:800），否则版本合并被阻挡。
+7. **dragons source 隔离**：`scan` 只写 `dragons_v1`，`scan_v2` 只写 `dragons_v2`；同 `(trade_date, code)` 可在两套表独立存在，5日去重也按 source 查询。
 8. **provider 基类新方法用默认 `NotImplementedError`**（非 `@abstractmethod`），否则 `create_providers()` 实例化全部 4 个 provider 时崩。
 
 ---

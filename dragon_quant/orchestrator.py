@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+import functools
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -41,6 +42,94 @@ STATISTICAL_CONCEPT_PREFIXES = (
 RANK_UP_COUNT = 8     # 领涨板块取前 8（候选筛选 + 5分K）
 RANK_UP_COUNT_V2 = 5  # scorers_v2：领涨板块取前 5（候选为板块内当日涨停股）
 RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
+
+# 数据源 / 接口中文名（仅用于控制台失败提示）
+PROVIDER_CN = {"ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯", "eastmoney": "东财"}
+ENDPOINT_CN = {
+    "sector_ranking": "获取板块排行",
+    "sector_components": "获取板块内个股",
+    "sector_5min_kline": "获取板块5分K线",
+    "sector_5min_history": "获取板块历史5分K线",
+    "sector_1min_kline": "获取板块1分K线",
+    "kline": "获取个股日K线",
+    "minute_kline": "获取个股分时K线",
+    "batch_quotes": "获取批量行情",
+}
+
+
+def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
+    """打印自上次游标以来新增的 api 失败，按 provider+endpoint 聚合。返回新游标。
+
+    数据源：logger.query(category="api", level="error")，每条 category 形如
+    api:{provider}:{endpoint}，data["error"] 为失败原因，code 为板块/个股代码。
+    """
+    fails = logger.query(category="api", level="error")
+    new = fails[seen_count:]
+    if verbose and new:
+        agg: dict = {}
+        for e in new:
+            parts = e.category.split(":")  # api:provider:endpoint
+            if len(parts) < 3:
+                continue
+            provider, endpoint = parts[1], parts[2]
+            g = agg.setdefault((provider, endpoint),
+                               {"count": 0, "codes": [], "error": ""})
+            g["count"] += 1
+            if e.code:
+                g["codes"].append(e.code)
+            g["error"] = e.data.get("error", "") or g["error"]
+        for (provider, endpoint), g in agg.items():
+            pcn = PROVIDER_CN.get(provider, provider)
+            ecn = ENDPOINT_CN.get(endpoint, endpoint)
+            codes = ""
+            if g["codes"]:
+                shown = ", ".join(g["codes"][:5])
+                more = "…" if len(g["codes"]) > 5 else ""
+                codes = f"（{shown}{more}）"
+            reason = f"：{g['error']}" if g["error"] else ""
+            print(f"   ❌ {pcn}·{ecn} 失败 {g['count']} 次{codes}{reason}",
+                  file=sys.stderr)
+    return len(fails)
+
+
+def _cache_worth_writing(data) -> bool:
+    """非 None 且（非 list 或 list 非空）才值得写盘，避免缓存 403 空结果。"""
+    if data is None:
+        return False
+    if isinstance(data, list):
+        return len(data) > 0
+    return True
+
+
+def _cached_fetch(limiter, cache, provider, endpoint, key, fetch_fn,
+                  trade_date, *, refresh, volatile, namespace=""):
+    """带交易日磁盘缓存的并发取数：命中则跳过 limiter，未命中提交任务并按需落盘。"""
+    if not refresh and not volatile:
+        if cache.load_for_trade_date(key, trade_date, namespace) is not None:
+            return  # 命中：不进 limiter 队列
+
+    def task():
+        data = fetch_fn()
+        if _cache_worth_writing(data) and not volatile:
+            cache.set_for_trade_date(key, data, trade_date, namespace)
+        else:
+            cache.set(key, data)  # 仅写内存供本轮使用
+    limiter.submit(provider, endpoint, task)
+
+
+def _cached_fetch_sync(cache, key, fetch_fn, trade_date, *,
+                       refresh, volatile, namespace=""):
+    """同步版（不经 limiter）：命中返回缓存，未命中 fetch 并按需落盘。"""
+    if not refresh and not volatile:
+        cached = cache.load_for_trade_date(key, trade_date, namespace)
+        if cached is not None:
+            return cached
+    data = fetch_fn()
+    if _cache_worth_writing(data) and not volatile:
+        cache.set_for_trade_date(key, data, trade_date, namespace)
+    else:
+        cache.set(key, data)
+    return data
 
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
@@ -268,7 +357,7 @@ def _get_trade_date() -> Optional[str]:
 
 def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
          verbose: bool = True, force: bool = False,
-         scorers: str = "v1") -> dict:
+         scorers: str = "v1", refresh_provider_cache: bool = False) -> dict:
     """龙头战法完整扫描 — Programmtic API
 
     返回结构化 dict:
@@ -298,6 +387,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     bj_tz = timezone(timedelta(hours=8))
     now = datetime.now(bj_tz)
     use_v2 = (scorers == "v2")
+    source = "v2" if use_v2 else "v1"
     rank_up_count = RANK_UP_COUNT_V2 if use_v2 else RANK_UP_COUNT
     
     # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
@@ -322,12 +412,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         try:
             from dragon_quant.storage import db
             # Step 1: 精确匹配当天日期
-            cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n)
+            cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n, source=source)
             # Step 2: 当天无记录 → 用雪球分时K确定最近交易日，查历史记录
             if not cached_scan:
                 trade_date = _get_trade_date()
                 if trade_date and trade_date != scan_date_fmt:
-                    cached_scan = db.get_latest_scan_by_date(trade_date, top_n)
+                    cached_scan = db.get_latest_scan_by_date(trade_date, top_n, source=source)
                     if cached_scan:
                         cache_note = f"（非交易日，使用最近交易日 {trade_date} 的数据）"
             # 命中缓存 → 输出结果（仅 raw_output 非空时）
@@ -337,7 +427,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                         print(f"💡 {cache_note}")
                     else:
                         print(f"💡 发现今日 ({scan_date_fmt}) 已存在 top_n={top_n} 的扫描记录")
-                    print(f"   直接从数据库读取缓存 (ID: {cached_scan['id']})...")
+                    print(f"   直接从数据库读取 {source} 缓存 (ID: {cached_scan['id']})...")
                 output_data = json.loads(cached_scan["raw_output"])
                 output_data["cached"] = True
                 if verbose:
@@ -364,6 +454,22 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                           provider_delays={"eastmoney": (1.5, 2.5),
                                            "ths": (0.3, 0.6)})
 
+    # provider 磁盘缓存命名空间：按交易日复用，避免每次命令重打满同花顺。
+    #   trade_date 优先用雪球分时K确定的最近交易日，失败回退自然日。
+    #   volatile：--force 闯入交易时段时，provider 缓存只用内存不落盘，
+    #             防止盘中波动数据冻结进当日交易日目录污染收盘后复用。
+    trade_date = _get_trade_date() or now.strftime("%Y-%m-%d")
+    volatile = is_trading_day and 9 <= now.hour < 15
+    _cf = functools.partial(_cached_fetch, limiter, cache,
+                            trade_date=trade_date,
+                            refresh=refresh_provider_cache, volatile=volatile)
+    _cf_sync = functools.partial(_cached_fetch_sync, cache,
+                                 trade_date=trade_date,
+                                 refresh=refresh_provider_cache, volatile=volatile)
+
+    # 失败接口提示游标（每个 phase 后增量打印新出现的 api 失败）
+    fail_seen = 0
+
     # ────────────────────────────────────────────
     # Phase A: 板块排行
     # ────────────────────────────────────────────
@@ -387,8 +493,11 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         return True
 
     # 一次抓取全部概念排行（provider 内已多页+本地排序），本地切涨幅/跌幅榜，
-    # 避免重复抓 8 页（desc/asc 数据相同）。
-    ranking_all = [s for s in ths.get_sector_ranking(asc=False) if _sector_ok(s)]
+    # 避免重复抓 8 页（desc/asc 数据相同）。缓存原始榜，黑名单过滤仍在内存做，
+    # 保证黑名单改动即时生效。
+    ranking_raw = _cf_sync("sector:ranking",
+                           lambda: ths.get_sector_ranking(asc=False)) or []
+    ranking_all = [s for s in ranking_raw if _sector_ok(s)]
     top10_up = ranking_all[:rank_up_count]
     top10_down = sorted(ranking_all, key=lambda s: s.pct)[:RANK_DOWN_COUNT]
     logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
@@ -399,6 +508,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         print(f"   领跌 {len(top10_down)} 个板块:")
         for s in top10_down:
             print(f"     ↓ {s.name}({s.code})  {s.pct:+.2f}%")
+
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     if not top10_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
@@ -416,12 +527,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # 提交前10涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     #   v2: all_pages=True 翻页到 ≈50 只，供 leadership 涨幅分位用更大样本
     for s in top10_up:
-        limiter.submit("ths", "ths",
-                       lambda sc=s.code: (
-                           cache.set(f"sector:components:{sc}",
-                                     ths.get_sector_components(sc, page=1,
-                                                               all_pages=use_v2))))
+        _cf("ths", "ths", f"sector:components:{s.code}",
+            (lambda sc=s.code: ths.get_sector_components(sc, page=1,
+                                                         all_pages=use_v2)),
+            namespace=source)
     limiter.wait_all()
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     for s in top10_up:
         components = cache.get(f"sector:components:{s.code}") or []
@@ -448,9 +559,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print(f"   拉取 {len(unique_codes)} 只个股日K线...")
     for code in unique_codes:
-        limiter.submit("xueqiu", "kline",
-                       lambda c=code: cache.set(f"kline:day:{c}", xq.get_kline(c, days=30)))
+        _cf("xueqiu", "kline", f"kline:day:{code}",
+            lambda c=code: xq.get_kline(c, days=30))
     limiter.wait_all()
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
     # 计算5日累计涨幅
     for code, stock in unique_codes.items():
@@ -479,24 +591,16 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     concepts=[s.name], primary_sector=s.code,
                 )
 
-    # 提交前10跌板块成分股请求（资金承接用，过 RateLimiter 防封）
-    for s in top10_down:
-        limiter.submit("ths", "ths",
-                       lambda sc=s.code: (
-                           cache.set(f"sector:components:{sc}",
-                                     ths.get_sector_components(sc, page=1))))
-    limiter.wait_all()
-
-    for s in top10_down:
-        components = cache.get(f"sector:components:{s.code}") or []
-        sector_components[s.code] = components
-
     candidate_pool = list(all_candidates.values())
     logger.phase("B", f"候选股筛选", count=len(candidate_pool))
     if verbose:
-        print(f"   候选池: {len(candidate_pool)} 只（去重）")
-        for c in candidate_pool:
-            print(f"     {c.name:6s} {c.code}  概念: {c.concepts}")
+        print(f"   候选池: {len(candidate_pool)} 只（去重），按板块明细:")
+        for s in top10_up:
+            picks = [c for c in sector_filtered[s.code]
+                     if c.code in all_candidates]
+            print(f"     ▎{s.name}({s.code})  {len(picks)} 只")
+            for c in picks:
+                print(f"        {c.code} {c.name}  涨幅{c.pct:+.2f}%")
 
     if not candidate_pool:
         return {"error": "无候选股", "ranking": [], "report_text": ""}
@@ -521,8 +625,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 拉大盘日K线（上证指数 000001 的 K 线用于跳水日检测）
     market_code = "000001"
-    market_kline = xq.get_kline(market_code, days=30)
-    cache.set(f"kline:day:{market_code}", market_kline)
+    market_kline = _cf_sync(f"kline:day:{market_code}",
+                            lambda: xq.get_kline(market_code, days=30)) or []
 
     # 排序（连板优先）后对候选池全部个股评分，不再截断
     candidate_pool.sort(key=lambda c: (c.board_count, len(c.concepts)), reverse=True)
@@ -534,6 +638,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         for r in ranking:
             print(f"     {r.code} {r.name:6s}  概念x{len(r.concepts)}  连板{r.board_count}")
 
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
+
     # ────────────────────────────────────────────
     # Phase D: 并发加载评分数据
     # ────────────────────────────────────────────
@@ -543,40 +649,35 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # T1: 板块5分K
     #   v1: 当日5分K（provider 内聚合）
     #   v2: 近10交易日历史5分K（虹吸回看），并额外拉主板块当日1分K（带动/抗跌基准）
+    #   口径不同 → 按 source 隔离缓存文件，避免 v1/v2 串味
     all_sectors = top10_up + top10_down
     for s in all_sectors:
         if use_v2:
-            limiter.submit("ths", "ths",
-                           lambda sc=s.code: (
-                               cache.set(f"kline:5min:sector:{sc}",
-                                         ths.get_sector_5min_kline_history(sc, days=10))))
+            _cf("ths", "ths", f"kline:5min:sector:{s.code}",
+                (lambda sc=s.code: ths.get_sector_5min_kline_history(sc, days=10)),
+                namespace=source)
         else:
-            limiter.submit("ths", "ths",
-                           lambda sc=s.code: (
-                               cache.set(f"kline:5min:sector:{sc}",
-                                         ths.get_sector_5min_kline(sc))))
+            _cf("ths", "ths", f"kline:5min:sector:{s.code}",
+                (lambda sc=s.code: ths.get_sector_5min_kline(sc)),
+                namespace=source)
     if use_v2:
         # 主板块当日1分K（领涨板块即可，带动/板块抗跌基准）
         for s in top10_up:
-            limiter.submit("ths", "ths",
-                           lambda sc=s.code: (
-                               cache.set(f"kline:1min:sector:{sc}",
-                                         ths.get_sector_1min_kline(sc))))
+            _cf("ths", "ths", f"kline:1min:sector:{s.code}",
+                (lambda sc=s.code: ths.get_sector_1min_kline(sc)),
+                namespace=source)
 
     # T2: 候选股分时K线
     #   v1: 只拉 ranking（top_n 评分池）
     #   v2: 拉全部候选（均为涨停股，含 drive 封板池对比所需的同板块涨停股）
     minute_targets = candidate_pool if use_v2 else ranking
     for r in minute_targets:
-        limiter.submit("xueqiu", "minute_kline",
-                       lambda c=r.code: (
-                           cache.set(f"kline:1min:{c}",
-                                     xq.get_minute_kline(c))))
+        _cf("xueqiu", "minute_kline", f"kline:1min:{r.code}",
+            lambda c=r.code: xq.get_minute_kline(c))
     if use_v2:
         # 大盘当日1分K（抗跌性大盘基准）
-        limiter.submit("xueqiu", "minute_kline",
-                       lambda: cache.set("kline:1min:000001",
-                                         xq.get_minute_kline("000001")))
+        _cf("xueqiu", "minute_kline", "kline:1min:000001",
+            lambda: xq.get_minute_kline("000001"))
 
     # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
     all_codes = set()
@@ -584,14 +685,18 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         for s in sc_list:
             all_codes.add(s.code)
     all_codes_list = list(all_codes)[:200]
-    limiter.submit("tencent", "quote",
-                   lambda: cache.set("quotes:batch",
-                                    tx.batch_get_quotes(all_codes_list)))
+    _cf("tencent", "quote", "quotes:batch",
+        lambda: tx.batch_get_quotes(all_codes_list))
 
     limiter.wait_all()
     logger.phase("D", "并发数据加载完成")
+    prev_seen = fail_seen
+    fail_seen = _report_api_failures(logger, fail_seen, verbose)
     if verbose:
-        print(f"   ✅ 全部加载完成")
+        if fail_seen == prev_seen:
+            print(f"   ✅ 全部加载完成")
+        else:
+            print(f"   ⚠️ 数据加载完成（部分接口失败，详见上方）")
 
     # ────────────────────────────────────────────
     # Phase E: 主进程打分 — 只对 top_n 只
@@ -654,8 +759,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     output = {
         "timestamp": time.strftime("%Y%m%d_%H%M%S"),
+        "source": source,
         "elapsed_s": round(elapsed, 1),
-        "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers},
+        "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers, "scorers": source},
         "sectors": {
             "up": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_up],
             "down": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_down],
@@ -739,13 +845,13 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         # ── 持久化 ──
         timestamp = output["timestamp"]
-        scan_id = f"{timestamp[:8]}_{top_n}"  # 20260519_25，同日期同 top_n 自动覆盖
+        scan_id = f"{source}_{timestamp[:8]}_{top_n}"  # v1_20260519_25 / v2_20260519_25
 
         # 结构化日志 → SQLite
         try:
             from dragon_quant.storage import db
-            db.save_scan_logs(scan_id, logger.to_dicts())
-            log_count = db.count_scan_logs(scan_id)
+            db.save_scan_logs(scan_id, logger.to_dicts(), source=source)
+            log_count = db.count_scan_logs(scan_id, source=source)
             output["log_count"] = log_count
         except Exception as e:
             if verbose:
@@ -753,7 +859,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             output["log_count"] = len(logger.to_dicts())
 
         # 报告文本
-        report_path = RESULTS_DIR / f"scan_report_{timestamp}.txt"
+        report_path = RESULTS_DIR / f"scan_report_{source}_{timestamp}.txt"
         with open(report_path, "w") as f:
             if use_v2:
                 f.write(reporter.build_summary_report_v2(display_list))
@@ -764,7 +870,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         output["report_path"] = str(report_path)
 
         # SQLite 持久化
-        scan_date = scan_id[:8]
+        scan_date = timestamp[:8]
         scan_date_fmt = f"{scan_date[:4]}-{scan_date[4:6]}-{scan_date[6:8]}"
         try:
             from dragon_quant.storage import db
@@ -776,7 +882,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 candidates_n=candidates_n,
                 workers=workers,
                 stocks=results[:top_n],
-                raw_output=json.dumps(output, ensure_ascii=False)
+                raw_output=json.dumps(output, ensure_ascii=False),
+                source=source,
             )
             
             # 保存 top_n 详细信息到 dragons 表
@@ -799,8 +906,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
                 # 5 日去重：该 code 上次入选距今 < 5 个交易日
                 #   仅对「跨日」(last_date 严格早于当天) 重复入选去重；
-                #   last_date == 当天 表示同日另一评分器版本已写入，放行以便 save_dragons 合并版本
-                last_info = db.get_last_entry_with_rank(code)
+                #   v1/v2 使用独立 dragons 表，因此同日另一评分器版本不会影响当前体系。
+                last_info = db.get_last_entry_with_rank(code, source=source)
                 if last_info:
                     last_date, old_rank = last_info
                     if last_date < scan_date_fmt and \
@@ -838,7 +945,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 print(f"  🚫 5 日内去重: {', '.join(parts)}")
                 
             db.save_dragons(scan_date_fmt, dragons_to_save,
-                            version=__version__, scorer_version=scorers)
+                            version=__version__, source=source)
             
         except Exception as e:
             if verbose:
@@ -851,7 +958,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
 
 def run_scan(top_n: int = 25, candidates_n: int = 5, workers: int = 2,
-             force: bool = False, scorers: str = "v1"):
+             force: bool = False, scorers: str = "v1",
+             refresh_provider_cache: bool = False):
     """CLI 入口 — 同 scan() 但带 verbose 输出"""
     scan(top_n=top_n, candidates_n=candidates_n, workers=workers,
-         verbose=True, force=force, scorers=scorers)
+         verbose=True, force=force, scorers=scorers,
+         refresh_provider_cache=refresh_provider_cache)

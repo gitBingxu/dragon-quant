@@ -24,12 +24,14 @@ interface Col {
 }
 
 const COLUMNS: Col[] = [
+  { key: "source", label: "体系", sortable: true },
   { key: "code", label: "代码", sortable: true },
   { key: "name", label: "名称", sortable: true },
   { key: "trade_date", label: "入选日", sortable: true },
   { key: "buy_date", label: "买入日", sortable: true },
   { key: "rank", label: "排名", sortable: true },
   { key: "composite_score", label: "综合分", sortable: true },
+  { key: "is_true_dragon", label: "真龙" },
   { key: "board_count", label: "连板", sortable: true },
   { key: "concepts", label: "概念" },
   { key: "buy_price", label: "买入价", sortable: true },
@@ -86,13 +88,31 @@ export function DragonTable({
   const renderRow = (r: Dragon) => {
     const st = statusMeta(r.review_status);
     return (
-      <Table.Tr key={`${r.trade_date}-${r.code}`}>
+      <Table.Tr key={`${r.source}-${r.trade_date}-${r.code}`}>
+        <Table.Td>
+          <Badge color={r.source === "v2" ? "grape" : "blue"} variant="light" radius="sm">
+            {r.source === "v2" ? "v2 五维" : "v1 四维"}
+          </Badge>
+        </Table.Td>
         <Table.Td>{r.code}</Table.Td>
         <Table.Td>{r.name}</Table.Td>
         <Table.Td>{r.trade_date}</Table.Td>
         <Table.Td>{r.buy_date || "—"}</Table.Td>
         <Table.Td>{r.rank ?? "—"}</Table.Td>
         <Table.Td fw={600}>{fmtNum(r.composite_score, 1)}</Table.Td>
+        <Table.Td>
+          {r.is_true_dragon == null ? (
+            "—"
+          ) : r.is_true_dragon ? (
+            <Badge color="red" variant="light" radius="sm">
+              🐉真龙
+            </Badge>
+          ) : (
+            <Badge color="gray" variant="light" radius="sm">
+              ✗
+            </Badge>
+          )}
+        </Table.Td>
         <Table.Td>{r.board_count ?? "—"}</Table.Td>
         <Table.Td>{(r.concepts || []).slice(0, 3).join(" · ")}</Table.Td>
         <Table.Td>{fmtNum(r.buy_price)}</Table.Td>

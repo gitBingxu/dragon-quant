@@ -63,25 +63,14 @@ class TestGetPendingDragons(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
         self._conn = sqlite3.connect(self._db_path)
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
 
-        # 建表（与 db.py _ensure_schema 一致的最小结构）
-        self._conn.executescript("""
-            CREATE TABLE IF NOT EXISTS dragons (
-                trade_date TEXT, code TEXT, name TEXT,
-                scan_id TEXT, rank INTEGER, composite_score REAL,
-                board_count INTEGER, open_px REAL, close_px REAL,
-                high_px REAL, low_px REAL, pct REAL,
-                turnover_rate REAL, amount REAL, market_cap REAL,
-                concepts_json TEXT, report_text TEXT,
-                buy_date TEXT, buy_price REAL,
-                max_return_5d REAL, max_drawdown_5d REAL,
-                max_return_hold_days INTEGER,
-                review_status TEXT, version TEXT DEFAULT ''
-            )
-        """)
         # 插入测试数据
         self._conn.executemany(
-            "INSERT INTO dragons(trade_date, code, name, composite_score, review_status) "
+            "INSERT INTO dragons_v1(trade_date, code, name, composite_score, review_status) "
             "VALUES (?, ?, ?, ?, ?)",
             [
                 ("20260521", "000725", "京东方A", 80.0, "completed"),
@@ -128,20 +117,10 @@ class TestGetReviewSummary(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
         self._conn = sqlite3.connect(self._db_path)
-        self._conn.executescript("""
-            CREATE TABLE IF NOT EXISTS dragons (
-                trade_date TEXT, code TEXT, name TEXT,
-                scan_id TEXT, rank INTEGER, composite_score REAL,
-                board_count INTEGER, open_px REAL, close_px REAL,
-                high_px REAL, low_px REAL, pct REAL,
-                turnover_rate REAL, amount REAL, market_cap REAL,
-                concepts_json TEXT, report_text TEXT,
-                buy_date TEXT, buy_price REAL,
-                max_return_5d REAL, max_drawdown_5d REAL,
-                max_return_hold_days INTEGER,
-                review_status TEXT, version TEXT DEFAULT ''
-            )
-        """)
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
 
     def tearDown(self):
         self._conn.close()
@@ -151,11 +130,11 @@ class TestGetReviewSummary(unittest.TestCase):
         with patch("dragon_quant.storage.db._connect",
                    return_value=sqlite3.connect(self._db_path)):
             from dragon_quant.storage.db import get_review_summary
-            return get_review_summary()
+            return get_review_summary(source="v1")
 
     def test_win_rate_requires_positive_return_and_drawdown_above_minus_5(self):
         self._conn.executemany(
-            "INSERT INTO dragons(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
+            "INSERT INTO dragons_v1(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [
                 ("20260521", "000001", "样本A", 8.5, -3.2, "completed"),
@@ -175,7 +154,7 @@ class TestGetReviewSummary(unittest.TestCase):
 
     def test_win_rate_is_none_when_no_completed_rows(self):
         self._conn.execute(
-            "INSERT INTO dragons(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
+            "INSERT INTO dragons_v1(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             ("20260525", "000005", "样本E", 9.0, -1.0, "pending"),
         )
@@ -189,7 +168,7 @@ class TestGetReviewSummary(unittest.TestCase):
 
     def test_completed_rows_with_null_metrics_count_in_denominator_only(self):
         self._conn.executemany(
-            "INSERT INTO dragons(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
+            "INSERT INTO dragons_v1(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [
                 ("20260521", "000001", "样本A", 8.5, -3.2, "completed"),
@@ -252,12 +231,7 @@ class TestDragonsRebuildUnion(unittest.TestCase):
                 "code": "e", "name": "e", "scan_id": scan1, "rank": 5,
                 "composite_score": 86, "board_count": 1, "concepts": [], "report_text": "",
             }], version="")
-            conn = sqlite3.connect(self._db_path)
-            try:
-                conn.execute("UPDATE dragons SET review_status='completed' WHERE trade_date=? AND code='e'", (day,))
-                conn.commit()
-            finally:
-                conn.close()
+            db.update_dragon_review(day, "e", review_status="completed", source="v1")
 
             # calendar: 简化为包含 day 以及 30 天内一堆日期，避免 5 日 gate 干扰
             calendar = {day, "2026-06-04", "2026-06-03", "2026-06-02", "2026-06-01"}
@@ -286,8 +260,8 @@ class TestDragonsRebuildUnion(unittest.TestCase):
             self.assertIn("e", codes2)
 
 
-class TestSaveDragonsScorerVersion(unittest.TestCase):
-    """验证：dragons.scorer_version 并集合并（v1/v2/v1_v2）+ 默认 v1"""
+class TestSaveDragonsSourceIsolation(unittest.TestCase):
+    """验证：dragons_v1 / dragons_v2 分表隔离，互不覆盖。"""
 
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -296,17 +270,54 @@ class TestSaveDragonsScorerVersion(unittest.TestCase):
     def tearDown(self):
         self._tmpdir.cleanup()
 
-    def _scorer_version(self, db, trade_date, code):
+    def _dragon_row(self, table, trade_date, code):
         conn = sqlite3.connect(self._db_path)
         try:
             r = conn.execute(
-                "SELECT scorer_version FROM dragons WHERE trade_date=? AND code=?",
+                f"SELECT rank, composite_score, report_text, source FROM {table} WHERE trade_date=? AND code=?",
                 (trade_date, code)).fetchone()
-            return r[0] if r else None
+            return r
         finally:
             conn.close()
 
-    def test_merge_and_default(self):
+    def test_schema_has_only_versioned_core_tables(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            tables = {
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            self.assertIn("scans_v1", tables)
+            self.assertIn("scans_v2", tables)
+            self.assertIn("dragons_v1", tables)
+            self.assertIn("dragons_v2", tables)
+            self.assertIn("scan_logs_v1", tables)
+            self.assertIn("scan_logs_v2", tables)
+            self.assertNotIn("scans", tables)
+            self.assertNotIn("scan_stocks", tables)
+            self.assertNotIn("dragons", tables)
+            self.assertNotIn("scan_logs", tables)
+
+            dragon_cols = {r[1] for r in conn.execute("PRAGMA table_info(dragons_v1)")}
+            self.assertIn("source", dragon_cols)
+            self.assertNotIn("scorer_version", dragon_cols)
+        finally:
+            conn.close()
+
+    def test_scorer_version_parameter_is_not_supported(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            with self.assertRaises(TypeError):
+                db.save_dragons("2026-06-20", [{"code": "A"}], scorer_version="v2")
+
+    def test_default_v1_and_explicit_v2_are_separate_tables(self):
         # db 层每次操作主动 close 连接，须用 side_effect 每次返回新连接
         with patch("dragon_quant.storage.db._connect",
                    side_effect=lambda: sqlite3.connect(self._db_path)):
@@ -315,34 +326,67 @@ class TestSaveDragonsScorerVersion(unittest.TestCase):
             D = "2026-06-20"
 
             # 默认参数 → v1
-            db.save_dragons(D, [{"code": "W", "rank": 1}])
-            self.assertEqual(self._scorer_version(db, D, "W"), "v1")
+            db.save_dragons(D, [{"code": "W", "rank": 1, "composite_score": 90, "report_text": "v1"}])
+            self.assertEqual(self._dragon_row("dragons_v1", D, "W")[3], "v1")
+            self.assertIsNone(self._dragon_row("dragons_v2", D, "W"))
 
-            # v1 → v2 累积合并为 v1_v2
-            db.save_dragons(D, [{"code": "A", "rank": 1}], scorer_version="v1")
-            self.assertEqual(self._scorer_version(db, D, "A"), "v1")
-            db.save_dragons(D, [{"code": "A", "rank": 1}], scorer_version="v2")
-            self.assertEqual(self._scorer_version(db, D, "A"), "v1_v2")
-            # 再写 v1 幂等
-            db.save_dragons(D, [{"code": "A", "rank": 1}], scorer_version="v1")
-            self.assertEqual(self._scorer_version(db, D, "A"), "v1_v2")
+            # 同日同票 v1/v2 各保存一行，rank/score/report 互不覆盖
+            db.save_dragons(D, [{"code": "A", "rank": 1, "composite_score": 91, "report_text": "from-v1"}], source="v1")
+            db.save_dragons(D, [{"code": "A", "rank": 2, "composite_score": 82, "report_text": "from-v2"}], source="v2")
+            self.assertEqual(self._dragon_row("dragons_v1", D, "A")[:3], (1, 91.0, "from-v1"))
+            self.assertEqual(self._dragon_row("dragons_v2", D, "A")[:3], (2, 82.0, "from-v2"))
 
-            # 顺序无关：先 v2 再 v1 仍输出 v1_v2（v1 在前）
-            db.save_dragons(D, [{"code": "Z", "rank": 1}], scorer_version="v2")
-            db.save_dragons(D, [{"code": "Z", "rank": 1}], scorer_version="v1")
-            self.assertEqual(self._scorer_version(db, D, "Z"), "v1_v2")
-
-    def test_union_two_versions(self):
+    def test_query_and_review_update_are_source_scoped(self):
         with patch("dragon_quant.storage.db._connect",
                    side_effect=lambda: sqlite3.connect(self._db_path)):
             from dragon_quant.storage import db
             db.init_db()
             D = "2026-06-20"
-            # v1 出 A,B；v2 出 A,C → A=v1_v2, B=v1, C=v2
             db.save_dragons(D, [{"code": "A", "rank": 1}, {"code": "B", "rank": 2}],
-                            scorer_version="v1")
+                            source="v1")
             db.save_dragons(D, [{"code": "A", "rank": 1}, {"code": "C", "rank": 2}],
-                            scorer_version="v2")
-            self.assertEqual(self._scorer_version(db, D, "A"), "v1_v2")
-            self.assertEqual(self._scorer_version(db, D, "B"), "v1")
-            self.assertEqual(self._scorer_version(db, D, "C"), "v2")
+                            source="v2")
+
+            self.assertEqual({r["code"] for r in db.get_pending_dragons(source="v1")}, {"A", "B"})
+            self.assertEqual({r["code"] for r in db.get_pending_dragons(source="v2")}, {"A", "C"})
+
+            db.update_dragon_review(D, "A", max_return_5d=10.0, review_status="completed", source="v1")
+            self.assertEqual(db.get_review_summary(source="v1")["completed"], 1)
+            self.assertEqual(db.get_review_summary(source="v2")["completed"], 0)
+
+    def test_is_true_dragon_written_and_read_for_v2(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            D = "2026-06-20"
+
+            dragon_cols = {r[1] for r in sqlite3.connect(self._db_path)
+                           .execute("PRAGMA table_info(dragons_v2)")}
+            self.assertIn("is_true_dragon", dragon_cols)
+
+            db.save_dragons(D, [
+                {"code": "A", "rank": 1, "composite_score": 90, "is_true_dragon": True},
+                {"code": "B", "rank": 2, "composite_score": 80, "is_true_dragon": False},
+            ], source="v2")
+
+            rows = {r["code"]: r for r in db.get_dragons(D, source="v2")}
+            self.assertIs(rows["A"]["is_true_dragon"], True)
+            self.assertIs(rows["B"]["is_true_dragon"], False)
+
+            pend = {r["code"]: r for r in db.get_pending_dragons(source="v2")}
+            self.assertIs(pend["A"]["is_true_dragon"], True)
+            self.assertIs(pend["B"]["is_true_dragon"], False)
+
+            q = {r["code"]: r for r in db.query_dragons(source="v2")}
+            self.assertIs(q["A"]["is_true_dragon"], True)
+
+    def test_is_true_dragon_is_none_when_not_provided(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            D = "2026-06-20"
+            db.save_dragons(D, [{"code": "A", "rank": 1}], source="v1")
+            rows = db.get_dragons(D, source="v1")
+            self.assertIsNone(rows[0]["is_true_dragon"])

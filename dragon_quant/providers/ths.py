@@ -367,6 +367,14 @@ class THSProvider(StockProvider):
         行业板块 clid 即 code 本身（881xxx）；概念板块为 885xxx 映射。"""
         if sector_code in _INNER_CACHE:
             return _INNER_CACHE[sector_code]
+
+        # 行业板块（881xxx）的 clid 与板块代码一致，无需依赖详情页解析。
+        # 详情页偶发返回异常/空页面时，历史 5 分 K 与当日 1 分 K 会被误判为
+        # innerCode 解析失败，进而导致 v2 资金承接降级为“目标板块5分K不足”。
+        if re.fullmatch(r"881\d{3}", sector_code):
+            _INNER_CACHE[sector_code] = sector_code
+            return sector_code
+
         html = _curl(DETAIL_URL.format(code=sector_code), gbk=True)
         inner = ""
         if html:

@@ -1,6 +1,7 @@
 // 后端 API 类型定义与 fetch 封装。字段对齐 dragon_quant/storage/db.py。
 
 export interface Dragon {
+  source: "v1" | "v2";
   trade_date: string;
   code: string;
   name: string;
@@ -18,6 +19,7 @@ export interface Dragon {
   market_cap: number | null;
   concepts: string[];
   report_text: string;
+  is_true_dragon: boolean | null;
   buy_date: string | null;
   buy_price: number | null;
   max_return_5d: number | null;
@@ -28,6 +30,7 @@ export interface Dragon {
 }
 
 export interface Summary {
+  source: "v1" | "v2";
   total: number;
   completed: number;
   pending: number;
@@ -39,6 +42,7 @@ export interface Summary {
 }
 
 export interface DragonFilters {
+  source?: "v1" | "v2";
   code?: string;
   name?: string;
   date_from?: string;
@@ -56,8 +60,9 @@ export interface DragonFilters {
   sort_dir: string;
 }
 
-export async function fetchSummary(): Promise<Summary> {
-  const res = await fetch("/api/summary");
+export async function fetchSummary(source: "v1" | "v2" = "v1"): Promise<Summary> {
+  const params = new URLSearchParams({ source });
+  const res = await fetch("/api/summary?" + params.toString());
   if (!res.ok) throw new Error(`summary ${res.status}`);
   return res.json();
 }
@@ -67,6 +72,7 @@ export async function fetchDragons(
 ): Promise<{ data: Dragon[]; count: number }> {
   const params = new URLSearchParams();
   const keys: (keyof DragonFilters)[] = [
+    "source",
     "code",
     "name",
     "date_from",

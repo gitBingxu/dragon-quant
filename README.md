@@ -43,6 +43,10 @@ playwright install chromium
 ## 快速开始
 
 ```bash
+# 查看 Linux 风格帮助提示
+dragon-quant -h
+dragon-quant scan -h
+
 # v1 扫榜 — 找 top5 龙头
 dragon-quant scan --top 5
 

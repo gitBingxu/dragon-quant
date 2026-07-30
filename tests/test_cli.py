@@ -9,6 +9,63 @@ from dragon_quant._version import __version__
 from dragon_quant import cli
 
 
+class TestCliHelp(unittest.TestCase):
+
+    def test_top_level_short_help(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage:", output)
+        self.assertIn("Commands:", output)
+        self.assertIn("Examples:", output)
+        self.assertIn("scan_v2", output)
+        self.assertIn("Use \"dragon-quant <command> -h\"", output)
+
+    def test_scan_help_does_not_run_scan(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "scan", "-h"]), \
+             patch("dragon_quant.cli.orchestrate_scan") as mock_scan:
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant scan [options]", output)
+        self.assertIn("--top TOP", output)
+        self.assertIn("--force", output)
+        self.assertIn("--no-cache", output)
+        mock_scan.assert_not_called()
+
+    def test_review_help_includes_source_and_ui_options(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "review", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant review [options]", output)
+        self.assertIn("--source {v1,v2}", output)
+        self.assertIn("--ui-only", output)
+
+    def test_data_kline_help_includes_required_options(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "data", "kline", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant data kline --code CODE [options]", output)
+        self.assertIn("--code CODE", output)
+        self.assertIn("--source {xueqiu,tencent}", output)
+        self.assertIn("--days DAYS", output)
+
+
 class TestCliVersion(unittest.TestCase):
 
     def test_short_version_option(self):

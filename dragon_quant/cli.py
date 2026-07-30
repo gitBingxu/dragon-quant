@@ -18,6 +18,42 @@ from dragon_quant.orchestrator import scan as orchestrate_scan
 from dragon_quant.storage.manager import StorageManager
 
 
+class DragonHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Keep curated help text layout while using argparse parsing behavior."""
+
+    def _format_action_invocation(self, action):
+        if not action.option_strings:
+            return super()._format_action_invocation(action)
+
+        parts = []
+        if action.nargs == 0:
+            parts.extend(action.option_strings)
+        else:
+            default = action.dest.upper()
+            args_string = self._format_args(action, default)
+            parts.extend(action.option_strings[:-1])
+            parts.append(f"{action.option_strings[-1]} {args_string}")
+        return ", ".join(parts)
+
+
+class DragonArgumentParser(argparse.ArgumentParser):
+    """Project parser with Linux-style help section names."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("formatter_class", DragonHelpFormatter)
+        super().__init__(*args, **kwargs)
+        self._optionals.title = "Options"
+        self._positionals.title = "Arguments"
+
+    def format_help(self):
+        text = super().format_help()
+        return text.replace("usage:", "Usage:", 1)
+
+
+def _parser(*args, **kwargs):
+    return DragonArgumentParser(*args, **kwargs)
+
+
 def _cmd_scan(args):
     """扫描命令（v1 四维评分器）"""
     if args.date:
@@ -364,7 +400,8 @@ def _to_dict(obj) -> dict:
 def main():
     from dragon_quant._version import __version__
 
-    shared = argparse.ArgumentParser(add_help=False)
+    shared = _parser(add_help=False)
+    shared._optionals.title = "Scan Options"
     shared.add_argument("--top", type=int, default=25, help="最终候选股数量 (默认25)")
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
     shared.add_argument("--workers", type=int, default=2, help="并发线程数 (默认2)")
@@ -373,98 +410,187 @@ def main():
     shared.add_argument("--no-cache", action="store_true",
                         help="跳过 provider 按交易日磁盘缓存，强制各数据源重新拉取并刷新缓存")
 
-    parser = argparse.ArgumentParser(
+    parser = _parser(
         prog="dragon-quant",
         description="龙头战法量化筛选系统",
+        epilog="""Examples:
+  dragon-quant -h
+  dragon-quant scan --top 25 --candidates 5 --workers 2
+  dragon-quant scan_v2 --top 5 --force
+  dragon-quant data kline --code 600172 --days 20
+  dragon-quant review --ui-only --source v2
+
+Use \"dragon-quant <command> -h\" for command-specific help.
+""",
     )
     parser.add_argument("-v", "--version", action="version",
                         version=f"%(prog)s {__version__}")
     parser.set_defaults(command="scan")
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command", title="Commands", metavar="<command>")
 
     # scan 子命令（v1 四维评分器）
-    scan_p = sub.add_parser("scan", help="批量扫描龙头股（v1 四维）", parents=[shared])
+    scan_p = sub.add_parser(
+        "scan",
+        help="批量扫描龙头股（v1 四维）",
+        parents=[shared],
+        usage="dragon-quant scan [options]",
+        description="批量扫描龙头股（v1 四维评分器）。",
+        epilog="""Examples:
+  dragon-quant scan
+  dragon-quant scan --top 25 --candidates 5 --workers 2
+  dragon-quant scan --date 20260519 --top 5
+""",
+    )
     scan_p.add_argument("--date", default=None,
                         help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
 
     # scan_v2 子命令（v2 五维「识别真龙」评分器）
-    scan_v2_p = sub.add_parser("scan_v2", help="批量扫描龙头股（v2 五维识别真龙）",
-                               parents=[shared])
+    scan_v2_p = sub.add_parser(
+        "scan_v2",
+        help="批量扫描龙头股（v2 五维识别真龙）",
+        parents=[shared],
+        usage="dragon-quant scan_v2 [options]",
+        description="批量扫描龙头股（v2 五维「识别真龙」评分器）。",
+        epilog="""Examples:
+  dragon-quant scan_v2 --top 5
+  dragon-quant scan_v2 --force
+  dragon-quant scan_v2 --date 20260519 --top 5
+""",
+    )
     scan_v2_p.add_argument("--date", default=None,
                            help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
 
     # logs 子命令
-    logs_p = sub.add_parser("logs", help="日志查询与管理")
+    logs_p = sub.add_parser(
+        "logs",
+        help="日志查询与管理",
+        usage="dragon-quant logs [options] <action> [action-options]",
+        description="查询、汇总或清理扫描日志。",
+        epilog="""Examples:
+  dragon-quant logs tail -n 20
+  dragon-quant logs --source v2 query --date 20260519 --level error
+  dragon-quant logs --source v1 summary
+""",
+    )
     logs_p.add_argument("--source", default="v1", choices=["v1", "v2"],
                         help="日志来源体系 (默认 v1)")
     logs_subs = logs_p.add_subparsers(dest="logs_action")
+    logs_subs.title = "Actions"
+    logs_subs.metavar = "<action>"
 
-    tail_p = logs_subs.add_parser("tail", help="查看最新日志")
+    tail_p = logs_subs.add_parser("tail", help="查看最新日志", usage="dragon-quant logs tail [options]")
     tail_p.add_argument("-n", "--lines", type=int, default=20, help="返回行数 (默认20)")
 
-    query_p = logs_subs.add_parser("query", help="按条件查询日志")
+    query_p = logs_subs.add_parser("query", help="按条件查询日志", usage="dragon-quant logs query [options]")
     query_p.add_argument("--date", help="日期 (YYYYMMDD)")
     query_p.add_argument("--category", help="类别过滤，如 phase、api、scorer:drive")
     query_p.add_argument("--level", help="级别过滤，如 info、warn、error")
     query_p.add_argument("--code", help="股票代码过滤")
     query_p.add_argument("--tail", type=int, default=200, help="最多返回条数 (默认200)")
 
-    clear_logs_p = logs_subs.add_parser("clear", help="清除旧日志")
+    clear_logs_p = logs_subs.add_parser("clear", help="清除旧日志", usage="dragon-quant logs clear [options]")
     clear_logs_p.add_argument("--days", type=int, default=7, help="保留最近N天 (默认7)")
 
-    logs_subs.add_parser("list", help="列出所有日志文件")
-    sum_p = logs_subs.add_parser("summary", help="最新扫描摘要")
+    logs_subs.add_parser("list", help="列出所有日志文件", usage="dragon-quant logs list")
+    sum_p = logs_subs.add_parser("summary", help="最新扫描摘要", usage="dragon-quant logs summary [options]")
     sum_p.add_argument("--date", help="日期过滤")
 
     # data 子命令
-    data_p = sub.add_parser("data", help="原子数据查询")
+    data_p = sub.add_parser(
+        "data",
+        help="原子数据查询",
+        usage="dragon-quant data <action> [action-options]",
+        description="查询板块、成分股、K线、实时行情和 Cookie 状态。",
+        epilog="""Examples:
+  dragon-quant data sector
+  dragon-quant data components --sector 881167
+  dragon-quant data kline --code 600172 --days 20
+  dragon-quant data cookie-status
+""",
+    )
     data_subs = data_p.add_subparsers(dest="data_action")
+    data_subs.title = "Actions"
+    data_subs.metavar = "<action>"
 
-    sector_p = data_subs.add_parser("sector", help="板块排行榜")
+    sector_p = data_subs.add_parser("sector", help="板块排行榜", usage="dragon-quant data sector [options]")
     sector_p.add_argument("--asc", action="store_true", help="跌幅榜（默认涨幅榜）")
 
-    comp_p = data_subs.add_parser("components", help="板块成分股")
+    comp_p = data_subs.add_parser("components", help="板块成分股", usage="dragon-quant data components --sector SECTOR")
     comp_p.add_argument("--sector", required=True, help="同花顺概念板块 6 位代码，如 301558")
 
-    kline_p = data_subs.add_parser("kline", help="个股日K线")
+    kline_p = data_subs.add_parser("kline", help="个股日K线", usage="dragon-quant data kline --code CODE [options]")
     kline_p.add_argument("--code", required=True, help="股票代码")
-    kline_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"])
-    kline_p.add_argument("--days", type=int, default=20)
+    kline_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"],
+                         help="数据源 (默认 xueqiu)")
+    kline_p.add_argument("--days", type=int, default=20, help="拉取日K线根数 (默认20)")
 
-    min_p = data_subs.add_parser("minute", help="个股1分钟K线（分时）")
+    min_p = data_subs.add_parser("minute", help="个股1分钟K线（分时）",
+                                 usage="dragon-quant data minute --code CODE [options]")
     min_p.add_argument("--code", required=True, help="股票代码")
-    min_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"])
+    min_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"],
+                       help="数据源 (默认 xueqiu)")
 
-    quote_p = data_subs.add_parser("quote", help="个股实时行情")
+    quote_p = data_subs.add_parser("quote", help="个股实时行情",
+                                   usage="dragon-quant data quote --code CODE [options]")
     quote_p.add_argument("--code", required=True, help="股票代码")
-    quote_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"])
+    quote_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"],
+                         help="数据源 (默认 tencent)")
 
-    bq_p = data_subs.add_parser("batch-quote", help="批量实时行情")
+    bq_p = data_subs.add_parser("batch-quote", help="批量实时行情",
+                                usage="dragon-quant data batch-quote --codes CODES [options]")
     bq_p.add_argument("--codes", required=True, help="股票代码，逗号分隔")
-    bq_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"])
+    bq_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"],
+                      help="数据源 (默认 tencent)")
 
-    data_subs.add_parser("cookie-status", help="查看 Cookie 状态")
+    data_subs.add_parser("cookie-status", help="查看 Cookie 状态",
+                         usage="dragon-quant data cookie-status")
     cf_p = data_subs.add_parser("cookie-fetch",
-                                help="刷新 Cookie（默认仅雪球；东财需显式 --source eastmoney）")
+                                help="刷新 Cookie（默认仅雪球；东财需显式 --source eastmoney）",
+                                usage="dragon-quant data cookie-fetch [options]")
     cf_p.add_argument("--source", default="all", choices=["all", "eastmoney", "xueqiu"],
                       help="all=仅雪球(默认) eastmoney=东财 xueqiu=雪球")
 
-    cs_p = data_subs.add_parser("cookie-set", help="手动设置 Cookie")
+    cs_p = data_subs.add_parser("cookie-set", help="手动设置 Cookie",
+                                usage="dragon-quant data cookie-set --source SOURCE --cookie COOKIE")
     cs_p.add_argument("--cookie", "-c", required=True, help="完整 Cookie 字符串")
     cs_p.add_argument("--source", required=True, choices=["em", "em_his", "xq"],
                       help="em=东财push2 em_his=东财push2his xq=雪球")
 
     # blacklist 子命令（概念板块黑名单，拉取领涨/领跌板块时过滤）
-    bl_p = sub.add_parser("blacklist", help="概念板块黑名单管理")
+    bl_p = sub.add_parser(
+        "blacklist",
+        help="概念板块黑名单管理",
+        usage="dragon-quant blacklist <action> [action-options]",
+        description="管理拉取领涨/领跌板块时使用的板块黑名单。",
+        epilog="""Examples:
+  dragon-quant blacklist list
+  dragon-quant blacklist add "次新股"
+  dragon-quant blacklist remove "次新股"
+""",
+    )
     bl_subs = bl_p.add_subparsers(dest="blacklist_action")
-    bl_subs.add_parser("list", help="列出黑名单")
-    bl_add_p = bl_subs.add_parser("add", help="新增黑名单概念")
+    bl_subs.title = "Actions"
+    bl_subs.metavar = "<action>"
+    bl_subs.add_parser("list", help="列出黑名单", usage="dragon-quant blacklist list")
+    bl_add_p = bl_subs.add_parser("add", help="新增黑名单概念",
+                                  usage="dragon-quant blacklist add NAME")
     bl_add_p.add_argument("name", help="概念名称（子串匹配，如 次新股）")
-    bl_rm_p = bl_subs.add_parser("remove", help="移除黑名单概念")
+    bl_rm_p = bl_subs.add_parser("remove", help="移除黑名单概念",
+                                 usage="dragon-quant blacklist remove NAME")
     bl_rm_p.add_argument("name", help="概念名称")
 
     # review 子命令
-    rev_p = sub.add_parser("review", help="龙头回测验证")
+    rev_p = sub.add_parser(
+        "review",
+        help="龙头回测验证",
+        usage="dragon-quant review [options]",
+        description="回测已入选龙头，或启动回测结果 Web UI。",
+        epilog="""Examples:
+  dragon-quant review
+  dragon-quant review --source v2 --date 20260519
+  dragon-quant review --ui-only --source v2
+""",
+    )
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
     rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
     rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
@@ -476,20 +602,44 @@ def main():
     rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     # vpa 子命令
-    vpa_p = sub.add_parser("vpa", help="个股量价分析")
+    vpa_p = sub.add_parser(
+        "vpa",
+        help="个股量价分析",
+        usage="dragon-quant vpa --code CODE [options]",
+        description="执行独立的个股量价健康度分析。",
+        epilog="""Examples:
+  dragon-quant vpa --code 600519
+  dragon-quant vpa --code 600519 --source xueqiu --days 60
+  dragon-quant vpa --code 600519 --no-save
+""",
+    )
     vpa_p.add_argument("--code", required=True, help="股票代码，如 600519")
     vpa_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"])
     vpa_p.add_argument("--days", type=int, default=60, help="拉取日K线根数 (默认60)")
     vpa_p.add_argument("--no-save", action="store_true", help="不写入数据库")
 
     # storage 子命令
-    st_p = sub.add_parser("storage", help="持久化数据管理")
+    st_p = sub.add_parser(
+        "storage",
+        help="持久化数据管理",
+        usage="dragon-quant storage <action> [action-options]",
+        description="查看磁盘占用或清理本地缓存、结果和日志。",
+        epilog="""Examples:
+  dragon-quant storage status
+  dragon-quant storage size
+  dragon-quant storage clear --cache --days 7
+  dragon-quant storage clear --all
+""",
+    )
     st_subs = st_p.add_subparsers(dest="storage_action")
+    st_subs.title = "Actions"
+    st_subs.metavar = "<action>"
 
-    st_subs.add_parser("status", help="查看存储状态")
-    st_subs.add_parser("size", help="查看磁盘占用")
+    st_subs.add_parser("status", help="查看存储状态", usage="dragon-quant storage status")
+    st_subs.add_parser("size", help="查看磁盘占用", usage="dragon-quant storage size")
 
-    clear_p = st_subs.add_parser("clear", help="清理数据")
+    clear_p = st_subs.add_parser("clear", help="清理数据",
+                                 usage="dragon-quant storage clear [options]")
     clear_p.add_argument("--all", action="store_true", help="清理全部(cache+results+logs)")
     clear_p.add_argument("--cache", action="store_true", help="清理缓存")
     clear_p.add_argument("--results", action="store_true", help="清理结果")

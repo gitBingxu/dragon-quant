@@ -24,6 +24,10 @@
 ```bash
 cd ~/repo/dragon-quant
 
+# 查看 Linux 风格帮助提示
+python -m dragon_quant -h
+python -m dragon_quant scan -h
+
 # 批量扫描（默认 v1 评分器）
 python -m dragon_quant
 python -m dragon_quant scan --top 25 --candidates 5 --workers 2

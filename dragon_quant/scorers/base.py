@@ -1,4 +1,4 @@
-"""scorers_v2.base — 共享数据模型与工具函数。
+"""scorers.base — 共享数据模型与工具函数。
 
 ScoreResult 复用 models/types.py；本模块新增 DragonVerdict（聚合产物）
 及评分器共享的 1分K对齐、归一化涨幅曲线、板块内排名分位等纯函数。

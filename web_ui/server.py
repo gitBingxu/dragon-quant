@@ -161,14 +161,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
         filters = _parse_filters(params)
         sort_by = _first(params, "sort_by") or "composite_score"
         sort_dir = _first(params, "sort_dir") or "desc"
-        source = _parse_source(params, getattr(self.server, "default_source", "v1"))
+        source = _parse_source(params, getattr(self.server, "default_source", "v2"))
         rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir, source=source)
         self._send_json({"data": rows, "count": len(rows)})
 
     def _serve_api_summary(self, params: dict):
         """GET /api/summary — 汇总统计"""
         db = _get_db()
-        source = _parse_source(params, getattr(self.server, "default_source", "v1"))
+        source = _parse_source(params, getattr(self.server, "default_source", "v2"))
         summary = db.get_review_summary(source=source)
         self._send_json(summary)
 
@@ -185,10 +185,10 @@ def _first(params: dict, key: str) -> Optional[str]:
     return vals[0] if vals else None
 
 
-def _parse_source(params: dict, default: str = "v1") -> str:
+def _parse_source(params: dict, default: str = "v2") -> str:
     """解析 dragon 体系来源，非法值回退到默认值。"""
-    src = (_first(params, "source") or default or "v1").lower().strip()
-    return src if src in {"v1", "v2"} else "v1"
+    src = (_first(params, "source") or default or "v2").lower().strip()
+    return src if src in {"v1", "v2"} else "v2"
 
 
 def _parse_filters(params: dict) -> dict:
@@ -268,14 +268,14 @@ def _parse_filters(params: dict) -> dict:
     return f
 
 
-def start_server(port: int = 8765, open_browser: bool = True, default_source: str = "v1"):
+def start_server(port: int = 8765, open_browser: bool = True, default_source: str = "v2"):
     """启动 HTTP 服务器。
 
     Args:
         port: 监听端口
         open_browser: 是否自动打开浏览器
     """
-    default_source = default_source if default_source in {"v1", "v2"} else "v1"
+    default_source = default_source if default_source in {"v1", "v2"} else "v2"
     server = HTTPServer(("127.0.0.1", port), ReviewHandler)
     server.default_source = default_source
     url = f"http://localhost:{port}?source={default_source}"
@@ -301,6 +301,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Review Web UI")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true")
-    p.add_argument("--source", default="v1", choices=["v1", "v2"])
+    p.add_argument("--source", default="v2", choices=["v1", "v2"])
     args = p.parse_args()
     start_server(args.port, open_browser=not args.no_browser, default_source=args.source)

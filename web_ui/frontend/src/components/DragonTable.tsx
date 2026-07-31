@@ -91,7 +91,7 @@ export function DragonTable({
       <Table.Tr key={`${r.source}-${r.trade_date}-${r.code}`}>
         <Table.Td>
           <Badge color={r.source === "v2" ? "grape" : "blue"} variant="light" radius="sm">
-            {r.source === "v2" ? "v2 五维" : "v1 四维"}
+            {r.source === "v2" ? "五维识别" : "v1 历史"}
           </Badge>
         </Table.Td>
         <Table.Td>{r.code}</Table.Td>

@@ -9,6 +9,64 @@ from dragon_quant._version import __version__
 from dragon_quant import cli
 
 
+class TestCliHelp(unittest.TestCase):
+
+    def test_top_level_short_help(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage:", output)
+        self.assertIn("Commands:", output)
+        self.assertIn("Examples:", output)
+        self.assertIn("scan", output)
+        self.assertNotIn("scan_v2", output)
+        self.assertIn("Use \"dragon-quant <command> -h\"", output)
+
+    def test_scan_help_does_not_run_scan(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "scan", "-h"]), \
+             patch("dragon_quant.cli.orchestrate_scan") as mock_scan:
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant scan [options]", output)
+        self.assertIn("--top TOP", output)
+        self.assertIn("--force", output)
+        self.assertIn("--no-cache", output)
+        mock_scan.assert_not_called()
+
+    def test_review_help_includes_source_and_ui_options(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "review", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant review [options]", output)
+        self.assertIn("--source {v1,v2}", output)
+        self.assertIn("--ui-only", output)
+
+    def test_data_kline_help_includes_required_options(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "data", "kline", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant data kline --code CODE [options]", output)
+        self.assertIn("--code CODE", output)
+        self.assertIn("--source {xueqiu,tencent}", output)
+        self.assertIn("--days DAYS", output)
+
+
 class TestCliVersion(unittest.TestCase):
 
     def test_short_version_option(self):
@@ -45,7 +103,7 @@ class TestCliSourceArgs(unittest.TestCase):
             "raw_output": '{"ranking": [], "source": "v2"}',
         }
         buf = io.StringIO()
-        with patch("sys.argv", ["dragon-quant", "scan_v2", "--date", "20260519", "--top", "5"]), \
+        with patch("sys.argv", ["dragon-quant", "scan", "--date", "20260519", "--top", "5"]), \
              patch("dragon_quant.storage.db.get_latest_scan_by_date", return_value=scan) as mock_get, \
              redirect_stdout(buf):
             cli.main()
@@ -55,7 +113,7 @@ class TestCliSourceArgs(unittest.TestCase):
 
     def test_scan_history_empty_raw_output_returns_error_without_rebuild(self):
         scan = {
-            "id": "v1_20260519_5",
+            "id": "v2_20260519_5",
             "scan_date": "2026-05-19",
             "top_n": 5,
             "raw_output": "",
@@ -69,12 +127,26 @@ class TestCliSourceArgs(unittest.TestCase):
 
         self.assertEqual(json.loads(buf.getvalue()), {
             "error": "scan raw_output is empty",
-            "scan_id": "v1_20260519_5",
+            "scan_id": "v2_20260519_5",
             "scan_date": "2026-05-19",
             "top_n": 5,
-            "source": "v1",
+            "source": "v2",
         })
         mock_get_stocks.assert_not_called()
+
+    def test_scan_v2_alias_still_uses_v2_history(self):
+        scan = {
+            "id": "v2_20260519_5",
+            "raw_output": '{"ranking": [], "source": "v2"}',
+        }
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "scan_v2", "--date", "20260519", "--top", "5"]), \
+             patch("dragon_quant.storage.db.get_latest_scan_by_date", return_value=scan) as mock_get, \
+             redirect_stdout(buf):
+            cli.main()
+
+        mock_get.assert_called_once_with("2026-05-19", 5, source="v2")
+        self.assertEqual(json.loads(buf.getvalue()), {"ranking": [], "source": "v2"})
 
     def test_long_version_option(self):
         buf = io.StringIO()

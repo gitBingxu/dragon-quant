@@ -69,7 +69,7 @@
 > 注：**不设一字板惩罚**——能一字封死也是强势表现（封单大、买盘汹涌）。流动性维只奖励「换手充沛 + 封板扎实」，不因一字而扣分。
 
 ### 5. 资金承接性 Absorption（权重 10%）
-> 文案无直接对应；属于龙头识别的补充盘面证据。实现思想参考旧 `scorers/absorption.py`，在 `scorers_v2/absorption.py` 中新写（旧文件不改）。
+> 文案无直接对应；属于龙头识别的补充盘面证据。实现思想参考旧 `scorers/absorption.py`，在 `scorers/absorption.py` 中新写（旧文件不改）。
 
 衡量：**市场恐慌/调整时，其他板块的资金是否被虹吸到目标板块**——龙头所在板块能否成为全场资金的承接载体。
 
@@ -107,10 +107,10 @@ Step 2 加权综合
 
 ## 四、模块结构（重构后）
 
-> **重要：本次重构全部落在全新目录 `scorers_v2/`，旧 `scorers/` 目录及其所有评分器、旧编排调用路径原样保留、零改动。** 新旧并存、互不影响，便于灰度对比与回滚。新旧切换由编排器/CLI 通过开关选择走 `scorers`（旧）还是 `scorers_v2`（新）。
+> **重要：本次重构全部落在全新目录 `scorers/`，旧 `scorers/` 目录及其所有评分器、旧编排调用路径原样保留、零改动。** 新旧并存、互不影响，便于灰度对比与回滚。新旧切换由编排器/CLI 通过开关选择走 `scorers`（旧）还是 `scorers`（新）。
 
 ```
-scorers_v2/                # 全新目录，与旧 scorers/ 并存
+scorers/                # 全新目录，与旧 scorers/ 并存
 ├── base.py            # 抽象基类 + ScoreResult/DragonVerdict 数据模型 + 共享工具
 ├── drive.py           # 带动性 (30%)
 ├── leadership.py      # 领涨性 (25%)
@@ -279,7 +279,7 @@ class DragonVerdict:
 
 ### 6.5 资金承接性 Absorption
 - **数据**：`kline:5min:sector:{primary_sector}`（目标板块）、`kline:5min:sector:{其他全部板块}`（虹吸对手盘）、`__meta__:sector_codes`（领跌板块列表）、`__meta__:sector_name_map`（展示）
-- **算法**（实现参考旧 `scorers/absorption.py`，在 `scorers_v2/absorption.py` 新写；回看窗口由 5 改为 **10 个交易日**）：
+- **算法**（实现参考旧 `scorers/absorption.py`，在 `scorers/absorption.py` 新写；回看窗口由 5 改为 **10 个交易日**）：
   1. 取最近 **10 个交易日**，按5分钟bucket对齐目标板块与其他板块时间轴
   2. 滑动窗口（6根=30分钟）检测虹吸事件：目标涨幅>0.3% 且 ≥4阳线；其他板块同窗口或前移1根跌幅<-0.3% 且受影响≥2个；回撤比例≤0.3；跳水不晚于拉升且时间差≤10分钟同日
   3. 单事件三维打分：虹吸强度40% + 广度20% + 持续性40%；多事件 bonus（每多1个+5，上限15）
@@ -324,7 +324,7 @@ class DragonVerdict:
 
 ## 九、阈值与权重表（推荐默认值，集中在 config，待确认）
 
-> 以下为推荐初始值（部分参考旧代码经验值），全部集中到 `scorers_v2/registry.py` 常量，便于回测调参。**请逐项确认或修改。**
+> 以下为推荐初始值（部分参考旧代码经验值），全部集中到 `scorers/registry.py` 常量，便于回测调参。**请逐项确认或修改。**
 
 ### 9.1 维度权重 & 门槛
 | 维度 | 权重 | 门槛 floor（低于则一票否决） |
@@ -401,18 +401,18 @@ class DragonVerdict:
 
 ## 十、待实现文件清单
 
-### 评分器（核心）—— 全部新建于 `scorers_v2/`，旧 `scorers/` 不动
+### 评分器（核心）—— 全部新建于 `scorers/`，旧 `scorers/` 不动
 | 文件 | 内容 |
 |------|------|
-| `scorers_v2/__init__.py` | 包初始化 |
-| `scorers_v2/base.py` | ScoreResult / DragonVerdict 数据模型 + 共享工具（板块内分位、1分K对齐、5分bucket时序对齐） |
-| `scorers_v2/drive.py` | 带动性算法 |
-| `scorers_v2/leadership.py` | 领涨性算法 |
-| `scorers_v2/anti_drop.py` | 抗跌性算法 |
-| `scorers_v2/liquidity.py` | 流动性算法（新增独立维） |
-| `scorers_v2/absorption.py` | 资金承接性算法（跨板块虹吸检测，实现参考旧 `scorers/absorption.py`，**新文件，不改旧文件**） |
-| `scorers_v2/registry.py` | 维度注册表 + 权重/门槛配置常量 |
-| `scorers_v2/aggregator.py` | 门槛+加权聚合 → DragonVerdict |
+| `scorers/__init__.py` | 包初始化 |
+| `scorers/base.py` | ScoreResult / DragonVerdict 数据模型 + 共享工具（板块内分位、1分K对齐、5分bucket时序对齐） |
+| `scorers/drive.py` | 带动性算法 |
+| `scorers/leadership.py` | 领涨性算法 |
+| `scorers/anti_drop.py` | 抗跌性算法 |
+| `scorers/liquidity.py` | 流动性算法（新增独立维） |
+| `scorers/absorption.py` | 资金承接性算法（跨板块虹吸检测，实现参考旧 `scorers/absorption.py`，**新文件，不改旧文件**） |
+| `scorers/registry.py` | 维度注册表 + 权重/门槛配置常量 |
+| `scorers/aggregator.py` | 门槛+加权聚合 → DragonVerdict |
 
 ### 非评分器的编排/数据改动
 
@@ -424,9 +424,9 @@ class DragonVerdict:
 | `providers/base.py` | 新增**普通方法**（默认 `raise NotImplementedError`，非 `@abstractmethod`，避免 eastmoney/tencent 实例化崩）：`get_sector_1min_kline(code)`、`get_sector_5min_kline_history(code, days)`（旧 `get_sector_5min_kline` 保留）。封单走 gtimg，**不新增 `get_pankou`** |
 | `providers/tencent.py` | `_parse_gtimg_quote` 补解析盘口：`bid1_price=f[9]`、`bid1_volume=f[10]`(手)、`ask1_volume=f[20]`(手)，填入 `Quote` 新字段（**纯增量**） |
 | `providers/ths.py` | ① 新增 `get_sector_1min_kline(code)`：调 `/v6/time/48_{inner}/last.js`，复用 `_get_inner_code`+`_curl`+`_parse_jsonp`，**跳过 `_aggregate_5min`** 直接把原始1分点位转 `list[KBar]`（单点位 → open=high=low=close）；② 新增 `get_sector_5min_kline_history(code, days)`：调 `/v6/line/48_{inner}/30/last1000.js`（**周期码 `30`=5分**，实测纠正），`_parse_jsonp` 后节点即顶层 dict，解析 `data` 行 `YYYYMMDDHHMM,开,高,低,收,量,额,...`（无 `pre`，pct 用前一根 close 推），截取最近 days 个交易日；③ 成分股翻页修复：新增 `PAGE_URL = /gn/detail/order/desc/page/{p}/code/{code}/`（**非 ajax**，免登录），`get_sector_components` 的 `all_pages` 分支由失效的 ajax `COMPONENTS_URL` 改走 `PAGE_URL`，`for p in range(2,6)` 翻到第5页（第6页302跳登录自然 break），稳定拿≈50只。**旧默认行为保持10只**。**旧 `get_sector_5min_kline` 原样保留** |
-| **`orchestrator.py` v2 分支** | 新增一条 v2 扫描路径（开关切换），旧路径不动。v2 路径下：**Phase A** 领涨板块 `RANK_UP_COUNT` 用 5；**Phase B** 取每个领涨板块当日所有涨停个股为候选；**Phase C** 写 `Candidate.fived_pct`；**Phase D** 见下；最终调用 `scorers_v2` 聚合器而非旧 `scorers` |
+| **`orchestrator.py` v2 分支** | 新增一条 v2 扫描路径（开关切换），旧路径不动。v2 路径下：**Phase A** 领涨板块 `RANK_UP_COUNT` 用 5；**Phase B** 取每个领涨板块当日所有涨停个股为候选；**Phase C** 写 `Candidate.fived_pct`；**Phase D** 见下；最终调用 `scorers` 聚合器而非旧 `scorers` |
 | **`orchestrator.py` v2 Phase D 数据预填** | ① 封单走 gtimg 盘口（已含在 `quotes:batch`，**无需单独拉**）；② 拉大盘当日1分K `get_minute_kline("000001")` 写 `kline:1min:000001`；③ 对每个主板块拉 `get_sector_1min_kline` 写 `kline:1min:sector:{s}`（带动/抗跌时序基准）；④ 对「主板块成分股中当日涨停者」补拉 `kline:1min`（带动性封板池）；⑤ 资金承接拉 `get_sector_5min_kline_history` 取板块近10日5分K 写 `kline:5min:sector:{s}`。v2 路径**不**调用旧 `get_sector_5min_kline`（当日版）写当日5分K |
-| `cli.py` / 入口 | 新增 `--scorers v2`（或等价开关/环境变量）选择走旧 `scorers` 还是新 `scorers_v2` 路径，默认可暂留旧路径，灰度验证后切换 |
+| `cli.py` / 入口 | 新增 `--scorers v2`（或等价开关/环境变量）选择走旧 `scorers` 还是新 `scorers` 路径，默认可暂留旧路径，灰度验证后切换 |
 
 #### Phase A / B 候选筛选改动（重点）
 - **领涨板块数**：`RANK_UP_COUNT` 8 → **5**（领跌板块 `RANK_DOWN_COUNT=20` 不变，仍供资金承接用）。

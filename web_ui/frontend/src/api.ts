@@ -60,7 +60,7 @@ export interface DragonFilters {
   sort_dir: string;
 }
 
-export async function fetchSummary(source: "v1" | "v2" = "v1"): Promise<Summary> {
+export async function fetchSummary(source: "v1" | "v2" = "v2"): Promise<Summary> {
   const params = new URLSearchParams({ source });
   const res = await fetch("/api/summary?" + params.toString());
   if (!res.ok) throw new Error(`summary ${res.status}`);

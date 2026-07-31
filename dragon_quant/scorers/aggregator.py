@@ -1,4 +1,4 @@
-"""scorers_v2.aggregator — 门槛+加权聚合，产出 DragonVerdict。
+"""scorers.aggregator — 门槛+加权聚合，产出 DragonVerdict。
 
 四大特征（drive/leadership/anti_drop/liquidity）任一低于门槛 → 一票否决；
 absorption 不否决，仅加权贡献。通过者按 composite 降序排名。
@@ -10,9 +10,9 @@ from typing import Optional
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import Candidate, ScoreResult
-from dragon_quant.scorers_v2 import registry as R
-from dragon_quant.scorers_v2.base import DragonVerdict
-from dragon_quant.scorers_v2 import (
+from dragon_quant.scorers import registry as R
+from dragon_quant.scorers.base import DragonVerdict
+from dragon_quant.scorers import (
     drive, leadership, anti_drop, liquidity, absorption)
 
 # 维度 → score 函数

@@ -70,7 +70,7 @@ class TestGetPendingDragons(unittest.TestCase):
 
         # 插入测试数据
         self._conn.executemany(
-            "INSERT INTO dragons_v1(trade_date, code, name, composite_score, review_status) "
+            "INSERT INTO dragons_v2(trade_date, code, name, composite_score, review_status) "
             "VALUES (?, ?, ?, ?, ?)",
             [
                 ("20260521", "000725", "京东方A", 80.0, "completed"),
@@ -130,11 +130,11 @@ class TestGetReviewSummary(unittest.TestCase):
         with patch("dragon_quant.storage.db._connect",
                    return_value=sqlite3.connect(self._db_path)):
             from dragon_quant.storage.db import get_review_summary
-            return get_review_summary(source="v1")
+            return get_review_summary()
 
     def test_win_rate_requires_positive_return_and_drawdown_above_minus_5(self):
         self._conn.executemany(
-            "INSERT INTO dragons_v1(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
+            "INSERT INTO dragons_v2(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [
                 ("20260521", "000001", "样本A", 8.5, -3.2, "completed"),
@@ -154,7 +154,7 @@ class TestGetReviewSummary(unittest.TestCase):
 
     def test_win_rate_is_none_when_no_completed_rows(self):
         self._conn.execute(
-            "INSERT INTO dragons_v1(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
+            "INSERT INTO dragons_v2(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             ("20260525", "000005", "样本E", 9.0, -1.0, "pending"),
         )
@@ -168,7 +168,7 @@ class TestGetReviewSummary(unittest.TestCase):
 
     def test_completed_rows_with_null_metrics_count_in_denominator_only(self):
         self._conn.executemany(
-            "INSERT INTO dragons_v1(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
+            "INSERT INTO dragons_v2(trade_date, code, name, max_return_5d, max_drawdown_5d, review_status) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [
                 ("20260521", "000001", "样本A", 8.5, -3.2, "completed"),
@@ -231,7 +231,7 @@ class TestDragonsRebuildUnion(unittest.TestCase):
                 "code": "e", "name": "e", "scan_id": scan1, "rank": 5,
                 "composite_score": 86, "board_count": 1, "concepts": [], "report_text": "",
             }], version="")
-            db.update_dragon_review(day, "e", review_status="completed", source="v1")
+            db.update_dragon_review(day, "e", review_status="completed")
 
             # calendar: 简化为包含 day 以及 30 天内一堆日期，避免 5 日 gate 干扰
             calendar = {day, "2026-06-04", "2026-06-03", "2026-06-02", "2026-06-01"}
@@ -317,7 +317,7 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             with self.assertRaises(TypeError):
                 db.save_dragons("2026-06-20", [{"code": "A"}], scorer_version="v2")
 
-    def test_default_v1_and_explicit_v2_are_separate_tables(self):
+    def test_default_v2_and_explicit_v1_are_separate_tables(self):
         # db 层每次操作主动 close 连接，须用 side_effect 每次返回新连接
         with patch("dragon_quant.storage.db._connect",
                    side_effect=lambda: sqlite3.connect(self._db_path)):
@@ -325,10 +325,10 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             db.init_db()
             D = "2026-06-20"
 
-            # 默认参数 → v1
-            db.save_dragons(D, [{"code": "W", "rank": 1, "composite_score": 90, "report_text": "v1"}])
-            self.assertEqual(self._dragon_row("dragons_v1", D, "W")[3], "v1")
-            self.assertIsNone(self._dragon_row("dragons_v2", D, "W"))
+            # 默认参数 → v2（向前兼容已有 dragons_v2 数据）
+            db.save_dragons(D, [{"code": "W", "rank": 1, "composite_score": 90, "report_text": "v2"}])
+            self.assertEqual(self._dragon_row("dragons_v2", D, "W")[3], "v2")
+            self.assertIsNone(self._dragon_row("dragons_v1", D, "W"))
 
             # 同日同票 v1/v2 各保存一行，rank/score/report 互不覆盖
             db.save_dragons(D, [{"code": "A", "rank": 1, "composite_score": 91, "report_text": "from-v1"}], source="v1")

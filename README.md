@@ -4,14 +4,13 @@
 
 基于同花顺、雪球、腾讯三大公开数据源，对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
 
-内置**两套评分体系**，分别由 `scan`（v1）与 `scan_v2`（v2）命令触发、并存互不影响：
+当前主流程使用**五维「识别真龙」评分体系**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，采用**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。详见仓库内《评分器Refactor.md》。
 
-- **v1（默认，四维加权）**：带动性 35% / 领涨性 25% / 抗跌性 15% / 资金承接 25%，简单加权求和。
-- **v2（五维「识别真龙」）**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。详见仓库内《评分器Refactor.md》。
+> 为兼容历史数据，SQLite 物理表继续沿用 `*_v2`（如 `dragons_v2` / `scans_v2`），`scan_v2` 命令保留为隐藏兼容别名，行为等同 `scan`。旧 `*_v1` 表不再由主流程写入，仅可通过显式 `--source v1` 查询历史记录。
 
 > 板块口径采用同花顺**行业板块**（`thshy`/`hyzjl`，约 90 个真实行业，code 为 881xxx）。
 
-## 📊 龙头回测成绩单（v1 历史样本）
+## 📊 龙头回测成绩单（历史样本）
 
 > 入选后第一个非一字板日以最低价买入；最大收益按收益观察窗口统计，最大回撤按「买入日至最大收益出现日」窗口统计。
 
@@ -43,19 +42,20 @@ playwright install chromium
 ## 快速开始
 
 ```bash
-# v1 扫榜 — 找 top5 龙头
+# 查看 Linux 风格帮助提示
+dragon-quant -h
+dragon-quant scan -h
+
+# 五维「识别真龙」扫榜 — 找 top5 龙头
 dragon-quant scan --top 5
 
-# v2 五维「识别真龙」
-dragon-quant scan_v2 --top 5
-
 # 强制执行（跳过交易时段拦截 + DB 缓存）
-dragon-quant scan_v2 --force
+dragon-quant scan --force
 
 # 龙头回测 + Web UI
 dragon-quant review --ui
-# 查看 v2 龙头回测面板
-dragon-quant review --ui-only --source v2
+# 查看龙头回测面板（默认读取 dragons_v2）
+dragon-quant review --ui-only
 ```
 
 ### 前置条件
@@ -77,21 +77,20 @@ Cookie 文件位置：`~/Library/Application Support/dragon-quant/cookies/{xueqi
 
 ## CLI 命令大全
 
-### `scan` / `scan_v2` — 扫榜
+### `scan` — 扫榜
 
 ```bash
-dragon-quant scan    [--top 25] [--candidates 5] [--workers 2] [--force]   # v1 四维
-dragon-quant scan_v2 [--top 25] [--candidates 5] [--workers 2] [--force]   # v2 五维识别真龙
+dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force]
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--top` | 25 | 最终输出的候选股数量 |
-| `--candidates` | 5 | 每个板块取前 N 只（仅 `scan`；`scan_v2` 取当日全部涨停股）|
+| `--candidates` | 5 | 兼容参数；当前五维路径按每个领涨行业当日全部涨停股入池 |
 | `--workers` | 2 | 并发线程数 |
 | `--force` | - | 跳过交易时段拦截与 DB 缓存 |
 
-两命令参数一致，区别仅在评分体系：`scan` 走 v1 四维，`scan_v2` 走 v2 五维「识别真龙」。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/`。
+`scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/` 的 `*_v2` 表。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
 
 ### `blacklist` — 概念板块黑名单
 
@@ -108,13 +107,13 @@ dragon-quant blacklist remove "次新股"
 ```bash
 dragon-quant review                       # 自动筛 5~20 交易日内 pending 票全回测
 dragon-quant review --date 20260519 --top 5
-dragon-quant review --source v2 --date 20260519
+dragon-quant review --date 20260519
 dragon-quant review --force --date 20260519
-dragon-quant review --ui --source v2      # 回测后启动 Web UI（默认展示 v2）
-dragon-quant review --ui-only --port 8765 # 仅看结果（默认 v1，可加 --source v2）
+dragon-quant review --ui                  # 回测后启动 Web UI（默认展示 dragons_v2）
+dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 ```
 
-`--source` 用于选择回测哪套龙头表：`v1` 读取/写回 `dragons_v1`，`v2` 读取/写回 `dragons_v2`。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
+`review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
 
 ### `vpa` — 量价分析
 
@@ -139,10 +138,10 @@ dragon-quant data cookie-status                        # Cookie 状态
 ### `logs` / `storage` — 日志与数据管理
 
 ```bash
-dragon-quant logs --source v1 tail [-n 20]
+dragon-quant logs tail [-n 20]
 dragon-quant logs --source v2 query [--date 20260513] [--category scorer:drive] [--level error] [--code 600172]
 dragon-quant logs --source v2 summary
-dragon-quant logs --source v1 clear --days 7
+dragon-quant logs clear --days 7
 
 dragon-quant storage status      # 存储状态
 dragon-quant storage size        # 磁盘占用
@@ -154,10 +153,7 @@ dragon-quant storage clear --all # 清理全部
 ```python
 import dragon_quant
 
-# v1 扫描
 result = dragon_quant.scan(top_n=5, candidates_n=5, workers=2)
-# v2 五维识别真龙
-result = dragon_quant.scan(top_n=5, scorers="v2")
 
 # 返回 dict：
 # {
@@ -166,9 +162,9 @@ result = dragon_quant.scan(top_n=5, scorers="v2")
 #   "ranking": [
 #     {"code": "...", "name": "...", "concepts": [...], "board_count": 3,
 #      "composite_score": 73.5,
-#      "is_true_dragon": true, "reject_reason": null,   # v2 专有
+#      "is_true_dragon": true, "reject_reason": null,
 #      "dimensions": {"drive": {...}, "leadership": {...}, "anti_drop": {...},
-#                     "liquidity": {...}, "absorption": {...}}}  # v2 为五维
+#                     "liquidity": {...}, "absorption": {...}}}
 #   ],
 #   "report_text": "..."
 # }
@@ -191,16 +187,7 @@ quote = get_quote("600172")
 
 ## 评分体系
 
-### v1 四维（默认）
-
-| 维度 | 权重 | 衡量 |
-|------|------|------|
-| 带动性 | 35% | 涨停后对同板块小弟的带动效应（板块共鸣 + 跟风力度 + 封板决策力）|
-| 领涨性 | 25% | 在行业内的日常空间排名（当日真实分位 + 历史估算）|
-| 抗跌性 | 15% | 大盘跳水日的相对回撤 + 日内承接 + 反弹弹性 |
-| 资金承接 | 25% | 市场恐慌时跨板块资金虹吸（强度 + 广度 + 持续性）|
-
-### v2 五维「识别真龙」
+### 五维「识别真龙」
 
 | 维度 | 权重 | 门槛 | 衡量（仅当日盘面，资金承接回看10日）|
 |------|------|------|------|
@@ -210,7 +197,7 @@ quote = get_quote("600172")
 | 流动性 | 20% | 35 | 换手充沛度 + 封板质量（封单/开板次数，一字不罚）|
 | 资金承接 | 10% | — | 跨板块虹吸（出逃规模越大 + 拉升越高 → 分越高）|
 
-聚合：四大特征任一 < 门槛 → 一票否决（非真龙）；通过者按综合分降序排名。资金承接不否决，仅加权贡献。阈值/权重集中在 `scorers_v2/registry.py`，便于回测调参。
+聚合：四大特征任一 < 门槛 → 一票否决（非真龙）；通过者按综合分降序排名。资金承接不否决，仅加权贡献。阈值/权重集中在 `scorers/registry.py`，便于回测调参。
 
 ## 数据源
 
@@ -227,12 +214,11 @@ quote = get_quote("600172")
 ```
 dragon_quant/
 ├── cli.py                # CLI（scan/logs/data/review/vpa/storage/blacklist）
-├── orchestrator.py       # 编排器（Phase A→F，含 v1/v2 双分支）
+├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
 ├── providers/            # 数据源适配（ths/eastmoney/xueqiu/tencent/browser/cookie）
-├── scorers/              # v1 四维评分器
-├── scorers_v2/           # v2 五维评分器 + registry + aggregator
+├── scorers/           # 五维评分器 + registry + aggregator
 ├── vpa/                  # 量价分析（插件式因子）
 ├── cache/                # 内存+本地双缓存
 ├── logging/              # ScanLogger + ReportBuilder + query
@@ -249,24 +235,24 @@ dragon_quant/
 2. **评分器是 cache 消费者**：统一签名 `score(code, cache, **kwargs) -> ScoreResult`，只读缓存不发请求；编排器 Phase A→D 预填，Phase E 打分。
 3. **并发与限流**：`RateLimiter` 按 provider 串行排队 + 随机延迟，不同 provider 并发。
 4. **结构化日志**：`ScanLogger` 全链路打点，支持按类别/级别/代码查询。
-5. **新旧并存**：v1 与 v2 除数据拉取与编排器外全程隔离，可灰度对比与回滚。
+5. **历史兼容**：主流程固定写 `*_v2` 表；旧 `*_v1` 表保留显式查询能力，不参与新扫描。
 
 ## 持久化
 
 SQLite 表分为三类：
 
-- v1 体系：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`
-- v2 体系：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
+- 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
+- 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
 
-运行时只创建和读写 `*_v1` / `*_v2` 分表，不再创建旧 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；`source` 是唯一版本路由字段。
+运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
-`dragons_v1` / `dragons_v2` 表关键字段：
-- `source`：固定为 `v1` 或 `v2`。
+`dragons_v2` 表关键字段：
+- `source`：固定为 `v2`；旧 `dragons_v1` 仅用于历史记录。
 - `version`：入库时的包版本号。
 - review 字段：`buy_date` / `buy_price` / `max_return_5d` / `max_drawdown_5d` / `max_return_hold_days` / `review_status`，按 source 独立维护。
 
-`scan_stocks_v1` / `scan_stocks_v2` 为同构表，v2 会额外填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
+`scan_stocks_v2` 填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
 
 ## License
 

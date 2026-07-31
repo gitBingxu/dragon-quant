@@ -18,7 +18,7 @@ from dragon_quant.models.types import KBar
 
 
 def ensure_asc(klines: list[KBar]) -> list[KBar]:
-    """确保按 timestamp 升序（旧→新）。参照 scorers/anti_drop.py 的约定。"""
+    """确保按 timestamp 升序（旧→新）。"""
     if len(klines) <= 1:
         return klines
     prev_ts = klines[0].timestamp

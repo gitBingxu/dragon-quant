@@ -1,11 +1,14 @@
-from dragon_quant.scorers.drive import score as score_drive
-from dragon_quant.scorers.anti_drop import score as score_anti_drop
-from dragon_quant.scorers.leadership import score as score_leadership
-from dragon_quant.scorers.absorption import score as score_absorption
+"""scorers —「识别真龙」五维评分体系（带动/领涨/抗跌/流动 + 资金承接）。
 
-SCORERS = {
-    "drive":      (score_drive,      0.35),
-    "anti_drop":  (score_anti_drop,  0.15),
-    "leadership": (score_leadership, 0.25),
-    "absorption": (score_absorption, 0.25),
-}
+当前 scan 主流程唯一使用的评分体系，SQLite 仍沿用 `*_v2` 分表以兼容历史数据。
+依据《评分器Refactor.md》。
+"""
+
+from dragon_quant.scorers import registry as R
+from dragon_quant.scorers.aggregator import evaluate, rank_verdicts
+from dragon_quant.scorers.base import DragonVerdict
+
+# 维度 → (score 函数模块名, 权重)，便于外部内省
+SCORERS = dict(R.DIM_WEIGHTS)
+
+__all__ = ["evaluate", "rank_verdicts", "DragonVerdict", "SCORERS"]

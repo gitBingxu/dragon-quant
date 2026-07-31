@@ -164,7 +164,7 @@ def run_review(trade_date: Optional[str] = None,
                top_n: Optional[int] = None,
                force: bool = False,
                verbose: bool = True,
-               source: str = "v1") -> list[dict]:
+               source: str = "v2") -> list[dict]:
     """批量执行龙头回测。
 
     默认行为（trade_date 未指定时）：
@@ -176,7 +176,7 @@ def run_review(trade_date: Optional[str] = None,
         top_n: 只回测 top N
         force: True=无视 review_status 全部重算
         verbose: 打印进度
-        source: 回测数据来源体系（v1/v2）
+        source: 回测数据来源体系，默认 v2；v1 仅用于历史记录查询。
     """
     if force:
         entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n,

@@ -55,24 +55,7 @@ def _parser(*args, **kwargs):
 
 
 def _cmd_scan(args):
-    """扫描命令（v1 四维评分器）"""
-    if args.date:
-        _cmd_scan_history(args, source="v1")
-        return
-
-    orchestrate_scan(
-        top_n=args.top,
-        candidates_n=args.candidates,
-        workers=args.workers,
-        verbose=True,
-        force=args.force,
-        scorers="v1",
-        refresh_provider_cache=args.no_cache,
-    )
-
-
-def _cmd_scan_v2(args):
-    """扫描命令（v2 五维「识别真龙」评分器）"""
+    """扫描命令（五维「识别真龙」评分器）"""
     if args.date:
         _cmd_scan_history(args, source="v2")
         return
@@ -88,7 +71,7 @@ def _cmd_scan_v2(args):
     )
 
 
-def _cmd_scan_history(args, source: str = "v1"):
+def _cmd_scan_history(args, source: str = "v2"):
     """查询历史扫描记录"""
     d = args.date
     if len(d) == 8:
@@ -293,7 +276,7 @@ def _cmd_review_ui(args):
     """启动 Web UI 服务器"""
     from web_ui.server import start_server
     start_server(port=args.port, open_browser=not args.no_browser,
-                 default_source=getattr(args, "source", "v1"))
+                 default_source=getattr(args, "source", "v2"))
 
 
 def _cmd_vpa(args):
@@ -416,7 +399,6 @@ def main():
         epilog="""Examples:
   dragon-quant -h
   dragon-quant scan --top 25 --candidates 5 --workers 2
-  dragon-quant scan_v2 --top 5 --force
   dragon-quant data kline --code 600172 --days 20
   dragon-quant review --ui-only --source v2
 
@@ -428,13 +410,13 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     parser.set_defaults(command="scan")
     sub = parser.add_subparsers(dest="command", title="Commands", metavar="<command>")
 
-    # scan 子命令（v1 四维评分器）
+    # scan 子命令（五维「识别真龙」评分器）
     scan_p = sub.add_parser(
         "scan",
-        help="批量扫描龙头股（v1 四维）",
+        help="批量扫描龙头股（五维识别真龙）",
         parents=[shared],
         usage="dragon-quant scan [options]",
-        description="批量扫描龙头股（v1 四维评分器）。",
+        description="批量扫描龙头股（五维「识别真龙」评分器）。",
         epilog="""Examples:
   dragon-quant scan
   dragon-quant scan --top 25 --candidates 5 --workers 2
@@ -443,22 +425,6 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     )
     scan_p.add_argument("--date", default=None,
                         help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
-
-    # scan_v2 子命令（v2 五维「识别真龙」评分器）
-    scan_v2_p = sub.add_parser(
-        "scan_v2",
-        help="批量扫描龙头股（v2 五维识别真龙）",
-        parents=[shared],
-        usage="dragon-quant scan_v2 [options]",
-        description="批量扫描龙头股（v2 五维「识别真龙」评分器）。",
-        epilog="""Examples:
-  dragon-quant scan_v2 --top 5
-  dragon-quant scan_v2 --force
-  dragon-quant scan_v2 --date 20260519 --top 5
-""",
-    )
-    scan_v2_p.add_argument("--date", default=None,
-                           help="查询历史扫描记录 (YYYYMMDD)，指定后不执行实时扫描")
 
     # logs 子命令
     logs_p = sub.add_parser(
@@ -469,11 +435,11 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         epilog="""Examples:
   dragon-quant logs tail -n 20
   dragon-quant logs --source v2 query --date 20260519 --level error
-  dragon-quant logs --source v1 summary
+  dragon-quant logs summary
 """,
     )
-    logs_p.add_argument("--source", default="v1", choices=["v1", "v2"],
-                        help="日志来源体系 (默认 v1)")
+    logs_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                        help="日志来源体系 (默认 v2；v1 仅用于历史记录查询)")
     logs_subs = logs_p.add_subparsers(dest="logs_action")
     logs_subs.title = "Actions"
     logs_subs.metavar = "<action>"
@@ -594,8 +560,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
     rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
     rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
-    rev_p.add_argument("--source", default="v1", choices=["v1", "v2"],
-                       help="回测数据来源体系：v1=dragons_v1，v2=dragons_v2 (默认 v1)")
+    rev_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                       help="回测数据来源体系：v2=dragons_v2 (默认 v2；v1 仅用于历史记录查询)")
     rev_p.add_argument("--ui", action="store_true", help="回测后启动 Web UI")
     rev_p.add_argument("--ui-only", action="store_true", help="仅启动 Web UI（不执行回测）")
     rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
@@ -646,12 +612,13 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
     clear_p.add_argument("--days", type=int, default=None, help="保留最近N天")
 
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    if argv and argv[0] == "scan_v2":
+        argv[0] = "scan"
+    args = parser.parse_args(argv)
 
     if args.command == "scan":
         _cmd_scan(args)
-    elif args.command == "scan_v2":
-        _cmd_scan_v2(args)
     elif args.command == "logs":
         _cmd_logs(args)
     elif args.command == "data":

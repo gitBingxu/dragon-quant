@@ -34,8 +34,8 @@ const STATUS_OPTIONS = [
 ];
 
 const SOURCE_OPTIONS = [
-  { value: "v1", label: "v1 四维" },
-  { value: "v2", label: "v2 五维" },
+  { value: "v2", label: "五维识别" },
+  { value: "v1", label: "v1 历史" },
 ];
 
 export function FilterBar({ filters, count, onChange, onSearch }: Props) {
@@ -114,8 +114,8 @@ export function FilterBar({ filters, count, onChange, onSearch }: Props) {
               w={120}
               size="xs"
               data={SOURCE_OPTIONS}
-              value={filters.source ?? "v1"}
-              onChange={(v) => onChange({ source: (v === "v2" ? "v2" : "v1") })}
+              value={filters.source ?? "v2"}
+              onChange={(v) => onChange({ source: (v === "v1" ? "v1" : "v2") })}
               allowDeselect={false}
             />
           </Field>

@@ -1,4 +1,4 @@
-"""scorers_v2.liquidity — 流动性 (20%)。
+"""scorers.liquidity — 流动性 (20%)。
 
 txt："没有换手、全是一字板顶板的装死走不远 / 真龙是流动性换手走出来的焦点"。
 两个子因子各满分100：换手充沛度 TURNOVER_W .5 + 封板质量 SEAL_W .5。
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, Quote, ScoreResult, StockInfo
-from dragon_quant.scorers_v2 import registry as R
-from dragon_quant.scorers_v2.base import clip
+from dragon_quant.scorers import registry as R
+from dragon_quant.scorers.base import clip
 
 DIM = "liquidity"
 WEIGHT = R.DIM_WEIGHTS[DIM]

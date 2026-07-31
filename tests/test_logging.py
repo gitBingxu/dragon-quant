@@ -93,51 +93,18 @@ class TestReportBuilder(unittest.TestCase):
         self.logger = ScanLogger()
         self.reporter = ReportBuilder(self.logger)
 
-    def test_build_stock_report_header(self):
-        report = self.reporter.build_stock_report(
-            code="600519", name="贵州茅台",
-            board_count=3, concepts=["白酒"],
-            composite_score=85.0, dimensions={},
-            primary_sector_name="白酒"
-        )
-        self.assertIn("贵州茅台", report)
-        self.assertIn("600519", report)
-        self.assertIn("白酒", report)
-        self.assertIn("3连板", report)
-        self.assertIn("85.0分", report)
-        self.assertIn("龙头", report)
-
-    def test_build_stock_report_tier(self):
-        tiers = [
-            (85.0, "龙头"),
-            (70.0, "强票"),
-            (55.0, "中等"),
-            (30.0, "偏弱"),
-        ]
-        for score, expected in tiers:
-            report = self.reporter.build_stock_report(
-                code="000001", name="test", composite_score=score,
-            )
-            self.assertIn(expected, report, f"score={score} should be {expected}")
-
-    def test_build_stock_report_no_board(self):
-        report = self.reporter.build_stock_report(
-            code="600519", name="贵州茅台",
-            board_count=0, concepts=["白酒"],
-            composite_score=50.0,
-        )
-        self.assertNotIn("连板", report)
-
     def test_build_summary_report(self):
         display_list = [{
             "code": "600519", "name": "茅台",
             "composite_score": 85.0, "board_count": 3,
             "concepts": ["白酒"],
+            "is_true_dragon": True,
             "dimensions": {
-                "drive": {"score": 80, "weight": 0.35},
+                "drive": {"score": 80, "weight": 0.30},
                 "anti_drop": {"score": 70, "weight": 0.15},
                 "leadership": {"score": 90, "weight": 0.25},
-                "absorption": {"score": 85, "weight": 0.25},
+                "liquidity": {"score": 75, "weight": 0.20},
+                "absorption": {"score": 85, "weight": 0.10},
             },
             "primary_sector_name": "白酒",
         }]
@@ -145,79 +112,11 @@ class TestReportBuilder(unittest.TestCase):
         self.assertIn("茅台", report)
         self.assertIn("600519", report)
         self.assertIn("85.0", report)
+        self.assertIn("流动", report)
+        self.assertIn("真龙", report)
 
-    def test_build_stock_report_drive_mentions_total_and_scoring_sample(self):
+    def test_build_stock_report_mentions_event_details(self):
         report = self.reporter.build_stock_report(
-            code="600519", name="贵州茅台",
-            composite_score=85.0,
-            dimensions={
-                "drive": {
-                    "score": 88.0,
-                    "details": {
-                        "best_day_detail": {
-                            "voice": 90.0,
-                            "follow": 80.0,
-                            "board_leadership": 70.0,
-                            "voice_raw": {"total": 286, "scoring_total": 50, "sample_limit": 50, "limit_up": 6},
-                            "follow_raw": {"total": 286, "scoring_total": 50, "sample_limit": 50, "strong": 12, "down": 3},
-                            "board_detail": {"board_time": None, "is_yiziban": False, "sector_limit_up_total": 6},
-                        }
-                    },
-                }
-            },
-            primary_sector_name="白酒"
-        )
-        self.assertIn("全量共 286 只票", report)
-        self.assertIn("居前 50 只样本", report)
-
-    def test_build_stock_report_absorption_fallback_reason(self):
-        report = self.reporter.build_stock_report(
-            code="600519", name="贵州茅台",
-            composite_score=60.0,
-            dimensions={
-                "absorption": {
-                    "score": 50.0,
-                    "details": {"fallback_reason": "目标板块5分K不足"},
-                }
-            },
-            primary_sector_name="白酒",
-        )
-        self.assertIn("资金承接", report)
-        self.assertIn("目标板块5分K不足", report)
-
-    def test_build_stock_report_absorption_single_sector_no_etc(self):
-        report = self.reporter.build_stock_report(
-            code="600519", name="贵州茅台",
-            composite_score=60.0,
-            dimensions={
-                "absorption": {
-                    "score": 50.0,
-                    "details": {
-                        "event_count": 1,
-                        "all_events": [
-                            {
-                                "dive_time": "5月8日 13:00",
-                                "rally_time": "5月8日 13:10",
-                                "time_diff_min": 10,
-                                "target_pct": 0.4,
-                                "fleeing_sectors": [{"name": "白酒"}],
-                            }
-                        ],
-                    },
-                }
-            },
-            primary_sector_name="锂矿概念",
-        )
-        # fewshot 对齐：单板块时不出现“等板块”
-        self.assertNotIn("等板块", report)
-        self.assertIn("白酒板块跳水", report)
-        # 0.4% 仍视为“小幅拉伸”
-        self.assertIn("小幅拉伸", report)
-        # fewshot 示例不输出“间隔xx分钟”
-        self.assertNotIn("间隔", report)
-
-    def test_build_stock_report_v2_mentions_event_details(self):
-        report = self.reporter.build_stock_report_v2(
             code="600519", name="贵州茅台",
             concepts=["白酒"], composite_score=88.0,
             primary_sector_name="白酒",

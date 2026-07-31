@@ -20,15 +20,15 @@ _lock = threading.Lock()
 VALID_SOURCES = {"v1", "v2"}
 
 
-def _normalize_source(source: str = "v1") -> str:
+def _normalize_source(source: str = "v2") -> str:
     """规范化扫描/回测体系来源，只允许 v1 / v2。"""
-    s = (source or "v1").lower().strip()
+    s = (source or "v2").lower().strip()
     if s not in VALID_SOURCES:
         raise ValueError(f"invalid source: {source!r}, expected one of {sorted(VALID_SOURCES)}")
     return s
 
 
-def _tables(source: str = "v1") -> dict[str, str]:
+def _tables(source: str = "v2") -> dict[str, str]:
     """返回指定体系的物理表名。表名只来自白名单 source，安全用于 SQL 拼接。"""
     s = _normalize_source(source)
     return {
@@ -258,7 +258,7 @@ def remove_sector_blacklist(name: str):
 def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
               top_n: int, candidates_n: int, workers: int,
               stocks: list[dict], raw_output: str = None,
-              source: str = "v1"):
+              source: str = "v2"):
     with _lock:
         conn = _connect()
         try:
@@ -320,7 +320,7 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
             conn.close()
 
 
-def list_scans(limit: int = 50, source: str = "v1") -> list[dict]:
+def list_scans(limit: int = 50, source: str = "v2") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -343,7 +343,7 @@ def list_scans(limit: int = 50, source: str = "v1") -> list[dict]:
         conn.close()
 
 
-def get_latest_scan_by_date(scan_date: str, top_n: int, source: str = "v1") -> Optional[dict]:
+def get_latest_scan_by_date(scan_date: str, top_n: int, source: str = "v2") -> Optional[dict]:
     """按日期和 top_n 获取最新的一次扫描记录"""
     conn = _connect()
     try:
@@ -365,7 +365,7 @@ def get_latest_scan_by_date(scan_date: str, top_n: int, source: str = "v1") -> O
     finally:
         conn.close()
 
-def get_scan(scan_id: str, source: str = "v1") -> Optional[dict]:
+def get_scan(scan_id: str, source: str = "v2") -> Optional[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -387,7 +387,7 @@ def get_scan(scan_id: str, source: str = "v1") -> Optional[dict]:
         conn.close()
 
 
-def get_scans_by_date(scan_date: str, source: str = "v1") -> list[dict]:
+def get_scans_by_date(scan_date: str, source: str = "v2") -> list[dict]:
     """返回某日期下所有 scan 记录（不同 top_n）。"""
     conn = _connect()
     try:
@@ -411,7 +411,7 @@ def get_scans_by_date(scan_date: str, source: str = "v1") -> list[dict]:
         conn.close()
 
 
-def delete_scans_by_date_topn(scan_date: str, top_n: int, source: str = "v1") -> int:
+def delete_scans_by_date_topn(scan_date: str, top_n: int, source: str = "v2") -> int:
     """删除指定日期 + top_n 的所有扫描 run（硬删除）。
 
     Returns:
@@ -441,7 +441,7 @@ def delete_scans_by_date_topn(scan_date: str, top_n: int, source: str = "v1") ->
             conn.close()
 
 
-def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v1") -> list[dict]:
+def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") -> list[dict]:
     """返回某日期下所有扫描 run 的贡献明细（scan_stocks join scans）。"""
     conn = _connect()
     try:
@@ -490,7 +490,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v1") ->
 
 
 def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
-                 source: str = "v1"):
+                 source: str = "v2"):
     """保存或更新 dragons（UPSERT，不覆盖 review 字段）。
 
     source: 本次评分器体系（"v1"/"v2"），写入对应 dragons_v1 / dragons_v2。
@@ -560,7 +560,7 @@ def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
             conn.close()
 
 
-def get_dragon_meta(trade_date: str, code: str, source: str = "v1") -> Optional[dict]:
+def get_dragon_meta(trade_date: str, code: str, source: str = "v2") -> Optional[dict]:
     """返回指定 trade_date+code 的 rank/review_status，用于重建逻辑。"""
     conn = _connect()
     try:
@@ -578,7 +578,7 @@ def get_dragon_meta(trade_date: str, code: str, source: str = "v1") -> Optional[
         conn.close()
 
 
-def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str], source: str = "v1") -> int:
+def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str], source: str = "v2") -> int:
     """删除某 trade_date 下不在 keep_codes 内且 review_status='pending' 的记录。"""
     with _lock:
         conn = _connect()
@@ -613,7 +613,7 @@ def rebuild_dragons_for_date(
     calendar: set[str],
     apply_5day_gate: bool = True,
     keep_completed: bool = True,
-    source: str = "v1",
+    source: str = "v2",
 ) -> dict:
     """按 trade_date 重建 dragons 为“当日所有扫描结果的并集”物化。
 
@@ -726,7 +726,7 @@ def rebuild_dragons_for_date(
         "gate_blocked_samples": gate_blocked_samples,
     }
 
-def get_dragons(trade_date: str, source: str = "v1") -> list[dict]:
+def get_dragons(trade_date: str, source: str = "v2") -> list[dict]:
     """获取某日的 dragons 数据"""
     conn = _connect()
     try:
@@ -765,7 +765,7 @@ def get_dragons(trade_date: str, source: str = "v1") -> list[dict]:
         conn.close()
 
 
-def get_last_entry(code: str, source: str = "v1") -> Optional[str]:
+def get_last_entry(code: str, source: str = "v2") -> Optional[str]:
     """返回该 code 最近一次入选的 trade_date，无记录则返回 None。"""
     conn = _connect()
     try:
@@ -782,7 +782,7 @@ def get_last_entry(code: str, source: str = "v1") -> Optional[str]:
         conn.close()
 
 
-def get_last_entry_with_rank(code: str, source: str = "v1") -> Optional[tuple]:
+def get_last_entry_with_rank(code: str, source: str = "v2") -> Optional[tuple]:
     """返回该 code 最近一次入选的 (trade_date, rank)，无记录则返回 None。"""
     conn = _connect()
     try:
@@ -802,7 +802,7 @@ def get_last_entry_with_rank(code: str, source: str = "v1") -> Optional[tuple]:
 def get_pending_dragons(trade_date: Optional[str] = None,
                         top_n: Optional[int] = None,
                         review_status: Optional[str] = "pending",
-                        source: str = "v1") -> list[dict]:
+                        source: str = "v2") -> list[dict]:
     """获取待 review 的 dragons 记录。
 
     review_status='pending' 时只取待回测记录；传入 None 则不做状态过滤。
@@ -868,7 +868,7 @@ def update_dragon_review(trade_date: str, code: str,
                          max_drawdown_5d: Optional[float] = None,
                          max_return_hold_days: Optional[int] = None,
                          review_status: str = "completed",
-                         source: str = "v1"):
+                         source: str = "v2"):
     """更新单条 dragon 的 review 字段。"""
     with _lock:
         conn = _connect()
@@ -985,7 +985,7 @@ def _version_in_range(version: str,
 def query_dragons(filters: dict = None,
                   sort_by: str = "composite_score",
                   sort_dir: str = "desc",
-                  source: str = "v1") -> list[dict]:
+                  source: str = "v2") -> list[dict]:
     """灵活查询 dragons 表（供 Web UI /api/dragons 使用）。
 
     Args:
@@ -1101,7 +1101,7 @@ def query_dragons(filters: dict = None,
         conn.close()
 
 
-def get_review_summary(source: str = "v1") -> dict:
+def get_review_summary(source: str = "v2") -> dict:
     """返回 dragons 表中的汇总统计（供 Web UI /api/summary 使用）。"""
     conn = _connect()
     try:
@@ -1155,7 +1155,7 @@ def get_review_summary(source: str = "v1") -> dict:
         conn.close()
 
 
-def get_scan_stocks(scan_id: str, source: str = "v1") -> list[dict]:
+def get_scan_stocks(scan_id: str, source: str = "v2") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -1187,7 +1187,7 @@ def get_scan_stocks(scan_id: str, source: str = "v1") -> list[dict]:
         conn.close()
 
 
-def has_scan(scan_id: str, source: str = "v1") -> bool:
+def has_scan(scan_id: str, source: str = "v2") -> bool:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -1199,7 +1199,7 @@ def has_scan(scan_id: str, source: str = "v1") -> bool:
         conn.close()
 
 
-def save_scan_logs(scan_id: str, entries: list[dict], source: str = "v1"):
+def save_scan_logs(scan_id: str, entries: list[dict], source: str = "v2"):
     with _lock:
         conn = _connect()
         try:
@@ -1236,7 +1236,7 @@ def get_scan_logs(scan_id: Optional[str] = None,
                   level: Optional[str] = None,
                   code: Optional[str] = None,
                   tail: int = 200,
-                  source: str = "v1") -> list[dict]:
+                  source: str = "v2") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -1283,7 +1283,7 @@ def get_scan_logs(scan_id: Optional[str] = None,
         conn.close()
 
 
-def list_scan_log_folders(source: str = "v1") -> list[dict]:
+def list_scan_log_folders(source: str = "v2") -> list[dict]:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -1305,7 +1305,7 @@ def list_scan_log_folders(source: str = "v1") -> list[dict]:
         conn.close()
 
 
-def log_summary(scan_id: Optional[str] = None, source: str = "v1") -> dict:
+def log_summary(scan_id: Optional[str] = None, source: str = "v2") -> dict:
     source = _normalize_source(source)
     entries = get_scan_logs(scan_id=scan_id, tail=99999, source=source)
     if not entries:
@@ -1351,7 +1351,7 @@ def log_summary(scan_id: Optional[str] = None, source: str = "v1") -> dict:
     }
 
 
-def count_scan_logs(scan_id: str, source: str = "v1") -> int:
+def count_scan_logs(scan_id: str, source: str = "v2") -> int:
     conn = _connect()
     try:
         _ensure_schema(conn)
@@ -1364,7 +1364,7 @@ def count_scan_logs(scan_id: str, source: str = "v1") -> int:
         conn.close()
 
 
-def delete_old_scan_logs(cutoff_ts: float, source: str = "v1") -> int:
+def delete_old_scan_logs(cutoff_ts: float, source: str = "v2") -> int:
     with _lock:
         conn = _connect()
         try:
@@ -1380,7 +1380,7 @@ def delete_old_scan_logs(cutoff_ts: float, source: str = "v1") -> int:
             conn.close()
 
 
-def delete_all_scan_logs(source: str = "v1") -> int:
+def delete_all_scan_logs(source: str = "v2") -> int:
     with _lock:
         conn = _connect()
         try:

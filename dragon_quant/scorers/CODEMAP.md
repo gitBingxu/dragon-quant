@@ -1,4 +1,4 @@
-# scorers_v2/CODEMAP.md — v2 五维「识别真龙」评分器
+# scorers/CODEMAP.md — 五维「识别真龙」评分器
 
 > 子目录代码地图。整体执行路径见根 `../CODEMAP.md`。
 > 统一签名 `score(code, cache, **kwargs) -> ScoreResult`，**只读 `cache.get`，不发请求**。
@@ -37,9 +37,9 @@
 
 ## 依赖关系
 
-- 上游：`orchestrator.py` Phase D 预填 cache（`kline:1min:{}`/`kline:1min:000001`/`kline:1min:sector:{}`/`kline:5min:sector:{}`/`quotes:batch`/`sector:components:{}`），Phase E `_score_one_v2` 调 `evaluate`。
+- 上游：`orchestrator.py` Phase D 预填 cache（`kline:1min:{}`/`kline:1min:000001`/`kline:1min:sector:{}`/`kline:5min:sector:{}`/`quotes:batch`/`sector:components:{}`），Phase E `_score_one` 调 `evaluate`。
 - 读取的 cache 键见根 `../CODEMAP.md` §三。
-- 与旧 `scorers/`（v1）**完全隔离**，互不引用。
+- 当前 `scan` 主流程唯一使用本目录；SQLite 仍写 `*_v2` 表以兼容历史数据。
 
 ## 本维度相关不变式
 
@@ -47,4 +47,4 @@
 2. `gain_curve` 用 `KBar.pct`（provider 已按昨收填好），避免高开股量级被压缩。
 3. leadership 涨幅样本用**候选池 fived_pct**（非成分股 five_day_return，后者未拉日K者为0会污染）。
 4. liquidity 封单强度 = `bid1_volume ÷ volume`（同为 gtimg「手」）；一字板不罚。
-5. absorption 强度正向口径：出逃规模越大 + 拉升越高 → 分越高（非旧版反向稀释）。
+5. absorption 强度正向口径：出逃规模越大 + 拉升越高 → 分越高。

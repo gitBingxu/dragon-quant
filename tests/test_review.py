@@ -369,7 +369,7 @@ class TestRunReview(unittest.TestCase):
             mock_provider.get_kline.return_value = []
             run_review(force=True, verbose=False)
         mock_pending.assert_called_once_with(
-            trade_date=None, top_n=None, review_status=None, source="v1",
+            trade_date=None, top_n=None, review_status=None, source="v2",
         )
 
     def test_run_review_source_passes_through(self):

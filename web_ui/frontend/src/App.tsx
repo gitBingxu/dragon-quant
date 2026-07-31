@@ -12,7 +12,7 @@ import { FilterBar } from "./components/FilterBar";
 import { DragonTable } from "./components/DragonTable";
 
 const DEFAULT_FILTERS: DragonFilters = {
-  source: "v1",
+  source: "v2",
   status: "completed",
   sort_by: "composite_score",
   sort_dir: "desc",
@@ -20,7 +20,7 @@ const DEFAULT_FILTERS: DragonFilters = {
 
 function initialFilters(): DragonFilters {
   const params = new URLSearchParams(window.location.search);
-  const source = params.get("source") === "v2" ? "v2" : "v1";
+  const source = params.get("source") === "v1" ? "v1" : "v2";
   return { ...DEFAULT_FILTERS, source };
 }
 
@@ -39,7 +39,7 @@ export function App() {
     try {
       const resp = await fetchDragons(f);
       setRawData(resp.data || []);
-      fetchSummary(f.source ?? "v1").then(setSummary).catch(() => setSummary(null));
+      fetchSummary(f.source ?? "v2").then(setSummary).catch(() => setSummary(null));
       setSort({ by: f.sort_by as keyof Dragon, dir: f.sort_dir as "asc" | "desc" });
     } catch {
       setRawData([]);

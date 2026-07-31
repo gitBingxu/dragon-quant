@@ -46,7 +46,7 @@ class StockProvider(ABC):
         """获取概念板块 5 分钟 K 线"""
         ...
 
-    # ─── scorers_v2 新增（普通方法，默认未实现；仅 ths 覆写）───
+    # ─── scorers 新增（普通方法，默认未实现；仅 ths 覆写）───
 
     def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
         """获取概念板块当日 1 分钟分时 K 线（原始 1 分，不聚合）"""

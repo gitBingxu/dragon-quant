@@ -33,7 +33,7 @@ from typing import Optional
 from dragon_quant.storage import db as store
 
 
-def tail_logs(lines: int = 20, date: Optional[str] = None, source: str = "v1") -> list[dict]:
+def tail_logs(lines: int = 20, date: Optional[str] = None, source: str = "v2") -> list[dict]:
     """读取最新日志最后 N 条
 
     Args:
@@ -53,7 +53,7 @@ def query_logs(date: Optional[str] = None,
                level: Optional[str] = None,
                code: Optional[str] = None,
                tail: int = 200,
-               source: str = "v1") -> list[dict]:
+               source: str = "v2") -> list[dict]:
     """按条件查询日志条目
 
     Args:
@@ -73,7 +73,7 @@ def query_logs(date: Optional[str] = None,
     return entries
 
 
-def clear_logs(days: int = 7, source: str = "v1") -> dict:
+def clear_logs(days: int = 7, source: str = "v2") -> dict:
     """清除 N 天前的日志
 
     Args:
@@ -86,13 +86,13 @@ def clear_logs(days: int = 7, source: str = "v1") -> dict:
     return {"cleared": cleared, "kept": -1, "files_removed": []}
 
 
-def list_logs(source: str = "v1") -> list[dict]:
+def list_logs(source: str = "v2") -> list[dict]:
     """列出所有扫描的日志概要"""
     folders = store.list_scan_log_folders(source=source)
     return folders
 
 
-def log_summary(date: Optional[str] = None, source: str = "v1") -> dict:
+def log_summary(date: Optional[str] = None, source: str = "v2") -> dict:
     """获取最新扫描的摘要信息（api_stats、errors、phases）
 
     Args:
@@ -114,7 +114,7 @@ def log_summary(date: Optional[str] = None, source: str = "v1") -> dict:
     return store.log_summary(scan_id=scan_id, source=source)
 
 
-def _find_latest_scan_for_date(date: str, source: str = "v1") -> Optional[str]:
+def _find_latest_scan_for_date(date: str, source: str = "v2") -> Optional[str]:
     """按日期前缀查找最新的 scan_id"""
     folders = store.list_scan_log_folders(source=source)
     new_prefix = f"{source}_{date}"

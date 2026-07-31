@@ -1,4 +1,4 @@
-"""tests for dragon_quant.scorers_v2 — 五维识别真龙评分体系。
+"""tests for dragon_quant.scorers — 五维识别真龙评分体系。
 
 覆盖：base 工具、leadership 排名分位、liquidity 一字不罚、drive 脉冲-跟随、
 anti_drop 跳水段、absorption 中性回落、aggregator 门槛一票否决与不否决。
@@ -8,11 +8,11 @@ import unittest
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, Quote, StockInfo, Candidate
-from dragon_quant.scorers_v2 import evaluate, rank_verdicts
-from dragon_quant.scorers_v2 import registry as R
-from dragon_quant.scorers_v2.base import (
+from dragon_quant.scorers import evaluate, rank_verdicts
+from dragon_quant.scorers import registry as R
+from dragon_quant.scorers.base import (
     clip, desc_rank_score, common_minute_axis, gain_curve)
-from dragon_quant.scorers_v2 import leadership, liquidity, drive, anti_drop
+from dragon_quant.scorers import leadership, liquidity, drive, anti_drop
 
 
 def _min_bars(pre, pcts, start="2026-06-19 09:30"):

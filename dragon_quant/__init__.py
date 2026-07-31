@@ -1,5 +1,5 @@
 """
-dragon_quant — 龙头战法四维量化筛选系统
+dragon_quant — 龙头战法五维量化筛选系统
 
 公共 API:
   from dragon_quant import scan          # 编排器：完整扫描

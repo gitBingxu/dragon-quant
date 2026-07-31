@@ -87,7 +87,7 @@ class Candidate:
 @dataclass
 class ScoreResult:
     """单维度评分结果"""
-    dim: str                # drive / anti_drop / leadership / absorption
+    dim: str                # drive / leadership / anti_drop / liquidity / absorption
     score: float            # 0-100
     weight: float           # 权重
     details: dict = field(default_factory=dict)  # 子维度得分明细

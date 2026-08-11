@@ -12,13 +12,16 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import { useElementSize } from "@mantine/hooks";
 import {
   fetchAccountPositions,
   fetchAccountBenchmark,
+  fetchAccountEvents,
   fetchAccountRuns,
   fetchAccountSnapshots,
   fetchAccountTrades,
   type AccountBenchmarkPoint,
+  type AccountTimelineEvent,
   type AccountPosition,
   type AccountRun,
   type AccountSnapshot,
@@ -39,6 +42,7 @@ export function AccountApp() {
   const [benchmark, setBenchmark] = useState<AccountBenchmarkPoint[]>([]);
   const [trades, setTrades] = useState<AccountTrade[]>([]);
   const [positions, setPositions] = useState<AccountPosition[]>([]);
+  const [events, setEvents] = useState<AccountTimelineEvent[]>([]);
 
   const selectedRun = useMemo(
     () => runs.find((r) => r.id === runId) || null,
@@ -65,6 +69,7 @@ export function AccountApp() {
       setBenchmark([]);
       setTrades([]);
       setPositions([]);
+      setEvents([]);
       return;
     }
     Promise.all([
@@ -72,18 +77,21 @@ export function AccountApp() {
       fetchAccountBenchmark(runId),
       fetchAccountTrades(runId),
       fetchAccountPositions(runId),
+      fetchAccountEvents(runId),
     ])
-      .then(([s, b, t, p]) => {
+      .then(([s, b, t, p, e]) => {
         setSnapshots(s.data || []);
         setBenchmark(b.data || []);
         setTrades(t.data || []);
         setPositions(p.data || []);
+        setEvents(e.data || []);
       })
       .catch(() => {
         setSnapshots([]);
         setBenchmark([]);
         setTrades([]);
         setPositions([]);
+        setEvents([]);
       });
   }, [runId]);
 
@@ -134,7 +142,7 @@ export function AccountApp() {
       </Grid>
 
       <TradesTable trades={trades} />
-      <PositionsTable positions={positions} />
+      <AccountTimeline events={events} positions={positions} />
     </Container>
   );
 }
@@ -187,7 +195,9 @@ function EquityCurve({
   benchmark: AccountBenchmarkPoint[];
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const chart = useMemo(() => buildChart(data, benchmark), [data, benchmark]);
+  const { ref, width } = useElementSize();
+  const geom = useMemo(() => chartGeometry(width), [width]);
+  const chart = useMemo(() => buildChart(data, benchmark, geom), [data, benchmark, geom]);
   const hover = hoverIndex == null ? null : chart.points[hoverIndex] ?? null;
 
   const handleMove = (event: React.MouseEvent<SVGSVGElement>) => {
@@ -199,13 +209,14 @@ function EquityCurve({
     point.x = event.clientX;
     point.y = event.clientY;
     const svgPoint = point.matrixTransform(matrix.inverse());
-    const x = Math.max(LEFT, Math.min(RIGHT, svgPoint.x));
+    const x = Math.max(geom.left, Math.min(geom.right, svgPoint.x));
     const idx = nearestIndex(chart.points, x);
     setHoverIndex(idx);
   };
 
   return (
     <Paper
+      ref={ref}
       withBorder
       radius="md"
       p="md"
@@ -234,9 +245,9 @@ function EquityCurve({
         </Group>
       </Group>
       <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        viewBox={`0 0 ${geom.width} ${geom.height}`}
         width="100%"
-        height="330"
+        height={geom.height}
         role="img"
         onMouseMove={handleMove}
         onMouseLeave={() => setHoverIndex(null)}
@@ -248,28 +259,28 @@ function EquityCurve({
             <stop offset="100%" stopColor="var(--mantine-color-red-5)" stopOpacity="0.02" />
           </linearGradient>
         </defs>
-        <rect x="0" y="0" width={CHART_W} height={CHART_H} fill="transparent" />
+        <rect x="0" y="0" width={geom.width} height={geom.height} fill="transparent" />
 
         {chart.equityTicks.map((tick) => (
           <g key={`eq-${tick.y}`}>
-            <line x1={LEFT} x2={RIGHT} y1={tick.y} y2={tick.y} stroke="#303030" strokeDasharray="3 5" />
-            <text x={RIGHT + 8} y={tick.y + 4} fontSize="11" fill="#8f8f8f">
+            <line x1={geom.left} x2={geom.right} y1={tick.y} y2={tick.y} stroke="#303030" strokeDasharray="3 5" />
+            <text x={geom.right + 8} y={tick.y + 4} fontSize="11" fill="#8f8f8f">
               {fmtCompactMoney(tick.value)}
             </text>
           </g>
         ))}
         {chart.dateTicks.map((tick) => (
           <g key={`dt-${tick.x}`}>
-            <line x1={tick.x} x2={tick.x} y1={TOP} y2={BOTTOM} stroke="#272727" />
-            <text x={tick.x} y={CHART_H - 10} fontSize="11" textAnchor="middle" fill="#8f8f8f">
+            <line x1={tick.x} x2={tick.x} y1={geom.top} y2={geom.bottom} stroke="#272727" />
+            <text x={tick.x} y={geom.height - 10} fontSize="11" textAnchor="middle" fill="#8f8f8f">
               {tick.label}
             </text>
           </g>
         ))}
 
-        <line x1={LEFT} x2={RIGHT} y1={EQUITY_BASE} y2={EQUITY_BASE} stroke="#454545" />
-        <line x1={LEFT} x2={LEFT} y1={TOP} y2={BOTTOM} stroke="#3d3d3d" />
-        <line x1={RIGHT} x2={RIGHT} y1={TOP} y2={BOTTOM} stroke="#3d3d3d" />
+        <line x1={geom.left} x2={geom.right} y1={geom.equityBase} y2={geom.equityBase} stroke="#454545" />
+        <line x1={geom.left} x2={geom.left} y1={geom.top} y2={geom.bottom} stroke="#3d3d3d" />
+        <line x1={geom.right} x2={geom.right} y1={geom.top} y2={geom.bottom} stroke="#3d3d3d" />
 
         {chart.equityArea && <path d={chart.equityArea} fill="url(#equityArea)" />}
         <path d={chart.equityPath} fill="none" stroke="var(--mantine-color-red-5)" strokeWidth="2.4" />
@@ -277,13 +288,13 @@ function EquityCurve({
 
         {hover && (
           <g>
-            <line x1={hover.x} x2={hover.x} y1={TOP} y2={BOTTOM} stroke="#888" strokeDasharray="4 4" />
-            <line x1={LEFT} x2={RIGHT} y1={hover.equityY} y2={hover.equityY} stroke="#664040" strokeDasharray="4 4" />
+            <line x1={hover.x} x2={hover.x} y1={geom.top} y2={geom.bottom} stroke="#888" strokeDasharray="4 4" />
+            <line x1={geom.left} x2={geom.right} y1={hover.equityY} y2={hover.equityY} stroke="#664040" strokeDasharray="4 4" />
             <circle cx={hover.x} cy={hover.equityY} r="4" fill="var(--mantine-color-red-5)" stroke="#fff" strokeWidth="1.2" />
             {hover.benchmarkY != null && (
               <circle cx={hover.x} cy={hover.benchmarkY} r="4" fill="var(--mantine-color-yellow-5)" stroke="#fff" strokeWidth="1.2" />
             )}
-            <HoverTip point={hover} alignRight={hover.x > CHART_W - 230} />
+            <HoverTip point={hover} geom={geom} />
           </g>
         )}
       </svg>
@@ -291,11 +302,12 @@ function EquityCurve({
   );
 }
 
-function HoverTip({ point, alignRight }: { point: ChartPoint; alignRight: boolean }) {
+function HoverTip({ point, geom }: { point: ChartPoint; geom: ChartGeometry }) {
   const w = 188;
   const h = 116;
+  const alignRight = point.x > geom.width - w - 28;
   const x = alignRight ? point.x - w - 14 : point.x + 14;
-  const y = Math.max(12, Math.min(point.equityY - 56, CHART_H - h - 12));
+  const y = Math.max(12, Math.min(point.equityY - 56, geom.height - h - 12));
   return (
     <g>
       <rect x={x} y={y} width={w} height={h} rx={4} fill="#111" opacity="0.94" stroke="#555" />
@@ -401,49 +413,132 @@ function TradesTable({ trades }: { trades: AccountTrade[] }) {
   );
 }
 
-function PositionsTable({ positions }: { positions: AccountPosition[] }) {
+function AccountTimeline({
+  events,
+  positions,
+}: {
+  events: AccountTimelineEvent[];
+  positions: AccountPosition[];
+}) {
+  const closedByEntry = useMemo(() => {
+    const m = new Map<string, AccountPosition>();
+    for (const p of positions) m.set(`${p.entry_date}-${p.code}`, p);
+    return m;
+  }, [positions]);
+
   return (
-    <Paper withBorder radius="md" mt="md" style={{ overflow: "hidden" }}>
-      <Table.ScrollContainer minWidth={900}>
-        <Table verticalSpacing="xs" highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>股票</Table.Th>
-              <Table.Th>买入日</Table.Th>
-              <Table.Th>卖出日</Table.Th>
-              <Table.Th>买入价</Table.Th>
-              <Table.Th>卖出价</Table.Th>
-              <Table.Th>收益</Table.Th>
-              <Table.Th>持有天</Table.Th>
-              <Table.Th>退出逻辑</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {positions.length ? (
-              positions.map((p, i) => (
-                <Table.Tr key={`${p.code}-${p.entry_date}-${i}`}>
-                  <Table.Td>{p.code} {p.name}</Table.Td>
-                  <Table.Td>{p.entry_date}</Table.Td>
-                  <Table.Td>{p.exit_date}</Table.Td>
-                  <Table.Td>{fmtNum(p.entry_price)}</Table.Td>
-                  <Table.Td>{fmtNum(p.exit_price)}</Table.Td>
-                  <Table.Td c={pnlColor(p.realized_return)}>{fmtPct(p.realized_return)}</Table.Td>
-                  <Table.Td>{p.hold_days}</Table.Td>
-                  <Table.Td>{p.exit_reason_code}</Table.Td>
-                </Table.Tr>
-              ))
-            ) : (
-              <Table.Tr>
-                <Table.Td colSpan={8}>
-                  <Text ta="center" c="dimmed" py={32}>暂无已平仓持仓</Text>
-                </Table.Td>
-              </Table.Tr>
-            )}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
+    <Paper withBorder radius="md" mt="md" p="md">
+      <Group justify="space-between" mb="md">
+        <div>
+          <Text fw={700}>账户决策时间线</Text>
+          <Text size="xs" c="dimmed">
+            展示每日买入、卖出、继续持有和空仓原因
+          </Text>
+        </div>
+        <Badge variant="light">{events.length} 条</Badge>
+      </Group>
+      {events.length ? (
+        <div style={{ display: "grid", gap: 12 }}>
+          {events.map((event, i) => (
+            <TimelineItem
+              key={`${event.event_date}-${event.event_type}-${event.code}-${i}`}
+              event={event}
+              position={event.event_type === "BUY" ? closedByEntry.get(`${event.event_date}-${event.code}`) : undefined}
+            />
+          ))}
+        </div>
+      ) : (
+        <Text ta="center" c="dimmed" py={32}>
+          暂无账户时间线。重新运行一次 review-account 后可展示空仓原因。
+        </Text>
+      )}
     </Paper>
   );
+}
+
+function TimelineItem({
+  event,
+  position,
+}: {
+  event: AccountTimelineEvent;
+  position?: AccountPosition;
+}) {
+  const meta = timelineMeta(event.event_type);
+  const isIdle = event.event_type === "IDLE";
+  const details = Array.isArray(event.signal?.details)
+    ? (event.signal.details as Array<Record<string, unknown>>)
+    : [];
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "120px 20px minmax(0, 1fr)",
+        gap: 12,
+        alignItems: "start",
+      }}
+    >
+      <Text size="sm" c="dimmed" pt={2}>{event.event_date}</Text>
+      <div
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: 999,
+          background: `var(--mantine-color-${meta.color}-5)`,
+          marginTop: 6,
+          boxShadow: `0 0 0 4px var(--mantine-color-${meta.color}-0)`,
+        }}
+      />
+      <Paper
+        withBorder
+        radius="sm"
+        p="sm"
+        style={isIdle ? { background: "#202020", borderColor: "#333" } : undefined}
+      >
+        <Group justify="space-between" gap="sm" wrap="nowrap">
+          <Group gap="xs" wrap="wrap">
+            <Badge color={meta.color} variant="light">{meta.label}</Badge>
+            <Text fw={700} c={isIdle ? "gray.2" : undefined}>{event.title || meta.label}</Text>
+            {event.code && <Badge variant="outline">{event.code}</Badge>}
+          </Group>
+          <Group gap="md" wrap="nowrap">
+            {event.cash != null && <Text size="xs" c="dimmed">现金 {fmtMoney(event.cash)}</Text>}
+            {event.total_equity != null && <Text size="xs" c="dimmed">权益 {fmtMoney(event.total_equity)}</Text>}
+          </Group>
+        </Group>
+        <Text size="sm" mt={8} c={isIdle ? "gray.4" : undefined}>{event.detail || event.reason_code}</Text>
+        {details.length > 0 && (
+          <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+            {details.slice(0, 5).map((d, i) => (
+              <Group key={i} gap="xs" wrap="nowrap" align="flex-start">
+                <Badge size="xs" color={d.passed ? "green" : "gray"} variant="light">
+                  {typeof d.rank === "number" ? `#${d.rank}` : "—"}
+                </Badge>
+                <Text size="xs" c={d.passed ? "green.7" : "dimmed"}>
+                  {String(d.reason_text || d.reason_code || "")}
+                </Text>
+              </Group>
+            ))}
+          </div>
+        )}
+        {position && (
+          <Group mt="sm" gap="md">
+            <Text size="xs" c="dimmed">卖出日 {position.exit_date}</Text>
+            <Text size="xs" c={pnlColor(position.realized_return)}>
+              闭环收益 {fmtPct(position.realized_return)}
+            </Text>
+            <Text size="xs" c="dimmed">持有 {position.hold_days} 天</Text>
+          </Group>
+        )}
+      </Paper>
+    </div>
+  );
+}
+
+function timelineMeta(type: AccountTimelineEvent["event_type"]) {
+  if (type === "BUY") return { label: "买入", color: "red" as const };
+  if (type === "SELL") return { label: "卖出", color: "teal" as const };
+  if (type === "HOLD") return { label: "持仓", color: "blue" as const };
+  return { label: "空仓", color: "gray" as const };
 }
 
 function Legend({ color, label }: { color: "red" | "teal" | "yellow"; label: string }) {
@@ -462,13 +557,18 @@ function Legend({ color, label }: { color: "red" | "teal" | "yellow"; label: str
   );
 }
 
-const CHART_W = 920;
 const CHART_H = 330;
-const LEFT = 54;
-const RIGHT = 850;
-const TOP = 18;
-const EQUITY_BASE = 204;
-const BOTTOM = 296;
+const MIN_CHART_W = 420;
+
+interface ChartGeometry {
+  width: number;
+  height: number;
+  left: number;
+  right: number;
+  top: number;
+  equityBase: number;
+  bottom: number;
+}
 
 interface ChartPoint {
   x: number;
@@ -478,7 +578,26 @@ interface ChartPoint {
   benchmark: AccountBenchmarkPoint | null;
 }
 
-function buildChart(data: AccountSnapshot[], benchmark: AccountBenchmarkPoint[]) {
+function chartGeometry(containerWidth: number): ChartGeometry {
+  const width = Math.max(Math.floor(containerWidth || 0), MIN_CHART_W);
+  const left = 54;
+  const right = Math.max(left + 160, width - 70);
+  return {
+    width,
+    height: CHART_H,
+    left,
+    right,
+    top: 18,
+    equityBase: 204,
+    bottom: 296,
+  };
+}
+
+function buildChart(
+  data: AccountSnapshot[],
+  benchmark: AccountBenchmarkPoint[],
+  geom: ChartGeometry
+) {
   const eqValues = data.map((d) => d.total_equity);
   const benchmarkByDate = new Map(benchmark.map((b) => [b.trade_date, b]));
   const benchmarkValues = data
@@ -492,12 +611,12 @@ function buildChart(data: AccountSnapshot[], benchmark: AccountBenchmarkPoint[])
   const eqMax = eqMaxRaw + eqPad;
 
   const points: ChartPoint[] = data.map((d, i) => {
-    const x = LEFT + (data.length <= 1 ? 0 : (i / (data.length - 1)) * (RIGHT - LEFT));
+    const x = geom.left + (data.length <= 1 ? 0 : (i / (data.length - 1)) * (geom.right - geom.left));
     const bench = benchmarkByDate.get(d.trade_date) || null;
     return {
       x,
-      equityY: scale(d.total_equity, eqMin, eqMax, EQUITY_BASE, TOP),
-      benchmarkY: bench ? scale(bench.total_equity, eqMin, eqMax, EQUITY_BASE, TOP) : null,
+      equityY: scale(d.total_equity, eqMin, eqMax, geom.equityBase, geom.top),
+      benchmarkY: bench ? scale(bench.total_equity, eqMin, eqMax, geom.equityBase, geom.top) : null,
       data: d,
       benchmark: bench,
     };
@@ -508,12 +627,12 @@ function buildChart(data: AccountSnapshot[], benchmark: AccountBenchmarkPoint[])
     points,
     equityPath,
     benchmarkPath,
-    equityArea: areaPath(points, "equityY", EQUITY_BASE),
+    equityArea: areaPath(points, "equityY", geom.equityBase),
     equityTicks: ticks(eqMin, eqMax, 4).map((v) => ({
       value: v,
-      y: scale(v, eqMin, eqMax, EQUITY_BASE, TOP),
+      y: scale(v, eqMin, eqMax, geom.equityBase, geom.top),
     })),
-    dateTicks: dateTicks(points),
+    dateTicks: dateTicks(points, geom),
     last: data[data.length - 1] || null,
   };
 }
@@ -556,9 +675,9 @@ function ticks(min: number, max: number, count: number) {
   return Array.from({ length: count }, (_, i) => min + step * i);
 }
 
-function dateTicks(points: ChartPoint[]) {
+function dateTicks(points: ChartPoint[], geom: ChartGeometry) {
   if (!points.length) return [];
-  const count = Math.min(6, points.length);
+  const count = Math.min(Math.max(Math.floor((geom.right - geom.left) / 135), 2), 8, points.length);
   return Array.from({ length: count }, (_, i) => {
     const idx = count === 1 ? 0 : Math.round((i / (count - 1)) * (points.length - 1));
     const p = points[idx];

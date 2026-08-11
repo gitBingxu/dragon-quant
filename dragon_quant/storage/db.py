@@ -140,6 +140,23 @@ CREATE TABLE IF NOT EXISTS review_account_positions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_account_positions_run ON review_account_positions(run_id, entry_date);
+
+CREATE TABLE IF NOT EXISTS review_account_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER NOT NULL REFERENCES review_account_runs(id) ON DELETE CASCADE,
+    event_date      TEXT NOT NULL,
+    event_type      TEXT NOT NULL,
+    code            TEXT,
+    name            TEXT,
+    title           TEXT,
+    detail          TEXT,
+    reason_code     TEXT,
+    cash            REAL,
+    total_equity    REAL,
+    signal_json     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_events_run ON review_account_events(run_id, event_date, id);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
@@ -1337,7 +1354,8 @@ def create_review_account_run(source: str,
 def save_review_account_results(run_id: int,
                                 snapshots: list[dict],
                                 trades: list[dict],
-                                positions: list[dict]):
+                                positions: list[dict],
+                                events: Optional[list[dict]] = None):
     """批量保存账户级 review 的快照、交割单和已平仓持仓。"""
     with _lock:
         conn = _connect()
@@ -1392,6 +1410,22 @@ def save_review_account_results(run_id: int,
                     for p in positions
                 ],
             )
+            if events:
+                conn.executemany(
+                    "INSERT INTO review_account_events("
+                    "run_id, event_date, event_type, code, name, title, detail, "
+                    "reason_code, cash, total_equity, signal_json"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            run_id, e.get("event_date"), e.get("event_type"),
+                            e.get("code"), e.get("name"), e.get("title"),
+                            e.get("detail"), e.get("reason_code"), e.get("cash"),
+                            e.get("total_equity"), e.get("signal_json"),
+                        )
+                        for e in events
+                    ],
+                )
             conn.commit()
         finally:
             conn.close()
@@ -1516,6 +1550,29 @@ def query_review_account_positions(run_id: int) -> list[dict]:
                 "exit_date": r[7], "exit_price": r[8], "exit_reason_code": r[9] or "",
                 "exit_signal": json.loads(r[10]) if r[10] else {},
                 "realized_return": r[11], "hold_days": r[12], "status": r[13],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def query_review_account_events(run_id: int) -> list[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT event_date, event_type, code, name, title, detail, reason_code, "
+            "cash, total_equity, signal_json "
+            "FROM review_account_events WHERE run_id = ? ORDER BY event_date ASC, id ASC",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "event_date": r[0], "event_type": r[1], "code": r[2] or "",
+                "name": r[3] or "", "title": r[4] or "", "detail": r[5] or "",
+                "reason_code": r[6] or "", "cash": r[7], "total_equity": r[8],
+                "signal": json.loads(r[9]) if r[9] else {},
             }
             for r in rows
         ]

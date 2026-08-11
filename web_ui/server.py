@@ -101,6 +101,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self._serve_api_account_trades(parse_qs(parsed.query))
             elif path == "/api/account/positions":
                 self._serve_api_account_positions(parse_qs(parsed.query))
+            elif path == "/api/account/events":
+                self._serve_api_account_events(parse_qs(parsed.query))
             elif path.startswith("/api/"):
                 self._send_json({"error": "not found"}, 404)
             else:
@@ -227,6 +229,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
         db = _get_db()
         run_id = _parse_run_id(params)
         self._send_json({"data": db.query_review_account_positions(run_id)})
+
+    def _serve_api_account_events(self, params: dict):
+        """GET /api/account/events?run_id=1"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        self._send_json({"data": db.query_review_account_events(run_id)})
 
     # ---------- 日志静默 ----------
 

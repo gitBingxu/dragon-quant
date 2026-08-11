@@ -52,6 +52,13 @@ def run_review_account(date_from: str,
             }
             for p in result["positions"]
         ],
+        events=[
+            {
+                **e.__dict__,
+                "signal_json": json.dumps(e.signal, ensure_ascii=False),
+            }
+            for e in result.get("events", [])
+        ],
     )
     result["run_id"] = run_id
 

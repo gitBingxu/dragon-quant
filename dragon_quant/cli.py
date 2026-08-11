@@ -279,6 +279,48 @@ def _cmd_review_ui(args):
                  default_source=getattr(args, "source", "v2"))
 
 
+def _cmd_review_account(args):
+    """账户级模拟交易 review 命令。"""
+    if args.ui_only:
+        _cmd_review_account_ui(args)
+        return
+
+    if not args.date_from or not args.date_to:
+        print("错误: review-account 需要 --from 和 --to，或使用 --ui-only", file=sys.stderr)
+        return
+
+    from dragon_quant.review_account import run_review_account
+    run_review_account(
+        date_from=_normalize_cli_date(args.date_from),
+        date_to=_normalize_cli_date(args.date_to),
+        initial_cash=args.capital,
+        source=args.source,
+        strategy_name=args.strategy,
+        verbose=True,
+    )
+
+    if args.ui:
+        _cmd_review_account_ui(args)
+
+
+def _cmd_review_account_ui(args):
+    """启动账户级 review Web UI。"""
+    from web_ui.server import start_server
+    start_server(
+        port=args.port,
+        open_browser=not args.no_browser,
+        default_source=getattr(args, "source", "v2"),
+        default_page="account",
+    )
+
+
+def _normalize_cli_date(d: str) -> str:
+    """CLI 日期支持 YYYYMMDD / YYYY-MM-DD。"""
+    if len(d) == 8 and d.isdigit():
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    return d
+
+
 def _cmd_vpa(args):
     """个股量价分析命令"""
     import json
@@ -401,6 +443,7 @@ def main():
   dragon-quant scan --top 25 --candidates 5 --workers 2
   dragon-quant data kline --code 600172 --days 20
   dragon-quant review --ui-only --source v2
+  dragon-quant review-account --from 20260501 --to 20260601 --ui
 
 Use \"dragon-quant <command> -h\" for command-specific help.
 """,
@@ -567,6 +610,33 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
     rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
+    # review-account 子命令
+    acct_p = sub.add_parser(
+        "review-account",
+        help="账户级模拟交易回测",
+        usage="dragon-quant review-account [options]",
+        description="按真实账户、现金、持仓和买卖策略模拟交易员操作。",
+        epilog="""Examples:
+  dragon-quant review-account --from 20260501 --to 20260601
+  dragon-quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
+  dragon-quant review-account --ui-only --source v2
+""",
+    )
+    acct_p.add_argument("--from", dest="date_from", default=None,
+                        help="回测开始日期 (YYYYMMDD 或 YYYY-MM-DD)")
+    acct_p.add_argument("--to", dest="date_to", default=None,
+                        help="回测结束日期 (YYYYMMDD 或 YYYY-MM-DD)")
+    acct_p.add_argument("--capital", type=float, default=100000.0,
+                        help="初始资金 (默认 100000)")
+    acct_p.add_argument("--strategy", default="dragon_pullback_daily",
+                        help="账户策略名 (默认 dragon_pullback_daily)")
+    acct_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                        help="候选数据来源体系 (默认 v2)")
+    acct_p.add_argument("--ui", action="store_true", help="回测后启动账户 Web UI")
+    acct_p.add_argument("--ui-only", action="store_true", help="仅启动账户 Web UI（不执行回测）")
+    acct_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
+    acct_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+
     # vpa 子命令
     vpa_p = sub.add_parser(
         "vpa",
@@ -627,6 +697,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_storage(args)
     elif args.command == "review":
         _cmd_review(args)
+    elif args.command == "review-account":
+        _cmd_review_account(args)
     elif args.command == "vpa":
         _cmd_vpa(args)
     elif args.command == "blacklist":

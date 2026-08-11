@@ -97,3 +97,115 @@ export async function fetchDragons(
   if (!res.ok) throw new Error(`dragons ${res.status}`);
   return res.json();
 }
+
+export interface AccountRun {
+  id: number;
+  source: "v1" | "v2";
+  strategy_name: string;
+  strategy_params: Record<string, unknown>;
+  date_from: string;
+  date_to: string;
+  initial_cash: number;
+  final_equity: number;
+  total_return: number;
+  max_drawdown: number;
+  trade_count: number;
+  win_rate: number | null;
+  created_at: string;
+}
+
+export interface AccountSnapshot {
+  trade_date: string;
+  cash: number;
+  market_value: number;
+  total_equity: number;
+  daily_return: number;
+  cumulative_return: number;
+  drawdown: number;
+  position_code: string;
+  position_name: string;
+  position_qty: number;
+  position_cost: number | null;
+  position_market_price: number | null;
+  position_unrealized_return: number | null;
+}
+
+export interface AccountBenchmarkPoint {
+  trade_date: string;
+  close: number;
+  total_equity: number;
+  cumulative_return: number;
+}
+
+export interface AccountTrade {
+  trade_date: string;
+  code: string;
+  name: string;
+  side: "BUY" | "SELL";
+  price: number;
+  qty: number;
+  amount: number;
+  fee: number;
+  cash_after: number;
+  position_after: number;
+  reason_code: string;
+  reason_text: string;
+  signal: Record<string, unknown>;
+}
+
+export interface AccountPosition {
+  code: string;
+  name: string;
+  entry_date: string;
+  entry_price: number;
+  qty: number;
+  entry_reason_code: string;
+  entry_signal: Record<string, unknown>;
+  exit_date: string;
+  exit_price: number;
+  exit_reason_code: string;
+  exit_signal: Record<string, unknown>;
+  realized_return: number;
+  hold_days: number;
+  status: string;
+}
+
+export async function fetchAccountRuns(
+  source: "v1" | "v2" = "v2"
+): Promise<{ data: AccountRun[]; count: number }> {
+  const params = new URLSearchParams({ source });
+  const res = await fetch("/api/account/runs?" + params.toString());
+  if (!res.ok) throw new Error(`account runs ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAccountSnapshots(runId: number): Promise<{ data: AccountSnapshot[] }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/snapshots?" + params.toString());
+  if (!res.ok) throw new Error(`account snapshots ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAccountBenchmark(
+  runId: number,
+  code = "SH000001"
+): Promise<{ data: AccountBenchmarkPoint[]; code: string; name: string }> {
+  const params = new URLSearchParams({ run_id: String(runId), code });
+  const res = await fetch("/api/account/benchmark?" + params.toString());
+  if (!res.ok) throw new Error(`account benchmark ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAccountTrades(runId: number): Promise<{ data: AccountTrade[] }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/trades?" + params.toString());
+  if (!res.ok) throw new Error(`account trades ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAccountPositions(runId: number): Promise<{ data: AccountPosition[] }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/positions?" + params.toString());
+  if (!res.ok) throw new Error(`account positions ${res.status}`);
+  return res.json();
+}

@@ -53,6 +53,18 @@ class TestCliHelp(unittest.TestCase):
         self.assertIn("--source {v1,v2}", output)
         self.assertIn("--ui-only", output)
 
+    def test_review_account_help(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "review-account", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant review-account [options]", output)
+        self.assertIn("--from DATE_FROM", output)
+        self.assertIn("--capital CAPITAL", output)
+
     def test_data_kline_help_includes_required_options(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "data", "kline", "-h"]):
@@ -96,6 +108,32 @@ class TestCliSourceArgs(unittest.TestCase):
             cli.main()
 
         mock_start.assert_called_once_with(port=8765, open_browser=False, default_source="v2")
+
+    def test_review_account_passes_to_service(self):
+        with patch("sys.argv", [
+            "dragon-quant", "review-account", "--from", "20260501", "--to", "20260601",
+            "--capital", "200000", "--source", "v2",
+        ]), patch("dragon_quant.review_account.run_review_account") as mock_run:
+            cli.main()
+
+        mock_run.assert_called_once_with(
+            date_from="2026-05-01",
+            date_to="2026-06-01",
+            initial_cash=200000.0,
+            source="v2",
+            strategy_name="dragon_pullback_daily",
+            verbose=True,
+        )
+
+    def test_review_account_ui_only_uses_account_page(self):
+        with patch("sys.argv", [
+            "dragon-quant", "review-account", "--ui-only", "--source", "v2", "--no-browser",
+        ]), patch("web_ui.server.start_server") as mock_start:
+            cli.main()
+
+        mock_start.assert_called_once_with(
+            port=8765, open_browser=False, default_source="v2", default_page="account"
+        )
 
     def test_scan_history_uses_v2_source(self):
         scan = {

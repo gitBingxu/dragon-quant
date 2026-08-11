@@ -198,6 +198,10 @@ dragon_quant/
 | `*_v1` | 历史旧表 | 不再由主流程写入，仅显式 `--source v1` 查询 |
 | `vpa_analysis` | 量价分析 | 独立表，不复用 dragons |
 | `sector_blacklist` | 概念板块黑名单 | 行业切换后默认种子为空 |
+| `review_account_runs` | 账户级 review 批次 | 保存策略参数、区间、初始资金、最终权益、收益率、最大回撤 |
+| `review_account_snapshots` | 账户每日快照 | 保存现金、市值、总权益、收益曲线、当前持仓 |
+| `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
+| `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -218,6 +222,14 @@ python -m dragon_quant review --ui                    # 回测后启动 Web UI�
 python -m dragon_quant review --ui-only               # 仅看结果
 ```
 回测逻辑：默认从 `dragons_v2` 读 pending → 找入选后第一个非一字板日（`high != low`）最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回 `dragons_v2`。`--source v1` 仅用于历史旧表。
+
+### 账户级模拟交易
+```bash
+python -m dragon_quant review-account --from 20260501 --to 20260601
+python -m dragon_quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
+python -m dragon_quant review-account --ui-only --source v2
+```
+`review-account` 不替代现有 `review`，而是按真实账户逐交易日模拟：先根据止盈止损处理持仓，再用当日 `dragons_v2` 前 5 候选按策略买入。第一版 `dragon_pullback_daily` 使用日 K 指标，单票满仓，买入信号包括 MA5 回踩承接、强势换手、弱转强；卖出信号包括硬止损、跌破买入日低点、跌破 MA5、固定止盈、移动止盈、最长持有退出。UI 独立页面为 `/account`，展示账户持仓、交割单、权益和收益率曲线。
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。

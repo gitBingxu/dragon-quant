@@ -61,6 +61,85 @@ CREATE TABLE IF NOT EXISTS sector_blacklist (
     name        TEXT PRIMARY KEY,
     created_at  TEXT DEFAULT (datetime('now','localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS review_account_runs (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    source               TEXT DEFAULT 'v2',
+    strategy_name        TEXT NOT NULL,
+    strategy_params_json TEXT,
+    date_from            TEXT NOT NULL,
+    date_to              TEXT NOT NULL,
+    initial_cash         REAL,
+    final_equity         REAL,
+    total_return         REAL,
+    max_drawdown         REAL,
+    trade_count          INTEGER,
+    win_rate             REAL,
+    created_at           TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_runs_created ON review_account_runs(created_at);
+
+CREATE TABLE IF NOT EXISTS review_account_snapshots (
+    id                           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                       INTEGER NOT NULL REFERENCES review_account_runs(id) ON DELETE CASCADE,
+    trade_date                   TEXT NOT NULL,
+    cash                         REAL,
+    market_value                 REAL,
+    total_equity                 REAL,
+    daily_return                 REAL,
+    cumulative_return            REAL,
+    drawdown                     REAL,
+    position_code                TEXT,
+    position_name                TEXT,
+    position_qty                 INTEGER,
+    position_cost                REAL,
+    position_market_price        REAL,
+    position_unrealized_return   REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_snapshots_run ON review_account_snapshots(run_id, trade_date);
+
+CREATE TABLE IF NOT EXISTS review_account_trades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER NOT NULL REFERENCES review_account_runs(id) ON DELETE CASCADE,
+    trade_date      TEXT NOT NULL,
+    code            TEXT NOT NULL,
+    name            TEXT,
+    side            TEXT NOT NULL,
+    price           REAL,
+    qty             INTEGER,
+    amount          REAL,
+    fee             REAL,
+    cash_after      REAL,
+    position_after  INTEGER,
+    reason_code     TEXT,
+    reason_text     TEXT,
+    signal_json     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_trades_run ON review_account_trades(run_id, trade_date);
+
+CREATE TABLE IF NOT EXISTS review_account_positions (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id               INTEGER NOT NULL REFERENCES review_account_runs(id) ON DELETE CASCADE,
+    code                 TEXT NOT NULL,
+    name                 TEXT,
+    entry_date           TEXT,
+    entry_price          REAL,
+    qty                  INTEGER,
+    entry_reason_code    TEXT,
+    entry_signal_json    TEXT,
+    exit_date            TEXT,
+    exit_price           REAL,
+    exit_reason_code     TEXT,
+    exit_signal_json     TEXT,
+    realized_return      REAL,
+    hold_days            INTEGER,
+    status               TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_positions_run ON review_account_positions(run_id, entry_date);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
@@ -861,6 +940,73 @@ def get_pending_dragons(trade_date: Optional[str] = None,
         conn.close()
 
 
+def list_dragon_trade_dates(date_from: Optional[str] = None,
+                            date_to: Optional[str] = None,
+                            source: str = "v2") -> list[str]:
+    """返回 dragons 表中有候选记录的交易日列表。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        sql = f"SELECT DISTINCT trade_date FROM {t['dragons']}"
+        params: list = []
+        conditions: list[str] = []
+        if date_from:
+            conditions.append("trade_date >= ?")
+            params.append(date_from)
+        if date_to:
+            conditions.append("trade_date <= ?")
+            params.append(date_to)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY trade_date ASC"
+        return [r[0] for r in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_dragons_by_date(trade_date: str,
+                        top_n: int = 5,
+                        source: str = "v2") -> list[dict]:
+    """返回某交易日入选龙头，供账户级 review 作为每日候选池。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        sql = (
+            "SELECT trade_date, code, name, scan_id, rank, composite_score, "
+            "board_count, open_px, close_px, high_px, low_px, pct, "
+            "turnover_rate, amount, market_cap, concepts_json, report_text, "
+            "is_true_dragon, version "
+            f"FROM {t['dragons']} WHERE trade_date = ? "
+            "ORDER BY COALESCE(rank, 999999) ASC, composite_score DESC"
+        )
+        params: list = [trade_date]
+        if top_n:
+            sql += " LIMIT ?"
+            params.append(top_n)
+        rows = conn.execute(sql, params).fetchall()
+        return [
+            {
+                "trade_date": r[0], "code": r[1], "name": r[2],
+                "scan_id": r[3], "rank": r[4], "composite_score": r[5],
+                "board_count": r[6], "open_px": r[7], "close_px": r[8],
+                "high_px": r[9], "low_px": r[10], "pct": r[11],
+                "turnover_rate": r[12], "amount": r[13], "market_cap": r[14],
+                "concepts": json.loads(r[15]) if r[15] else [],
+                "report_text": r[16] or "",
+                "is_true_dragon": bool(r[17]) if r[17] is not None else None,
+                "version": r[18] or "",
+                "source": source,
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
 def update_dragon_review(trade_date: str, code: str,
                          buy_date: Optional[str] = None,
                          buy_price: Optional[float] = None,
@@ -1151,6 +1297,228 @@ def get_review_summary(source: str = "v2") -> dict:
             "best_return": round(best[2], 2) if best and best[2] is not None else None,
             "source": source,
         }
+    finally:
+        conn.close()
+
+
+# --- Account Review 持久化 / 查询 ---
+
+def create_review_account_run(source: str,
+                              strategy_name: str,
+                              strategy_params_json: str,
+                              date_from: str,
+                              date_to: str,
+                              initial_cash: float,
+                              final_equity: float,
+                              total_return: float,
+                              max_drawdown: float,
+                              trade_count: int,
+                              win_rate: Optional[float]) -> int:
+    """创建一条账户级 review run，返回 run_id。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            source = _normalize_source(source)
+            cur = conn.execute(
+                "INSERT INTO review_account_runs("
+                "source, strategy_name, strategy_params_json, date_from, date_to, "
+                "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (source, strategy_name, strategy_params_json, date_from, date_to,
+                 initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+
+def save_review_account_results(run_id: int,
+                                snapshots: list[dict],
+                                trades: list[dict],
+                                positions: list[dict]):
+    """批量保存账户级 review 的快照、交割单和已平仓持仓。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.executemany(
+                "INSERT INTO review_account_snapshots("
+                "run_id, trade_date, cash, market_value, total_equity, daily_return, "
+                "cumulative_return, drawdown, position_code, position_name, position_qty, "
+                "position_cost, position_market_price, position_unrealized_return"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        run_id, s.get("trade_date"), s.get("cash"), s.get("market_value"),
+                        s.get("total_equity"), s.get("daily_return"), s.get("cumulative_return"),
+                        s.get("drawdown"), s.get("position_code"), s.get("position_name"),
+                        s.get("position_qty"), s.get("position_cost"),
+                        s.get("position_market_price"), s.get("position_unrealized_return"),
+                    )
+                    for s in snapshots
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO review_account_trades("
+                "run_id, trade_date, code, name, side, price, qty, amount, fee, "
+                "cash_after, position_after, reason_code, reason_text, signal_json"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        run_id, t.get("trade_date"), t.get("code"), t.get("name"),
+                        t.get("side"), t.get("price"), t.get("qty"), t.get("amount"),
+                        t.get("fee"), t.get("cash_after"), t.get("position_after"),
+                        t.get("reason_code"), t.get("reason_text"), t.get("signal_json"),
+                    )
+                    for t in trades
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO review_account_positions("
+                "run_id, code, name, entry_date, entry_price, qty, entry_reason_code, "
+                "entry_signal_json, exit_date, exit_price, exit_reason_code, exit_signal_json, "
+                "realized_return, hold_days, status"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        run_id, p.get("code"), p.get("name"), p.get("entry_date"),
+                        p.get("entry_price"), p.get("qty"), p.get("entry_reason_code"),
+                        p.get("entry_signal_json"), p.get("exit_date"), p.get("exit_price"),
+                        p.get("exit_reason_code"), p.get("exit_signal_json"),
+                        p.get("realized_return"), p.get("hold_days"), p.get("status"),
+                    )
+                    for p in positions
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def query_review_account_runs(limit: int = 20, source: str = "v2") -> list[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        rows = conn.execute(
+            "SELECT id, source, strategy_name, strategy_params_json, date_from, date_to, "
+            "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate, created_at "
+            "FROM review_account_runs WHERE source = ? ORDER BY id DESC LIMIT ?",
+            (source, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r[0], "source": r[1], "strategy_name": r[2],
+                "strategy_params": json.loads(r[3]) if r[3] else {},
+                "date_from": r[4], "date_to": r[5],
+                "initial_cash": r[6], "final_equity": r[7],
+                "total_return": r[8], "max_drawdown": r[9],
+                "trade_count": r[10], "win_rate": r[11],
+                "created_at": r[12],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def get_review_account_run(run_id: int) -> Optional[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        row = conn.execute(
+            "SELECT id, source, strategy_name, strategy_params_json, date_from, date_to, "
+            "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate, created_at "
+            "FROM review_account_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0], "source": row[1], "strategy_name": row[2],
+            "strategy_params": json.loads(row[3]) if row[3] else {},
+            "date_from": row[4], "date_to": row[5],
+            "initial_cash": row[6], "final_equity": row[7],
+            "total_return": row[8], "max_drawdown": row[9],
+            "trade_count": row[10], "win_rate": row[11],
+            "created_at": row[12],
+        }
+    finally:
+        conn.close()
+
+
+def query_review_account_snapshots(run_id: int) -> list[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT trade_date, cash, market_value, total_equity, daily_return, cumulative_return, "
+            "drawdown, position_code, position_name, position_qty, position_cost, "
+            "position_market_price, position_unrealized_return "
+            "FROM review_account_snapshots WHERE run_id = ? ORDER BY trade_date ASC",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "trade_date": r[0], "cash": r[1], "market_value": r[2],
+                "total_equity": r[3], "daily_return": r[4], "cumulative_return": r[5],
+                "drawdown": r[6], "position_code": r[7] or "", "position_name": r[8] or "",
+                "position_qty": r[9] or 0, "position_cost": r[10],
+                "position_market_price": r[11], "position_unrealized_return": r[12],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def query_review_account_trades(run_id: int) -> list[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT trade_date, code, name, side, price, qty, amount, fee, cash_after, "
+            "position_after, reason_code, reason_text, signal_json "
+            "FROM review_account_trades WHERE run_id = ? ORDER BY trade_date ASC, id ASC",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "trade_date": r[0], "code": r[1], "name": r[2] or "",
+                "side": r[3], "price": r[4], "qty": r[5], "amount": r[6],
+                "fee": r[7], "cash_after": r[8], "position_after": r[9],
+                "reason_code": r[10] or "", "reason_text": r[11] or "",
+                "signal": json.loads(r[12]) if r[12] else {},
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def query_review_account_positions(run_id: int) -> list[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT code, name, entry_date, entry_price, qty, entry_reason_code, entry_signal_json, "
+            "exit_date, exit_price, exit_reason_code, exit_signal_json, realized_return, hold_days, status "
+            "FROM review_account_positions WHERE run_id = ? ORDER BY entry_date ASC, id ASC",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "code": r[0], "name": r[1] or "", "entry_date": r[2],
+                "entry_price": r[3], "qty": r[4], "entry_reason_code": r[5] or "",
+                "entry_signal": json.loads(r[6]) if r[6] else {},
+                "exit_date": r[7], "exit_price": r[8], "exit_reason_code": r[9] or "",
+                "exit_signal": json.loads(r[10]) if r[10] else {},
+                "realized_return": r[11], "hold_days": r[12], "status": r[13],
+            }
+            for r in rows
+        ]
     finally:
         conn.close()
 

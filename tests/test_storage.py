@@ -184,6 +184,69 @@ class TestGetReviewSummary(unittest.TestCase):
         self.assertEqual(summary["win_rate"], 33.3)
 
 
+class TestReviewAccountStorage(unittest.TestCase):
+    """账户级 review 持久化查询。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+        self._conn = sqlite3.connect(self._db_path)
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+
+    def tearDown(self):
+        self._conn.close()
+        self._tmpdir.cleanup()
+
+    def test_account_run_roundtrip(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            run_id = db.create_review_account_run(
+                source="v2",
+                strategy_name="dragon_pullback_daily",
+                strategy_params_json='{"initial_cash":100000}',
+                date_from="2026-05-01",
+                date_to="2026-06-01",
+                initial_cash=100000,
+                final_equity=112000,
+                total_return=12.0,
+                max_drawdown=-3.0,
+                trade_count=2,
+                win_rate=50.0,
+            )
+            db.save_review_account_results(
+                run_id,
+                snapshots=[{
+                    "trade_date": "2026-05-01", "cash": 0, "market_value": 100000,
+                    "total_equity": 100000, "daily_return": 0, "cumulative_return": 0,
+                    "drawdown": 0, "position_code": "000001", "position_name": "样本",
+                    "position_qty": 1000, "position_cost": 10,
+                    "position_market_price": 10, "position_unrealized_return": 0,
+                }],
+                trades=[{
+                    "trade_date": "2026-05-01", "code": "000001", "name": "样本",
+                    "side": "BUY", "price": 10, "qty": 1000, "amount": 10000,
+                    "fee": 3, "cash_after": 90000, "position_after": 1000,
+                    "reason_code": "buy_ma5_pullback", "reason_text": "回踩MA5",
+                    "signal_json": '{"ma5": 9.8}',
+                }],
+                positions=[],
+            )
+
+            runs = db.query_review_account_runs(source="v2")
+            snapshots = db.query_review_account_snapshots(run_id)
+            trades = db.query_review_account_trades(run_id)
+
+        self.assertEqual(runs[0]["id"], run_id)
+        self.assertEqual(runs[0]["total_return"], 12.0)
+        self.assertEqual(snapshots[0]["position_code"], "000001")
+        self.assertEqual(trades[0]["reason_code"], "buy_ma5_pullback")
+        self.assertEqual(trades[0]["signal"]["ma5"], 9.8)
+
+
 if __name__ == "__main__":
     unittest.main()
 

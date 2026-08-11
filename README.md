@@ -115,6 +115,16 @@ dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 
 `review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
 
+### `review-account` — 账户级模拟交易
+
+```bash
+dragon-quant review-account --from 20260501 --to 20260601
+dragon-quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
+dragon-quant review-account --ui-only --source v2
+```
+
+`review-account` 保留现有 `review` 不变，新增账户级交易模拟：按交易日推进账户现金、持仓、交割单和权益曲线。第一版策略为 `dragon_pullback_daily`，从每日 `dragons_v2` 前 5 候选中筛选，单票满仓买入，卖出后释放现金再按策略买入；买入信号包括 MA5 回踩承接、强势换手、弱转强；卖出信号包括硬止损、跌破买入日低点、跌破 MA5、固定止盈、移动止盈和最长持有退出。每笔交割单保存 `reason_code` / `reason_text` / `signal_json`，用于解释买入卖出逻辑。
+
 ### `vpa` — 量价分析
 
 ```bash
@@ -244,6 +254,7 @@ SQLite 表分为三类：
 - 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
 - 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
+- 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions`
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -253,6 +264,8 @@ SQLite 表分为三类：
 - review 字段：`buy_date` / `buy_price` / `max_return_5d` / `max_drawdown_5d` / `max_return_hold_days` / `review_status`，按 source 独立维护。
 
 `scan_stocks_v2` 填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
+
+`review_account_*` 表用于账户级模拟交易：`runs` 保存策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因。
 
 ## License
 

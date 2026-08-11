@@ -31,6 +31,9 @@ HEADERS = {
 
 
 def _symbol(code: str) -> str:
+    code = code.upper()
+    if code.startswith(("SH", "SZ")):
+        return code
     prefix = "SH" if code.startswith(("6", "9")) else "SZ"
     return f"{prefix}{code}"
 

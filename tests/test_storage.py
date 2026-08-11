@@ -234,17 +234,27 @@ class TestReviewAccountStorage(unittest.TestCase):
                     "signal_json": '{"ma5": 9.8}',
                 }],
                 positions=[],
+                events=[{
+                    "event_date": "2026-05-01", "event_type": "BUY",
+                    "code": "000001", "name": "样本", "title": "买入 样本",
+                    "detail": "回踩MA5", "reason_code": "buy_ma5_pullback",
+                    "cash": 90000, "total_equity": 100000,
+                    "signal_json": '{"ma5": 9.8}',
+                }],
             )
 
             runs = db.query_review_account_runs(source="v2")
             snapshots = db.query_review_account_snapshots(run_id)
             trades = db.query_review_account_trades(run_id)
+            events = db.query_review_account_events(run_id)
 
         self.assertEqual(runs[0]["id"], run_id)
         self.assertEqual(runs[0]["total_return"], 12.0)
         self.assertEqual(snapshots[0]["position_code"], "000001")
         self.assertEqual(trades[0]["reason_code"], "buy_ma5_pullback")
         self.assertEqual(trades[0]["signal"]["ma5"], 9.8)
+        self.assertEqual(events[0]["event_type"], "BUY")
+        self.assertEqual(events[0]["signal"]["ma5"], 9.8)
 
 
 if __name__ == "__main__":

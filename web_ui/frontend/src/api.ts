@@ -153,6 +153,19 @@ export interface AccountTrade {
   signal: Record<string, unknown>;
 }
 
+export interface AccountTimelineEvent {
+  event_date: string;
+  event_type: "BUY" | "SELL" | "HOLD" | "IDLE";
+  code: string;
+  name: string;
+  title: string;
+  detail: string;
+  reason_code: string;
+  cash: number | null;
+  total_equity: number | null;
+  signal: Record<string, unknown>;
+}
+
 export interface AccountPosition {
   code: string;
   name: string;
@@ -200,6 +213,13 @@ export async function fetchAccountTrades(runId: number): Promise<{ data: Account
   const params = new URLSearchParams({ run_id: String(runId) });
   const res = await fetch("/api/account/trades?" + params.toString());
   if (!res.ok) throw new Error(`account trades ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAccountEvents(runId: number): Promise<{ data: AccountTimelineEvent[] }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/events?" + params.toString());
+  if (!res.ok) throw new Error(`account events ${res.status}`);
   return res.json();
 }
 

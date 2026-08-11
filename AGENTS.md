@@ -202,6 +202,7 @@ dragon_quant/
 | `review_account_snapshots` | 账户每日快照 | 保存现金、市值、总权益、收益曲线、当前持仓 |
 | `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
+| `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -229,7 +230,7 @@ python -m dragon_quant review-account --from 20260501 --to 20260601
 python -m dragon_quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
 python -m dragon_quant review-account --ui-only --source v2
 ```
-`review-account` 不替代现有 `review`，而是按真实账户逐交易日模拟：先根据止盈止损处理持仓，再用当日 `dragons_v2` 前 5 候选按策略买入。第一版 `dragon_pullback_daily` 使用日 K 指标，单票满仓，买入信号包括 MA5 回踩承接、强势换手、弱转强；卖出信号包括硬止损、跌破买入日低点、跌破 MA5、固定止盈、移动止盈、最长持有退出。UI 独立页面为 `/account`，展示账户持仓、交割单、权益和收益率曲线。
+`review-account` 不替代现有 `review`，而是按真实账户逐交易日模拟：先根据止盈止损处理持仓，再用上一交易日收盘后已知的 `dragons_v2` 真龙池，按 9:25 集合竞价结束后的开盘数据择优买入，同等信号下优先选择 `rank` 更高的股票；账户允许多持仓，每次开仓使用可用现金买入，卖出当日释放的现金不再买入，次日起再按策略继续开仓。买入信号包括开盘贴近 MA5 承接、开盘突破前高弱转强。卖出信号使用日 K 近似口径：`-5%` 硬止损全仓退出，`+12%` 止盈先卖半仓锁定利润，剩余仓位由保本、跌破买入日低点、跌破 MA5、移动止盈退出，不再按最长持有天数强制卖出。UI 独立页面为 `/account`，展示账户持仓、交割单、权益和收益率曲线。
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。

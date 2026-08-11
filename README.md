@@ -123,7 +123,7 @@ dragon-quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
 dragon-quant review-account --ui-only --source v2
 ```
 
-`review-account` 保留现有 `review` 不变，新增账户级交易模拟：按交易日推进账户现金、持仓、交割单和权益曲线。第一版策略为 `dragon_pullback_daily`，从每日 `dragons_v2` 前 5 候选中筛选，单票满仓买入，卖出后释放现金再按策略买入；买入信号包括 MA5 回踩承接、强势换手、弱转强；卖出信号包括硬止损、跌破买入日低点、跌破 MA5、固定止盈、移动止盈和最长持有退出。每笔交割单保存 `reason_code` / `reason_text` / `signal_json`，用于解释买入卖出逻辑。
+`review-account` 保留现有 `review` 不变，新增账户级交易模拟：按交易日推进账户现金、持仓、交割单和权益曲线。第一版策略为 `dragon_pullback_daily`，只使用上一交易日收盘后已知的 `dragons_v2` 真龙池，9:25 集合竞价结束后按当日开盘数据择优买入，同等信号下优先选择 `rank` 更高的股票；账户允许多持仓，每次开仓使用可用现金买入，卖出当日释放的现金不再买入，次日起再按策略继续开仓。买入信号包括开盘贴近 MA5 承接、开盘突破前高弱转强。卖出先按日 K 近似触发 `-5%` 硬止损，再按 `+12%` 日内近似卖出半仓锁定利润，剩余仓位由保本、跌破买入日低点、跌破 MA5、移动止盈退出，不再按最长持有天数强制卖出。每笔交割单保存 `reason_code` / `reason_text` / `signal_json`，用于解释买入卖出逻辑。
 
 ### `vpa` — 量价分析
 
@@ -254,7 +254,7 @@ SQLite 表分为三类：
 - 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
 - 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
-- 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions`
+- 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -265,7 +265,7 @@ SQLite 表分为三类：
 
 `scan_stocks_v2` 填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
 
-`review_account_*` 表用于账户级模拟交易：`runs` 保存策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因。
+`review_account_*` 表用于账户级模拟交易：`runs` 保存策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因，`events` 保存买入、卖出、持仓和空仓原因时间线。
 
 ## License
 

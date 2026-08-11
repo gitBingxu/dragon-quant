@@ -12,7 +12,7 @@ class StrategyConfig:
     strategy_name: str = "dragon_pullback_daily"
     initial_cash: float = 100_000.0
     candidate_top_n: int = 5
-    max_positions: int = 1
+    max_positions: int = 5
     min_score: float = 70.0
     min_amount: float = 300_000_000.0
     min_turnover: float = 5.0
@@ -22,8 +22,9 @@ class StrategyConfig:
     max_close_to_ma5: float = 12.0
     stop_loss_pct: float = -5.0
     take_profit_pct: float = 12.0
-    trailing_activate_pct: float = 8.0
-    trailing_drawdown_pct: float = 5.0
+    breakeven_activate_pct: float = 6.0
+    trailing_activate_pct: float = 6.0
+    trailing_drawdown_pct: float = 3.5
     max_hold_days: int = 5
     buy_slippage: float = 0.002
     sell_slippage: float = 0.002
@@ -49,6 +50,16 @@ class Position:
     highest_return: float = 0.0
     highest_price: float = 0.0
     entry_day_low: Optional[float] = None
+    initial_qty: int = 0
+    initial_cost: float = 0.0
+    realized_pnl: float = 0.0
+    took_profit_half: bool = False
+
+    def __post_init__(self):
+        if self.initial_qty <= 0:
+            self.initial_qty = self.qty
+        if self.initial_cost <= 0:
+            self.initial_cost = self.cost
 
 
 @dataclass
@@ -65,6 +76,20 @@ class Trade:
     position_after: int
     reason_code: str
     reason_text: str
+    signal: dict = field(default_factory=dict)
+
+
+@dataclass
+class TimelineEvent:
+    event_date: str
+    event_type: str
+    title: str
+    detail: str
+    reason_code: str = ""
+    code: str = ""
+    name: str = ""
+    cash: Optional[float] = None
+    total_equity: Optional[float] = None
     signal: dict = field(default_factory=dict)
 
 

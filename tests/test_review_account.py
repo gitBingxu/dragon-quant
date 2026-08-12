@@ -224,11 +224,11 @@ class TestAccountStrategy(unittest.TestCase):
             "low": 9.4, "close": 11.5, "ma5": 10.0,
         }
 
-        signal = evaluate_sell(pos, row, 1, cfg)
+        signals = evaluate_sell(pos, row, 1, cfg)
 
-        self.assertEqual(signal["code"], "hard_stop_loss")
+        self.assertEqual(signals[0]["code"], "hard_stop_loss")
 
-    def test_sell_breakeven_after_profit(self):
+    def test_sell_profit_back_to_cost_take_profit(self):
         cfg = StrategyConfig(breakeven_activate_pct=6.0)
         pos = Position(
             code="000001", name="样本", qty=100, entry_date="2026-05-20",
@@ -237,15 +237,15 @@ class TestAccountStrategy(unittest.TestCase):
             highest_return=7.0,
         )
         row = {
-            "date": "2026-05-22", "open": 10.2, "high": 10.3,
+            "date": "2026-05-22", "open": 10.0, "high": 10.3,
             "low": 9.98, "close": 10.1, "ma5": 9.8,
         }
 
-        signal = evaluate_sell(pos, row, 2, cfg)
+        signals = evaluate_sell(pos, row, 2, cfg)
 
-        self.assertEqual(signal["code"], "breakeven_stop")
+        self.assertEqual(signals[0]["code"], "profit_back_to_cost_take_profit")
 
-    def test_take_profit_uses_daily_k_approx_half_position(self):
+    def test_next_day_limit_up_sells_half_position(self):
         cfg = StrategyConfig(take_profit_pct=12.0)
         pos = Position(
             code="000001", name="样本", qty=800, entry_date="2026-05-20",
@@ -253,32 +253,100 @@ class TestAccountStrategy(unittest.TestCase):
             entry_reason_text="buy", entry_day_low=9.8,
         )
         row = {
-            "date": "2026-05-21", "open": 10.5, "high": 11.3,
+            "date": "2026-05-21", "open": 10.5, "high": 11.0,
             "low": 10.2, "close": 11.0, "ma5": 9.8,
+            "is_limit_up_close": True,
         }
 
-        signal = evaluate_sell(pos, row, 1, cfg)
+        signals = evaluate_sell(pos, row, 1, cfg)
 
-        self.assertEqual(signal["code"], "take_profit_half")
-        self.assertIn("日K近似", signal["reason_text"])
-        self.assertEqual(signal["signal"]["intraday_mode"], "daily_k_approx")
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0]["code"], "next_day_limit_up_half")
 
-    def test_take_profit_half_only_once(self):
-        cfg = StrategyConfig(take_profit_pct=12.0)
+    def test_next_day_limit_up_then_weak_clear_returns_two_signals(self):
+        cfg = StrategyConfig()
+        pos = Position(
+            code="000001", name="样本", qty=800, entry_date="2026-05-20",
+            entry_price=10.0, cost=8000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        row = {
+            "date": "2026-05-21", "open": 10.5, "high": 11.0,
+            "low": 10.2, "close": 11.0, "ma5": 11.2,
+            "is_limit_up_close": True,
+        }
+
+        signals = evaluate_sell(pos, row, 1, cfg)
+
+        self.assertEqual([s["code"] for s in signals], [
+            "next_day_limit_up_half",
+            "next_day_limit_up_clear",
+        ])
+
+    def test_next_day_close_below_open_clears_position(self):
+        cfg = StrategyConfig()
         pos = Position(
             code="000001", name="样本", qty=400, entry_date="2026-05-20",
             entry_price=10.0, cost=4000.0, entry_reason_code="buy",
             entry_reason_text="buy", entry_day_low=9.8,
-            took_profit_half=True,
         )
         row = {
-            "date": "2026-05-22", "open": 11.0, "high": 11.4,
-            "low": 10.6, "close": 11.2, "ma5": 9.8,
+            "date": "2026-05-21", "open": 10.8, "high": 10.9,
+            "low": 10.2, "close": 10.4, "ma5": 9.8,
         }
 
-        signal = evaluate_sell(pos, row, 2, cfg)
+        signals = evaluate_sell(pos, row, 1, cfg)
 
-        self.assertIsNone(signal)
+        self.assertEqual(signals[0]["code"], "next_day_close_below_open")
+
+    def test_close_below_ma5_stops_out(self):
+        cfg = StrategyConfig()
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.0, "high": 10.4,
+            "low": 10.0, "close": 10.1, "ma5": 10.3,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals[0]["code"], "break_intraday_ma_stop")
+
+    def test_close_above_ma5_takes_profit(self):
+        cfg = StrategyConfig()
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.2, "high": 10.8,
+            "low": 10.1, "close": 10.7, "ma5": 10.3,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals[0]["code"], "close_above_ma5_take_profit")
+
+    def test_volume_spike_takes_profit(self):
+        cfg = StrategyConfig(volume_spike_pct=30.0)
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.2, "high": 10.4,
+            "low": 10.1, "close": 10.2, "ma5": 10.2,
+            "volume": 1300, "prev_volume": 1000,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals[0]["code"], "volume_spike_take_profit")
 
     def test_no_max_hold_days_forced_exit(self):
         cfg = StrategyConfig(max_hold_days=5)
@@ -289,12 +357,12 @@ class TestAccountStrategy(unittest.TestCase):
         )
         row = {
             "date": "2026-05-29", "open": 10.6, "high": 10.8,
-            "low": 10.3, "close": 10.7, "ma5": 10.2,
+            "low": 10.3, "close": 10.6, "ma5": 10.6,
         }
 
-        signal = evaluate_sell(pos, row, 6, cfg)
+        signals = evaluate_sell(pos, row, 6, cfg)
 
-        self.assertIsNone(signal)
+        self.assertEqual(signals, [])
 
 
 class TestAccountSimulator(unittest.TestCase):
@@ -331,6 +399,7 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual(len(result["trades"]), 1)
         self.assertEqual(result["trades"][0].side, "BUY")
         self.assertAlmostEqual(result["trades"][0].price, 11.2 * 1.002)
+        self.assertAlmostEqual(result["trades"][0].realized_pnl, -result["trades"][0].fee)
         self.assertEqual(result["positions"], [])
         self.assertEqual(result["snapshots"][-1].position_code, "000001")
         self.assertGreater(result["snapshots"][-1].market_value, 0)
@@ -472,7 +541,7 @@ class TestAccountSimulator(unittest.TestCase):
 
         self.assertEqual(buy.call_count, 1)
 
-    def test_half_take_profit_cash_can_buy_new_position_next_day(self):
+    def test_next_day_limit_up_half_cash_can_buy_new_position_next_day(self):
         cfg = StrategyConfig(
             initial_cash=100000,
             min_amount=500_000_000,
@@ -487,10 +556,9 @@ class TestAccountSimulator(unittest.TestCase):
                 _kbar("2026-05-18", 10, 10, 10.2, 9.8, amount=100_000_000),
                 _kbar("2026-05-19", 10, 10, 10.2, 9.8, amount=100_000_000),
                 _kbar("2026-05-20", 10, 10, 10.2, 9.8, amount=100_000_000),
-                _kbar("2026-05-21", 10, 10, 10.2, 9.8, amount=100_000_000),
-                _kbar("2026-05-22", 10.0, 11.3, 11.3, 10.0, amount=100_000_000),
-                _kbar("2026-05-25", 11.2, 11.2, 11.4, 11.0, amount=100_000_000),
-                _kbar("2026-05-26", 11.2, 11.2, 11.4, 11.0, amount=100_000_000),
+            _kbar("2026-05-21", 10, 10, 10.2, 9.8, amount=100_000_000),
+            _kbar("2026-05-22", 10.0, 11.0, 11.0, 10.0, pct=10.0, amount=100_000_000),
+                _kbar("2026-05-25", 10.0, 11.0, 11.0, 10.0, pct=10.0, amount=100_000_000),
             ],
             "000002": [
                 _kbar("2026-05-15", 20, 20, 20.2, 19.8, amount=100_000_000),
@@ -551,7 +619,7 @@ class TestAccountSimulator(unittest.TestCase):
 
         self.assertEqual(price, 9.5)
 
-    def test_take_profit_half_keeps_remaining_position(self):
+    def test_next_day_limit_up_half_keeps_remaining_position(self):
         cfg = StrategyConfig(take_profit_pct=12.0, sell_slippage=0.0)
         sim = AccountSimulator(cfg, provider=MagicMock())
         sim.position = Position(
@@ -562,8 +630,8 @@ class TestAccountSimulator(unittest.TestCase):
         sim.cash = 1000.0
 
         sim._sell(
-            sim.position, "2026-05-21", 11.2, "take_profit_half",
-            "日K近似：当日最高价触及12.0%止盈，卖出半仓锁定利润",
+            sim.position, "2026-05-21", 11.2, "next_day_limit_up_half",
+            "买入次日收盘涨停，按涨停价卖出半仓",
             {"intraday_mode": "daily_k_approx"},
         )
 
@@ -573,9 +641,13 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertTrue(sim.position.took_profit_half)
         self.assertEqual(sim.trades[-1].qty, 400)
         self.assertEqual(sim.trades[-1].position_after, 400)
+        self.assertAlmostEqual(
+            sim.trades[-1].realized_pnl,
+            sim.trades[-1].amount - sim.trades[-1].fee - 4000.0,
+        )
         self.assertEqual(sim.closed_positions, [])
 
-    def test_break_ma5_closes_remaining_after_half_take_profit(self):
+    def test_close_below_open_closes_remaining_after_half_sell(self):
         cfg = StrategyConfig(take_profit_pct=12.0, sell_slippage=0.0)
         sim = AccountSimulator(cfg, provider=MagicMock())
         sim.position = Position(
@@ -586,8 +658,8 @@ class TestAccountSimulator(unittest.TestCase):
         sim.cash = 1000.0
         with patch.object(sim, "_hold_days", return_value=1):
             sim._sell(
-                sim.position, "2026-05-21", 11.2, "take_profit_half",
-                "日K近似：当日最高价触及12.0%止盈，卖出半仓锁定利润",
+                sim.position, "2026-05-21", 11.2, "next_day_limit_up_half",
+                "买入次日收盘涨停，按涨停价卖出半仓",
                 {"intraday_mode": "daily_k_approx"},
             )
         row = {
@@ -602,7 +674,7 @@ class TestAccountSimulator(unittest.TestCase):
 
         self.assertIsNone(sim.position)
         self.assertEqual(len(sim.trades), 2)
-        self.assertEqual(sim.trades[-1].reason_code, "break_ma5")
+        self.assertEqual(sim.trades[-1].reason_code, "close_below_open_stop")
         self.assertEqual(sim.trades[-1].qty, 400)
         self.assertEqual(len(sim.closed_positions), 1)
         self.assertEqual(sim.closed_positions[0].qty, 800)

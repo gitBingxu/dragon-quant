@@ -146,6 +146,7 @@ export interface AccountTrade {
   qty: number;
   amount: number;
   fee: number;
+  realized_pnl: number | null;
   cash_after: number;
   position_after: number;
   reason_code: string;

@@ -32,6 +32,7 @@ def enrich_daily_klines(klines: list[KBar]) -> list[dict]:
     amounts: list[float] = []
     turnovers: list[float] = []
     prev_close: Optional[float] = None
+    prev_volume: Optional[float] = None
 
     for i, r in enumerate(rows):
         closes.append(r["close"])
@@ -46,6 +47,7 @@ def enrich_daily_klines(klines: list[KBar]) -> list[dict]:
         r["amount_ma5"] = _ma(amounts, 5)
         r["turnover_ma5"] = _ma(turnovers, 5)
         r["prev_close"] = prev_close
+        r["prev_volume"] = prev_volume
         r["prev_high"] = rows[i - 1]["high"] if i > 0 else None
         r["prev_low"] = rows[i - 1]["low"] if i > 0 else None
         r["open_gap_pct"] = (
@@ -62,6 +64,7 @@ def enrich_daily_klines(klines: list[KBar]) -> list[dict]:
         r["max_drawdown_5d"] = _max_drawdown(rows[max(0, i - 4): i + 1])
         r["avg_amplitude_5"] = _avg_amplitude(rows[max(0, i - 4): i + 1])
         prev_close = r["close"]
+        prev_volume = r["volume"]
     return rows
 
 

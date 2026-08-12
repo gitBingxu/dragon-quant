@@ -25,6 +25,7 @@ class StrategyConfig:
     breakeven_activate_pct: float = 6.0
     trailing_activate_pct: float = 6.0
     trailing_drawdown_pct: float = 3.5
+    volume_spike_pct: float = 30.0
     max_hold_days: int = 5
     buy_slippage: float = 0.002
     sell_slippage: float = 0.002
@@ -72,6 +73,7 @@ class Trade:
     qty: int
     amount: float
     fee: float
+    realized_pnl: float
     cash_after: float
     position_after: int
     reason_code: str

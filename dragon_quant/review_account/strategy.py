@@ -134,16 +134,18 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
 
 
 def evaluate_sell(position: Position, row: dict, hold_days: int,
-                  cfg: StrategyConfig) -> Optional[dict]:
-    """按优先级返回卖出信号；继续持有返回 None。"""
+                  cfg: StrategyConfig) -> list[dict]:
+    """按优先级返回卖出信号列表；继续持有返回空列表。"""
     if position.entry_price <= 0:
-        return None
+        return []
 
     high_ret = (row["high"] / position.entry_price - 1) * 100
     low_ret = (row["low"] / position.entry_price - 1) * 100
     close_ret = (row["close"] / position.entry_price - 1) * 100
     position.highest_return = max(position.highest_return, high_ret)
     position.highest_price = max(position.highest_price, row["high"])
+    ma5 = row.get("ma5")
+    volume_change_pct = _volume_change_pct(row)
 
     signal = {
         "date": row["date"],
@@ -158,53 +160,78 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
         "highest_return": position.highest_return,
         "took_profit_half": position.took_profit_half,
         "intraday_mode": "daily_k_approx",
+        "is_limit_up_close": row.get("is_limit_up_close"),
+        "volume": row.get("volume"),
+        "prev_volume": row.get("prev_volume"),
+        "volume_change_pct": volume_change_pct,
     }
 
-    # 日 K 无法确认盘中先后，近似口径采用止损先于止盈。
+    sells: list[dict] = []
+
     if low_ret <= cfg.stop_loss_pct:
-        return _sell(
+        return [_sell(
             "hard_stop_loss",
             f"日K近似：当日最低价触及{cfg.stop_loss_pct:.1f}%硬止损，卖出全部持仓",
             signal,
-        )
+        )]
 
-    if position.highest_return >= cfg.breakeven_activate_pct and low_ret <= 0:
-        return _sell("breakeven_stop", f"最高浮盈{position.highest_return:.1f}%后回落至成本线", signal)
+    close_below_open = row["close"] < row["open"]
+    close_below_ma5 = bool(ma5 and row["close"] < ma5)
+    close_above_ma5 = bool(ma5 and row["close"] > ma5)
 
-    if position.entry_day_low and row["close"] < position.entry_day_low:
-        return _sell("break_entry_day_low", "收盘跌破买入日低点，结构失效", signal)
+    if hold_days == 1:
+        if row.get("is_limit_up_close"):
+            sells.append(_sell(
+                "next_day_limit_up_half",
+                "买入次日收盘涨停，按涨停价卖出半仓",
+                signal,
+            ))
+            if close_below_ma5 or close_below_open:
+                sells.append(_sell(
+                    "next_day_limit_up_clear",
+                    "买入次日涨停后收盘转弱，清仓剩余持仓",
+                    signal,
+                ))
+            return sells
+        if close_below_open:
+            return [_sell("next_day_close_below_open", "买入次日收盘价低于开盘价，清仓离场", signal)]
 
-    ma5 = row.get("ma5")
-    if hold_days >= 2 and position.highest_return < 3.0 and ma5 and row["close"] < ma5:
-        return _sell("weak_follow_through", "买入后未形成有效浮盈且跌回MA5下方", signal)
+    if close_below_open:
+        return [_sell("close_below_open_stop", "收盘价低于开盘价，止损离场", signal)]
 
-    if ma5 and row["close"] < ma5:
-        reason = "半仓止盈后，收盘跌破MA5，卖出剩余仓位" if position.took_profit_half else "收盘跌破MA5，趋势失守"
-        return _sell("break_ma5", reason, signal)
+    if close_below_ma5:
+        return [_sell("break_intraday_ma_stop", "日K近似：收盘价低于日内均线，止损离场", signal)]
 
-    if high_ret >= cfg.take_profit_pct and not position.took_profit_half:
-        return _sell(
-            "take_profit_half",
-            f"日K近似：当日最高价触及{cfg.take_profit_pct:.1f}%止盈，卖出半仓锁定利润",
+    if position.highest_return >= cfg.breakeven_activate_pct and row["low"] <= position.entry_price:
+        return [_sell(
+            "profit_back_to_cost_take_profit",
+            f"最高浮盈达到过{cfg.breakeven_activate_pct:.1f}%，日K近似回落至成本线，止盈保护离场",
             signal,
-        )
+        )]
 
-    if (
-        position.highest_return >= cfg.trailing_activate_pct
-        and position.highest_return - close_ret >= cfg.trailing_drawdown_pct
-    ):
-        prefix = "半仓止盈后，" if position.took_profit_half else ""
-        return _sell(
-            "trailing_stop",
-            f"{prefix}最高浮盈{position.highest_return:.1f}%后回撤超过{cfg.trailing_drawdown_pct:.1f}%",
+    if close_above_ma5:
+        return [_sell("close_above_ma5_take_profit", "收盘价高于5日线，止盈离场", signal)]
+
+    if volume_change_pct is not None and volume_change_pct >= cfg.volume_spike_pct:
+        return [_sell(
+            "volume_spike_take_profit",
+            f"成交量较上日增加{volume_change_pct:.1f}%，止盈离场",
             signal,
-        )
+        )]
 
-    return None
+    return []
 
 
 def _sell(code: str, reason_text: str, signal: dict) -> dict:
     return {"action": "SELL", "code": code, "reason_text": reason_text, "signal": signal}
+
+
+def _volume_change_pct(row: dict) -> Optional[float]:
+    prev_volume = row.get("prev_volume")
+    volume = row.get("volume")
+    if not prev_volume or prev_volume <= 0 or volume is None:
+        return None
+    return (volume / prev_volume - 1) * 100
 
 
 def _buy_explain(candidate: dict, reason_code: str, reason_text: str) -> dict:

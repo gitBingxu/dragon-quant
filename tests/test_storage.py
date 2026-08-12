@@ -229,7 +229,7 @@ class TestReviewAccountStorage(unittest.TestCase):
                 trades=[{
                     "trade_date": "2026-05-01", "code": "000001", "name": "样本",
                     "side": "BUY", "price": 10, "qty": 1000, "amount": 10000,
-                    "fee": 3, "cash_after": 90000, "position_after": 1000,
+                    "fee": 3, "realized_pnl": -3, "cash_after": 90000, "position_after": 1000,
                     "reason_code": "buy_ma5_pullback", "reason_text": "回踩MA5",
                     "signal_json": '{"ma5": 9.8}',
                 }],
@@ -252,6 +252,7 @@ class TestReviewAccountStorage(unittest.TestCase):
         self.assertEqual(runs[0]["total_return"], 12.0)
         self.assertEqual(snapshots[0]["position_code"], "000001")
         self.assertEqual(trades[0]["reason_code"], "buy_ma5_pullback")
+        self.assertEqual(trades[0]["realized_pnl"], -3)
         self.assertEqual(trades[0]["signal"]["ma5"], 9.8)
         self.assertEqual(events[0]["event_type"], "BUY")
         self.assertEqual(events[0]["signal"]["ma5"], 9.8)

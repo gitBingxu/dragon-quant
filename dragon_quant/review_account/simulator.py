@@ -66,13 +66,19 @@ class AccountSimulator:
             row = self._row_for(position.code, day)
             if row:
                 hold_days = self._hold_days(position, day)
-                sell_signal = evaluate_sell(position, row, hold_days, self.cfg)
-                if sell_signal:
-                    price = self._sell_execution_price(position, row, sell_signal["code"])
-                    trade = self._sell(position, day, price, sell_signal["code"], sell_signal["reason_text"], sell_signal["signal"])
-                    if trade:
-                        sold_today = True
-                        day_events.append(self._event_from_trade(trade))
+                sell_signals = evaluate_sell(position, row, hold_days, self.cfg)
+                if sell_signals:
+                    for sell_signal in sell_signals:
+                        if position not in self.positions:
+                            break
+                        price = self._sell_execution_price(position, row, sell_signal["code"])
+                        trade = self._sell(
+                            position, day, price, sell_signal["code"],
+                            sell_signal["reason_text"], sell_signal["signal"],
+                        )
+                        if trade:
+                            sold_today = True
+                            day_events.append(self._event_from_trade(trade))
                 elif position in self.positions:
                     day_events.append(self._hold_event(position, day, row, hold_days))
 
@@ -201,6 +207,7 @@ class AccountSimulator:
             qty=qty,
             amount=amount,
             fee=fee,
+            realized_pnl=-fee,
             cash_after=self.cash,
             position_after=qty,
             reason_code=signal["code"],
@@ -241,6 +248,7 @@ class AccountSimulator:
             qty=qty,
             amount=amount,
             fee=fee,
+            realized_pnl=realized_pnl,
             cash_after=self.cash,
             position_after=remaining_qty,
             reason_code=reason_code,
@@ -251,7 +259,7 @@ class AccountSimulator:
         if remaining_qty > 0:
             p.qty = remaining_qty
             p.cost -= cost_portion
-            if reason_code == "take_profit_half":
+            if reason_code in {"take_profit_half", "next_day_limit_up_half"}:
                 p.took_profit_half = True
             return trade
 
@@ -424,8 +432,10 @@ class AccountSimulator:
         if reason_code == "hard_stop_loss":
             stop_price = position.entry_price * (1 + self.cfg.stop_loss_pct / 100)
             return row["open"] if row["open"] <= stop_price else stop_price
-        if reason_code == "breakeven_stop":
+        if reason_code in {"breakeven_stop", "profit_back_to_cost_take_profit"}:
             return position.entry_price
+        if reason_code == "next_day_limit_up_half":
+            return row["close"]
         if reason_code in {"take_profit", "take_profit_half"}:
             target_price = position.entry_price * (1 + self.cfg.take_profit_pct / 100)
             return row["open"] if row["open"] >= target_price else target_price
@@ -439,7 +449,7 @@ class AccountSimulator:
         return len(self.positions) < self.cfg.max_positions
 
     def _sell_qty(self, position: Position, reason_code: str) -> int:
-        if reason_code != "take_profit_half":
+        if reason_code not in {"take_profit_half", "next_day_limit_up_half"}:
             return position.qty
         half = position.qty // 2
         qty = (half // self.cfg.lot_size) * self.cfg.lot_size

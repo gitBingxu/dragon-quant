@@ -5,6 +5,7 @@ import {
   Container,
   Grid,
   Group,
+  Pagination,
   Paper,
   Select,
   SimpleGrid,
@@ -142,6 +143,7 @@ export function AccountApp() {
       </Grid>
 
       <TradesTable trades={trades} />
+      <PositionsTable positions={positions} />
       <AccountTimeline events={events} positions={positions} />
     </Container>
   );
@@ -361,9 +363,10 @@ function CurrentPosition({ latest }: { latest: AccountSnapshot | null }) {
 }
 
 function TradesTable({ trades }: { trades: AccountTrade[] }) {
+  const pager = usePagination(trades, 10);
   return (
     <Paper withBorder radius="md" mt="md" style={{ overflow: "hidden" }}>
-      <Table.ScrollContainer minWidth={1100}>
+      <Table.ScrollContainer minWidth={1220}>
         <Table stickyHeader verticalSpacing="xs" highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -374,13 +377,14 @@ function TradesTable({ trades }: { trades: AccountTrade[] }) {
               <Table.Th>数量</Table.Th>
               <Table.Th>金额</Table.Th>
               <Table.Th>费用</Table.Th>
+              <Table.Th>本笔收益</Table.Th>
               <Table.Th>现金余额</Table.Th>
               <Table.Th>逻辑</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {trades.length ? (
-              trades.map((t, i) => (
+              pager.items.map((t, i) => (
                 <Table.Tr key={`${t.trade_date}-${t.code}-${t.side}-${i}`}>
                   <Table.Td>{t.trade_date}</Table.Td>
                   <Table.Td>
@@ -393,6 +397,7 @@ function TradesTable({ trades }: { trades: AccountTrade[] }) {
                   <Table.Td>{t.qty}</Table.Td>
                   <Table.Td>{fmtMoney(t.amount)}</Table.Td>
                   <Table.Td>{fmtMoney(t.fee)}</Table.Td>
+                  <Table.Td c={pnlColor(t.realized_pnl)}>{fmtMoney(t.realized_pnl)}</Table.Td>
                   <Table.Td>{fmtMoney(t.cash_after)}</Table.Td>
                   <Table.Td maw={520}>
                     <Text size="sm">{t.reason_text || t.reason_code}</Text>
@@ -401,7 +406,7 @@ function TradesTable({ trades }: { trades: AccountTrade[] }) {
               ))
             ) : (
               <Table.Tr>
-                <Table.Td colSpan={9}>
+                <Table.Td colSpan={10}>
                   <Text ta="center" c="dimmed" py={32}>暂无交割单</Text>
                 </Table.Td>
               </Table.Tr>
@@ -409,6 +414,7 @@ function TradesTable({ trades }: { trades: AccountTrade[] }) {
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+      <Pager total={trades.length} pager={pager} />
     </Paper>
   );
 }
@@ -420,6 +426,7 @@ function AccountTimeline({
   events: AccountTimelineEvent[];
   positions: AccountPosition[];
 }) {
+  const pager = usePagination(events, 10);
   const closedByEntry = useMemo(() => {
     const m = new Map<string, AccountPosition>();
     for (const p of positions) m.set(`${p.entry_date}-${p.code}`, p);
@@ -439,7 +446,7 @@ function AccountTimeline({
       </Group>
       {events.length ? (
         <div style={{ display: "grid", gap: 12 }}>
-          {events.map((event, i) => (
+          {pager.items.map((event, i) => (
             <TimelineItem
               key={`${event.event_date}-${event.event_type}-${event.code}-${i}`}
               event={event}
@@ -452,6 +459,7 @@ function AccountTimeline({
           暂无账户时间线。重新运行一次 review-account 后可展示空仓原因。
         </Text>
       )}
+      <Pager total={events.length} pager={pager} />
     </Paper>
   );
 }
@@ -539,6 +547,99 @@ function timelineMeta(type: AccountTimelineEvent["event_type"]) {
   if (type === "SELL") return { label: "卖出", color: "teal" as const };
   if (type === "HOLD") return { label: "持仓", color: "blue" as const };
   return { label: "空仓", color: "gray" as const };
+}
+
+function PositionsTable({ positions }: { positions: AccountPosition[] }) {
+  const pager = usePagination(positions, 10);
+  return (
+    <Paper withBorder radius="md" mt="md" style={{ overflow: "hidden" }}>
+      <Group justify="space-between" px="md" py="sm">
+        <div>
+          <Text fw={700}>单票收益汇总</Text>
+          <Text size="xs" c="dimmed">按已平仓持仓统计每只股票收益</Text>
+        </div>
+        <Badge variant="light">{positions.length} 笔</Badge>
+      </Group>
+      <Table.ScrollContainer minWidth={900}>
+        <Table verticalSpacing="xs" highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>股票</Table.Th>
+              <Table.Th>买入日</Table.Th>
+              <Table.Th>卖出日</Table.Th>
+              <Table.Th>买入价</Table.Th>
+              <Table.Th>卖出价</Table.Th>
+              <Table.Th>收益</Table.Th>
+              <Table.Th>持有天</Table.Th>
+              <Table.Th>退出逻辑</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {positions.length ? (
+              pager.items.map((p, i) => (
+                <Table.Tr key={`${p.code}-${p.entry_date}-${i}`}>
+                  <Table.Td>{p.code} {p.name}</Table.Td>
+                  <Table.Td>{p.entry_date}</Table.Td>
+                  <Table.Td>{p.exit_date}</Table.Td>
+                  <Table.Td>{fmtNum(p.entry_price)}</Table.Td>
+                  <Table.Td>{fmtNum(p.exit_price)}</Table.Td>
+                  <Table.Td c={pnlColor(p.realized_return)}>{fmtPct(p.realized_return)}</Table.Td>
+                  <Table.Td>{p.hold_days}</Table.Td>
+                  <Table.Td>{p.exit_reason_code}</Table.Td>
+                </Table.Tr>
+              ))
+            ) : (
+              <Table.Tr>
+                <Table.Td colSpan={8}>
+                  <Text ta="center" c="dimmed" py={32}>暂无已平仓持仓</Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
+      <Pager total={positions.length} pager={pager} />
+    </Paper>
+  );
+}
+
+function Pager<T>({
+  total,
+  pager,
+}: {
+  total: number;
+  pager: ReturnType<typeof usePagination<T>>;
+}) {
+  if (pager.totalPages <= 1) return null;
+  return (
+    <Group justify="space-between" px="md" py="sm">
+      <Text size="xs" c="dimmed">
+        第 {(pager.page - 1) * pager.pageSize + 1}-{Math.min(pager.page * pager.pageSize, total)} 条，共 {total} 条
+      </Text>
+      <Pagination
+        size="sm"
+        total={pager.totalPages}
+        value={pager.page}
+        onChange={pager.setPage}
+      />
+    </Group>
+  );
+}
+
+function usePagination<T>(items: T[], pageSize: number) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const pageItems = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, page, pageSize]);
+
+  return { items: pageItems, page, pageSize, totalPages, setPage };
 }
 
 function Legend({ color, label }: { color: "red" | "teal" | "yellow"; label: string }) {

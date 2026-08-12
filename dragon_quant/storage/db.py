@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS review_account_trades (
     qty             INTEGER,
     amount          REAL,
     fee             REAL,
+    realized_pnl    REAL,
     cash_after      REAL,
     position_after  INTEGER,
     reason_code     TEXT,
@@ -173,6 +174,7 @@ def _connect() -> sqlite3.Connection:
 
 def _ensure_schema(conn: sqlite3.Connection):
     conn.executescript(BASE_SCHEMA)
+    _ensure_review_account_columns(conn)
     for source in sorted(VALID_SOURCES):
         _create_versioned_tables(conn, source)
         _ensure_dragon_columns(conn, source)
@@ -186,6 +188,13 @@ def _ensure_dragon_columns(conn: sqlite3.Connection, source: str):
     cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t['dragons']})")}
     if "is_true_dragon" not in cols:
         conn.execute(f"ALTER TABLE {t['dragons']} ADD COLUMN is_true_dragon INTEGER")
+
+
+def _ensure_review_account_columns(conn: sqlite3.Connection):
+    """对已存在的账户级 review 表幂等补列。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_trades)")}
+    if "realized_pnl" not in cols:
+        conn.execute("ALTER TABLE review_account_trades ADD COLUMN realized_pnl REAL")
 
 
 def _create_versioned_tables(conn: sqlite3.Connection, source: str):
@@ -1381,14 +1390,15 @@ def save_review_account_results(run_id: int,
             conn.executemany(
                 "INSERT INTO review_account_trades("
                 "run_id, trade_date, code, name, side, price, qty, amount, fee, "
-                "cash_after, position_after, reason_code, reason_text, signal_json"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "realized_pnl, cash_after, position_after, reason_code, reason_text, signal_json"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         run_id, t.get("trade_date"), t.get("code"), t.get("name"),
                         t.get("side"), t.get("price"), t.get("qty"), t.get("amount"),
-                        t.get("fee"), t.get("cash_after"), t.get("position_after"),
-                        t.get("reason_code"), t.get("reason_text"), t.get("signal_json"),
+                        t.get("fee"), t.get("realized_pnl"), t.get("cash_after"),
+                        t.get("position_after"), t.get("reason_code"), t.get("reason_text"),
+                        t.get("signal_json"),
                     )
                     for t in trades
                 ],
@@ -1513,8 +1523,8 @@ def query_review_account_trades(run_id: int) -> list[dict]:
     try:
         _ensure_schema(conn)
         rows = conn.execute(
-            "SELECT trade_date, code, name, side, price, qty, amount, fee, cash_after, "
-            "position_after, reason_code, reason_text, signal_json "
+            "SELECT trade_date, code, name, side, price, qty, amount, fee, realized_pnl, "
+            "cash_after, position_after, reason_code, reason_text, signal_json "
             "FROM review_account_trades WHERE run_id = ? ORDER BY trade_date ASC, id ASC",
             (run_id,),
         ).fetchall()
@@ -1522,9 +1532,10 @@ def query_review_account_trades(run_id: int) -> list[dict]:
             {
                 "trade_date": r[0], "code": r[1], "name": r[2] or "",
                 "side": r[3], "price": r[4], "qty": r[5], "amount": r[6],
-                "fee": r[7], "cash_after": r[8], "position_after": r[9],
-                "reason_code": r[10] or "", "reason_text": r[11] or "",
-                "signal": json.loads(r[12]) if r[12] else {},
+                "fee": r[7], "realized_pnl": r[8], "cash_after": r[9],
+                "position_after": r[10], "reason_code": r[11] or "",
+                "reason_text": r[12] or "",
+                "signal": json.loads(r[13]) if r[13] else {},
             }
             for r in rows
         ]

@@ -18,7 +18,13 @@ def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
     from dragon_quant.providers.xueqiu import XueqiuProvider
 
     provider = XueqiuProvider()
-    klines = provider.get_kline("000001", days=90)
+    try:
+        start = datetime.strptime(from_date, "%Y-%m-%d")
+        end = datetime.strptime(to_date, "%Y-%m-%d")
+        days = max((end - start).days + 30, 90)
+    except ValueError:
+        days = 90
+    klines = provider.get_kline("000001", days=days)
 
     dates: set[str] = set()
     for k in klines:

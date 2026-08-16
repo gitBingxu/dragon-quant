@@ -32,6 +32,23 @@ def _kbar(date: str, open_: float, close: float, high: float, low: float,
     )
 
 
+def _minute_bar(date_time: str, open_: float, close: float, high: float, low: float) -> KBar:
+    import datetime as dt
+    ts = int(dt.datetime.strptime(date_time, "%Y-%m-%d %H:%M").timestamp() * 1000)
+    return KBar(
+        timestamp=ts,
+        volume=10_000,
+        open=open_,
+        high=high,
+        low=low,
+        close=close,
+        chg=close - open_,
+        pct=0.0,
+        turnover=0.0,
+        amount=1_000_000,
+    )
+
+
 class TestAccountIndicators(unittest.TestCase):
     def test_enrich_daily_klines_computes_ma5_touch(self):
         rows = enrich_daily_klines([
@@ -87,6 +104,25 @@ class TestAccountStrategy(unittest.TestCase):
 
         self.assertIsNotNone(signal)
         self.assertGreaterEqual(signal["signal"]["amount_yuan"], 740_800_000)
+
+    def test_default_buy_amount_threshold_is_two_hundred_million(self):
+        cfg = StrategyConfig()
+        row = {
+            "date": "2026-05-22", "open": 12.2, "high": 13.5, "low": 11.9,
+            "close": 12.8, "pct": 4.0, "ma5": 12.0, "ma10": None, "ma20": None,
+            "open_gap_pct": 2.0, "close_to_ma5_pct": 6.7, "low_touch_ma5": True,
+            "prev_high": 12.5, "return_3d": 10.0, "return_5d": None,
+            "max_drawdown_5d": -3.0, "avg_amplitude_5": 7.0,
+            "is_one_word_board": False,
+        }
+        cand = {
+            "rank": 1, "composite_score": 82.0, "turnover_rate": 18.0,
+            "amount": 210_000_000, "board_count": 3,
+        }
+
+        self.assertIsNotNone(evaluate_buy(cand, row, cfg))
+        cand["amount"] = 199_000_000
+        self.assertIsNone(evaluate_buy(cand, row, cfg))
 
     def test_buy_does_not_require_min_turnover_floor(self):
         cfg = StrategyConfig(min_turnover=5.0)
@@ -212,7 +248,7 @@ class TestAccountStrategy(unittest.TestCase):
         self.assertEqual(explain["reason_code"], "no_buy_pattern")
         self.assertIn("未触发回踩MA5或弱转强买点", explain["reason_text"])
 
-    def test_sell_hard_stop_loss_has_priority(self):
+    def test_cost_line_protection_has_priority_over_hard_stop(self):
         cfg = StrategyConfig(stop_loss_pct=-5.0, take_profit_pct=10.0)
         pos = Position(
             code="000001", name="样本", qty=100, entry_date="2026-05-20",
@@ -226,7 +262,7 @@ class TestAccountStrategy(unittest.TestCase):
 
         signals = evaluate_sell(pos, row, 1, cfg)
 
-        self.assertEqual(signals[0]["code"], "hard_stop_loss")
+        self.assertEqual(signals[0]["code"], "profit_back_to_cost_take_profit")
 
     def test_sell_profit_back_to_cost_take_profit(self):
         cfg = StrategyConfig(breakeven_activate_pct=6.0)
@@ -234,7 +270,7 @@ class TestAccountStrategy(unittest.TestCase):
             code="000001", name="样本", qty=100, entry_date="2026-05-20",
             entry_price=10.0, cost=1000.0, entry_reason_code="buy",
             entry_reason_text="buy", entry_day_low=9.8,
-            highest_return=7.0,
+            highest_return=0.0,
         )
         row = {
             "date": "2026-05-22", "open": 10.0, "high": 10.3,
@@ -308,14 +344,14 @@ class TestAccountStrategy(unittest.TestCase):
         )
         row = {
             "date": "2026-05-22", "open": 10.0, "high": 10.4,
-            "low": 10.0, "close": 10.1, "ma5": 10.3,
+            "low": 10.05, "close": 10.1, "ma5": 10.3,
         }
 
         signals = evaluate_sell(pos, row, 2, cfg)
 
         self.assertEqual(signals[0]["code"], "break_intraday_ma_stop")
 
-    def test_close_above_ma5_takes_profit(self):
+    def test_close_above_ma5_no_longer_takes_profit(self):
         cfg = StrategyConfig()
         pos = Position(
             code="000001", name="样本", qty=400, entry_date="2026-05-20",
@@ -329,9 +365,9 @@ class TestAccountStrategy(unittest.TestCase):
 
         signals = evaluate_sell(pos, row, 2, cfg)
 
-        self.assertEqual(signals[0]["code"], "close_above_ma5_take_profit")
+        self.assertEqual(signals, [])
 
-    def test_volume_spike_takes_profit(self):
+    def test_volume_spike_takes_profit_only_when_not_limit_up(self):
         cfg = StrategyConfig(volume_spike_pct=30.0)
         pos = Position(
             code="000001", name="样本", qty=400, entry_date="2026-05-20",
@@ -347,6 +383,68 @@ class TestAccountStrategy(unittest.TestCase):
         signals = evaluate_sell(pos, row, 2, cfg)
 
         self.assertEqual(signals[0]["code"], "volume_spike_take_profit")
+
+        row["is_limit_up_close"] = True
+        self.assertEqual(evaluate_sell(pos, row, 2, cfg), [])
+
+    def test_high_open_7pct_without_limit_up_in_5m_clears(self):
+        cfg = StrategyConfig()
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy",
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.8, "high": 10.95,
+            "low": 10.4, "close": 10.6, "ma5": 10.3,
+            "prev_close": 10.0, "open_gap_pct": 8.0,
+        }
+        bars = [_minute_bar("2026-05-22 09:30", 10.8, 10.72, 10.88, 10.7)]
+
+        signals = evaluate_sell(pos, row, 2, cfg, intraday_bars=bars)
+
+        self.assertEqual(signals[0]["code"], "high_open_7pct_no_limit_5m_clear")
+        self.assertEqual(signals[0]["signal"]["execution_price"], 10.72)
+
+    def test_high_open_5pct_without_limit_up_in_30m_clears(self):
+        cfg = StrategyConfig()
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy",
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.55, "high": 10.96,
+            "low": 10.4, "close": 10.7, "ma5": 10.3,
+            "prev_close": 10.0, "open_gap_pct": 5.5,
+        }
+        bars = [
+            _minute_bar(f"2026-05-22 09:{30 + i * 5:02d}", 10.55, 10.6 + i * 0.01, 10.8, 10.5)
+            for i in range(6)
+        ]
+
+        signals = evaluate_sell(pos, row, 2, cfg, intraday_bars=bars)
+
+        self.assertEqual(signals[0]["code"], "high_open_5pct_no_limit_30m_clear")
+        self.assertEqual(signals[0]["signal"]["execution_price"], bars[-1].close)
+
+    def test_high_open_window_holds_when_limit_up_touched(self):
+        cfg = StrategyConfig()
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy",
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.8, "high": 11.0,
+            "low": 10.4, "close": 10.8, "ma5": 10.3,
+            "prev_close": 10.0, "open_gap_pct": 8.0,
+        }
+        bars = [_minute_bar("2026-05-22 09:30", 10.8, 11.0, 11.0, 10.7)]
+
+        signals = evaluate_sell(pos, row, 2, cfg, intraday_bars=bars)
+
+        self.assertEqual(signals, [])
 
     def test_no_max_hold_days_forced_exit(self):
         cfg = StrategyConfig(max_hold_days=5)
@@ -388,7 +486,7 @@ class TestAccountSimulator(unittest.TestCase):
             "amount": 100_000.0, "board_count": 1,
         }
 
-        with patch("dragon_quant.review_account.simulator.db.list_dragon_trade_dates",
+        with patch("dragon_quant.review_account.simulator.build_trade_calendar",
                    return_value=["2026-05-21", "2026-05-22"]), \
              patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
                    return_value=[candidate]):
@@ -443,7 +541,7 @@ class TestAccountSimulator(unittest.TestCase):
             },
         ]
 
-        with patch("dragon_quant.review_account.simulator.db.list_dragon_trade_dates",
+        with patch("dragon_quant.review_account.simulator.build_trade_calendar",
                    return_value=["2026-05-21", "2026-05-22"]), \
              patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
                    return_value=candidates):
@@ -476,7 +574,7 @@ class TestAccountSimulator(unittest.TestCase):
             "amount": 100_000.0, "board_count": 1, "is_true_dragon": True,
         }
 
-        with patch("dragon_quant.review_account.simulator.db.list_dragon_trade_dates",
+        with patch("dragon_quant.review_account.simulator.build_trade_calendar",
                    return_value=["2026-05-21", "2026-05-22"]), \
              patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
                    return_value=[candidate]):
@@ -489,6 +587,33 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual(result["events"][-1].reason_code, "no_candidate_passed")
         self.assertIn("没有候选触发开盘买入条件", result["events"][-1].detail)
         self.assertEqual(result["events"][-1].signal["details"][0]["reason_code"], "no_buy_pattern")
+
+    def test_missing_previous_trade_day_pool_does_not_fallback_to_older_pool(self):
+        cfg = StrategyConfig(initial_cash=100000)
+        provider = MagicMock()
+        provider.get_kline.return_value = [
+            _kbar("2026-07-06", 10, 10, 10.2, 9.8, amount=100_000_000),
+            _kbar("2026-07-07", 10, 10, 10.2, 9.8, amount=100_000_000),
+            _kbar("2026-07-08", 10, 10, 10.2, 9.8, amount=100_000_000),
+            _kbar("2026-07-09", 10.1, 10.5, 10.8, 10.0, amount=100_000_000),
+        ]
+        older_candidate = {
+            "trade_date": "2026-07-07", "code": "000001", "name": "有研新材",
+            "rank": 1, "composite_score": 80.0, "turnover_rate": 12.0,
+            "amount": 300_000_000, "board_count": 1, "is_true_dragon": True,
+        }
+
+        with patch("dragon_quant.review_account.simulator.build_trade_calendar",
+                   return_value=["2026-07-07", "2026-07-08", "2026-07-09"]), \
+             patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
+                   side_effect=lambda day, top_n=5, source="v2": [older_candidate] if day == "2026-07-07" else []):
+            result = AccountSimulator(cfg, provider=provider).run(
+                "2026-07-07", "2026-07-09"
+            )
+
+        self.assertEqual(result["trades"], [])
+        self.assertEqual(result["events"][-1].reason_code, "empty_previous_pool")
+        self.assertEqual(result["events"][-1].signal["candidate_date"], "2026-07-08")
 
     def test_t_plus_one_blocks_same_day_sell(self):
         cfg = StrategyConfig()
@@ -590,7 +715,7 @@ class TestAccountSimulator(unittest.TestCase):
             }],
         }
 
-        with patch("dragon_quant.review_account.simulator.db.list_dragon_trade_dates",
+        with patch("dragon_quant.review_account.simulator.build_trade_calendar",
                    return_value=["2026-05-21", "2026-05-22", "2026-05-25", "2026-05-26"]), \
              patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
                    side_effect=lambda day, top_n=5, source="v2": day_candidates.get(day, [])):
@@ -601,8 +726,8 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual([t.side for t in result["trades"]], ["BUY", "SELL", "BUY"])
         self.assertEqual(result["trades"][2].trade_date, "2026-05-26")
         self.assertEqual(result["trades"][2].code, "000002")
-        self.assertEqual(result["snapshots"][-1].position_code, "MULTI")
-        self.assertEqual(result["snapshots"][-1].position_name, "2只持仓")
+        self.assertEqual(result["trades"][1].reason_code, "profit_back_to_cost_take_profit")
+        self.assertEqual(result["snapshots"][-1].position_code, "000002")
 
     def test_hard_stop_sells_at_stop_price_not_low(self):
         cfg = StrategyConfig(stop_loss_pct=-5.0)

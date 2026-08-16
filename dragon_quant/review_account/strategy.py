@@ -134,7 +134,7 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
 
 
 def evaluate_sell(position: Position, row: dict, hold_days: int,
-                  cfg: StrategyConfig) -> list[dict]:
+                  cfg: StrategyConfig, intraday_bars: Optional[list] = None) -> list[dict]:
     """按优先级返回卖出信号列表；继续持有返回空列表。"""
     if position.entry_price <= 0:
         return []
@@ -168,6 +168,13 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
     sells: list[dict] = []
 
+    if row["low"] <= position.entry_price:
+        return [_sell(
+            "profit_back_to_cost_take_profit",
+            "日内价格低于成本价，按成本线止盈保护离场",
+            signal,
+        )]
+
     if low_ret <= cfg.stop_loss_pct:
         return [_sell(
             "hard_stop_loss",
@@ -177,7 +184,15 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
     close_below_open = row["close"] < row["open"]
     close_below_ma5 = bool(ma5 and row["close"] < ma5)
-    close_above_ma5 = bool(ma5 and row["close"] > ma5)
+    high_open_signal = _high_open_no_limit_signal(row, intraday_bars)
+
+    if high_open_signal:
+        window_minutes = high_open_signal["window_minutes"]
+        return [_sell(
+            high_open_signal["code"],
+            f"开盘高开{high_open_signal['open_gap_pct']:.1f}%，{window_minutes}分钟内未涨停，清仓离场",
+            {**signal, **high_open_signal},
+        )]
 
     if hold_days == 1:
         if row.get("is_limit_up_close"):
@@ -202,20 +217,14 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
     if close_below_ma5:
         return [_sell("break_intraday_ma_stop", "日K近似：收盘价低于日内均线，止损离场", signal)]
 
-    if position.highest_return >= cfg.breakeven_activate_pct and row["low"] <= position.entry_price:
-        return [_sell(
-            "profit_back_to_cost_take_profit",
-            f"最高浮盈达到过{cfg.breakeven_activate_pct:.1f}%，日K近似回落至成本线，止盈保护离场",
-            signal,
-        )]
-
-    if close_above_ma5:
-        return [_sell("close_above_ma5_take_profit", "收盘价高于5日线，止盈离场", signal)]
-
-    if volume_change_pct is not None and volume_change_pct >= cfg.volume_spike_pct:
+    if (
+        volume_change_pct is not None
+        and volume_change_pct >= cfg.volume_spike_pct
+        and not row.get("is_limit_up_close")
+    ):
         return [_sell(
             "volume_spike_take_profit",
-            f"成交量较上日增加{volume_change_pct:.1f}%，止盈离场",
+            f"成交量较上日增加{volume_change_pct:.1f}%，且未涨停，清仓离场",
             signal,
         )]
 
@@ -232,6 +241,66 @@ def _volume_change_pct(row: dict) -> Optional[float]:
     if not prev_volume or prev_volume <= 0 or volume is None:
         return None
     return (volume / prev_volume - 1) * 100
+
+
+def _high_open_no_limit_signal(row: dict, intraday_bars: Optional[list]) -> Optional[dict]:
+    open_gap = row.get("open_gap_pct")
+    if open_gap is None or open_gap < 5.0:
+        return None
+
+    if open_gap >= 7.0:
+        return _no_limit_in_window_signal(
+            row, intraday_bars, window_bars=1, window_minutes=5,
+            code="high_open_7pct_no_limit_5m_clear",
+        )
+
+    return _no_limit_in_window_signal(
+        row, intraday_bars, window_bars=6, window_minutes=30,
+        code="high_open_5pct_no_limit_30m_clear",
+    )
+
+
+def _no_limit_in_window_signal(row: dict, intraday_bars: Optional[list],
+                               window_bars: int, window_minutes: int,
+                               code: str) -> Optional[dict]:
+    bars = list(intraday_bars or [])[:window_bars]
+    payload = {
+        "intraday_mode": "5min_window",
+        "intraday_window_minutes": window_minutes,
+        "intraday_window_bars": len(bars),
+        "intraday_missing": not bars,
+    }
+    if not bars:
+        return None
+
+    limit_up = _limit_up_price(row)
+    payload["limit_up_price"] = limit_up
+    if limit_up and any((getattr(bar, "high", 0) or 0) >= limit_up * 0.999 for bar in bars):
+        return None
+
+    last_bar = bars[-1]
+    payload.update({
+        "code": code,
+        "window_minutes": window_minutes,
+        "open_gap_pct": row.get("open_gap_pct") or 0.0,
+        "execution_price": getattr(last_bar, "close", None),
+        "window_high": max((getattr(bar, "high", 0) or 0) for bar in bars),
+        "window_close": getattr(last_bar, "close", None),
+        "intraday_missing": False,
+    })
+    return payload
+
+
+def _limit_up_price(row: dict) -> Optional[float]:
+    limit_up = row.get("limit_up")
+    if limit_up and limit_up > 0:
+        return float(limit_up)
+    prev_close = row.get("prev_close")
+    if not prev_close and row.get("open") and row.get("open_gap_pct") is not None:
+        prev_close = row["open"] / (1 + row["open_gap_pct"] / 100)
+    if not prev_close or prev_close <= 0:
+        return None
+    return round(prev_close * 1.1, 2)
 
 
 def _buy_explain(candidate: dict, reason_code: str, reason_text: str) -> dict:

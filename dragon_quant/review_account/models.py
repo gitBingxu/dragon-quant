@@ -14,7 +14,7 @@ class StrategyConfig:
     candidate_top_n: int = 5
     max_positions: int = 5
     min_score: float = 70.0
-    min_amount: float = 300_000_000.0
+    min_amount: float = 200_000_000.0
     min_turnover: float = 5.0
     strong_turnover_min: float = 8.0
     strong_turnover_max: float = 35.0

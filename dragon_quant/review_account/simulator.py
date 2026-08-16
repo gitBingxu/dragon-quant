@@ -1,5 +1,6 @@
 """账户级交易模拟器。"""
 
+from datetime import datetime
 from typing import Optional
 
 from dragon_quant.providers.xueqiu import XueqiuProvider
@@ -18,6 +19,7 @@ from dragon_quant.review_account.strategy import (
     explain_buy_candidate,
 )
 from dragon_quant.storage import db
+from dragon_quant.utils.trading import build_trade_calendar
 
 
 class AccountSimulator:
@@ -33,9 +35,10 @@ class AccountSimulator:
         self.closed_positions: list[ClosedPosition] = []
         self.events: list[TimelineEvent] = []
         self._kline_cache: dict[str, list[dict]] = {}
+        self._intraday_cache: dict[tuple[str, str], list] = {}
         self._peak_equity = float(cfg.initial_cash)
         self._prev_equity = float(cfg.initial_cash)
-        self._candidate_dates: list[str] = []
+        self._trading_days: list[str] = []
 
     @property
     def position(self) -> Optional[Position]:
@@ -47,10 +50,10 @@ class AccountSimulator:
         self.positions = [value] if value else []
 
     def run(self, date_from: str, date_to: str) -> dict:
-        trading_days = db.list_dragon_trade_dates(date_from, date_to, source=self.cfg.source)
+        trading_days = sorted(build_trade_calendar(date_from, date_to))
         if not trading_days:
             return self._result(date_from, date_to)
-        self._candidate_dates = trading_days
+        self._trading_days = trading_days
 
         for day in trading_days:
             self._process_day(day)
@@ -66,12 +69,15 @@ class AccountSimulator:
             row = self._row_for(position.code, day)
             if row:
                 hold_days = self._hold_days(position, day)
-                sell_signals = evaluate_sell(position, row, hold_days, self.cfg)
+                intraday_bars = self._intraday_bars_for(position.code, day)
+                sell_signals = evaluate_sell(position, row, hold_days, self.cfg, intraday_bars=intraday_bars)
                 if sell_signals:
                     for sell_signal in sell_signals:
                         if position not in self.positions:
                             break
-                        price = self._sell_execution_price(position, row, sell_signal["code"])
+                        price = self._sell_execution_price(
+                            position, {**row, **sell_signal.get("signal", {})}, sell_signal["code"]
+                        )
                         trade = self._sell(
                             position, day, price, sell_signal["code"],
                             sell_signal["reason_text"], sell_signal["signal"],
@@ -412,8 +418,12 @@ class AccountSimulator:
         return prev
 
     def _previous_candidate_date(self, day: str) -> Optional[str]:
-        prev = [d for d in self._candidate_dates if d < day]
-        return prev[-1] if prev else None
+        for i, trade_day in enumerate(self._trading_days):
+            if trade_day == day:
+                return self._trading_days[i - 1] if i > 0 else None
+            if trade_day > day:
+                return self._trading_days[i - 1] if i > 0 else None
+        return self._trading_days[-1] if self._trading_days and self._trading_days[-1] < day else None
 
     def _klines(self, code: str) -> list[dict]:
         if code not in self._kline_cache:
@@ -422,6 +432,25 @@ class AccountSimulator:
             )
         return self._kline_cache[code]
 
+    def _intraday_bars_for(self, code: str, day: str) -> list:
+        key = (code, day)
+        if key not in self._intraday_cache:
+            self._intraday_cache[key] = []
+            getter = getattr(self.provider, "get_5min_kline_for", None)
+            if not getter:
+                return self._intraday_cache[key]
+            try:
+                target_ts = int(datetime.strptime(f"{day} 09:30", "%Y-%m-%d %H:%M").timestamp() * 1000)
+                bars = getter(code, target_ts)
+            except Exception:
+                bars = []
+            day_prefix = day.replace("-", "")
+            self._intraday_cache[key] = [
+                bar for bar in bars
+                if datetime.fromtimestamp(bar.timestamp / 1000).strftime("%Y%m%d") == day_prefix
+            ]
+        return self._intraday_cache[key]
+
     def _hold_days(self, position: Position, day: str) -> int:
         return sum(
             1 for r in self._klines(position.code)
@@ -429,6 +458,9 @@ class AccountSimulator:
         )
 
     def _sell_execution_price(self, position: Position, row: dict, reason_code: str) -> float:
+        signal_price = row.get("execution_price")
+        if signal_price and signal_price > 0:
+            return signal_price
         if reason_code == "hard_stop_loss":
             stop_price = position.entry_price * (1 + self.cfg.stop_loss_pct / 100)
             return row["open"] if row["open"] <= stop_price else stop_price

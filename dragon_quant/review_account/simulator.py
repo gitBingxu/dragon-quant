@@ -4,7 +4,11 @@ from datetime import datetime
 from typing import Optional
 
 from dragon_quant.providers.xueqiu import XueqiuProvider
-from dragon_quant.review_account.indicators import enrich_daily_klines, row_by_date
+from dragon_quant.review_account.indicators import (
+    enrich_daily_klines,
+    latest_on_or_before,
+    row_by_date,
+)
 from dragon_quant.review_account.models import (
     ClosedPosition,
     Position,
@@ -86,7 +90,9 @@ class AccountSimulator:
                             sold_today = True
                             day_events.append(self._event_from_trade(trade))
                 elif position in self.positions:
-                    day_events.append(self._hold_event(position, day, row, hold_days))
+                    day_events.append(self._hold_event(
+                        position, day, row, hold_days, intraday_bars
+                    ))
 
         if self._can_open_position(day, sold_today):
             buy_result = self._try_buy(day)
@@ -302,13 +308,12 @@ class AccountSimulator:
         total_cost = 0.0
         for p in self.positions:
             row = self._row_for(p.code, day)
-            px = row["close"] if row else p.entry_price
+            px = self._mark_price(p, day)
             market_value += px * p.qty
             total_cost += p.cost
         if len(self.positions) == 1:
             p = self.positions[0]
-            row = self._row_for(p.code, day)
-            market_price = row["close"] if row else p.entry_price
+            market_price = self._mark_price(p, day)
             unrealized = (market_price * p.qty - p.cost) / p.cost * 100 if p.cost > 0 else 0.0
             code = p.code
             name = p.name
@@ -343,6 +348,13 @@ class AccountSimulator:
         self._prev_equity = equity
         return snapshot
 
+    def _mark_price(self, position: Position, day: str) -> float:
+        row = self._row_for(position.code, day)
+        if row:
+            return row["close"]
+        latest = latest_on_or_before(self._klines(position.code), day)
+        return latest["close"] if latest else position.entry_price
+
     def _event_from_trade(self, trade: Trade) -> TimelineEvent:
         side_text = "买入" if trade.side == "BUY" else "卖出"
         return TimelineEvent(
@@ -357,16 +369,24 @@ class AccountSimulator:
             signal=trade.signal,
         )
 
-    def _hold_event(self, position: Position, day: str, row: dict, hold_days: int) -> TimelineEvent:
+    def _hold_event(self, position: Position, day: str, row: dict, hold_days: int,
+                    intraday_bars: Optional[list] = None) -> TimelineEvent:
         p = position
         unrealized = (row["close"] / p.entry_price - 1) * 100 if p.entry_price > 0 else 0.0
+        high_open_intraday_missing = (
+            (row.get("open_gap_pct") or 0.0) >= 5.0
+            and not intraday_bars
+        )
+        detail = f"持有第{hold_days}个交易日，收盘浮盈亏{unrealized:+.1f}%，未触发止盈止损"
+        if high_open_intraday_missing:
+            detail += "；缺少当日5分钟K，高开未封板规则未执行"
         return TimelineEvent(
             event_date=day,
             event_type="HOLD",
             code=p.code,
             name=p.name,
             title=f"继续持有 {p.name or p.code}",
-            detail=f"持有第{hold_days}个交易日，收盘浮盈亏{unrealized:+.1f}%，未触发止盈止损",
+            detail=detail,
             reason_code="hold_no_signal",
             cash=self.cash,
             signal={
@@ -374,6 +394,7 @@ class AccountSimulator:
                 "ma5": row.get("ma5"),
                 "hold_days": hold_days,
                 "unrealized_return": unrealized,
+                "high_open_intraday_missing": high_open_intraday_missing,
             },
         )
 

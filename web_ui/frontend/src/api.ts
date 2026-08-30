@@ -101,6 +101,7 @@ export async function fetchDragons(
 export interface AccountRun {
   id: number;
   source: "v1" | "v2";
+  display_name: string | null;
   strategy_name: string;
   strategy_params: Record<string, unknown>;
   date_from: string;
@@ -112,6 +113,15 @@ export interface AccountRun {
   trade_count: number;
   win_rate: number | null;
   created_at: string;
+}
+
+export interface CreateAccountRunInput {
+  source?: "v1" | "v2";
+  name: string;
+  date_from: string;
+  date_to: string;
+  initial_cash?: number;
+  strategy_name?: string;
 }
 
 export interface AccountSnapshot {
@@ -190,6 +200,27 @@ export async function fetchAccountRuns(
   const params = new URLSearchParams({ source });
   const res = await fetch("/api/account/runs?" + params.toString());
   if (!res.ok) throw new Error(`account runs ${res.status}`);
+  return res.json();
+}
+
+export async function createAccountRun(
+  input: CreateAccountRunInput
+): Promise<{ data: AccountRun; run_id: number }> {
+  const res = await fetch("/api/account/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    let message = `account run create ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = String(body.error);
+    } catch {
+      // keep the status-based fallback
+    }
+    throw new Error(message);
+  }
   return res.json();
 }
 

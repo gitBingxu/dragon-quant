@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Badge,
+  Button,
   Card,
   Container,
   Grid,
   Group,
+  Modal,
+  NumberInput,
   Pagination,
   Paper,
   Select,
   SimpleGrid,
   Table,
   Text,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import {
+  createAccountRun,
   fetchAccountPositions,
   fetchAccountBenchmark,
   fetchAccountEvents,
@@ -44,6 +50,7 @@ export function AccountApp() {
   const [trades, setTrades] = useState<AccountTrade[]>([]);
   const [positions, setPositions] = useState<AccountPosition[]>([]);
   const [events, setEvents] = useState<AccountTimelineEvent[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const selectedRun = useMemo(
     () => runs.find((r) => r.id === runId) || null,
@@ -116,13 +123,16 @@ export function AccountApp() {
             }}
             allowDeselect={false}
           />
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            生成回测记录
+          </Button>
           <Select
             size="sm"
             w={330}
             placeholder="选择回测批次"
             data={runs.map((r) => ({
               value: String(r.id),
-              label: `#${r.id} ${r.date_from} ~ ${r.date_to} ${r.total_return?.toFixed(1)}%`,
+              label: `${r.display_name || `#${r.id} ${r.date_from} ~ ${r.date_to}`} ${runReturnLabel(r)}`,
             }))}
             value={runId ? String(runId) : null}
             onChange={(v) => setRunId(v ? Number(v) : null)}
@@ -130,6 +140,20 @@ export function AccountApp() {
           />
         </Group>
       </Group>
+
+      <CreateRunModal
+        opened={createOpen}
+        source={source}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(run) => {
+          setSource(run.source);
+          setRunId(run.id);
+          loadRuns(run.source).then(() => setRunId(run.id)).catch(() => {
+            setRuns([run]);
+            setRunId(run.id);
+          });
+        }}
+      />
 
       <AccountStats run={selectedRun} latest={latest} />
 
@@ -146,6 +170,136 @@ export function AccountApp() {
       <PositionsTable positions={positions} />
       <AccountTimeline events={events} positions={positions} />
     </Container>
+  );
+}
+
+function CreateRunModal({
+  opened,
+  source,
+  onClose,
+  onCreated,
+}: {
+  opened: boolean;
+  source: "v1" | "v2";
+  onClose: () => void;
+  onCreated: (run: AccountRun) => void;
+}) {
+  const defaultRange = useMemo(() => defaultDateRange(), []);
+  const [dateFrom, setDateFrom] = useState(defaultRange.dateFrom);
+  const [dateTo, setDateTo] = useState(defaultRange.dateTo);
+  const [name, setName] = useState(defaultRunName(defaultRange.dateFrom, defaultRange.dateTo));
+  const [initialCash, setInitialCash] = useState<number | string>(100000);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!opened) return;
+    const range = defaultDateRange();
+    setDateFrom(range.dateFrom);
+    setDateTo(range.dateTo);
+    setName(defaultRunName(range.dateFrom, range.dateTo));
+    setInitialCash(100000);
+    setError(null);
+  }, [opened]);
+
+  const submit = async () => {
+    const cleanName = name.trim() || defaultRunName(dateFrom, dateTo);
+    if (!dateFrom || !dateTo) {
+      setError("请选择完整日期范围");
+      return;
+    }
+    if (dateFrom > dateTo) {
+      setError("开始日期不能晚于结束日期");
+      return;
+    }
+    const cash = typeof initialCash === "number" ? initialCash : Number(initialCash);
+    if (!Number.isFinite(cash) || cash <= 0) {
+      setError("初始资金必须大于 0");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const resp = await createAccountRun({
+        source,
+        name: cleanName,
+        date_from: dateFrom,
+        date_to: dateTo,
+        initial_cash: cash,
+      });
+      onCreated(resp.data);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "生成失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="生成回测记录" centered>
+      <div style={{ display: "grid", gap: 14 }}>
+        {error && (
+          <Alert color="red" variant="light">
+            {error}
+          </Alert>
+        )}
+        <TextInput
+          label="记录名称"
+          value={name}
+          onChange={(event) => setName(event.currentTarget.value)}
+          placeholder={defaultRunName(dateFrom, dateTo)}
+        />
+        <Group grow align="flex-start">
+          <TextInput
+            label="开始日期"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => {
+              const next = event.currentTarget.value;
+              setDateFrom(next);
+              if (!name.trim() || name === defaultRunName(dateFrom, dateTo)) {
+                setName(defaultRunName(next, dateTo));
+              }
+            }}
+          />
+          <TextInput
+            label="结束日期"
+            type="date"
+            value={dateTo}
+            onChange={(event) => {
+              const next = event.currentTarget.value;
+              setDateTo(next);
+              if (!name.trim() || name === defaultRunName(dateFrom, dateTo)) {
+                setName(defaultRunName(dateFrom, next));
+              }
+            }}
+          />
+        </Group>
+        <NumberInput
+          label="初始资金"
+          min={1}
+          step={10000}
+          value={initialCash}
+          onChange={setInitialCash}
+          thousandSeparator=","
+        />
+        <Group justify="space-between" mt="xs">
+          <Text size="xs" c="dimmed">
+            数据来源：{source === "v2" ? "五维识别" : "v1 历史"}
+          </Text>
+          <Group>
+            <Button variant="default" onClick={onClose} disabled={submitting}>
+              取消
+            </Button>
+            <Button onClick={submit} loading={submitting}>
+              确认生成
+            </Button>
+          </Group>
+        </Group>
+      </div>
+    </Modal>
   );
 }
 
@@ -656,6 +810,31 @@ function Legend({ color, label }: { color: "red" | "teal" | "yellow"; label: str
       <Text size="xs" c="dimmed">{label}</Text>
     </Group>
   );
+}
+
+function defaultRunName(dateFrom: string, dateTo: string) {
+  return `${dateFrom || "开始日期"} ~ ${dateTo || "结束日期"}`;
+}
+
+function runReturnLabel(run: AccountRun) {
+  return run.total_return == null ? "—" : `${run.total_return.toFixed(1)}%`;
+}
+
+function defaultDateRange() {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - 30);
+  return {
+    dateFrom: formatDateInput(start),
+    dateTo: formatDateInput(end),
+  };
+}
+
+function formatDateInput(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 const CHART_H = 330;

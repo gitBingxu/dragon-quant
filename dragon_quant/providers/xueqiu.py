@@ -113,7 +113,8 @@ class XueqiuProvider(StockProvider):
     def get_kline(self, code: str, days: int = 20, fq_type: str = "after") -> list[KBar]:
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
-        begin = now_ms - 100 * 86400 * 1000  # 从 100 天前开始取
+        lookback_days = max(days * 2, 100)
+        begin = now_ms - lookback_days * 86400 * 1000
         path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type={fq_type}&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
         data = _fetch(path, logger=self._logger, endpoint="kline")
         if not data:

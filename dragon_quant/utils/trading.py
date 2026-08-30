@@ -27,9 +27,12 @@ def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
     klines = provider.get_kline("000001", days=days)
 
     dates: set[str] = set()
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    market_closed = (now.hour, now.minute) >= (15, 5)
     for k in klines:
         d = datetime.fromtimestamp(k.timestamp / 1000).strftime("%Y-%m-%d")
-        if from_date <= d <= to_date:
+        if from_date <= d <= to_date and (d < today or (d == today and market_closed)):
             dates.add(d)
     return dates
 

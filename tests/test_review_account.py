@@ -12,6 +12,7 @@ from dragon_quant.review_account.strategy import (
     evaluate_sell,
     explain_buy_candidate,
 )
+from dragon_quant.utils.trading import build_trade_calendar
 
 
 def _kbar(date: str, open_: float, close: float, high: float, low: float,
@@ -61,6 +62,37 @@ class TestAccountIndicators(unittest.TestCase):
 
         self.assertAlmostEqual(rows[-1]["ma5"], 12.0)
         self.assertTrue(rows[-1]["low_touch_ma5"])
+
+
+class TestAccountDataBoundaries(unittest.TestCase):
+    def test_xueqiu_daily_kline_window_scales_with_requested_days(self):
+        from dragon_quant.providers.xueqiu import XueqiuProvider
+
+        captured = {}
+        now_ms = 1_800_000_000_000
+        payload = {"data": {"item": []}}
+        with patch("dragon_quant.providers.xueqiu.time.time", return_value=now_ms / 1000), \
+             patch("dragon_quant.providers.xueqiu._fetch", side_effect=lambda path, **_: captured.setdefault("path", path) and payload):
+            XueqiuProvider().get_kline("000001", days=260, fq_type="normal")
+
+        begin = int(captured["path"].split("begin=")[1])
+        self.assertEqual(begin, now_ms - 520 * 86400 * 1000)
+
+    def test_trade_calendar_excludes_unclosed_today(self):
+        bars = [
+            _kbar("2026-08-14", 10, 10, 10, 10),
+            _kbar("2026-08-17", 10, 10, 10, 10),
+        ]
+        provider = MagicMock()
+        provider.get_kline.return_value = bars
+        with patch("dragon_quant.providers.xueqiu.XueqiuProvider", return_value=provider), \
+             patch("dragon_quant.utils.trading.datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = __import__("datetime").datetime(2026, 8, 17, 14, 30)
+            mocked_datetime.fromtimestamp.side_effect = __import__("datetime").datetime.fromtimestamp
+            mocked_datetime.strptime.side_effect = __import__("datetime").datetime.strptime
+            days = build_trade_calendar("2026-08-14", "2026-08-17")
+
+        self.assertEqual(days, {"2026-08-14"})
 
 
 class TestAccountStrategy(unittest.TestCase):
@@ -124,7 +156,7 @@ class TestAccountStrategy(unittest.TestCase):
         cand["amount"] = 199_000_000
         self.assertIsNone(evaluate_buy(cand, row, cfg))
 
-    def test_buy_does_not_require_min_turnover_floor(self):
+    def test_buy_requires_min_turnover_floor(self):
         cfg = StrategyConfig(min_turnover=5.0)
         row = {
             "date": "2026-05-22", "open": 12.2, "high": 13.5, "low": 11.9,
@@ -141,8 +173,7 @@ class TestAccountStrategy(unittest.TestCase):
 
         signal = evaluate_buy(cand, row, cfg)
 
-        self.assertIsNotNone(signal)
-        self.assertEqual(signal["code"], "buy_open_ma5_pullback")
+        self.assertIsNone(signal)
 
     def test_buy_open_decision_does_not_peek_close(self):
         cfg = StrategyConfig()
@@ -163,7 +194,7 @@ class TestAccountStrategy(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal["signal"]["decision_timing"], "open")
 
-    def test_buy_does_not_require_composite_score_floor(self):
+    def test_buy_requires_composite_score_floor(self):
         cfg = StrategyConfig(min_score=90)
         row = {
             "date": "2026-05-22", "open": 12.2, "high": 13.5, "low": 11.9,
@@ -180,8 +211,7 @@ class TestAccountStrategy(unittest.TestCase):
 
         signal = evaluate_buy(cand, row, cfg)
 
-        self.assertIsNotNone(signal)
-        self.assertEqual(signal["signal"]["candidate_trade_date"], "2026-05-21")
+        self.assertIsNone(signal)
 
     def test_buy_allows_non_rank_one_true_dragon(self):
         cfg = StrategyConfig()
@@ -214,7 +244,7 @@ class TestAccountStrategy(unittest.TestCase):
 
         self.assertIsNone(evaluate_buy(cand, row, cfg))
 
-    def test_high_open_gap_does_not_block_ma5_pullback_buy(self):
+    def test_high_open_gap_blocks_ma5_pullback_buy(self):
         cfg = StrategyConfig(max_open_gap=7.0)
         row = {
             "open": 12.0, "high": 12.5, "low": 11.8, "close": 12.2, "pct": 5.0,
@@ -225,8 +255,7 @@ class TestAccountStrategy(unittest.TestCase):
 
         signal = evaluate_buy(cand, row, cfg)
 
-        self.assertIsNotNone(signal)
-        self.assertEqual(signal["code"], "buy_open_ma5_pullback")
+        self.assertIsNone(signal)
 
     def test_explain_buy_candidate_reports_pattern_reject_reason(self):
         cfg = StrategyConfig(max_open_gap=7.0)
@@ -248,12 +277,13 @@ class TestAccountStrategy(unittest.TestCase):
         self.assertEqual(explain["reason_code"], "no_buy_pattern")
         self.assertIn("未触发回踩MA5或弱转强买点", explain["reason_text"])
 
-    def test_cost_line_protection_has_priority_over_hard_stop(self):
-        cfg = StrategyConfig(stop_loss_pct=-5.0, take_profit_pct=10.0)
+    def test_hard_stop_has_priority_over_cost_line_protection(self):
+        cfg = StrategyConfig(stop_loss_pct=-5.0, take_profit_pct=10.0, breakeven_activate_pct=6.0)
         pos = Position(
             code="000001", name="样本", qty=100, entry_date="2026-05-20",
             entry_price=10.0, cost=1000.0, entry_reason_code="buy",
             entry_reason_text="buy", entry_day_low=9.8,
+            highest_return=6.5,
         )
         row = {
             "date": "2026-05-21", "open": 10.0, "high": 12.0,
@@ -262,9 +292,9 @@ class TestAccountStrategy(unittest.TestCase):
 
         signals = evaluate_sell(pos, row, 1, cfg)
 
-        self.assertEqual(signals[0]["code"], "profit_back_to_cost_take_profit")
+        self.assertEqual(signals[0]["code"], "hard_stop_loss")
 
-    def test_sell_profit_back_to_cost_take_profit(self):
+    def test_sell_profit_back_to_cost_requires_prior_profit_activation(self):
         cfg = StrategyConfig(breakeven_activate_pct=6.0)
         pos = Position(
             code="000001", name="样本", qty=100, entry_date="2026-05-20",
@@ -278,6 +308,56 @@ class TestAccountStrategy(unittest.TestCase):
         }
 
         signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals, [])
+
+    def test_sell_profit_back_to_cost_take_profit_after_activation(self):
+        cfg = StrategyConfig(breakeven_activate_pct=6.0)
+        pos = Position(
+            code="000001", name="样本", qty=100, entry_date="2026-05-20",
+            entry_price=10.0, cost=1000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+            highest_return=6.2,
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.2, "high": 10.4,
+            "low": 9.98, "close": 10.1, "ma5": 9.8,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals[0]["code"], "profit_back_to_cost_take_profit")
+        self.assertGreater(signals[0]["signal"]["break_even_price"], pos.entry_price)
+        self.assertEqual(
+            signals[0]["signal"]["execution_price"],
+            signals[0]["signal"]["break_even_price"],
+        )
+
+    def test_same_day_profit_and_retrace_requires_ordered_intraday_bars(self):
+        cfg = StrategyConfig(breakeven_activate_pct=6.0)
+        pos = Position(
+            code="000001", name="样本", qty=100, entry_date="2026-05-20",
+            entry_price=10.0, cost=1000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        row = {
+            "date": "2026-05-22", "open": 10.0, "high": 10.8,
+            "low": 9.95, "close": 10.2, "ma5": 9.8,
+        }
+
+        no_intraday = evaluate_sell(pos, row, 2, cfg)
+        self.assertEqual(no_intraday, [])
+
+        pos = Position(
+            code="000001", name="样本", qty=100, entry_date="2026-05-20",
+            entry_price=10.0, cost=1000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        bars = [
+            _minute_bar("2026-05-22 09:35", 10.0, 10.7, 10.8, 10.0),
+            _minute_bar("2026-05-22 09:40", 10.7, 10.0, 10.7, 9.95),
+        ]
+        signals = evaluate_sell(pos, row, 2, cfg, intraday_bars=bars)
 
         self.assertEqual(signals[0]["code"], "profit_back_to_cost_take_profit")
 
@@ -634,6 +714,44 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual(sim.trades, [])
         self.assertIsNotNone(sim.position)
 
+    def test_snapshot_uses_last_close_when_current_day_kline_is_missing(self):
+        cfg = StrategyConfig()
+        provider = MagicMock()
+        provider.get_kline.return_value = [
+            _kbar("2026-05-20", 10, 10, 10.2, 9.8),
+            _kbar("2026-05-21", 10, 12, 12.1, 9.9),
+        ]
+        sim = AccountSimulator(cfg, provider=provider)
+        sim.position = Position(
+            code="000001", name="样本", qty=100, entry_date="2026-05-20",
+            entry_price=10.0, cost=1000.0, entry_reason_code="buy",
+            entry_reason_text="buy",
+        )
+        sim.cash = 0
+
+        snapshot = sim._snapshot("2026-05-22")
+
+        self.assertEqual(snapshot.market_value, 1200.0)
+        self.assertEqual(snapshot.total_equity, 1200.0)
+
+    def test_hold_event_marks_missing_intraday_data_for_high_open_rule(self):
+        cfg = StrategyConfig()
+        sim = AccountSimulator(cfg, provider=MagicMock())
+        pos = Position(
+            code="000001", name="样本", qty=100, entry_date="2026-05-20",
+            entry_price=10.0, cost=1000.0, entry_reason_code="buy",
+            entry_reason_text="buy",
+        )
+        row = {
+            "date": "2026-05-21", "open": 10.6, "high": 10.8,
+            "low": 10.4, "close": 10.7, "ma5": 10.2, "open_gap_pct": 6.0,
+        }
+
+        event = sim._hold_event(pos, "2026-05-21", row, 1, intraday_bars=[])
+
+        self.assertTrue(event.signal["high_open_intraday_missing"])
+        self.assertIn("高开未封板规则未执行", event.detail)
+
     def test_sell_day_blocks_rebuy_until_next_day(self):
         cfg = StrategyConfig()
         sim = AccountSimulator(cfg, provider=MagicMock())
@@ -726,8 +844,8 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual([t.side for t in result["trades"]], ["BUY", "SELL", "BUY"])
         self.assertEqual(result["trades"][2].trade_date, "2026-05-26")
         self.assertEqual(result["trades"][2].code, "000002")
-        self.assertEqual(result["trades"][1].reason_code, "profit_back_to_cost_take_profit")
-        self.assertEqual(result["snapshots"][-1].position_code, "000002")
+        self.assertEqual(result["trades"][1].reason_code, "next_day_limit_up_half")
+        self.assertEqual(result["snapshots"][-1].position_code, "MULTI")
 
     def test_hard_stop_sells_at_stop_price_not_low(self):
         cfg = StrategyConfig(stop_loss_pct=-5.0)

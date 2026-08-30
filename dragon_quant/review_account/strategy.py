@@ -27,20 +27,28 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
 
     if candidate.get("is_true_dragon") is False:
         return None
+    if score < cfg.min_score:
+        return None
     if amount < cfg.min_amount:
+        return None
+    if turnover < cfg.min_turnover:
         return None
     if row.get("is_one_word_board"):
         return None
 
-    if ma5 and open_px <= ma5 * 1.03 and (open_gap is None or open_gap > -3.0):
+    if (
+        ma5
+        and open_px <= ma5 * 1.03
+        and (open_gap is None or -3.0 < open_gap <= cfg.max_open_gap)
+    ):
         reasons.append("开盘贴近MA5，回踩后具备承接条件")
         code = "buy_open_ma5_pullback"
         priority = 300
     elif (
         prev_high and open_px > prev_high
-        and open_gap is not None and 0 <= open_gap <= 5.5
+        and open_gap is not None and 0 <= open_gap <= min(5.5, cfg.max_open_gap)
         and open_to_ma5 is not None and open_to_ma5 <= cfg.max_close_to_ma5
-        and turnover >= cfg.strong_turnover_min
+        and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
         and amount >= 500_000_000
     ):
         reasons.append("开盘突破前高，竞价弱转强")
@@ -97,22 +105,36 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
 
     if candidate.get("is_true_dragon") is False:
         return _buy_explain(candidate, "not_true_dragon", f"{name} 不是上日真龙候选")
+    score = candidate.get("composite_score") or 0.0
+    if score < cfg.min_score:
+        return _buy_explain(
+            candidate, "score_too_low",
+            f"{name} 综合分{score:.1f}，低于{cfg.min_score:.1f}分门槛",
+        )
     if amount < cfg.min_amount:
         return _buy_explain(
             candidate, "amount_too_low",
             f"{name} 成交额{amount / 100000000:.1f}亿，低于{cfg.min_amount / 100000000:.1f}亿门槛",
+        )
+    if turnover < cfg.min_turnover:
+        return _buy_explain(
+            candidate, "turnover_too_low",
+            f"{name} 换手率{turnover:.1f}%，低于{cfg.min_turnover:.1f}%门槛",
         )
     if row.get("is_one_word_board"):
         return _buy_explain(candidate, "one_word_board", f"{name} 当日一字板，无法按开盘策略介入")
     if not ma5:
         return _buy_explain(candidate, "missing_ma5", f"{name} 缺少上日MA5，无法判断回踩承接")
 
-    pullback_ok = open_px <= ma5 * 1.03 and (open_gap is None or open_gap > -3.0)
+    pullback_ok = (
+        open_px <= ma5 * 1.03
+        and (open_gap is None or -3.0 < open_gap <= cfg.max_open_gap)
+    )
     turn_strong_ok = (
         bool(prev_high and open_px > prev_high)
-        and open_gap is not None and 0 <= open_gap <= 5.5
+        and open_gap is not None and 0 <= open_gap <= min(5.5, cfg.max_open_gap)
         and open_to_ma5 is not None and open_to_ma5 <= cfg.max_close_to_ma5
-        and turnover >= cfg.strong_turnover_min
+        and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
         and amount >= 500_000_000
     )
     if not pullback_ok and not turn_strong_ok:
@@ -142,6 +164,7 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
     high_ret = (row["high"] / position.entry_price - 1) * 100
     low_ret = (row["low"] / position.entry_price - 1) * 100
     close_ret = (row["close"] / position.entry_price - 1) * 100
+    previous_highest_return = position.highest_return
     position.highest_return = max(position.highest_return, high_ret)
     position.highest_price = max(position.highest_price, row["high"])
     ma5 = row.get("ma5")
@@ -168,17 +191,40 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
     sells: list[dict] = []
 
-    if row["low"] <= position.entry_price:
-        return [_sell(
-            "profit_back_to_cost_take_profit",
-            "日内价格低于成本价，按成本线止盈保护离场",
-            signal,
-        )]
-
     if low_ret <= cfg.stop_loss_pct:
         return [_sell(
             "hard_stop_loss",
             f"日K近似：当日最低价触及{cfg.stop_loss_pct:.1f}%硬止损，卖出全部持仓",
+            signal,
+        )]
+
+    break_even_price = _break_even_signal_price(position, cfg)
+    if _is_breakeven_retrace(
+        position,
+        row,
+        cfg,
+        intraday_bars,
+        previous_highest_return,
+        break_even_price,
+    ):
+        signal.update({
+            "break_even_price": break_even_price,
+            "execution_price": break_even_price,
+            "breakeven_activated_before_today": (
+                previous_highest_return >= cfg.breakeven_activate_pct
+            ),
+            "intraday_mode": (
+                "prior_day_profit_daily_low"
+                if previous_highest_return >= cfg.breakeven_activate_pct
+                else "5min_ordered"
+            ),
+        })
+        return [_sell(
+            "profit_back_to_cost_take_profit",
+            (
+                f"最高浮盈达到{position.highest_return:.1f}%后回落至"
+                f"{break_even_price:.2f}完整成本线，止盈保护离场"
+            ),
             signal,
         )]
 
@@ -233,6 +279,39 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
 def _sell(code: str, reason_text: str, signal: dict) -> dict:
     return {"action": "SELL", "code": code, "reason_text": reason_text, "signal": signal}
+
+
+def _break_even_signal_price(position: Position, cfg: StrategyConfig) -> float:
+    """计算覆盖买入成本、卖出滑点和卖出费用后的保本委托价。"""
+    if position.qty <= 0:
+        return position.entry_price
+    net_factor = (
+        (1 - cfg.sell_slippage)
+        * (1 - cfg.commission_rate - cfg.stamp_tax_rate)
+    )
+    if net_factor <= 0:
+        return position.entry_price
+    return position.cost / position.qty / net_factor
+
+
+def _is_breakeven_retrace(position: Position,
+                           row: dict,
+                           cfg: StrategyConfig,
+                           intraday_bars: Optional[list],
+                           previous_highest_return: float,
+                           break_even_price: float) -> bool:
+    """判断浮盈后回落完整成本线，避免从日K高低点推断未知的盘中顺序。"""
+    if previous_highest_return >= cfg.breakeven_activate_pct:
+        return row["low"] <= break_even_price
+
+    activate_price = position.entry_price * (1 + cfg.breakeven_activate_pct / 100)
+    activated = False
+    for bar in sorted(intraday_bars or [], key=lambda item: item.timestamp):
+        if activated and (getattr(bar, "low", 0) or 0) <= break_even_price:
+            return True
+        if (getattr(bar, "high", 0) or 0) >= activate_price:
+            activated = True
+    return False
 
 
 def _volume_change_pct(row: dict) -> Optional[float]:

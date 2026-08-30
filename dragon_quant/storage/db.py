@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS sector_blacklist (
 CREATE TABLE IF NOT EXISTS review_account_runs (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     source               TEXT DEFAULT 'v2',
+    display_name         TEXT,
     strategy_name        TEXT NOT NULL,
     strategy_params_json TEXT,
     date_from            TEXT NOT NULL,
@@ -192,6 +193,10 @@ def _ensure_dragon_columns(conn: sqlite3.Connection, source: str):
 
 def _ensure_review_account_columns(conn: sqlite3.Connection):
     """对已存在的账户级 review 表幂等补列。"""
+    run_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_runs)")}
+    if "display_name" not in run_cols:
+        conn.execute("ALTER TABLE review_account_runs ADD COLUMN display_name TEXT")
+
     cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_trades)")}
     if "realized_pnl" not in cols:
         conn.execute("ALTER TABLE review_account_trades ADD COLUMN realized_pnl REAL")
@@ -1339,7 +1344,8 @@ def create_review_account_run(source: str,
                               total_return: float,
                               max_drawdown: float,
                               trade_count: int,
-                              win_rate: Optional[float]) -> int:
+                              win_rate: Optional[float],
+                              display_name: Optional[str] = None) -> int:
     """创建一条账户级 review run，返回 run_id。"""
     with _lock:
         conn = _connect()
@@ -1348,10 +1354,10 @@ def create_review_account_run(source: str,
             source = _normalize_source(source)
             cur = conn.execute(
                 "INSERT INTO review_account_runs("
-                "source, strategy_name, strategy_params_json, date_from, date_to, "
+                "source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
                 "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (source, strategy_name, strategy_params_json, date_from, date_to,
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (source, display_name, strategy_name, strategy_params_json, date_from, date_to,
                  initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate),
             )
             conn.commit()
@@ -1447,20 +1453,21 @@ def query_review_account_runs(limit: int = 20, source: str = "v2") -> list[dict]
         _ensure_schema(conn)
         source = _normalize_source(source)
         rows = conn.execute(
-            "SELECT id, source, strategy_name, strategy_params_json, date_from, date_to, "
+            "SELECT id, source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
             "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate, created_at "
             "FROM review_account_runs WHERE source = ? ORDER BY id DESC LIMIT ?",
             (source, limit),
         ).fetchall()
         return [
             {
-                "id": r[0], "source": r[1], "strategy_name": r[2],
-                "strategy_params": json.loads(r[3]) if r[3] else {},
-                "date_from": r[4], "date_to": r[5],
-                "initial_cash": r[6], "final_equity": r[7],
-                "total_return": r[8], "max_drawdown": r[9],
-                "trade_count": r[10], "win_rate": r[11],
-                "created_at": r[12],
+                "id": r[0], "source": r[1], "display_name": r[2],
+                "strategy_name": r[3],
+                "strategy_params": json.loads(r[4]) if r[4] else {},
+                "date_from": r[5], "date_to": r[6],
+                "initial_cash": r[7], "final_equity": r[8],
+                "total_return": r[9], "max_drawdown": r[10],
+                "trade_count": r[11], "win_rate": r[12],
+                "created_at": r[13],
             }
             for r in rows
         ]
@@ -1473,7 +1480,7 @@ def get_review_account_run(run_id: int) -> Optional[dict]:
     try:
         _ensure_schema(conn)
         row = conn.execute(
-            "SELECT id, source, strategy_name, strategy_params_json, date_from, date_to, "
+            "SELECT id, source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
             "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate, created_at "
             "FROM review_account_runs WHERE id = ?",
             (run_id,),
@@ -1481,13 +1488,14 @@ def get_review_account_run(run_id: int) -> Optional[dict]:
         if not row:
             return None
         return {
-            "id": row[0], "source": row[1], "strategy_name": row[2],
-            "strategy_params": json.loads(row[3]) if row[3] else {},
-            "date_from": row[4], "date_to": row[5],
-            "initial_cash": row[6], "final_equity": row[7],
-            "total_return": row[8], "max_drawdown": row[9],
-            "trade_count": row[10], "win_rate": row[11],
-            "created_at": row[12],
+            "id": row[0], "source": row[1], "display_name": row[2],
+            "strategy_name": row[3],
+            "strategy_params": json.loads(row[4]) if row[4] else {},
+            "date_from": row[5], "date_to": row[6],
+            "initial_cash": row[7], "final_equity": row[8],
+            "total_return": row[9], "max_drawdown": row[10],
+            "trade_count": row[11], "win_rate": row[12],
+            "created_at": row[13],
         }
     finally:
         conn.close()

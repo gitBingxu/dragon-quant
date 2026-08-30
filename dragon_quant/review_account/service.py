@@ -14,7 +14,8 @@ def run_review_account(date_from: str,
                        initial_cash: float = 100_000.0,
                        source: str = "v2",
                        strategy_name: str = "dragon_pullback_daily",
-                       verbose: bool = True) -> dict:
+                       verbose: bool = True,
+                       display_name: Optional[str] = None) -> dict:
     """运行账户级交易模拟并持久化结果。"""
     cfg = StrategyConfig(
         source=source,
@@ -36,6 +37,7 @@ def run_review_account(date_from: str,
         max_drawdown=result["max_drawdown"],
         trade_count=result["trade_count"],
         win_rate=result["win_rate"],
+        display_name=display_name,
     )
     db.save_review_account_results(
         run_id,
@@ -61,6 +63,7 @@ def run_review_account(date_from: str,
         ],
     )
     result["run_id"] = run_id
+    result["display_name"] = display_name
 
     if verbose:
         _print_summary(result, source, strategy_name)

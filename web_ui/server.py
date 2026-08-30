@@ -110,6 +110,22 @@ class ReviewHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+
+        try:
+            if path == "/api/account/runs":
+                self._serve_api_account_run_create()
+            elif path.startswith("/api/"):
+                self._send_json({"error": "not found"}, 404)
+            else:
+                self._send_json({"error": "not found"}, 404)
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
     # ---------- 响应工具 ----------
 
     def _serve_static(self, raw_path: str):
@@ -154,6 +170,23 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_body(self) -> dict:
+        raw_len = self.headers.get("Content-Length") or "0"
+        try:
+            length = int(raw_len)
+        except ValueError as exc:
+            raise ValueError("invalid content length") from exc
+        if length <= 0:
+            return {}
+        body = self.rfile.read(length)
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid json body") from exc
+        if not isinstance(data, dict):
+            raise ValueError("json body must be an object")
+        return data
+
     # ---------- API ----------
 
     def _serve_api_dragons(self, params: dict):
@@ -194,6 +227,53 @@ class ReviewHandler(BaseHTTPRequestHandler):
             limit = 20
         rows = db.query_review_account_runs(limit=limit, source=source)
         self._send_json({"data": rows, "count": len(rows)})
+
+    def _serve_api_account_run_create(self):
+        """POST /api/account/runs — 生成账户级回测记录。"""
+        payload = self._read_json_body()
+        date_from = _normalize_api_date(str(payload.get("date_from") or "").strip())
+        date_to = _normalize_api_date(str(payload.get("date_to") or "").strip())
+        if not date_from or not date_to:
+            raise ValueError("date_from and date_to are required")
+        if date_from > date_to:
+            raise ValueError("date_from must be earlier than date_to")
+
+        source = _normalize_source_value(
+            str(payload.get("source") or getattr(self.server, "default_source", "v2"))
+        )
+        strategy_name = str(payload.get("strategy_name") or "dragon_pullback_daily").strip()
+        if not strategy_name:
+            strategy_name = "dragon_pullback_daily"
+
+        display_name = str(payload.get("name") or payload.get("display_name") or "").strip()
+        if not display_name:
+            display_name = f"{date_from} ~ {date_to}"
+
+        raw_cash = payload.get("initial_cash", 100000.0)
+        if raw_cash in (None, ""):
+            raw_cash = 100000.0
+        try:
+            initial_cash = float(raw_cash)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("initial_cash must be a number") from exc
+        if initial_cash <= 0:
+            raise ValueError("initial_cash must be greater than 0")
+
+        from dragon_quant.review_account import run_review_account
+
+        result = run_review_account(
+            date_from=date_from,
+            date_to=date_to,
+            initial_cash=initial_cash,
+            source=source,
+            strategy_name=strategy_name,
+            verbose=False,
+            display_name=display_name,
+        )
+
+        db = _get_db()
+        run = db.get_review_account_run(int(result["run_id"]))
+        self._send_json({"data": run, "run_id": result["run_id"]}, 201)
 
     def _serve_api_account_snapshots(self, params: dict):
         """GET /api/account/snapshots?run_id=1"""
@@ -253,6 +333,26 @@ def _parse_source(params: dict, default: str = "v2") -> str:
     """解析 dragon 体系来源，非法值回退到默认值。"""
     src = (_first(params, "source") or default or "v2").lower().strip()
     return src if src in {"v1", "v2"} else "v2"
+
+
+def _normalize_source_value(raw: str) -> str:
+    src = (raw or "v2").lower().strip()
+    return src if src in {"v1", "v2"} else "v2"
+
+
+def _normalize_api_date(raw: str) -> str:
+    value = (raw or "").strip()
+    if len(value) == 8 and value.isdigit():
+        value = f"{value[:4]}-{value[4:6]}-{value[6:8]}"
+    if not value:
+        return ""
+    import datetime as dt
+
+    try:
+        parsed = dt.datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("date must be YYYY-MM-DD or YYYYMMDD") from exc
+    return parsed.strftime("%Y-%m-%d")
 
 
 def _parse_run_id(params: dict) -> int:

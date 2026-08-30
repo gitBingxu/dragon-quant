@@ -216,6 +216,7 @@ class TestReviewAccountStorage(unittest.TestCase):
                 max_drawdown=-3.0,
                 trade_count=2,
                 win_rate=50.0,
+                display_name="五月账户回测",
             )
             db.save_review_account_results(
                 run_id,
@@ -249,6 +250,7 @@ class TestReviewAccountStorage(unittest.TestCase):
             events = db.query_review_account_events(run_id)
 
         self.assertEqual(runs[0]["id"], run_id)
+        self.assertEqual(runs[0]["display_name"], "五月账户回测")
         self.assertEqual(runs[0]["total_return"], 12.0)
         self.assertEqual(snapshots[0]["position_code"], "000001")
         self.assertEqual(trades[0]["reason_code"], "buy_ma5_pullback")
@@ -256,6 +258,51 @@ class TestReviewAccountStorage(unittest.TestCase):
         self.assertEqual(trades[0]["signal"]["ma5"], 9.8)
         self.assertEqual(events[0]["event_type"], "BUY")
         self.assertEqual(events[0]["signal"]["ma5"], 9.8)
+
+    def test_account_run_display_name_column_is_added_to_old_schema(self):
+        self._conn.execute("DROP TABLE review_account_runs")
+        self._conn.execute(
+            """
+            CREATE TABLE review_account_runs (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                source               TEXT DEFAULT 'v2',
+                strategy_name        TEXT NOT NULL,
+                strategy_params_json TEXT,
+                date_from            TEXT NOT NULL,
+                date_to              TEXT NOT NULL,
+                initial_cash         REAL,
+                final_equity         REAL,
+                total_return         REAL,
+                max_drawdown         REAL,
+                trade_count          INTEGER,
+                win_rate             REAL,
+                created_at           TEXT DEFAULT (datetime('now','localtime'))
+            )
+            """
+        )
+        self._conn.commit()
+
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            run_id = db.create_review_account_run(
+                source="v2",
+                strategy_name="dragon_pullback_daily",
+                strategy_params_json="{}",
+                date_from="2026-05-01",
+                date_to="2026-06-01",
+                initial_cash=100000,
+                final_equity=100000,
+                total_return=0.0,
+                max_drawdown=0.0,
+                trade_count=0,
+                win_rate=None,
+                display_name="旧库补列测试",
+            )
+            run = db.get_review_account_run(run_id)
+
+        self.assertEqual(run["display_name"], "旧库补列测试")
 
 
 if __name__ == "__main__":

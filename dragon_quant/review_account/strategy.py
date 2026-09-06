@@ -6,12 +6,23 @@ from dragon_quant.review_account.models import Position, StrategyConfig
 
 
 def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
-                 prev_row: Optional[dict] = None) -> Optional[dict]:
-    """返回开盘买入信号；不满足则返回 None。
+                 prev_row: Optional[dict] = None,
+                 hist_rows: Optional[list] = None,
+                 intraday_bars: Optional[list] = None) -> Optional[dict]:
+    """返回买入信号；不满足则返回 None。
 
-    买入发生在当日开盘，只能使用上日龙头池、上日技术指标和当日开盘价。
-    不读取当日 close/high/low 来决定是否买入，避免未来函数。
+    优先判定分歧买龙（断板后承接确认，约 10:00 成交），其次是开盘买点
+    （贴近 MA5 / 突破前高，开盘成交）。开盘买点只使用上日龙头池、上日技术
+    指标和当日开盘价，不读取当日 close/high/low 决定是否买入，避免未来函数。
     """
+    if cfg.divergence_enabled:
+        divergence = evaluate_divergence_buy(
+            candidate, row, cfg, hist_rows=hist_rows, intraday_bars=intraday_bars,
+            prev_row=prev_row,
+        )
+        if divergence:
+            return divergence
+
     reasons: list[str] = []
     rank = candidate.get("rank") or 999
     score = candidate.get("composite_score") or 0.0
@@ -72,8 +83,174 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
     }
 
 
+def _count_shrinking_one_word_boards(hist_rows: list, cfg: StrategyConfig) -> tuple[int, bool]:
+    """统计今日之前紧邻的连续一字涨停板数，以及期间成交量是否非递增（缩量）。
+
+    hist_rows 为该股截至上一交易日（含）的日 K（按日期升序），不含今日。
+    返回 (连续一字板数, 是否缩量)。缩量定义为板与板之间成交量非递增。
+    """
+    boards = 0
+    volumes: list[float] = []
+    for r in reversed(hist_rows or []):
+        if r.get("is_one_word_board") and (r.get("pct") or 0.0) >= 9.9:
+            boards += 1
+            volumes.append(r.get("volume") or 0.0)
+        else:
+            break
+    # volumes 为从最近板往前，若要判断时间顺序上的非递增，需反转成时间升序
+    ordered = list(reversed(volumes))
+    shrinking = all(
+        ordered[i] <= ordered[i - 1] for i in range(1, len(ordered))
+    ) if len(ordered) >= 2 else True
+    return boards, shrinking
+
+
+def evaluate_divergence_buy(candidate: dict, row: dict, cfg: StrategyConfig,
+                            hist_rows: Optional[list] = None,
+                            intraday_bars: Optional[list] = None,
+                            prev_row: Optional[dict] = None) -> Optional[dict]:
+    """分歧买龙：连续缩量一字板 → 第一次断板 → 盘中承接确认才买入。
+
+    - 通用门槛：真龙候选 + 综合分达标（不套用 min_amount/min_turnover/一字板过滤）。
+    - 连板缩量：用截至上日的日 K 判定。
+    - 断板：当日开盘价低于涨停价（开盘打开一字，可成交）。
+    - 承接确认：前 divergence_confirm_bars 根 5 分钟 K，最低不破昨收且末根收盘不低于
+      首根开盘；回封涨停视为最强承接。5 分钟 K 缺失则跳过（返回 None）。
+    """
+    if candidate.get("is_true_dragon") is False:
+        return None
+    score = candidate.get("composite_score") or 0.0
+    if score < cfg.min_score:
+        return None
+
+    boards, shrinking = _count_shrinking_one_word_boards(hist_rows or [], cfg)
+    if boards < cfg.divergence_min_boards:
+        return None
+    if cfg.divergence_require_shrinking_volume and not shrinking:
+        return None
+
+    limit_up = _limit_up_price(row)
+    open_px = row.get("open") or 0.0
+    if not limit_up or open_px <= 0:
+        return None
+    if open_px >= limit_up * cfg.divergence_break_open_ratio:
+        return None  # 未断板（仍一字/近一字涨停开盘）
+
+    support = _divergence_support_signal(row, cfg, intraday_bars, limit_up)
+    if not support:
+        return None
+
+    rank = candidate.get("rank") or 999
+    signal = _signal_payload(candidate, row, prev_row=prev_row)
+    signal.update(support["signal_extra"])
+    reason_text = (
+        f"连续{boards}个一字板后首次断板，{support['support_text']}。"
+        f"真龙池排名{rank}，综合分{score:.1f}"
+    )
+    return {
+        "action": "BUY",
+        "code": "buy_divergence_first_break",
+        "reason_text": reason_text,
+        "priority": 400,
+        "score": 400,
+        "signal": signal,
+    }
+
+
+def _divergence_support_signal(row: dict, cfg: StrategyConfig,
+                               intraday_bars: Optional[list],
+                               limit_up: float) -> Optional[dict]:
+    """判定断板日盘中承接；成功返回执行价与描述，失败/缺数据返回 None。"""
+    bars = sorted(intraday_bars or [], key=lambda b: b.timestamp)[:cfg.divergence_confirm_bars]
+    if not bars:
+        return None
+
+    prev_close = row.get("prev_close")
+    if not prev_close and row.get("open") and row.get("open_gap_pct") is not None:
+        prev_close = row["open"] / (1 + row["open_gap_pct"] / 100)
+
+    # 回封涨停：最强承接
+    if any((getattr(bar, "high", 0) or 0) >= limit_up * 0.999 for bar in bars):
+        return {
+            "support_text": f"{cfg.divergence_confirm_bars * 5}分钟内回封涨停，承接最强",
+            "signal_extra": {
+                "intraday_mode": "divergence_5min",
+                "divergence_support": "limit_up_reseal",
+                "divergence_window_bars": len(bars),
+                "execution_price": limit_up,
+                "limit_up_price": limit_up,
+            },
+        }
+
+    window_low = min((getattr(bar, "low", 0) or 0) for bar in bars)
+    first_open = getattr(bars[0], "open", 0) or 0
+    last_close = getattr(bars[-1], "close", 0) or 0
+    if prev_close and window_low < prev_close:
+        return None  # 破昨收，宁可不做也不做弱
+    if last_close < first_open:
+        return None  # 窗口内单边下滑，无承接
+
+    return {
+        "support_text": (
+            f"{cfg.divergence_confirm_bars * 5}分钟内最低未破昨收且收盘企稳，具备承接"
+        ),
+        "signal_extra": {
+            "intraday_mode": "divergence_5min",
+            "divergence_support": "hold_prev_close",
+            "divergence_window_bars": len(bars),
+            "execution_price": last_close,
+            "limit_up_price": limit_up,
+            "divergence_window_low": window_low,
+        },
+    }
+
+
+def _explain_divergence(candidate: dict, row: dict, cfg: StrategyConfig, name: str,
+                        hist_rows: Optional[list],
+                        intraday_bars: Optional[list]) -> Optional[dict]:
+    """解释分歧买龙未触发的原因；若不构成分歧形态返回 None（交回开盘买点解释）。"""
+    boards, shrinking = _count_shrinking_one_word_boards(hist_rows or [], cfg)
+    if boards < cfg.divergence_min_boards:
+        return None  # 非连板一字形态，不属于分歧买点范畴
+
+    if cfg.divergence_require_shrinking_volume and not shrinking:
+        return _buy_explain(
+            candidate, "divergence_not_shrinking",
+            f"{name} 连续{boards}个一字板但期间未持续缩量，不符合分歧买龙",
+        )
+
+    limit_up = _limit_up_price(row)
+    open_px = row.get("open") or 0.0
+    if not limit_up or open_px <= 0:
+        return _buy_explain(
+            candidate, "divergence_missing_limit_up",
+            f"{name} 缺少涨停价基准，无法判断是否断板",
+        )
+    if open_px >= limit_up * cfg.divergence_break_open_ratio:
+        return _buy_explain(
+            candidate, "divergence_not_broken",
+            f"{name} 连续{boards}个一字板仍未开盘断板，等待断板",
+        )
+
+    bars = list(intraday_bars or [])
+    if not bars:
+        return _buy_explain(
+            candidate, "divergence_missing_5min",
+            f"{name} 断板日缺少5分钟K，无法确认承接，跳过",
+        )
+
+    if not _divergence_support_signal(row, cfg, intraday_bars, limit_up):
+        return _buy_explain(
+            candidate, "divergence_no_support",
+            f"{name} 断板后{cfg.divergence_confirm_bars * 5}分钟内未见承接（破昨收或收盘走弱）",
+        )
+    return None  # 承接达标，交由 evaluate_buy 命中路径处理
+
+
 def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyConfig,
-                          prev_row: Optional[dict] = None) -> dict:
+                          prev_row: Optional[dict] = None,
+                          hist_rows: Optional[list] = None,
+                          intraday_bars: Optional[list] = None) -> dict:
     """解释候选未买入原因；满足买入时返回买入信号摘要。"""
     rank = candidate.get("rank") or 999
     name = candidate.get("name") or candidate.get("code") or "候选"
@@ -82,7 +259,10 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
             candidate, "missing_kline", f"{name} 缺少当日开盘日K数据，无法判断买点"
         )
 
-    signal = evaluate_buy(candidate, row, cfg, prev_row=prev_row)
+    signal = evaluate_buy(
+        candidate, row, cfg, prev_row=prev_row,
+        hist_rows=hist_rows, intraday_bars=intraday_bars,
+    )
     if signal:
         return {
             "code": candidate.get("code", ""),
@@ -111,6 +291,14 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
             candidate, "score_too_low",
             f"{name} 综合分{score:.1f}，低于{cfg.min_score:.1f}分门槛",
         )
+
+    if cfg.divergence_enabled:
+        divergence_explain = _explain_divergence(
+            candidate, row, cfg, name, hist_rows, intraday_bars
+        )
+        if divergence_explain:
+            return divergence_explain
+
     if amount < cfg.min_amount:
         return _buy_explain(
             candidate, "amount_too_low",

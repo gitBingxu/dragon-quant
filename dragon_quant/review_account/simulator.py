@@ -120,13 +120,13 @@ class AccountSimulator:
                 "candidate_date": None,
                 "details": [],
             }
-        candidates = db.get_dragons_by_date(
-            candidate_date, top_n=self.cfg.candidate_top_n, source=self.cfg.source
-        )
+        candidates = self._collect_candidates(day)
         if not candidates:
             return {
                 "reason_code": "empty_previous_pool",
-                "reason_text": f"{candidate_date} 真龙池为空，按规则不开仓",
+                "reason_text": (
+                    f"近{self.cfg.candidate_lookback_days}个交易日真龙池为空，按规则不开仓"
+                ),
                 "candidate_date": candidate_date,
                 "details": [],
             }
@@ -147,17 +147,27 @@ class AccountSimulator:
                 continue
             row = self._row_for(cand["code"], day)
             prev_row = self._previous_row_for(cand["code"], day) if row else None
-            details.append(explain_buy_candidate(cand, row, self.cfg, prev_row=prev_row))
+            hist_rows = self._history_before(cand["code"], day) if row else None
+            intraday_bars = self._intraday_bars_for(cand["code"], day) if row else None
+            details.append(explain_buy_candidate(
+                cand, row, self.cfg, prev_row=prev_row,
+                hist_rows=hist_rows, intraday_bars=intraday_bars,
+            ))
             if not row:
                 continue
-            signal = evaluate_buy(cand, row, self.cfg, prev_row=prev_row)
+            signal = evaluate_buy(
+                cand, row, self.cfg, prev_row=prev_row,
+                hist_rows=hist_rows, intraday_bars=intraday_bars,
+            )
             if signal:
                 signals.append((signal, cand, row))
 
         if not signals:
             return {
                 "reason_code": "no_candidate_passed",
-                "reason_text": f"{candidate_date} 真龙池没有候选触发开盘买入条件",
+                "reason_text": (
+                    f"近{self.cfg.candidate_lookback_days}个交易日真龙池没有候选触发买入条件"
+                ),
                 "candidate_date": candidate_date,
                 "details": details,
             }
@@ -171,7 +181,8 @@ class AccountSimulator:
             reverse=True,
         )
         signal, cand, row = signals[0]
-        price = row["open"] * (1 + self.cfg.buy_slippage)
+        exec_px = signal["signal"].get("execution_price") or row["open"]
+        price = exec_px * (1 + self.cfg.buy_slippage)
         qty = int(self.cash / (price * self.cfg.lot_size)) * self.cfg.lot_size
         if qty <= 0:
             return {
@@ -446,6 +457,32 @@ class AccountSimulator:
                 return self._trading_days[i - 1] if i > 0 else None
         return self._trading_days[-1] if self._trading_days and self._trading_days[-1] < day else None
 
+    def _lookback_candidate_dates(self, day: str) -> list[str]:
+        """返回 day 之前最近的 candidate_lookback_days 个交易日（升序）。"""
+        prior = [d for d in self._trading_days if d < day]
+        n = max(1, self.cfg.candidate_lookback_days)
+        return prior[-n:]
+
+    def _collect_candidates(self, day: str) -> list[dict]:
+        """取近 N 个交易日真龙池并集，按 code 去重（保留 rank 更优者），排序取前 top_n。"""
+        merged: dict[str, dict] = {}
+        for date in self._lookback_candidate_dates(day):
+            for cand in db.get_dragons_by_date(
+                date, top_n=self.cfg.candidate_top_n, source=self.cfg.source
+            ):
+                code = cand.get("code")
+                if not code:
+                    continue
+                existing = merged.get(code)
+                if existing is None or _candidate_sort_key(cand) < _candidate_sort_key(existing):
+                    merged[code] = cand
+        ranked = sorted(merged.values(), key=_candidate_sort_key)
+        return ranked[: self.cfg.candidate_top_n]
+
+    def _history_before(self, code: str, day: str) -> list[dict]:
+        """返回该股截至 day 之前（不含当日）的日 K 指标行，按日期升序。"""
+        return [row for row in self._klines(code) if row["date"] < day]
+
     def _klines(self, code: str) -> list[dict]:
         if code not in self._kline_cache:
             self._kline_cache[code] = enrich_daily_klines(
@@ -535,3 +572,11 @@ class AccountSimulator:
             "positions": self.closed_positions,
             "events": self.events,
         }
+
+
+def _candidate_sort_key(cand: dict) -> tuple[int, float]:
+    """候选排序键：rank 越小越优先，rank 相同则综合分越高越优先。"""
+    rank = cand.get("rank")
+    rank = rank if rank is not None else 999999
+    score = cand.get("composite_score") or 0.0
+    return (rank, -score)

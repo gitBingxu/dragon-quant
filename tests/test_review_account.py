@@ -9,6 +9,7 @@ from dragon_quant.review_account.models import Position, StrategyConfig
 from dragon_quant.review_account.simulator import AccountSimulator
 from dragon_quant.review_account.strategy import (
     evaluate_buy,
+    evaluate_divergence_buy,
     evaluate_sell,
     explain_buy_candidate,
 )
@@ -256,6 +257,168 @@ class TestAccountStrategy(unittest.TestCase):
         signal = evaluate_buy(cand, row, cfg)
 
         self.assertIsNone(signal)
+
+    def test_divergence_buy_hits_after_first_break_with_support(self):
+        cfg = StrategyConfig()
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 11.9, "low": 11.3,
+            "close": 11.7, "pct": 6.4, "prev_close": 11.0, "open_gap_pct": 4.5,
+            "is_one_word_board": False,
+        }
+        bars = [
+            _minute_bar("2026-05-22 09:35", 11.5, 11.6, 11.7, 11.2),
+            _minute_bar("2026-05-22 09:40", 11.6, 11.8, 11.9, 11.4),
+        ]
+        cand = {
+            "code": "000001", "name": "样本", "rank": 1, "composite_score": 70.0,
+            "turnover_rate": 3.0, "amount": 50_000_000, "is_true_dragon": True,
+        }
+
+        signal = evaluate_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["code"], "buy_divergence_first_break")
+        self.assertEqual(signal["priority"], 400)
+        self.assertAlmostEqual(signal["signal"]["execution_price"], 11.8)
+        self.assertEqual(signal["signal"]["divergence_support"], "hold_prev_close")
+
+    def test_divergence_buy_needs_min_boards(self):
+        cfg = StrategyConfig(divergence_min_boards=2)
+        hist = [
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 11.9, "low": 11.3,
+            "close": 11.7, "prev_close": 11.0, "open_gap_pct": 4.5,
+        }
+        bars = [_minute_bar("2026-05-22 09:35", 11.5, 11.8, 11.9, 11.4)]
+        cand = {"composite_score": 70.0, "is_true_dragon": True, "rank": 1}
+
+        self.assertIsNone(
+            evaluate_divergence_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+        )
+
+    def test_divergence_buy_requires_shrinking_volume(self):
+        cfg = StrategyConfig(divergence_min_boards=2)
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 1_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+        ]
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 11.9, "low": 11.3,
+            "close": 11.7, "prev_close": 11.0, "open_gap_pct": 4.5,
+        }
+        bars = [_minute_bar("2026-05-22 09:35", 11.5, 11.8, 11.9, 11.4)]
+        cand = {"composite_score": 70.0, "is_true_dragon": True, "rank": 1}
+
+        self.assertIsNone(
+            evaluate_divergence_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+        )
+
+    def test_divergence_buy_needs_actual_break(self):
+        cfg = StrategyConfig(divergence_min_boards=2)
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        # 开盘仍贴近涨停价（12.1×0.998=12.08），未断板
+        row = {
+            "date": "2026-05-22", "open": 12.1, "high": 12.1, "low": 12.1,
+            "close": 12.1, "prev_close": 11.0, "open_gap_pct": 10.0,
+        }
+        bars = [_minute_bar("2026-05-22 09:35", 12.1, 12.1, 12.1, 12.1)]
+        cand = {"composite_score": 70.0, "is_true_dragon": True, "rank": 1}
+
+        self.assertIsNone(
+            evaluate_divergence_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+        )
+
+    def test_divergence_buy_rejects_when_support_breaks_prev_close(self):
+        cfg = StrategyConfig(divergence_min_boards=2)
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 11.9, "low": 10.5,
+            "close": 10.8, "prev_close": 11.0, "open_gap_pct": 4.5,
+        }
+        # 窗口内最低 10.8 < 昨收 11.0，破位无承接
+        bars = [
+            _minute_bar("2026-05-22 09:35", 11.5, 11.0, 11.6, 10.8),
+            _minute_bar("2026-05-22 09:40", 11.0, 10.9, 11.1, 10.85),
+        ]
+        cand = {"composite_score": 70.0, "is_true_dragon": True, "rank": 1}
+
+        self.assertIsNone(
+            evaluate_divergence_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+        )
+
+    def test_divergence_buy_skips_when_5min_missing(self):
+        cfg = StrategyConfig(divergence_min_boards=2)
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 11.9, "low": 11.3,
+            "close": 11.7, "prev_close": 11.0, "open_gap_pct": 4.5,
+        }
+        cand = {"composite_score": 70.0, "is_true_dragon": True, "rank": 1}
+
+        self.assertIsNone(
+            evaluate_divergence_buy(cand, row, cfg, hist_rows=hist, intraday_bars=[])
+        )
+
+    def test_divergence_buy_reseals_at_limit_up_price(self):
+        cfg = StrategyConfig(divergence_min_boards=2)
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 12.1, "low": 11.3,
+            "close": 12.1, "prev_close": 11.0, "open_gap_pct": 4.5,
+        }
+        # 窗口内触及涨停 12.1，视为回封
+        bars = [_minute_bar("2026-05-22 09:35", 11.5, 12.1, 12.1, 11.4)]
+        cand = {"composite_score": 70.0, "is_true_dragon": True, "rank": 1}
+
+        signal = evaluate_divergence_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["signal"]["divergence_support"], "limit_up_reseal")
+        self.assertAlmostEqual(signal["signal"]["execution_price"], 12.1)
+
+    def test_divergence_buy_outranks_ma5_pullback(self):
+        cfg = StrategyConfig()
+        hist = [
+            {"date": "2026-05-20", "is_one_word_board": True, "pct": 10.0, "volume": 2_000_000},
+            {"date": "2026-05-21", "is_one_word_board": True, "pct": 10.0, "volume": 1_500_000},
+        ]
+        # 该 row 同时满足贴近 MA5（open<=ma5*1.03）与分歧断板承接
+        row = {
+            "date": "2026-05-22", "open": 11.5, "high": 11.9, "low": 11.3,
+            "close": 11.7, "pct": 6.4, "ma5": 11.4, "prev_close": 11.0,
+            "open_gap_pct": 4.5, "close_to_ma5_pct": 2.6, "is_one_word_board": False,
+        }
+        bars = [
+            _minute_bar("2026-05-22 09:35", 11.5, 11.6, 11.7, 11.2),
+            _minute_bar("2026-05-22 09:40", 11.6, 11.8, 11.9, 11.4),
+        ]
+        cand = {
+            "code": "000001", "rank": 1, "composite_score": 70.0,
+            "turnover_rate": 12.0, "amount": 800_000_000, "is_true_dragon": True,
+        }
+
+        signal = evaluate_buy(cand, row, cfg, hist_rows=hist, intraday_bars=bars)
+
+        self.assertEqual(signal["code"], "buy_divergence_first_break")
+        self.assertEqual(signal["priority"], 400)
 
     def test_explain_buy_candidate_reports_pattern_reject_reason(self):
         cfg = StrategyConfig(max_open_gap=7.0)
@@ -665,11 +828,12 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual(result["trades"], [])
         self.assertEqual(result["events"][-1].event_type, "IDLE")
         self.assertEqual(result["events"][-1].reason_code, "no_candidate_passed")
-        self.assertIn("没有候选触发开盘买入条件", result["events"][-1].detail)
+        self.assertIn("没有候选触发买入条件", result["events"][-1].detail)
         self.assertEqual(result["events"][-1].signal["details"][0]["reason_code"], "no_buy_pattern")
 
-    def test_missing_previous_trade_day_pool_does_not_fallback_to_older_pool(self):
-        cfg = StrategyConfig(initial_cash=100000)
+    def test_candidate_pool_unions_recent_lookback_days(self):
+        """近 N 日票池并集：上一交易日池为空时，仍可纳入更早（窗口内）交易日的候选。"""
+        cfg = StrategyConfig(initial_cash=100000, candidate_lookback_days=3)
         provider = MagicMock()
         provider.get_kline.return_value = [
             _kbar("2026-07-06", 10, 10, 10.2, 9.8, amount=100_000_000),
@@ -691,9 +855,47 @@ class TestAccountSimulator(unittest.TestCase):
                 "2026-07-07", "2026-07-09"
             )
 
-        self.assertEqual(result["trades"], [])
-        self.assertEqual(result["events"][-1].reason_code, "empty_previous_pool")
-        self.assertEqual(result["events"][-1].signal["candidate_date"], "2026-07-08")
+        # 07-09 的上一交易日 07-08 池为空，但 07-07 在 3 日窗口内仍被纳入，
+        # 因此不是 empty_previous_pool，而是池内候选未触发买点。
+        last_event = result["events"][-1]
+        self.assertEqual(last_event.reason_code, "no_candidate_passed")
+        self.assertEqual(
+            last_event.signal["details"][0]["code"], "000001"
+        )
+
+    def test_simulator_executes_divergence_buy_end_to_end(self):
+        cfg = StrategyConfig(initial_cash=100000)
+        provider = MagicMock()
+        # 连续两个一字板（05-20、05-21）后 05-22 开盘断板并盘中承接
+        provider.get_kline.return_value = [
+            _kbar("2026-05-19", 9.0, 9.0, 9.0, 9.0, pct=10.0),
+            _kbar("2026-05-20", 9.9, 9.9, 9.9, 9.9, pct=10.0),
+            _kbar("2026-05-21", 10.89, 10.89, 10.89, 10.89, pct=10.0),
+            _kbar("2026-05-22", 11.4, 11.7, 11.9, 11.3, pct=7.4),
+        ]
+        provider.get_5min_kline_for.return_value = [
+            _minute_bar("2026-05-22 09:35", 11.4, 11.6, 11.7, 11.2),
+            _minute_bar("2026-05-22 09:40", 11.6, 11.8, 11.9, 11.4),
+        ]
+        candidate = {
+            "trade_date": "2026-05-21", "code": "000001", "name": "分歧龙", "rank": 1,
+            "composite_score": 70.0, "turnover_rate": 3.0,
+            "amount": 50_000_000, "board_count": 3, "is_true_dragon": True,
+        }
+
+        with patch("dragon_quant.review_account.simulator.build_trade_calendar",
+                   return_value=["2026-05-21", "2026-05-22"]), \
+             patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
+                   return_value=[candidate]):
+            result = AccountSimulator(cfg, provider=provider).run(
+                "2026-05-21", "2026-05-22"
+            )
+
+        buys = [t for t in result["trades"] if t.side == "BUY"]
+        self.assertEqual(len(buys), 1)
+        self.assertEqual(buys[0].reason_code, "buy_divergence_first_break")
+        # 成交价 = 承接窗口末根收盘 11.8 × (1 + buy_slippage)
+        self.assertAlmostEqual(buys[0].price, 11.8 * (1 + cfg.buy_slippage), places=4)
 
     def test_t_plus_one_blocks_same_day_sell(self):
         cfg = StrategyConfig()

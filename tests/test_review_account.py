@@ -453,7 +453,7 @@ class TestAccountStrategy(unittest.TestCase):
             "low": 9.4, "close": 11.5, "ma5": 10.0,
         }
 
-        signals = evaluate_sell(pos, row, 1, cfg)
+        signals = evaluate_sell(pos, row, 2, cfg)
 
         self.assertEqual(signals[0]["code"], "hard_stop_loss")
 
@@ -704,6 +704,142 @@ class TestAccountStrategy(unittest.TestCase):
         signals = evaluate_sell(pos, row, 6, cfg)
 
         self.assertEqual(signals, [])
+
+
+class TestAccountSellOptimizations(unittest.TestCase):
+    """卖出策略优化：首日紧止损 / 弱势容忍带 / 移动止盈。"""
+
+    def _pos(self, **kw) -> Position:
+        base = dict(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        base.update(kw)
+        return Position(**base)
+
+    def test_first_day_uses_tighter_stop_loss(self):
+        cfg = StrategyConfig(stop_loss_pct=-5.0, first_day_stop_loss_pct=-3.5)
+        pos = self._pos()
+        # 最低 -4%，触及首日 -3.5% 但未及常规 -5%
+        row = {
+            "date": "2026-05-21", "open": 10.0, "high": 10.1,
+            "low": 9.6, "close": 9.7, "ma5": 9.5,
+        }
+
+        signals = evaluate_sell(pos, row, 1, cfg)
+
+        self.assertEqual(signals[0]["code"], "first_day_stop_loss")
+        self.assertEqual(signals[0]["signal"]["applied_stop_pct"], -3.5)
+
+    def test_regular_day_keeps_wider_stop_loss(self):
+        cfg = StrategyConfig(stop_loss_pct=-5.0, first_day_stop_loss_pct=-3.5)
+        pos = self._pos()
+        # 最低 -4%，第2个可卖日不触发常规 -5%
+        row = {
+            "date": "2026-05-22", "open": 10.0, "high": 10.3,
+            "low": 9.6, "close": 10.2, "ma5": 9.5,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        codes = [s["code"] for s in signals]
+        self.assertNotIn("hard_stop_loss", codes)
+        self.assertNotIn("first_day_stop_loss", codes)
+
+    def test_weak_close_within_tolerance_above_ma5_holds(self):
+        cfg = StrategyConfig(weak_close_tolerance_pct=1.0)
+        pos = self._pos()
+        # 收盘较开盘仅低 0.5%，仍站上 MA5 与昨收 → 洗盘，继续持有
+        row = {
+            "date": "2026-05-22", "open": 10.0, "high": 10.2,
+            "low": 9.9, "close": 9.95, "ma5": 9.8, "prev_close": 9.9,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals, [])
+
+    def test_weak_close_beyond_tolerance_clears(self):
+        cfg = StrategyConfig(weak_close_tolerance_pct=1.0)
+        pos = self._pos()
+        # 收盘较开盘低 2% > 容忍带 → 清仓
+        row = {
+            "date": "2026-05-22", "open": 10.0, "high": 10.2,
+            "low": 9.7, "close": 9.8, "ma5": 9.5, "prev_close": 9.6,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals[0]["code"], "close_below_open_stop")
+
+    def test_weak_close_within_tolerance_but_below_support_clears(self):
+        cfg = StrategyConfig(weak_close_tolerance_pct=1.0)
+        pos = self._pos()
+        # 收盘较开盘仅低 0.5%，但同时跌破 MA5 → 支撑失守，清仓
+        row = {
+            "date": "2026-05-22", "open": 10.0, "high": 10.2,
+            "low": 9.9, "close": 9.95, "ma5": 10.1, "prev_close": 9.9,
+        }
+
+        signals = evaluate_sell(pos, row, 2, cfg)
+
+        self.assertEqual(signals[0]["code"], "close_below_open_stop")
+
+    def test_first_day_weak_close_uses_tolerance_band(self):
+        cfg = StrategyConfig(weak_close_tolerance_pct=1.0)
+        pos = self._pos()
+        # 买入次日：收盘较开盘仅低 0.5% 且站上 MA5/昨收 → 不清仓（T+1 首个可卖日）
+        row = {
+            "date": "2026-05-21", "open": 10.0, "high": 10.2,
+            "low": 9.9, "close": 9.95, "ma5": 9.8, "prev_close": 9.9,
+        }
+
+        signals = evaluate_sell(pos, row, 1, cfg)
+
+        self.assertEqual(signals, [])
+
+    def test_trailing_take_profit_on_retrace(self):
+        cfg = StrategyConfig(trailing_activate_pct=8.0, trailing_drawdown_pct=3.5)
+        pos = self._pos(highest_return=9.0, highest_price=10.9)
+        # 上一日峰值 9% 已达标；今日收盘自最高价 10.9 回撤约 4.6% (>3.5%)
+        row = {
+            "date": "2026-05-25", "open": 10.8, "high": 10.85,
+            "low": 10.3, "close": 10.4, "ma5": 10.2,
+        }
+
+        signals = evaluate_sell(pos, row, 4, cfg)
+
+        self.assertEqual(signals[0]["code"], "trailing_take_profit")
+
+    def test_trailing_take_profit_on_ma5_break(self):
+        cfg = StrategyConfig(trailing_activate_pct=8.0, trailing_drawdown_pct=3.5)
+        pos = self._pos(highest_return=9.0, highest_price=10.9)
+        # 回撤不足 3.5%，但收盘跌破 MA5 → 移动止盈
+        row = {
+            "date": "2026-05-25", "open": 10.8, "high": 10.88,
+            "low": 10.6, "close": 10.7, "ma5": 10.8,
+        }
+
+        signals = evaluate_sell(pos, row, 4, cfg)
+
+        self.assertEqual(signals[0]["code"], "trailing_take_profit")
+
+    def test_breakeven_protection_not_preempted_below_trailing_activate(self):
+        cfg = StrategyConfig(
+            breakeven_activate_pct=6.0, trailing_activate_pct=8.0,
+            trailing_drawdown_pct=3.5,
+        )
+        pos = self._pos(highest_return=6.5, highest_price=10.65)
+        # 峰值 6.5% ∈ [6,8)：移动止盈不接管，回落成本线仍走保本保护
+        row = {
+            "date": "2026-05-25", "open": 10.2, "high": 10.3,
+            "low": 9.98, "close": 10.0, "ma5": 9.9,
+        }
+
+        signals = evaluate_sell(pos, row, 4, cfg)
+
+        self.assertEqual(signals[0]["code"], "profit_back_to_cost_take_profit")
 
 
 class TestAccountSimulator(unittest.TestCase):
@@ -1124,6 +1260,28 @@ class TestAccountSimulator(unittest.TestCase):
         self.assertEqual(len(sim.closed_positions), 1)
         self.assertEqual(sim.closed_positions[0].qty, 800)
         self.assertGreater(sim.closed_positions[0].realized_return, 0)
+
+    def test_sell_execution_price_for_new_reason_codes(self):
+        cfg = StrategyConfig(first_day_stop_loss_pct=-3.5, sell_slippage=0.0)
+        sim = AccountSimulator(cfg, provider=MagicMock())
+        pos = Position(
+            code="000001", name="样本", qty=400, entry_date="2026-05-20",
+            entry_price=10.0, cost=4000.0, entry_reason_code="buy",
+            entry_reason_text="buy", entry_day_low=9.8,
+        )
+        # 首日紧止损：开盘未破止损价，按 -3.5% 止损价成交
+        first_day_row = {"open": 9.9, "high": 9.95, "low": 9.5, "close": 9.6,
+                         "applied_stop_pct": -3.5}
+        self.assertAlmostEqual(
+            sim._sell_execution_price(pos, first_day_row, "first_day_stop_loss"),
+            10.0 * (1 - 3.5 / 100),
+        )
+        # 移动止盈：按当日收盘价成交
+        trailing_row = {"open": 10.8, "high": 10.85, "low": 10.3, "close": 10.4}
+        self.assertEqual(
+            sim._sell_execution_price(pos, trailing_row, "trailing_take_profit"),
+            10.4,
+        )
 
 
 if __name__ == "__main__":

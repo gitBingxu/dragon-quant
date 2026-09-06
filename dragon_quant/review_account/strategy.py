@@ -379,10 +379,31 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
     sells: list[dict] = []
 
-    if low_ret <= cfg.stop_loss_pct:
+    applied_stop_pct = (
+        cfg.first_day_stop_loss_pct if hold_days <= 1 else cfg.stop_loss_pct
+    )
+    if low_ret <= applied_stop_pct:
+        signal["applied_stop_pct"] = applied_stop_pct
+        if hold_days <= 1:
+            return [_sell(
+                "first_day_stop_loss",
+                f"日K近似：买入次日最低价触及{applied_stop_pct:.1f}%首日紧止损，卖出全部持仓",
+                signal,
+            )]
         return [_sell(
             "hard_stop_loss",
-            f"日K近似：当日最低价触及{cfg.stop_loss_pct:.1f}%硬止损，卖出全部持仓",
+            f"日K近似：当日最低价触及{applied_stop_pct:.1f}%硬止损，卖出全部持仓",
+            signal,
+        )]
+
+    trailing_signal = _trailing_take_profit(
+        position, row, cfg, previous_highest_return, ma5
+    )
+    if trailing_signal:
+        signal.update(trailing_signal["signal_extra"])
+        return [_sell(
+            "trailing_take_profit",
+            trailing_signal["reason_text"],
             signal,
         )]
 
@@ -418,6 +439,7 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
     close_below_open = row["close"] < row["open"]
     close_below_ma5 = bool(ma5 and row["close"] < ma5)
+    weak_close_break = _weak_close_break(row, cfg)
     high_open_signal = _high_open_no_limit_signal(row, intraday_bars)
 
     if high_open_signal:
@@ -442,11 +464,19 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
                     signal,
                 ))
             return sells
-        if close_below_open:
-            return [_sell("next_day_close_below_open", "买入次日收盘价低于开盘价，清仓离场", signal)]
+        if weak_close_break:
+            return [_sell(
+                "next_day_close_below_open",
+                "买入次日收盘走弱（跌破开盘超容忍带或失守MA5/昨收），清仓离场",
+                signal,
+            )]
 
-    if close_below_open:
-        return [_sell("close_below_open_stop", "收盘价低于开盘价，止损离场", signal)]
+    if weak_close_break:
+        return [_sell(
+            "close_below_open_stop",
+            "收盘走弱（跌破开盘超容忍带或失守MA5/昨收），止损离场",
+            signal,
+        )]
 
     if close_below_ma5:
         return [_sell("break_intraday_ma_stop", "日K近似：收盘价低于日内均线，止损离场", signal)]
@@ -467,6 +497,66 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
 
 def _sell(code: str, reason_text: str, signal: dict) -> dict:
     return {"action": "SELL", "code": code, "reason_text": reason_text, "signal": signal}
+
+
+def _trailing_take_profit(position: Position,
+                          row: dict,
+                          cfg: StrategyConfig,
+                          previous_highest_return: float,
+                          ma5: Optional[float]) -> Optional[dict]:
+    """移动止盈：峰值达标后让利润奔跑，回撤或失守 MA5 才离场。
+
+    门控使用 previous_highest_return（截至上一交易日的最高浮盈），避免用当日盘中高点
+    产生未来函数；与保本保护同款口径。仅当峰值 >= trailing_activate_pct 才启用，
+    该阈值高于 breakeven_activate_pct，因此强势盈利单优先由移动止盈接管、
+    尚未达标的浮盈单仍走保本保护。
+    """
+    if previous_highest_return < cfg.trailing_activate_pct:
+        return None
+    highest_price = position.highest_price
+    if highest_price <= 0:
+        return None
+
+    retrace_pct = (highest_price - row["close"]) / highest_price * 100
+    close_below_ma5 = bool(ma5 and row["close"] < ma5)
+    if retrace_pct < cfg.trailing_drawdown_pct and not close_below_ma5:
+        return None
+
+    trigger = (
+        f"收盘跌破MA5" if close_below_ma5
+        else f"收盘自最高价回撤{retrace_pct:.1f}%"
+    )
+    return {
+        "reason_text": (
+            f"最高浮盈达到{previous_highest_return:.1f}%后{trigger}，移动止盈让利润落袋"
+        ),
+        "signal_extra": {
+            "trailing_activated_return": previous_highest_return,
+            "trailing_retrace_pct": retrace_pct,
+            "trailing_highest_price": highest_price,
+            "trailing_close_below_ma5": close_below_ma5,
+        },
+    }
+
+
+def _weak_close_break(row: dict, cfg: StrategyConfig) -> bool:
+    """收盘弱势是否达到清仓标准。
+
+    收盘不低于开盘则不成立；小幅跌破开盘（不超过 weak_close_tolerance_pct）且仍站上
+    MA5 与昨收，视为日内洗盘，继续持有；否则（跌破开盘超容忍带，或失守 MA5/昨收）清仓。
+    """
+    close = row["close"]
+    open_ = row["open"]
+    if not open_ or close >= open_:
+        return False
+    drop_pct = (open_ - close) / open_ * 100
+    if drop_pct > cfg.weak_close_tolerance_pct:
+        return True
+    ma5 = row.get("ma5")
+    prev_close = row.get("prev_close")
+    below_ma5 = bool(ma5 and close < ma5)
+    below_prev = bool(prev_close and close < prev_close)
+    return below_ma5 or below_prev
 
 
 def _break_even_signal_price(position: Position, cfg: StrategyConfig) -> float:

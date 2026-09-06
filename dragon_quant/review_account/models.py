@@ -27,9 +27,11 @@ class StrategyConfig:
     divergence_confirm_bars: int = 6
     divergence_break_open_ratio: float = 0.998
     stop_loss_pct: float = -5.0
+    first_day_stop_loss_pct: float = -3.5
+    weak_close_tolerance_pct: float = 1.0
     take_profit_pct: float = 12.0
     breakeven_activate_pct: float = 6.0
-    trailing_activate_pct: float = 6.0
+    trailing_activate_pct: float = 8.0
     trailing_drawdown_pct: float = 3.5
     volume_spike_pct: float = 30.0
     max_hold_days: int = 5

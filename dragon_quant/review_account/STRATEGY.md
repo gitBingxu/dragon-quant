@@ -45,15 +45,19 @@
 | `divergence_require_shrinking_volume` | True | 是否要求一字板期间成交量非递增（缩量确认） |
 | `divergence_confirm_bars` | 6 | 断板日承接观察窗口的 5 分钟 K 根数（6 根=30 分钟） |
 | `divergence_break_open_ratio` | 0.998 | 开盘价低于「涨停价 × 此值」判为断板 |
-| `stop_loss_pct` | -5.0 | 硬止损线（%） |
+| `stop_loss_pct` | -5.0 | 常规硬止损线（持有第 2 日起，%） |
+| `first_day_stop_loss_pct` | -3.5 | 买入后首个可卖日（T+1，`hold_days==1`）专用紧止损（%） |
+| `weak_close_tolerance_pct` | 1.0 | 弱势清仓容忍带：收盘小幅低于开盘但站上支撑则不清（%） |
 | `breakeven_activate_pct` | 6.0 | 保本止盈的浮盈激活阈值（%） |
+| `trailing_activate_pct` | 8.0 | 移动止盈激活阈值（峰值达此值后启用，%） |
+| `trailing_drawdown_pct` | 3.5 | 移动止盈回撤阈值（自最高价回撤达此值触发，%） |
 | `volume_spike_pct` | 30.0 | 放量止盈阈值（较上日成交量增幅 %） |
 | `buy_slippage` / `sell_slippage` | 0.002 / 0.002 | 买入/卖出滑点 |
 | `commission_rate` | 0.0003 | 佣金率（双向） |
 | `stamp_tax_rate` | 0.0005 | 印花税（仅卖出） |
 | `lot_size` | 100 | 最小交易单位（一手） |
 
-> 说明：`take_profit_pct`、`trailing_*`、`max_hold_days` 等字段仍保留在配置中，但**当前主卖出路径不再使用固定止盈 / 移动止盈 / 最长持有天数强制卖出**（详见卖出策略）。
+> 说明：`take_profit_pct`、`max_hold_days` 等字段仍保留在配置中，但**当前主卖出路径不再使用固定止盈 / 最长持有天数强制卖出**（详见卖出策略）；`trailing_*` 已启用为移动止盈。
 
 ---
 
@@ -151,16 +155,31 @@
 
 每个交易日对每只**非当日买入**的持仓按**固定优先级**判定，命中即返回并执行（列表可含多笔，如涨停半仓 + 转弱清仓）。
 
+> **T+1 前提**：A 股买入当日不可卖出。模拟器对 `entry_date == day` 的持仓在当日**跳过全部卖出判定**，
+> 第一个可卖出日是买入次日，代码中即 `hold_days == 1`。因此下文「首日」均指**买入后的首个可卖日（T+1）**，
+> 而非买入当天。
+
 > 卖出判定同时会更新持仓的历史最高浮盈 `highest_return` 与最高价 `highest_price`，
-> 供保本止盈的「先浮盈后回落」判断使用。
+> 供保本止盈与移动止盈的「先浮盈后回落」判断使用。
+
+分层原则：**盈利越高越用「移动止盈」让它跑，尚未盈利才用「保护性止损」守。**
 
 ### 优先级顺序（自上而下）
 
-**① 硬止损（`hard_stop_loss`）—— 最高优先级**
-- 当日最低价触及 `stop_loss_pct`（默认 -5%）即全部清仓。
-- 成交价：若开盘已跌破止损价则按开盘价，否则按止损价。
+**① 硬止损（首日紧止损 / 常规硬止损）—— 最高优先级**
+- 首个可卖日（`hold_days <= 1`）用 `first_day_stop_loss_pct`（默认 -3.5%），触发 `first_day_stop_loss`；
+- 持有第 2 日起用 `stop_loss_pct`（默认 -5%），触发 `hard_stop_loss`。
+- 当日最低价触及对应止损线即全部清仓；成交价若开盘已跌破止损价则按开盘价，否则按止损价。
 
-**② 保本止盈 / 浮盈回落保护（`profit_back_to_cost_take_profit`）**
+**② 移动止盈（`trailing_take_profit`）—— 让利润奔跑**
+- 门控：**此前交易日**最高浮盈 `previous_highest_return >= trailing_activate_pct`（默认 8%），
+  用上一日峰值避免未来函数，与保本同款口径。
+- 触发（满足其一）：当日收盘自 `highest_price` 回撤 `>= trailing_drawdown_pct`（默认 3.5%），
+  **或**收盘跌破 MA5。
+- 因 `trailing_activate_pct(8%) > breakeven_activate_pct(6%)`，强势盈利单优先由移动止盈接管，
+  峰值∈[6%,8%) 的浮盈单仍走保本保护；且移动止盈层级高于 T+1/常规弱势清仓，进入该区间后不再被机械清仓。
+
+**③ 保本止盈 / 浮盈回落保护（`profit_back_to_cost_take_profit`）**
 - 体现「坚决不能亏钱」：最高浮盈达到 `breakeven_activate_pct`（默认 6%）后，
   若价格回落到**完整成本线**则保护性离场。
 - **完整成本线**（`_break_even_signal_price`）覆盖买入成本、卖出滑点、卖出佣金 + 印花税：
@@ -169,33 +188,38 @@
   - 若**此前交易日**最高浮盈已达激活阈值 → 当日最低价 `<= 完整成本线` 即触发（按日 K 最低）；
   - 否则需用当日 5 分钟 K 确认「先冲到激活价、后回落到成本线」的真实顺序。
 
-**③ 高开未封板清仓（`_high_open_no_limit_signal`，依赖 5 分钟 K）**
+**④ 高开未封板清仓（`_high_open_no_limit_signal`，依赖 5 分钟 K）**
 - 开盘高开 **≥ 7%**：若 **5 分钟内（1 根 5 分 K）** 未触及涨停 → 清仓
   （`high_open_7pct_no_limit_5m_clear`）。
 - 开盘高开 **≥ 5%**（且 < 7%）：若 **30 分钟内（6 根 5 分 K）** 未触及涨停 → 清仓
   （`high_open_5pct_no_limit_30m_clear`）。
 - 历史 5 分钟线缺失时**跳过**该窗口规则（持有事件会标注「缺少 5 分钟 K」）。
 
-**④ 买入次日（`hold_days == 1`）专属规则**
+**⑤ 买入次日（`hold_days == 1`）专属规则**
 - 次日收盘涨停：先按涨停价**卖出半仓**（`next_day_limit_up_half`）；若同时收盘转弱
   （收盘 < MA5 或收盘 < 开盘）则**清仓剩余**（`next_day_limit_up_clear`）。
-- 次日未涨停且**收盘价 < 开盘价** → 清仓（`next_day_close_below_open`）。
+- 次日未涨停且触发**弱势清仓判定**（见下）→ 清仓（`next_day_close_below_open`）。
 
-**⑤ 常规持仓止损/止盈（`hold_days >= 2`）**
-- **收盘价 < 开盘价** → 止损清仓（`close_below_open_stop`）；
+**⑥ 常规持仓止损/止盈（`hold_days >= 2`）**
+- **弱势清仓**（`close_below_open_stop`）：满足下述「弱势清仓判定」即止损离场；
 - **收盘价 < MA5**（日内均线近似）→ 止损清仓（`break_intraday_ma_stop`）；
 - **放量未涨停**：成交量较上日增幅 `>= volume_spike_pct`（默认 30%）且未涨停 → 清仓
   （`volume_spike_take_profit`）；涨停则继续持有。
+
+> **弱势清仓判定（容忍带，`_weak_close_break`）**：收盘不低于开盘则不成立；收盘小幅低于开盘
+> （跌幅 `<= weak_close_tolerance_pct`，默认 1%）且**仍站上 MA5 与昨收**，视为日内洗盘、继续持有；
+> 否则（跌破开盘超容忍带，或失守 MA5/昨收）才清仓。用于 ④ 的 `next_day_close_below_open` 与
+> ⑥ 的 `close_below_open_stop`。
 
 > **已移除的旧规则**：不再按「收盘高于 MA5」固定止盈，不再按 `max_hold_days` 最长持有天数强制卖出。
 
 ### 卖出成交价（`simulator._sell_execution_price`）
 
 - 若信号已带 `execution_price`（如 5 分钟窗口清仓、保本价）则优先用之；
-- `hard_stop_loss`：开盘跌破按开盘价，否则按止损价；
+- `hard_stop_loss` / `first_day_stop_loss`：按信号 `applied_stop_pct` 算止损价，开盘跌破按开盘价，否则按止损价；
 - `profit_back_to_cost_take_profit`：按 `entry_price`（成本价近似）；
 - `next_day_limit_up_half`：按收盘价（涨停价）；
-- 其余默认按当日收盘价。
+- `trailing_take_profit` 及其余默认按当日收盘价。
 - 最终成交价再扣卖出滑点：`成交价 × (1 - sell_slippage)`；卖出费用 = `金额 ×
   (commission_rate + stamp_tax_rate)`。
 
@@ -246,3 +270,39 @@ python -m dragon_quant review-account --ui-only --source v2
 
 # UI：/account 页面「生成回测记录」按钮，填写记录名称 / 日期范围 / 初始资金
 ```
+
+---
+
+## 九、卖出策略优化落地记录（基于 run_id=21 回测复盘）
+
+> 本章记录卖出策略的一次优化的**动因与决策**，具体规则已落地并合并进上文第二、五章。
+
+**复盘数据（run_id=21，区间 2026-06-26 ~ 2026-09-06，12 笔平仓）**：
+- 胜率 58.3%（7 胜 5 负），但**盈亏比仅 0.76**（平均盈利 +3.16% vs 平均亏损 -3.88%）。
+- 3 笔 `hard_stop_loss` **全部顶格 -5.29%，且全部发生在买入后的首个可卖日**（`hold_days==1`）。
+- `next_day_close_below_open` 触发 4 次，平均仅 -0.47%，多为日内噪音扫出、纯交手续费。
+- 平均持有 **1.58 天**，盈利单被保护性规则过早斩断（莱宝保本 +3.18% 即走；掌阅 +5.94%、
+  通宇 +8.06% 属被动多扛才兑现）。
+- **核心矛盾：不是胜率问题，而是"赚小钱、亏大钱"。** 优化目标是把盈亏比从 0.76 拧过 1.3。
+
+**已落地的三项优化**：
+
+1. **亏损端封顶 —— 首个可卖日更紧止损**：新增 `first_day_stop_loss_pct=-3.5`，`hold_days<=1`
+   用它、其余用 `stop_loss_pct=-5.0`（reason code `first_day_stop_loss`）。将首日顶格亏损从
+   -5.29% 压到约 -3.5%。
+2. **弱势清仓加容忍带**：新增 `weak_close_tolerance_pct=1.0`，收盘小幅低于开盘（≤1%）且仍站上
+   MA5/昨收视为洗盘、继续持有；否则清仓（`_weak_close_break`，作用于 `next_day_close_below_open`
+   与 `close_below_open_stop`）。减少无效交易与手续费。
+3. **盈利端松绑 —— 启用移动止盈**：`trailing_activate_pct` 6.0→8.0 与保本 6.0 拉开层级，新增
+   `trailing_take_profit` 分支（峰值达标后收盘回撤 ≥3.5% 或破 MA5 才走）。强势单让利润奔跑，
+   且优先级高于机械清仓，进入移动止盈区间后不被扫出。
+
+优化后的完整卖出优先级阶梯见第五章。
+
+> **暂不改（记录备查）**：`next_day_limit_up_half`（次日涨停卖半仓）会主动砍掉强势单一半仓位，
+> 理论上压制盈利端。可选优化是"强封板（收盘=最高=涨停）时不减仓、交给移动止盈管理"，
+> 但会提高波动，本轮**默认不动**，待回测验证后再评估。
+
+> **数据说明**：分歧买龙依赖当日 5 分钟 K，而雪球 5 分钟线仅可回溯约 14 天，长区间回测中
+> 绝大多数交易日取不到、按"缺失则跳过"未触发。此问题**不在本轮优化范围**，后续通过接入
+> easy-tdx 解决个股数据回溯，再单独验证分歧买龙。

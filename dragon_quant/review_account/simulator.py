@@ -519,8 +519,15 @@ class AccountSimulator:
         signal_price = row.get("execution_price")
         if signal_price and signal_price > 0:
             return signal_price
-        if reason_code == "hard_stop_loss":
-            stop_price = position.entry_price * (1 + self.cfg.stop_loss_pct / 100)
+        if reason_code in {"hard_stop_loss", "first_day_stop_loss"}:
+            applied_stop_pct = row.get("applied_stop_pct")
+            if applied_stop_pct is None:
+                applied_stop_pct = (
+                    self.cfg.first_day_stop_loss_pct
+                    if reason_code == "first_day_stop_loss"
+                    else self.cfg.stop_loss_pct
+                )
+            stop_price = position.entry_price * (1 + applied_stop_pct / 100)
             return row["open"] if row["open"] <= stop_price else stop_price
         if reason_code in {"breakeven_stop", "profit_back_to_cost_take_profit"}:
             return position.entry_price

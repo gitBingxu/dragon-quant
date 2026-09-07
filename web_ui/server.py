@@ -91,10 +91,54 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self._serve_api_dragons(parse_qs(parsed.query))
             elif path == "/api/summary":
                 self._serve_api_summary(parse_qs(parsed.query))
+            elif path == "/api/account/runs":
+                self._serve_api_account_runs(parse_qs(parsed.query))
+            elif path == "/api/account/snapshots":
+                self._serve_api_account_snapshots(parse_qs(parsed.query))
+            elif path == "/api/account/benchmark":
+                self._serve_api_account_benchmark(parse_qs(parsed.query))
+            elif path == "/api/account/trades":
+                self._serve_api_account_trades(parse_qs(parsed.query))
+            elif path == "/api/account/positions":
+                self._serve_api_account_positions(parse_qs(parsed.query))
+            elif path == "/api/account/events":
+                self._serve_api_account_events(parse_qs(parsed.query))
             elif path.startswith("/api/"):
                 self._send_json({"error": "not found"}, 404)
             else:
                 self._serve_static(raw_path)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+
+        try:
+            if path == "/api/account/runs":
+                self._serve_api_account_run_create()
+            elif path.startswith("/api/"):
+                self._send_json({"error": "not found"}, 404)
+            else:
+                self._send_json({"error": "not found"}, 404)
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+
+        try:
+            if path == "/api/account/runs":
+                self._serve_api_account_run_delete(parse_qs(parsed.query))
+            elif path.startswith("/api/"):
+                self._send_json({"error": "not found"}, 404)
+            else:
+                self._send_json({"error": "not found"}, 404)
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
@@ -142,6 +186,23 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_body(self) -> dict:
+        raw_len = self.headers.get("Content-Length") or "0"
+        try:
+            length = int(raw_len)
+        except ValueError as exc:
+            raise ValueError("invalid content length") from exc
+        if length <= 0:
+            return {}
+        body = self.rfile.read(length)
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid json body") from exc
+        if not isinstance(data, dict):
+            raise ValueError("json body must be an object")
+        return data
+
     # ---------- API ----------
 
     def _serve_api_dragons(self, params: dict):
@@ -172,6 +233,115 @@ class ReviewHandler(BaseHTTPRequestHandler):
         summary = db.get_review_summary(source=source)
         self._send_json(summary)
 
+    def _serve_api_account_runs(self, params: dict):
+        """GET /api/account/runs?source=v2"""
+        db = _get_db()
+        source = _parse_source(params, getattr(self.server, "default_source", "v2"))
+        try:
+            limit = int(_first(params, "limit") or "20")
+        except ValueError:
+            limit = 20
+        rows = db.query_review_account_runs(limit=limit, source=source)
+        self._send_json({"data": rows, "count": len(rows)})
+
+    def _serve_api_account_run_create(self):
+        """POST /api/account/runs — 生成账户级回测记录。"""
+        payload = self._read_json_body()
+        date_from = _normalize_api_date(str(payload.get("date_from") or "").strip())
+        date_to = _normalize_api_date(str(payload.get("date_to") or "").strip())
+        if not date_from or not date_to:
+            raise ValueError("date_from and date_to are required")
+        if date_from > date_to:
+            raise ValueError("date_from must be earlier than date_to")
+
+        source = _normalize_source_value(
+            str(payload.get("source") or getattr(self.server, "default_source", "v2"))
+        )
+        strategy_name = str(payload.get("strategy_name") or "dragon_pullback_daily").strip()
+        if not strategy_name:
+            strategy_name = "dragon_pullback_daily"
+
+        display_name = str(payload.get("name") or payload.get("display_name") or "").strip()
+        if not display_name:
+            display_name = f"{date_from} ~ {date_to}"
+
+        raw_cash = payload.get("initial_cash", 100000.0)
+        if raw_cash in (None, ""):
+            raw_cash = 100000.0
+        try:
+            initial_cash = float(raw_cash)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("initial_cash must be a number") from exc
+        if initial_cash <= 0:
+            raise ValueError("initial_cash must be greater than 0")
+
+        from dragon_quant.review_account import run_review_account
+
+        result = run_review_account(
+            date_from=date_from,
+            date_to=date_to,
+            initial_cash=initial_cash,
+            source=source,
+            strategy_name=strategy_name,
+            verbose=False,
+            display_name=display_name,
+        )
+
+        db = _get_db()
+        run = db.get_review_account_run(int(result["run_id"]))
+        self._send_json({"data": run, "run_id": result["run_id"]}, 201)
+
+    def _serve_api_account_run_delete(self, params: dict):
+        """DELETE /api/account/runs?run_id=1 — 删除账户级回测记录及级联数据。"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        deleted = db.delete_review_account_run(run_id)
+        if not deleted:
+            self._send_json({"error": "run not found"}, 404)
+            return
+        self._send_json({"deleted": True, "run_id": run_id})
+
+    def _serve_api_account_snapshots(self, params: dict):
+        """GET /api/account/snapshots?run_id=1"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        self._send_json({"data": db.query_review_account_snapshots(run_id)})
+
+    def _serve_api_account_benchmark(self, params: dict):
+        """GET /api/account/benchmark?run_id=1&code=SH000001"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        code = (_first(params, "code") or "SH000001").upper()
+        run = db.get_review_account_run(run_id)
+        if not run:
+            self._send_json({"error": "run not found"}, 404)
+            return
+        snapshots = db.query_review_account_snapshots(run_id)
+        rows = _build_benchmark_series(
+            code=code,
+            dates=[s["trade_date"] for s in snapshots],
+            initial_cash=run["initial_cash"] or 0,
+        )
+        self._send_json({"data": rows, "code": code, "name": "上证指数"})
+
+    def _serve_api_account_trades(self, params: dict):
+        """GET /api/account/trades?run_id=1"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        self._send_json({"data": db.query_review_account_trades(run_id)})
+
+    def _serve_api_account_positions(self, params: dict):
+        """GET /api/account/positions?run_id=1"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        self._send_json({"data": db.query_review_account_positions(run_id)})
+
+    def _serve_api_account_events(self, params: dict):
+        """GET /api/account/events?run_id=1"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        self._send_json({"data": db.query_review_account_events(run_id)})
+
     # ---------- 日志静默 ----------
 
     def log_message(self, format, *args):
@@ -189,6 +359,37 @@ def _parse_source(params: dict, default: str = "v2") -> str:
     """解析 dragon 体系来源，非法值回退到默认值。"""
     src = (_first(params, "source") or default or "v2").lower().strip()
     return src if src in {"v1", "v2"} else "v2"
+
+
+def _normalize_source_value(raw: str) -> str:
+    src = (raw or "v2").lower().strip()
+    return src if src in {"v1", "v2"} else "v2"
+
+
+def _normalize_api_date(raw: str) -> str:
+    value = (raw or "").strip()
+    if len(value) == 8 and value.isdigit():
+        value = f"{value[:4]}-{value[4:6]}-{value[6:8]}"
+    if not value:
+        return ""
+    import datetime as dt
+
+    try:
+        parsed = dt.datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("date must be YYYY-MM-DD or YYYYMMDD") from exc
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _parse_run_id(params: dict) -> int:
+    """解析账户回测 run_id。"""
+    raw = _first(params, "run_id")
+    if not raw:
+        raise ValueError("missing run_id")
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError("invalid run_id") from exc
 
 
 def _parse_filters(params: dict) -> dict:
@@ -268,7 +469,42 @@ def _parse_filters(params: dict) -> dict:
     return f
 
 
-def start_server(port: int = 8765, open_browser: bool = True, default_source: str = "v2"):
+def _build_benchmark_series(code: str, dates: list[str], initial_cash: float) -> list[dict]:
+    """按账户快照日期生成指数等效权益曲线。"""
+    if not dates or initial_cash <= 0:
+        return []
+    from datetime import datetime
+    from dragon_quant.providers.xueqiu import XueqiuProvider
+
+    days = max(60, len(dates) + 30)
+    provider = XueqiuProvider()
+    klines = provider.get_kline(code, days=days, fq_type="normal")
+    close_by_date = {
+        datetime.fromtimestamp(k.timestamp / 1000).strftime("%Y-%m-%d"): k.close
+        for k in klines
+    }
+    first_close = None
+    rows = []
+    last_close = None
+    for d in dates:
+        close = close_by_date.get(d) or last_close
+        if close is None:
+            continue
+        if first_close is None:
+            first_close = close
+        last_close = close
+        cumulative_return = (close / first_close - 1) * 100 if first_close else 0.0
+        rows.append({
+            "trade_date": d,
+            "close": close,
+            "total_equity": initial_cash * close / first_close if first_close else initial_cash,
+            "cumulative_return": cumulative_return,
+        })
+    return rows
+
+
+def start_server(port: int = 8765, open_browser: bool = True,
+                 default_source: str = "v2", default_page: str = "review"):
     """启动 HTTP 服务器。
 
     Args:
@@ -278,7 +514,8 @@ def start_server(port: int = 8765, open_browser: bool = True, default_source: st
     default_source = default_source if default_source in {"v1", "v2"} else "v2"
     server = HTTPServer(("127.0.0.1", port), ReviewHandler)
     server.default_source = default_source
-    url = f"http://localhost:{port}?source={default_source}"
+    path = "/account" if default_page == "account" else "/"
+    url = f"http://localhost:{port}{path}?source={default_source}"
 
     print(f"🐉 Review Web UI 已启动 → {url}")
     print("   按 Ctrl+C 停止服务")

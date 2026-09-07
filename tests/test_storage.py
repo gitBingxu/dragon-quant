@@ -259,6 +259,72 @@ class TestReviewAccountStorage(unittest.TestCase):
         self.assertEqual(events[0]["event_type"], "BUY")
         self.assertEqual(events[0]["signal"]["ma5"], 9.8)
 
+    def test_account_run_delete_cascades_children(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            run_id = db.create_review_account_run(
+                source="v2",
+                strategy_name="dragon_pullback_daily",
+                strategy_params_json="{}",
+                date_from="2026-05-01",
+                date_to="2026-06-01",
+                initial_cash=100000,
+                final_equity=100000,
+                total_return=0.0,
+                max_drawdown=0.0,
+                trade_count=1,
+                win_rate=None,
+                display_name="待删除记录",
+            )
+            db.save_review_account_results(
+                run_id,
+                snapshots=[{
+                    "trade_date": "2026-05-01", "cash": 90000, "market_value": 10000,
+                    "total_equity": 100000, "daily_return": 0, "cumulative_return": 0,
+                    "drawdown": 0, "position_code": "000001", "position_name": "样本",
+                    "position_qty": 1000, "position_cost": 10,
+                    "position_market_price": 10, "position_unrealized_return": 0,
+                }],
+                trades=[{
+                    "trade_date": "2026-05-01", "code": "000001", "name": "样本",
+                    "side": "BUY", "price": 10, "qty": 1000, "amount": 10000,
+                    "fee": 3, "realized_pnl": -3, "cash_after": 90000, "position_after": 1000,
+                    "reason_code": "buy_ma5_pullback", "reason_text": "回踩MA5",
+                    "signal_json": "{}",
+                }],
+                positions=[{
+                    "code": "000001", "name": "样本", "entry_date": "2026-05-01",
+                    "entry_price": 10, "qty": 1000, "entry_reason_code": "buy_ma5_pullback",
+                    "entry_signal_json": "{}", "exit_date": "2026-05-06", "exit_price": 11,
+                    "exit_reason_code": "trailing_take_profit", "exit_signal_json": "{}",
+                    "realized_return": 10.0, "hold_days": 3, "status": "closed",
+                }],
+                events=[{
+                    "event_date": "2026-05-01", "event_type": "BUY",
+                    "code": "000001", "name": "样本", "title": "买入 样本",
+                    "detail": "回踩MA5", "reason_code": "buy_ma5_pullback",
+                    "cash": 90000, "total_equity": 100000, "signal_json": "{}",
+                }],
+            )
+
+            deleted = db.delete_review_account_run(run_id)
+            missing = db.delete_review_account_run(run_id)
+
+            runs = db.query_review_account_runs(source="v2")
+            snapshots = db.query_review_account_snapshots(run_id)
+            trades = db.query_review_account_trades(run_id)
+            positions = db.query_review_account_positions(run_id)
+            events = db.query_review_account_events(run_id)
+
+        self.assertTrue(deleted)
+        self.assertFalse(missing)
+        self.assertEqual(runs, [])
+        self.assertEqual(snapshots, [])
+        self.assertEqual(trades, [])
+        self.assertEqual(positions, [])
+        self.assertEqual(events, [])
+
     def test_account_run_display_name_column_is_added_to_old_schema(self):
         self._conn.execute("DROP TABLE review_account_runs")
         self._conn.execute(

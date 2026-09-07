@@ -126,6 +126,22 @@ class ReviewHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+
+        try:
+            if path == "/api/account/runs":
+                self._serve_api_account_run_delete(parse_qs(parsed.query))
+            elif path.startswith("/api/"):
+                self._send_json({"error": "not found"}, 404)
+            else:
+                self._send_json({"error": "not found"}, 404)
+        except ValueError as e:
+            self._send_json({"error": str(e)}, 400)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
     # ---------- 响应工具 ----------
 
     def _serve_static(self, raw_path: str):
@@ -274,6 +290,16 @@ class ReviewHandler(BaseHTTPRequestHandler):
         db = _get_db()
         run = db.get_review_account_run(int(result["run_id"]))
         self._send_json({"data": run, "run_id": result["run_id"]}, 201)
+
+    def _serve_api_account_run_delete(self, params: dict):
+        """DELETE /api/account/runs?run_id=1 — 删除账户级回测记录及级联数据。"""
+        db = _get_db()
+        run_id = _parse_run_id(params)
+        deleted = db.delete_review_account_run(run_id)
+        if not deleted:
+            self._send_json({"error": "run not found"}, 404)
+            return
+        self._send_json({"deleted": True, "run_id": run_id})
 
     def _serve_api_account_snapshots(self, params: dict):
         """GET /api/account/snapshots?run_id=1"""

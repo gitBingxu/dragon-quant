@@ -224,6 +224,26 @@ export async function createAccountRun(
   return res.json();
 }
 
+export async function deleteAccountRun(
+  runId: number
+): Promise<{ deleted: boolean; run_id: number }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/runs?" + params.toString(), {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    let message = `account run delete ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = String(body.error);
+    } catch {
+      // keep the status-based fallback
+    }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
 export async function fetchAccountSnapshots(runId: number): Promise<{ data: AccountSnapshot[] }> {
   const params = new URLSearchParams({ run_id: String(runId) });
   const res = await fetch("/api/account/snapshots?" + params.toString());

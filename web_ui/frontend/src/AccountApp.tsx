@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -13,14 +14,18 @@ import {
   Paper,
   Select,
   SimpleGrid,
+  Stack,
   Table,
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
+import { IconTrash } from "@tabler/icons-react";
 import {
   createAccountRun,
+  deleteAccountRun,
   fetchAccountPositions,
   fetchAccountBenchmark,
   fetchAccountEvents,
@@ -51,10 +56,16 @@ export function AccountApp() {
   const [positions, setPositions] = useState<AccountPosition[]>([]);
   const [events, setEvents] = useState<AccountTimelineEvent[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const selectedRun = useMemo(
     () => runs.find((r) => r.id === runId) || null,
     [runs, runId]
+  );
+  const runById = useMemo(
+    () => new Map(runs.map((r) => [String(r.id), r])),
+    [runs]
   );
   const latest = snapshots[snapshots.length - 1] || null;
 
@@ -63,6 +74,21 @@ export function AccountApp() {
     setRuns(resp.data || []);
     setRunId((prev) => prev ?? resp.data?.[0]?.id ?? null);
   }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteAccountRun(deleteTarget.id);
+      setDeleteTarget(null);
+      setRunId(null);
+      await loadRuns(source);
+    } catch {
+      // 保留 Modal，交由用户重试
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteTarget, loadRuns, source]);
 
   useEffect(() => {
     loadRuns(source).catch(() => {
@@ -128,7 +154,7 @@ export function AccountApp() {
           </Button>
           <Select
             size="sm"
-            w={330}
+            w={360}
             placeholder="选择回测批次"
             data={runs.map((r) => ({
               value: String(r.id),
@@ -137,6 +163,34 @@ export function AccountApp() {
             value={runId ? String(runId) : null}
             onChange={(v) => setRunId(v ? Number(v) : null)}
             allowDeselect={false}
+            renderOption={({ option }) => {
+              const run = runById.get(option.value);
+              return (
+                <Group justify="space-between" wrap="nowrap" gap="xs" w="100%">
+                  <Text size="sm" truncate>
+                    {option.label}
+                  </Text>
+                  {run && (
+                    <Tooltip label="删除该记录" withinPortal>
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="red"
+                        aria-label={`删除记录 ${option.label}`}
+                        onMouseDown={(event) => {
+                          // 阻止选项被选中，仅触发删除确认
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setDeleteTarget(run);
+                        }}
+                      >
+                        <IconTrash size={15} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </Group>
+              );
+            }}
           />
         </Group>
       </Group>
@@ -155,21 +209,85 @@ export function AccountApp() {
         }}
       />
 
-      <AccountStats run={selectedRun} latest={latest} />
+      <DeleteRunModal
+        run={deleteTarget}
+        loading={deleting}
+        onClose={() => (deleting ? undefined : setDeleteTarget(null))}
+        onConfirm={confirmDelete}
+      />
 
-      <Grid gutter="md" mt="md">
-        <Grid.Col span={{ base: 12, lg: 8 }}>
-          <EquityCurve data={snapshots} benchmark={benchmark} />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, lg: 4 }}>
-          <CurrentPosition latest={latest} />
-        </Grid.Col>
-      </Grid>
+      {runs.length === 0 ? (
+        <EmptyRuns onCreate={() => setCreateOpen(true)} />
+      ) : (
+        <>
+          <AccountStats run={selectedRun} latest={latest} />
 
-      <TradesTable trades={trades} />
-      <PositionsTable positions={positions} />
-      <AccountTimeline events={events} positions={positions} />
+          <Grid gutter="md" mt="md">
+            <Grid.Col span={{ base: 12, lg: 8 }}>
+              <EquityCurve data={snapshots} benchmark={benchmark} />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, lg: 4 }}>
+              <CurrentPosition latest={latest} />
+            </Grid.Col>
+          </Grid>
+
+          <TradesTable trades={trades} />
+          <PositionsTable positions={positions} />
+          <AccountTimeline events={events} positions={positions} />
+        </>
+      )}
     </Container>
+  );
+}
+
+function EmptyRuns({ onCreate }: { onCreate: () => void }) {
+  return (
+    <Paper withBorder radius="md" p="xl" mt="md">
+      <Stack align="center" gap="sm" py={48}>
+        <Text fz={40}>📈</Text>
+        <Title order={3}>还没有账户回测记录</Title>
+        <Text c="dimmed" ta="center" maw={420}>
+          点击下方「生成回测记录」，选择日期范围和初始资金，即可生成第一条账户级回测批次。
+        </Text>
+        <Button size="md" mt="sm" onClick={onCreate}>
+          生成回测记录
+        </Button>
+      </Stack>
+    </Paper>
+  );
+}
+
+function DeleteRunModal({
+  run,
+  loading,
+  onClose,
+  onConfirm,
+}: {
+  run: AccountRun | null;
+  loading: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const label = run
+    ? run.display_name || `#${run.id} ${run.date_from} ~ ${run.date_to}`
+    : "";
+  return (
+    <Modal opened={run != null} onClose={onClose} title="删除回测记录" centered>
+      <Stack gap="md">
+        <Text size="sm">
+          确认删除记录「<Text span fw={700}>{label}</Text>」？
+          该批次的交割单、持仓、快照和决策时间线将一并删除，且不可恢复。
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose} disabled={loading}>
+            取消
+          </Button>
+          <Button color="red" onClick={onConfirm} loading={loading}>
+            确认删除
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

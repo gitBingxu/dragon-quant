@@ -56,6 +56,15 @@ dragon-quant scan --force
 dragon-quant review --ui
 # 查看龙头回测面板（默认读取 dragons_v2）
 dragon-quant review --ui-only
+
+# 账户级模拟交易回测（按真实账户逐日推进，可 --ui 打开 /account 面板）
+dragon-quant review-account --ui-only
+
+# 实盘辅助交易（复用 review-account 策略，维护纸上账户）
+dragon-quant account init --capital 100000   # 新建/重置纸上账户
+dragon-quant buy                              # 9:25 给出买入建议并记账
+dragon-quant sell                             # 14:55 给出卖出建议并记账
+dragon-quant account                          # 查看现金、持仓与交割单
 ```
 
 ### 前置条件
@@ -120,7 +129,7 @@ dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 ```bash
 dragon-quant review-account --from 20260501 --to 20260601
 dragon-quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
-dragon-quant review-account --ui-only --source v2
+dragon-quant review-account --ui-only
 ```
 
 `review-account` 保留现有 `review` 不变，新增账户级交易模拟：按交易日推进账户现金、持仓、交割单和权益曲线。也可以先用 `dragon-quant review-account --ui-only --source v2` 打开 `/account`，在页面点击“生成回测记录”，填写记录名称、日期范围和初始资金后由 UI 生成新批次。首次打开且无任何记录时，页面展示引导提示并提供“生成回测记录”入口；批次下拉框右侧的删除按钮可删除当前选中批次（弹窗二次确认，级联清理其快照/交割单/持仓/时间线，对应 `DELETE /api/account/runs?run_id=`）。第一版策略为 `dragon_pullback_daily`，候选池取**近 `candidate_lookback_days`（默认 3）个交易日**的 `dragons_v2` 真龙池并集去重（按 `code` 保留 rank 更优者），同等信号下优先选择 `rank` 更高、综合分更高的股票；候选必须满足真龙标记与综合分门槛（默认 50）。如果近 3 日都没有龙头记录，则当日不开仓，不再回退使用更早的有记录日期。账户允许多持仓，每次开仓使用可用现金买入，卖出当日释放的现金不再买入，次日起再按策略继续开仓。买入信号按优先级从高到低为：**分歧买龙 > 开盘贴近 MA5 承接 > 开盘突破前高弱转强**。分歧买龙针对「连续缩量一字板 → 第一次断板 → 有承接才买」：用截至上日日 K 判定连续一字涨停（默认 ≥2 板）且期间缩量，当日开盘价低于涨停价视为断板，再用断板日开盘后 30 分钟（默认 6 根 5 分钟 K）确认承接——窗口内最低不破昨收且收盘企稳，或回封涨停即买入，5 分钟 K 缺失则跳过；分歧买点**不套用成交额/换手率/非一字板过滤**，改用连板+缩量+盘中承接把关。开盘两类买点仍要求成交额（默认 2 亿）、换手率门槛与非一字板。卖出策略保留 T+1 约束（买入当日不可卖出，首个可卖日为买入次日）：硬止损优先，买入后首个可卖日用更紧的 `first_day_stop_loss_pct`（默认 -3.5%）、持有第 2 日起用 `stop_loss_pct`（默认 -5%）；峰值浮盈达到 `trailing_activate_pct`（默认 8%）后启用移动止盈，收盘自最高价回撤 `trailing_drawdown_pct`（默认 3.5%）或跌破 MA5 则让利润落袋；最高浮盈达到 `breakeven_activate_pct`（默认 6%）后，只有在已有浮盈记录或 5 分钟 K 能确认先浮盈后回落时，才按覆盖买入费、卖出滑点及卖出费用的完整成本线保护性卖出；开盘高开 7% 以上且 5 分钟内未涨停清仓，开盘高开 5% 以上且 30 分钟内未涨停清仓（历史 5 分钟线缺失时跳过窗口规则）；买入次日收盘涨停则卖出半仓，若同时收盘转弱则清仓；弱势清仓加容忍带（`weak_close_tolerance_pct` 默认 1%）：收盘小幅低于开盘但仍站上 MA5/昨收视为洗盘、继续持有，否则清仓；常规持仓收盘低于日内均线（当前用 MA5 近似）止损，成交量较上日增加 30% 且未涨停则清仓，涨停则继续持有。不再按收盘高于 MA5 止盈，也不按最长持有天数强制卖出。回测仅纳入已收盘交易日，区间末未平仓持仓按最后可得收盘价估值。每笔交割单保存 `reason_code` / `reason_text` / `signal_json`，用于解释买入卖出逻辑。
@@ -238,7 +247,7 @@ quote = get_quote("600172")
 
 ```
 dragon_quant/
-├── cli.py                # CLI（scan/logs/data/review/vpa/storage/blacklist）
+├── cli.py                # CLI（scan/logs/data/review/review-account/buy/sell/account/vpa/storage/blacklist）
 ├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
@@ -250,6 +259,8 @@ dragon_quant/
 ├── storage/              # paths / db（SQLite）/ manager
 ├── utils/trading.py     # 交易日历工具
 ├── review.py             # 龙头回测
+├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
+├── live_trade/           # 实盘辅助交易 buy/sell/account（row_builder/trader/service，复用 review_account 策略）
 ├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
 └── models/types.py      # 数据模型
 ```
@@ -270,6 +281,7 @@ SQLite 表分为三类：
 - 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
+- 实盘辅助纸上账户表：`live_account` / `live_positions` / `live_trades`（`buy` / `sell` / `account` 命令使用，默认单账户 `default`）
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -281,6 +293,8 @@ SQLite 表分为三类：
 `scan_stocks_v2` 填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
 
 `review_account_*` 表用于账户级模拟交易：`runs` 保存 UI 记录名称、策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因，`events` 保存买入、卖出、持仓和空仓原因时间线。
+
+`live_*` 表用于实盘辅助交易（`buy` / `sell` / `account`）：`live_account` 存纸上账户的初始资金/可用现金/策略参数，`live_positions` 存每笔持仓（成本、最高浮盈/价、半仓标记、平仓退出字段，含 open/closed 状态），`live_trades` 存每笔 buy/sell 交割单及 `command` / `reason_code` / `reason_text` / `signal_json`。
 
 ## License
 

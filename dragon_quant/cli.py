@@ -13,6 +13,7 @@ CLI 入口 — dragon-quant 命令行工具
 import argparse
 import json
 import sys
+from typing import Optional
 
 from dragon_quant.orchestrator import scan as orchestrate_scan
 from dragon_quant.storage.manager import StorageManager
@@ -279,6 +280,80 @@ def _cmd_review_ui(args):
                  default_source=getattr(args, "source", "v2"))
 
 
+def _cmd_review_account(args):
+    """账户级模拟交易 review 命令。"""
+    if args.ui_only:
+        _cmd_review_account_ui(args)
+        return
+
+    if not args.date_from or not args.date_to:
+        print("错误: review-account 需要 --from 和 --to，或使用 --ui-only", file=sys.stderr)
+        return
+
+    from dragon_quant.review_account import run_review_account
+    run_review_account(
+        date_from=_normalize_cli_date(args.date_from),
+        date_to=_normalize_cli_date(args.date_to),
+        initial_cash=args.capital,
+        source=args.source,
+        strategy_name=args.strategy,
+        verbose=True,
+    )
+
+    if args.ui:
+        _cmd_review_account_ui(args)
+
+
+def _cmd_review_account_ui(args):
+    """启动账户级 review Web UI。"""
+    from web_ui.server import start_server
+    start_server(
+        port=args.port,
+        open_browser=not args.no_browser,
+        default_source=getattr(args, "source", "v2"),
+        default_page="account",
+    )
+
+
+def _normalize_cli_date(d: str) -> str:
+    """CLI 日期支持 YYYYMMDD / YYYY-MM-DD。"""
+    if len(d) == 8 and d.isdigit():
+        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    return d
+
+
+def _resolve_trade_date(raw: Optional[str]) -> str:
+    """解析交易日：显式 --date 优先，否则取 Asia/Shanghai 当前日期。"""
+    if raw:
+        return _normalize_cli_date(raw)
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(hours=8))
+    return datetime.now(tz).strftime("%Y-%m-%d")
+
+
+def _cmd_buy(args):
+    """实盘辅助买入建议命令（9:25）。"""
+    from dragon_quant.live_trade import run_buy
+    trade_date = _resolve_trade_date(args.date)
+    run_buy(trade_date, capital=args.capital, source=args.source, verbose=True)
+
+
+def _cmd_sell(args):
+    """实盘辅助卖出建议命令（14:55）。"""
+    from dragon_quant.live_trade import run_sell
+    trade_date = _resolve_trade_date(args.date)
+    run_sell(trade_date, source=args.source, verbose=True)
+
+
+def _cmd_account(args):
+    """实盘辅助账户管理命令。"""
+    from dragon_quant.live_trade import init_account, run_account_status
+    if getattr(args, "account_action", None) == "init":
+        init_account(capital=args.capital, source=args.source)
+    else:
+        run_account_status()
+
+
 def _cmd_vpa(args):
     """个股量价分析命令"""
     import json
@@ -401,6 +476,7 @@ def main():
   dragon-quant scan --top 25 --candidates 5 --workers 2
   dragon-quant data kline --code 600172 --days 20
   dragon-quant review --ui-only --source v2
+  dragon-quant review-account --from 20260501 --to 20260601 --ui
 
 Use \"dragon-quant <command> -h\" for command-specific help.
 """,
@@ -567,6 +643,83 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
     rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
+    # review-account 子命令
+    acct_p = sub.add_parser(
+        "review-account",
+        help="账户级模拟交易回测",
+        usage="dragon-quant review-account [options]",
+        description="按真实账户、现金、持仓和买卖策略模拟交易员操作。",
+        epilog="""Examples:
+  dragon-quant review-account --from 20260501 --to 20260601
+  dragon-quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
+  dragon-quant review-account --ui-only --source v2
+""",
+    )
+    acct_p.add_argument("--from", dest="date_from", default=None,
+                        help="回测开始日期 (YYYYMMDD 或 YYYY-MM-DD)")
+    acct_p.add_argument("--to", dest="date_to", default=None,
+                        help="回测结束日期 (YYYYMMDD 或 YYYY-MM-DD)")
+    acct_p.add_argument("--capital", type=float, default=100000.0,
+                        help="初始资金 (默认 100000)")
+    acct_p.add_argument("--strategy", default="dragon_pullback_daily",
+                        help="账户策略名 (默认 dragon_pullback_daily)")
+    acct_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                        help="候选数据来源体系 (默认 v2)")
+    acct_p.add_argument("--ui", action="store_true", help="回测后启动账户 Web UI")
+    acct_p.add_argument("--ui-only", action="store_true", help="仅启动账户 Web UI（不执行回测）")
+    acct_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
+    acct_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+
+    # buy 子命令（实盘辅助：9:25 开盘买入建议）
+    buy_p = sub.add_parser(
+        "buy",
+        help="实盘辅助：给出今日买入建议并记账",
+        usage="dragon-quant buy [--date YYYYMMDD] [--capital N]",
+        description="每交易日 9:25 执行，按 review_account 开盘买点给出买入建议，默认以开盘价买入并记入纸上账户。",
+        epilog="""Examples:
+  dragon-quant buy
+  dragon-quant buy --date 20260904 --capital 100000
+""",
+    )
+    buy_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
+    buy_p.add_argument("--capital", type=float, default=100000.0,
+                       help="首次建账初始资金 (默认 100000，账户已存在时忽略)")
+    buy_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                       help="候选数据来源体系 (默认 v2)")
+
+    # sell 子命令（实盘辅助：14:55 卖出建议）
+    sell_p = sub.add_parser(
+        "sell",
+        help="实盘辅助：给出今日卖出建议并记账",
+        usage="dragon-quant sell [--date YYYYMMDD]",
+        description="每交易日 14:55 执行，按 review_account 卖出策略判定已持仓是否卖出（严格 T+1，当日买入不卖）。",
+        epilog="""Examples:
+  dragon-quant sell
+  dragon-quant sell --date 20260905
+""",
+    )
+    sell_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
+    sell_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                        help="候选数据来源体系 (默认 v2)")
+
+    # account 子命令（实盘辅助账户管理）
+    live_p = sub.add_parser(
+        "account",
+        help="实盘辅助账户：查看状态或初始化",
+        usage="dragon-quant account [init] [--capital N]",
+        description="查看实盘辅助纸上账户的现金、持仓与交割单；account init 重置账户。",
+        epilog="""Examples:
+  dragon-quant account
+  dragon-quant account init --capital 100000
+""",
+    )
+    live_subs = live_p.add_subparsers(dest="account_action")
+    live_init_p = live_subs.add_parser("init", help="新建或重置账户",
+                                       usage="dragon-quant account init [--capital N]")
+    live_init_p.add_argument("--capital", type=float, default=100000.0,
+                             help="初始资金 (默认 100000)")
+    live_init_p.add_argument("--source", default="v2", choices=["v1", "v2"])
+
     # vpa 子命令
     vpa_p = sub.add_parser(
         "vpa",
@@ -627,6 +780,14 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_storage(args)
     elif args.command == "review":
         _cmd_review(args)
+    elif args.command == "review-account":
+        _cmd_review_account(args)
+    elif args.command == "buy":
+        _cmd_buy(args)
+    elif args.command == "sell":
+        _cmd_sell(args)
+    elif args.command == "account":
+        _cmd_account(args)
     elif args.command == "vpa":
         _cmd_vpa(args)
     elif args.command == "blacklist":

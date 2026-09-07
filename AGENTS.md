@@ -114,6 +114,11 @@ dragon_quant/
 │   └── db.py                    # SQLite（主流程读写 *_v2，兼容查询 *_v1）
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
+├── review_account/              # 账户级模拟交易（回测；strategy/simulator/models/indicators/service）
+├── live_trade/                  # 实盘辅助交易（buy/sell/account；复用 review_account 策略）
+│   ├── row_builder.py           # 实时 Quote + 历史日K → 策略消费的 row
+│   ├── trader.py                # LiveTrader.buy/sell（纸上账户）
+│   └── service.py               # run_buy/run_sell/run_account_status/init_account
 ├── web_ui/                      # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer）
 └── models/types.py             # dataclass 数据模型
 ```
@@ -198,6 +203,14 @@ dragon_quant/
 | `*_v1` | 历史旧表 | 不再由主流程写入，仅显式 `--source v1` 查询 |
 | `vpa_analysis` | 量价分析 | 独立表，不复用 dragons |
 | `sector_blacklist` | 概念板块黑名单 | 行业切换后默认种子为空 |
+| `review_account_runs` | 账户级 review 批次 | 保存 UI 记录名称、策略参数、区间、初始资金、最终权益、收益率、最大回撤 |
+| `review_account_snapshots` | 账户每日快照 | 保存现金、市值、总权益、收益曲线、当前持仓 |
+| `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
+| `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
+| `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
+| `live_account` | 实盘辅助纸上账户 | buy/sell 命令的账户（默认单账户 `default`），存初始资金、可用现金、策略参数 |
+| `live_positions` | 实盘辅助持仓 | 每笔持仓含成本、最高浮盈/价、半仓标记、平仓退出字段（open/closed） |
+| `live_trades` | 实盘辅助交割单 | 每笔 buy/sell 含 `command` / `reason_code` / `reason_text` / `signal_json` |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -219,8 +232,28 @@ python -m dragon_quant review --ui-only               # 仅看结果
 ```
 回测逻辑：默认从 `dragons_v2` 读 pending → 找入选后第一个非一字板日（`high != low`）最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回 `dragons_v2`。`--source v1` 仅用于历史旧表。
 
+### 账户级模拟交易
+```bash
+python -m dragon_quant review-account --from 20260501 --to 20260601
+python -m dragon_quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
+python -m dragon_quant review-account --ui-only --source v2
+```
+`review-account` 不替代现有 `review`，而是按真实账户逐交易日模拟：先根据止盈止损处理持仓，再从**近 `candidate_lookback_days`（默认 3）个交易日**的 `dragons_v2` 真龙池并集（按 `code` 去重、保留 rank 更优者）择优买入，同等信号下优先选择 `rank` 更高、综合分更高的股票；候选必须满足真龙标记与综合分门槛（默认 50）。如果近 3 日都没有龙头记录，则当日不开仓，不再回退使用更早的有记录日期。账户允许多持仓，每次开仓使用可用现金买入，卖出当日释放的现金不再买入，次日起再按策略继续开仓。买入信号按优先级从高到低为：分歧买龙（400）> 开盘贴近 MA5 承接（300）> 开盘突破前高弱转强（200）。分歧买龙针对「连续缩量一字板 → 第一次断板 → 有承接才买」：用截至上日日 K 判定连续一字涨停（`divergence_min_boards` 默认 2 板）且期间缩量，当日开盘价低于「涨停价 × `divergence_break_open_ratio`（默认 0.998）」视为断板，再用断板日开盘后 `divergence_confirm_bars`（默认 6 根=30 分钟）5 分钟 K 确认承接——窗口内最低不破昨收且收盘企稳，或回封涨停即买入，5 分钟 K 缺失则跳过；分歧买点**不套用成交额/换手率/非一字板过滤**，改用连板+缩量+盘中承接把关，成交价取承接窗口末根收盘价（回封则取涨停价）。开盘两类买点仍要求成交额（默认 2 亿）、换手率门槛与非一字板，按当日开盘价成交。卖出信号保留 T+1 约束（买入当日不可卖出，模拟器对 `entry_date==day` 跳过卖出，首个可卖日为 `hold_days==1`）：硬止损优先，买入后首个可卖日（`hold_days<=1`）用 `first_day_stop_loss_pct`（默认 -3.5%）、持有第 2 日起用 `stop_loss_pct`（默认 -5%），触发 `first_day_stop_loss` / `hard_stop_loss`；峰值浮盈（用上一日 `previous_highest_return` 避免未来函数）达到 `trailing_activate_pct`（默认 8%）后启用移动止盈 `trailing_take_profit`，收盘自 `highest_price` 回撤 `trailing_drawdown_pct`（默认 3.5%）或跌破 MA5 则离场；最高浮盈达到 `breakeven_activate_pct`（默认 6%）后，只有在已有浮盈记录或 5 分钟 K 能确认先浮盈后回落时，才按覆盖买入费、卖出滑点及卖出费用的完整成本线保护性卖出（移动止盈层级高于保本，峰值∈[6%,8%) 仍走保本）；开盘高开 7% 以上且 5 分钟内未涨停清仓，开盘高开 5% 以上且 30 分钟内未涨停清仓（历史 5 分钟线缺失时跳过窗口规则）；买入次日收盘涨停卖出半仓，若同时收盘转弱则清仓；弱势清仓加容忍带 `weak_close_tolerance_pct`（默认 1%，`_weak_close_break`）：收盘小幅低于开盘但仍站上 MA5/昨收视为洗盘、继续持有，否则清仓（作用于 `next_day_close_below_open` 与 `close_below_open_stop`）；常规持仓收盘低于日内均线（当前用 MA5 近似）止损，成交量较上日增加 30% 且未涨停则清仓，涨停则继续持有。不再按收盘高于 MA5 止盈，也不按最长持有天数强制卖出。回测仅纳入已收盘交易日，区间末未平仓持仓按最后可得收盘价估值。完整策略见 `dragon_quant/review_account/STRATEGY.md`。UI 独立页面为 `/account`，展示账户持仓、交割单、权益和收益率曲线，并提供“生成回测记录”入口，可在 Modal 中填写记录名称、日期范围和初始资金后直接生成账户回测批次。批次下拉框右侧提供删除按钮（弹窗二次确认），调用 `DELETE /api/account/runs?run_id=` 删除该批次并级联清理其快照/交割单/持仓/时间线（`db.delete_review_account_run` 显式删除子表，不依赖 `PRAGMA foreign_keys`）；首次打开且无任何记录时展示引导空态并给出“生成回测记录”按钮。
+
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
+
+### 实盘辅助交易（buy / sell / account）
+```bash
+python -m dragon_quant account init --capital 100000
+python -m dragon_quant buy --date 20260904 --capital 100000
+python -m dragon_quant sell --date 20260905
+python -m dragon_quant account
+```
+`buy` / `sell` 把 `review_account` 操盘策略用于每日实盘辅助决策，**策略逻辑 100% 复用**（同一套 `StrategyConfig` / `evaluate_buy` / `evaluate_sell`）。新增模块 `dragon_quant/live_trade/`：`row_builder.py`（用腾讯实时 `Quote` + 雪球历史日 K 现场拼出策略消费的 `row`：buy 用今日开盘价拼开盘决策 row，sell 用实时快照合成今日 KBar 追加历史后 `enrich_daily_klines` 取末行）、`trader.py`（`LiveTrader.buy/sell`）、`service.py`（`run_buy/run_sell/run_account_status/init_account`）。持久化为默认单账户三表 `live_account` / `live_positions` / `live_trades`。
+- `buy`（9:25）：近 `candidate_lookback_days`（默认 3）个有龙头记录交易日票池并集去重，用实时开盘价判定**开盘买点**（贴近 MA5 / 突破前高弱转强），择优后默认开盘价整手买入并记账。**9:25 无当日 5 分钟 K，不评估分歧买龙**（待 easy-tdx）。
+- `sell`（14:55）：对已持仓按 `review_account` 卖出优先级判定并记账；**严格 T+1**：`entry_date == 交易日` 的持仓（当日买入）跳过卖出。
+- 交易日期默认 Asia/Shanghai 当日，可 `--date YYYYMMDD` 覆盖（补录/回放）。成交价/半仓复用 review_account 同款逻辑。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

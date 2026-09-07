@@ -18,12 +18,21 @@ def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
     from dragon_quant.providers.xueqiu import XueqiuProvider
 
     provider = XueqiuProvider()
-    klines = provider.get_kline("000001", days=90)
+    try:
+        start = datetime.strptime(from_date, "%Y-%m-%d")
+        end = datetime.strptime(to_date, "%Y-%m-%d")
+        days = max((end - start).days + 30, 90)
+    except ValueError:
+        days = 90
+    klines = provider.get_kline("000001", days=days)
 
     dates: set[str] = set()
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    market_closed = (now.hour, now.minute) >= (15, 5)
     for k in klines:
         d = datetime.fromtimestamp(k.timestamp / 1000).strftime("%Y-%m-%d")
-        if from_date <= d <= to_date:
+        if from_date <= d <= to_date and (d < today or (d == today and market_closed)):
             dates.add(d)
     return dates
 

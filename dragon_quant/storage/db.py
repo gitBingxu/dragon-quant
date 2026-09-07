@@ -1510,6 +1510,33 @@ def save_review_account_results(run_id: int,
             conn.close()
 
 
+def delete_review_account_run(run_id: int) -> bool:
+    """删除一条账户级 review run 及其全部子表数据，返回是否删除成功。
+
+    子表（snapshots / trades / positions / events）虽声明了 ON DELETE CASCADE，
+    但外键级联仅在 `PRAGMA foreign_keys=ON` 的连接上生效；此处显式清理子表，
+    保证在任何连接（含测试用裸连接）上都能彻底删除。
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            for table in (
+                "review_account_snapshots",
+                "review_account_trades",
+                "review_account_positions",
+                "review_account_events",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE run_id = ?", (run_id,))
+            cur = conn.execute(
+                "DELETE FROM review_account_runs WHERE id = ?", (run_id,)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
 def query_review_account_runs(limit: int = 20, source: str = "v2") -> list[dict]:
     conn = _connect()
     try:

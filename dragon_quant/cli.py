@@ -13,6 +13,7 @@ CLI 入口 — dragon-quant 命令行工具
 import argparse
 import json
 import sys
+from typing import Optional
 
 from dragon_quant.orchestrator import scan as orchestrate_scan
 from dragon_quant.storage.manager import StorageManager
@@ -319,6 +320,38 @@ def _normalize_cli_date(d: str) -> str:
     if len(d) == 8 and d.isdigit():
         return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
     return d
+
+
+def _resolve_trade_date(raw: Optional[str]) -> str:
+    """解析交易日：显式 --date 优先，否则取 Asia/Shanghai 当前日期。"""
+    if raw:
+        return _normalize_cli_date(raw)
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(hours=8))
+    return datetime.now(tz).strftime("%Y-%m-%d")
+
+
+def _cmd_buy(args):
+    """实盘辅助买入建议命令（9:25）。"""
+    from dragon_quant.live_trade import run_buy
+    trade_date = _resolve_trade_date(args.date)
+    run_buy(trade_date, capital=args.capital, source=args.source, verbose=True)
+
+
+def _cmd_sell(args):
+    """实盘辅助卖出建议命令（14:55）。"""
+    from dragon_quant.live_trade import run_sell
+    trade_date = _resolve_trade_date(args.date)
+    run_sell(trade_date, source=args.source, verbose=True)
+
+
+def _cmd_account(args):
+    """实盘辅助账户管理命令。"""
+    from dragon_quant.live_trade import init_account, run_account_status
+    if getattr(args, "account_action", None) == "init":
+        init_account(capital=args.capital, source=args.source)
+    else:
+        run_account_status()
 
 
 def _cmd_vpa(args):
@@ -637,6 +670,56 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     acct_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
     acct_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
+    # buy 子命令（实盘辅助：9:25 开盘买入建议）
+    buy_p = sub.add_parser(
+        "buy",
+        help="实盘辅助：给出今日买入建议并记账",
+        usage="dragon-quant buy [--date YYYYMMDD] [--capital N]",
+        description="每交易日 9:25 执行，按 review_account 开盘买点给出买入建议，默认以开盘价买入并记入纸上账户。",
+        epilog="""Examples:
+  dragon-quant buy
+  dragon-quant buy --date 20260904 --capital 100000
+""",
+    )
+    buy_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
+    buy_p.add_argument("--capital", type=float, default=100000.0,
+                       help="首次建账初始资金 (默认 100000，账户已存在时忽略)")
+    buy_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                       help="候选数据来源体系 (默认 v2)")
+
+    # sell 子命令（实盘辅助：14:55 卖出建议）
+    sell_p = sub.add_parser(
+        "sell",
+        help="实盘辅助：给出今日卖出建议并记账",
+        usage="dragon-quant sell [--date YYYYMMDD]",
+        description="每交易日 14:55 执行，按 review_account 卖出策略判定已持仓是否卖出（严格 T+1，当日买入不卖）。",
+        epilog="""Examples:
+  dragon-quant sell
+  dragon-quant sell --date 20260905
+""",
+    )
+    sell_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
+    sell_p.add_argument("--source", default="v2", choices=["v1", "v2"],
+                        help="候选数据来源体系 (默认 v2)")
+
+    # account 子命令（实盘辅助账户管理）
+    live_p = sub.add_parser(
+        "account",
+        help="实盘辅助账户：查看状态或初始化",
+        usage="dragon-quant account [init] [--capital N]",
+        description="查看实盘辅助纸上账户的现金、持仓与交割单；account init 重置账户。",
+        epilog="""Examples:
+  dragon-quant account
+  dragon-quant account init --capital 100000
+""",
+    )
+    live_subs = live_p.add_subparsers(dest="account_action")
+    live_init_p = live_subs.add_parser("init", help="新建或重置账户",
+                                       usage="dragon-quant account init [--capital N]")
+    live_init_p.add_argument("--capital", type=float, default=100000.0,
+                             help="初始资金 (默认 100000)")
+    live_init_p.add_argument("--source", default="v2", choices=["v1", "v2"])
+
     # vpa 子命令
     vpa_p = sub.add_parser(
         "vpa",
@@ -699,6 +782,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_review(args)
     elif args.command == "review-account":
         _cmd_review_account(args)
+    elif args.command == "buy":
+        _cmd_buy(args)
+    elif args.command == "sell":
+        _cmd_sell(args)
+    elif args.command == "account":
+        _cmd_account(args)
     elif args.command == "vpa":
         _cmd_vpa(args)
     elif args.command == "blacklist":

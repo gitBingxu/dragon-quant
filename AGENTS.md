@@ -114,6 +114,11 @@ dragon_quant/
 │   └── db.py                    # SQLite（主流程读写 *_v2，兼容查询 *_v1）
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
+├── review_account/              # 账户级模拟交易（回测；strategy/simulator/models/indicators/service）
+├── live_trade/                  # 实盘辅助交易（buy/sell/account；复用 review_account 策略）
+│   ├── row_builder.py           # 实时 Quote + 历史日K → 策略消费的 row
+│   ├── trader.py                # LiveTrader.buy/sell（纸上账户）
+│   └── service.py               # run_buy/run_sell/run_account_status/init_account
 ├── web_ui/                      # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer）
 └── models/types.py             # dataclass 数据模型
 ```
@@ -203,6 +208,9 @@ dragon_quant/
 | `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
+| `live_account` | 实盘辅助纸上账户 | buy/sell 命令的账户（默认单账户 `default`），存初始资金、可用现金、策略参数 |
+| `live_positions` | 实盘辅助持仓 | 每笔持仓含成本、最高浮盈/价、半仓标记、平仓退出字段（open/closed） |
+| `live_trades` | 实盘辅助交割单 | 每笔 buy/sell 含 `command` / `reason_code` / `reason_text` / `signal_json` |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -234,6 +242,18 @@ python -m dragon_quant review-account --ui-only --source v2
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
+
+### 实盘辅助交易（buy / sell / account）
+```bash
+python -m dragon_quant account init --capital 100000
+python -m dragon_quant buy --date 20260904 --capital 100000
+python -m dragon_quant sell --date 20260905
+python -m dragon_quant account
+```
+`buy` / `sell` 把 `review_account` 操盘策略用于每日实盘辅助决策，**策略逻辑 100% 复用**（同一套 `StrategyConfig` / `evaluate_buy` / `evaluate_sell`）。新增模块 `dragon_quant/live_trade/`：`row_builder.py`（用腾讯实时 `Quote` + 雪球历史日 K 现场拼出策略消费的 `row`：buy 用今日开盘价拼开盘决策 row，sell 用实时快照合成今日 KBar 追加历史后 `enrich_daily_klines` 取末行）、`trader.py`（`LiveTrader.buy/sell`）、`service.py`（`run_buy/run_sell/run_account_status/init_account`）。持久化为默认单账户三表 `live_account` / `live_positions` / `live_trades`。
+- `buy`（9:25）：近 `candidate_lookback_days`（默认 3）个有龙头记录交易日票池并集去重，用实时开盘价判定**开盘买点**（贴近 MA5 / 突破前高弱转强），择优后默认开盘价整手买入并记账。**9:25 无当日 5 分钟 K，不评估分歧买龙**（待 easy-tdx）。
+- `sell`（14:55）：对已持仓按 `review_account` 卖出优先级判定并记账；**严格 T+1**：`entry_date == 交易日` 的持仓（当日买入）跳过卖出。
+- 交易日期默认 Asia/Shanghai 当日，可 `--date YYYYMMDD` 覆盖（补录/回放）。成交价/半仓复用 review_account 同款逻辑。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

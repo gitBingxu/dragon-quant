@@ -29,6 +29,8 @@ from dragon_quant.logging.logger import ScanLogger
 from dragon_quant.logging.reporter import ReportBuilder
 from dragon_quant.storage.paths import RESULTS_DIR
 from dragon_quant._version import __version__
+from dragon_quant.scorers import registry as R, rank_verdicts
+from dragon_quant.scorers.base import DragonVerdict
 
 STATISTICAL_CONCEPT_PREFIXES = (
     "昨日涨停", "昨日连板", "昨日首板", "昨日打二板",
@@ -230,7 +232,10 @@ def _print_cached_output(output_data: dict, top_n: int):
     print(f"{'═'*56}")
     print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙")
     print("-" * 64)
-    display_list = output_data.get("ranking", [])[:top_n]
+    display_list = [r for r in output_data.get("ranking", [])
+                    if r.get("is_true_dragon")][:top_n]
+    if not display_list:
+        print("本轮无符合条件的真龙")
     for r in display_list:
         dims = r.get("dimensions", {})
         mark = "🐉" if r.get("is_true_dragon") else "✗"
@@ -244,7 +249,7 @@ def _print_cached_output(output_data: dict, top_n: int):
     print(f"\n{'═'*56}")
     print(f"📋 完整详细报告 (来自缓存)")
     print(f"{'═'*56}")
-    print(output_data.get("report_text", ""))
+    print("\n\n".join(r.get("report_text", "") for r in display_list))
     print()
 
 
@@ -569,17 +574,24 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     for r in candidate_pool:
         _cf("xueqiu", "minute_kline", f"kline:1min:{r.code}",
             lambda c=r.code: xq.get_minute_kline(c))
-    _cf("xueqiu", "minute_kline", "kline:1min:000001",
-        lambda: xq.get_minute_kline("000001"))
+    _cf("xueqiu", "minute_kline", f"kline:1min:{R.MARKET_SYMBOL}",
+        lambda: xq.get_minute_kline(R.MARKET_SYMBOL))
 
     # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
     all_codes = set()
     for sc_list in sector_components.values():
         for s in sc_list:
             all_codes.add(s.code)
-    all_codes_list = list(all_codes)[:200]
-    _cf("tencent", "quote", "quotes:batch",
-        lambda: tx.batch_get_quotes(all_codes_list))
+    all_codes_list = sorted(all_codes)
+
+    def fetch_quotes():
+        quotes = {}
+        for start in range(0, len(all_codes_list), 200):
+            for quote in tx.batch_get_quotes(all_codes_list[start:start + 200]):
+                quotes[quote.code] = quote
+        return [quotes[code] for code in sorted(quotes)]
+
+    _cf("tencent", "quote", "quotes:batch", fetch_quotes)
 
     limiter.wait_all()
     logger.phase("D", "并发数据加载完成")
@@ -655,7 +667,14 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     }
 
     if results:
-        results.sort(key=lambda r: r.get("composite_score", 0), reverse=True)
+        results.sort(key=lambda r: (-r["composite_score"], r["code"]))
+        verdicts = rank_verdicts([
+            DragonVerdict(code=r["code"], is_true_dragon=r["is_true_dragon"],
+                          composite=r["composite_score"])
+            for r in results
+        ])
+        for result, verdict in zip(results, verdicts):
+            result["rank"] = verdict.rank
         
         # 提前初始化 Reporter，并为所有结果生成报告，存入 r["report_text"] 以便持久化
         reporter = ReportBuilder(logger)
@@ -673,11 +692,12 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         output["ranking"] = results  # 返回全部评分结果
 
         # top_n 控制输出范围
-        display_list = results[:top_n]
+        display_list = [r for r in results if r["is_true_dragon"]][:top_n]
+        if verbose and not display_list:
+            print("本轮无符合条件的真龙")
 
-        # 提取自然语言报告并拼接
         report_parts = [r["report_text"] for r in display_list]
-        output["report_text"] = "\n\n".join(report_parts)
+        output["report_text"] = "\n\n".join(report_parts) or "本轮无符合条件的真龙"
 
         if verbose:
             print(f"\n{'═'*56}")
@@ -738,7 +758,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 top_n=top_n,
                 candidates_n=candidates_n,
                 workers=workers,
-                stocks=results[:top_n],
+                stocks=results,
                 raw_output=json.dumps(output, ensure_ascii=False),
                 source=source,
             )
@@ -757,9 +777,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             dragons_to_save = []
             skipped_count = 0
             updated_count = 0
-            for i, r in enumerate(display_list):
+            for r in display_list:
                 code = r["code"]
-                new_rank = i + 1  # 与 save_dragons 中 rank = i + 1 一致
+                new_rank = r["rank"]
 
                 # 5 日去重：该 code 上次入选距今 < 5 个交易日
                 #   仅对「跨日」(last_date 严格早于当天) 重复入选去重；

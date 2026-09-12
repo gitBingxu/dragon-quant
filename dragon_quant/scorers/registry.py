@@ -1,7 +1,7 @@
 """scorers.registry —「识别真龙」五维评分体系的权重/门槛/阈值常量。
 
 全部集中于此，便于回测调参；算法文件只引用，不写死。
-依据《评分器Refactor.md》§9。
+依据《评分器Refactor.md》的各维规则。
 """
 
 # ─── 9.1 维度权重 & 门槛 ───
@@ -13,6 +13,12 @@ DIM_WEIGHTS = {
     "liquidity": 0.20,
     "absorption": 0.10,
 }
+MARKET_SYMBOL = "SH000001"
+PRICE_TOLERANCE = 0.001
+DRIVE_NEUTRAL = 40.0
+SEAL_NEUTRAL = 60.0
+SEAL_STABLE_SCORES = (100.0, 60.0, 20.0)
+
 DIM_FLOORS = {
     "drive": 40.0,
     "leadership": 40.0,

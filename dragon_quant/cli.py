@@ -460,7 +460,7 @@ def main():
 
     shared = _parser(add_help=False)
     shared._optionals.title = "Scan Options"
-    shared.add_argument("--top", type=int, default=25, help="最终候选股数量 (默认25)")
+    shared.add_argument("--top", type=int, default=25, help="最多展示和入选的真龙数量 (默认25)")
     shared.add_argument("--candidates", type=int, default=5, help="每板块取前N只 (默认5)")
     shared.add_argument("--workers", type=int, default=2, help="并发线程数 (默认2)")
     shared.add_argument("--force", action="store_true",

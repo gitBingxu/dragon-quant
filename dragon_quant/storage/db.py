@@ -455,7 +455,7 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
                     scan_id,
                     s.get("code", ""),
                     s.get("name", ""),
-                    i + 1,
+                    s.get("rank", i + 1),
                     s.get("composite_score", 0),
                     s.get("board_count", 0),
                     json.dumps(concepts, ensure_ascii=False),
@@ -627,7 +627,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
             "  ss.code, ss.name, ss.rank, ss.composite_score, ss.board_count, "
             "  ss.concepts_json, ss.report_text, "
             "  ss.open_px, ss.close_px, ss.high_px, ss.low_px, ss.pct, "
-            "  ss.turnover_rate, ss.amount, ss.market_cap "
+            "  ss.turnover_rate, ss.amount, ss.market_cap, ss.is_true_dragon "
             f"FROM {t['scans']} s "
             f"JOIN {t['scan_stocks']} ss ON ss.scan_id = s.id "
             "WHERE s.scan_date = ?",
@@ -655,6 +655,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
                 "turnover_rate": r[15],
                 "amount": r[16],
                 "market_cap": r[17],
+                "is_true_dragon": bool(r[18]) if r[18] is not None else None,
                 "source": source,
             })
         return result
@@ -798,7 +799,9 @@ def rebuild_dragons_for_date(
     from dragon_quant.utils.trading import trade_days_between
 
     source = _normalize_source(source)
-    contribs = list_scan_stock_contributions_by_date(trade_date, source=source)
+    contribs = [c for c in list_scan_stock_contributions_by_date(trade_date, source=source)
+                if c.get("is_true_dragon") is not False and c.get("rank") is not None
+                and c["rank"] <= c["scan_top_n"]]
     if not contribs:
         deleted = delete_pending_dragons_not_in(trade_date, set(), source=source)
         return {"contrib_codes": 0, "upserted": 0, "kept": 0, "deleted": deleted}
@@ -869,6 +872,7 @@ def rebuild_dragons_for_date(
                 "market_cap": b.get("market_cap"),
                 "concepts": b.get("concepts", []),
                 "report_text": b.get("report_text", ""),
+                **({"is_true_dragon": b["is_true_dragon"]} if b.get("is_true_dragon") is not None else {}),
             })
         else:
             meta = get_dragon_meta(trade_date, code, source=source)

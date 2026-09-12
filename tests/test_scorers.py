@@ -5,6 +5,11 @@ anti_drop 跳水段、absorption 中性回落、aggregator 门槛一票否决与
 """
 import time
 import unittest
+from datetime import datetime
+from unittest.mock import patch
+
+from dragon_quant.scorers.base import CHINA_TZ
+from dragon_quant.scorers import absorption, aggregator
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, Quote, StockInfo, Candidate
@@ -17,7 +22,7 @@ from dragon_quant.scorers import leadership, liquidity, drive, anti_drop
 
 def _min_bars(pre, pcts, start="2026-06-19 09:30"):
     """按累计涨幅(%)序列构造当日1分K（open=上一分钟close，首根open=pre）。"""
-    base = int(time.mktime(time.strptime(start, "%Y-%m-%d %H:%M")))
+    base = int(datetime.strptime(start, "%Y-%m-%d %H:%M").replace(tzinfo=CHINA_TZ).timestamp())
     bars = []
     prev = pre
     for i, p in enumerate(pcts):
@@ -71,7 +76,7 @@ class TestBaseUtils(unittest.TestCase):
 class TestLeadership(unittest.TestCase):
 
     def setUp(self):
-        self.cache = DataCache()
+        self.cache = DataCache(cache_dir="")
         comps = [StockInfo(code="600001", name="龙头", sector_code="BK1",
                            pct=10, price=11, five_day_return=40.0),
                  StockInfo(code="600002", name="小弟", sector_code="BK1",
@@ -106,7 +111,7 @@ class TestLiquidityYizi(unittest.TestCase):
 
     def test_yizi_not_penalized(self):
         """一字板：开板0次 + 封单大 → 封板质量满分，不被惩罚。"""
-        cache = DataCache()
+        cache = DataCache(cache_dir="")
         # 一字封死：全程涨停价
         minute = _min_bars(10.0, [10.0] * 10)
         cache.set("kline:1min:600001", minute)
@@ -124,7 +129,7 @@ class TestLiquidityYizi(unittest.TestCase):
 class TestDrivePulse(unittest.TestCase):
 
     def test_early_seal_details_include_time_and_bid_volume(self):
-        cache = DataCache()
+        cache = DataCache(cache_dir="")
         stock = _min_bars(10.0, [0, 2, 5, 10, 10, 10])
         cache.set("kline:1min:600001", stock)
         comps = [StockInfo(code="600001", name="龙头", sector_code="BK1",
@@ -140,7 +145,7 @@ class TestDrivePulse(unittest.TestCase):
 
     def test_pure_follower_zero(self):
         """纯跟风票（板块先拉、个股后跟，无主动带动）→ lead 子因子 0 分。"""
-        cache = DataCache()
+        cache = DataCache(cache_dir="")
         # 板块第1分钟就先拉起来，个股拖到第4分钟才跟 → 个股脉冲前板块已抢跑
         sector = _min_bars(100.0, [0, 0.4, 0.7, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
         stock = _min_bars(10.0, [0, 0, 0, 0, 4.0, 7.0, 10.0, 10.0, 10.0, 10.0])
@@ -150,29 +155,30 @@ class TestDrivePulse(unittest.TestCase):
 
     def test_lead_sector_records_lead_event_details(self):
         stock = _min_bars(10.0, [0, 0, 0, 0, 1.5, 3.5, 4.0, 4.0, 4.0, 4.0])
-        sector = _min_bars(100.0, [0, 0, 0, 0, 0.05, 0.45, 0.50, 0.50, 0.50, 0.50])
+        sector = _min_bars(100.0, [0, 0, 0, 0, 0, 0.05, 0.45, 0.50, 0.50, 0.50])
 
         s, d = drive._lead_sector(stock, sector)
 
         self.assertGreater(s, 0)
         self.assertEqual(d["n_lead"], 1)
         event = d["lead_events"][0]
-        self.assertEqual(event["event_time"], "09:32")
+        self.assertEqual(event["event_time"], "09:34")
+        self.assertEqual(d["n_follow"], 0)
         self.assertIn("stock_gain_pct", event)
         self.assertIn("sector_gain_pct", event)
         self.assertGreater(event["stock_gain_pct"], 0)
         self.assertGreater(event["sector_gain_pct"], 0)
 
     def test_lead_sector_records_follow_event_details(self):
-        sector = _min_bars(100.0, [0, 0, 0, 0.4, 0.7, 0.7, 0.7, 1.1, 1.1, 1.1])
-        stock = _min_bars(10.0, [0, 0, 0, 0, 0, 0, 0, 3.2, 4.0, 4.0])
+        sector = _min_bars(100.0, [0, 0, 0, 0.4, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
+        stock = _min_bars(10.0, [0, 0, 0, 0, 0, 3.2, 4.0, 4.0, 4.0, 4.0])
 
         s, d = drive._lead_sector(stock, sector)
 
         self.assertEqual(s, 0.0)
         self.assertGreaterEqual(d["n_follow"], 1)
         event = d["follow_events"][0]
-        self.assertEqual(event["sector_event_time"], "09:34")
+        self.assertEqual(event["sector_event_time"], "09:33")
         self.assertIn("stock_follow_time", event)
         self.assertGreater(event["sector_gain_pct"], 0)
         self.assertGreater(event["stock_gain_pct"], 0)
@@ -197,7 +203,7 @@ class TestAntiDropDetails(unittest.TestCase):
 class TestAggregator(unittest.TestCase):
 
     def _full_cache(self, bid1=50000, market_dip=True):
-        cache = DataCache()
+        cache = DataCache(cache_dir="")
         stock = _min_bars(10.0, [0, 1.5, 4.2, 7, 10, 10, 10, 10, 10, 10])
         cache.set("kline:1min:600001", stock)
         sector = _min_bars(100.0, [0, 0, 0.1, 0.4, 0.6, 0.6, 0.5, 0.5, 0.5, 0.5])
@@ -206,7 +212,7 @@ class TestAggregator(unittest.TestCase):
             mkt = _min_bars(3000.0, [0, -0.2, -0.6, -0.8, -0.5, -0.2, 0, 0.1, 0.2, 0.3])
         else:
             mkt = _min_bars(3000.0, [0] * 10)
-        cache.set("kline:1min:000001", mkt)
+        cache.set("kline:1min:SH000001", mkt)
         comps = [StockInfo(code="600001", name="龙头", sector_code="BK1",
                            pct=10, price=11, five_day_return=40.0),
                  StockInfo(code="600002", name="小弟", sector_code="BK1",
@@ -267,6 +273,215 @@ class TestAggregator(unittest.TestCase):
         if len(dragons) >= 2:
             ranks = sorted(v.rank for v in dragons)
             self.assertEqual(ranks, list(range(1, len(dragons) + 1)))
+
+
+class TestScoringRegressions(unittest.TestCase):
+
+    def setUp(self):
+        self.cache = DataCache(cache_dir="")
+
+    def test_stable_seal_uses_last_reseal(self):
+        bars = _min_bars(10, [0, 10, 8, 8, 10, 10])
+        self.assertEqual(drive._first_seal_minute(bars, 11), bars[4].timestamp // 60000)
+        self.assertIsNone(drive._first_seal_minute(_min_bars(10, [10, 8]), 11))
+
+    def test_early_seal_ties_and_candidate_scope(self):
+        bars = _min_bars(10, [0, 10, 10])
+        comps = [StockInfo(code=c, name=c) for c in ("600001", "600002", "300001")]
+        quotes = {s.code: _quote(s.code, 10, 11) for s in comps}
+        for s in comps:
+            self.cache.set(f"kline:1min:{s.code}", bars)
+        pool = [Candidate(code=s.code, name=s.name, primary_sector="S") for s in comps[:2]]
+        for code in ("600001", "600002"):
+            score, detail = drive._early_seal(code, self.cache, "S", comps, quotes, pool)
+            self.assertEqual((score, detail["rank"], detail["pool_size"]), (50, 1, 2))
+
+    def test_missing_and_flat_drive_are_degraded(self):
+        score, detail = drive._early_seal("600001", self.cache, "S", [], {})
+        self.assertEqual(score, R.DRIVE_NEUTRAL)
+        self.assertTrue(detail["degraded"])
+        score, detail = drive._lead_sector(_min_bars(10, [10] * 10), _min_bars(100, [0] * 10))
+        self.assertEqual(score, R.DRIVE_NEUTRAL)
+        self.assertTrue(detail["degraded"])
+
+    def test_simultaneous_pulse_is_neither_lead_nor_follow(self):
+        stock = _min_bars(10, [0, 0, 0, 0, 1.5, 3.5, 4, 4, 4, 4])
+        sector = _min_bars(100, [0, 0, 0, 0, .05, .45, .5, .5, .5, .5])
+        score, detail = drive._lead_sector(stock, sector)
+        self.assertEqual((score, detail["n_lead"], detail["n_follow"]), (0, 0, 0))
+
+    def test_pulse_selects_local_maximum(self):
+        pulses = drive._pulses([0, 0, 0, 0, .015, .035, .04, .04], 3, .03)
+        self.assertEqual(len(pulses), 1)
+        self.assertEqual(pulses[0]["trigger"], 6)
+
+    def test_bonus_excludes_first_touch_and_later_minutes(self):
+        stock = _min_bars(10, [0, 0, 0, 1, 4, 7, 10, 8, 10, 10])
+        sector = _min_bars(100, [0, 0, 0, 0, .1, .5, .6, 1, 2, 3])
+        with patch.object(drive, "_corr_bonus", return_value=0) as corr:
+            drive._lead_sector(stock, sector, 11)
+        self.assertEqual(len(corr.call_args.args[0]), 6)
+
+    def test_strong_voice_excludes_exactly_three_percent(self):
+        comps = [StockInfo("600001", "A")]
+        _, detail = drive._voice(comps, {"600001": _quote("600001", 3, 11)})
+        self.assertEqual(detail["n_strong"], 0)
+
+    def test_non_limit_bid_is_not_a_seal(self):
+        q = _quote("600001", 1, 11, bid1=50000)
+        q.price = q.bid1_price = 10.1
+        self.cache.set("quotes:batch", [q])
+        self.cache.set("kline:1min:600001", _min_bars(10, [1] * 10))
+        result = liquidity.score("600001", self.cache)
+        self.assertEqual(result.details["s_seal"], 0)
+
+    def test_invalid_limit_bid_and_missing_minutes_degrade(self):
+        q = _quote("600001", 10, 11, bid1=50000)
+        q.bid1_price = 10
+        self.cache.set("quotes:batch", [q])
+        result = liquidity.score("600001", self.cache)
+        self.assertEqual(result.details["s_seal_strength"], R.SEAL_NEUTRAL)
+        self.assertEqual(result.details["s_seal_stable"], R.SEAL_NEUTRAL)
+        self.assertTrue(result.details["degraded"])
+
+    def test_intraminute_touch_and_reopen_counts(self):
+        bars = _min_bars(10, [9])
+        bars[0].high = 11
+        self.assertEqual(liquidity._count_open(bars, 11), 1)
+        bars = _min_bars(10, [10, 8, 7, 10, 9])
+        self.assertEqual(liquidity._count_open(bars, 11), 2)
+
+    def test_flat_stock_or_flat_base_has_no_rebound_reward(self):
+        market = [0, 0, 0, -.01, -.008, -.005, 0]
+        self.assertEqual(anti_drop._rebound(market, [0] * 7, 3), 0)
+        self.assertEqual(anti_drop._rebound([0, 0, 0, -.01, -.01, -.01, -.01],
+                                          [0, 0, 0, 0, .01, .02, .03], 3), 0)
+
+    def test_real_early_rebound_and_short_window(self):
+        market = [0, -.002, -.005, -.01, -.008, -.005, 0]
+        stock = [0, -.001, -.003, 0, .01, .02, .03]
+        self.assertGreater(anti_drop._rebound(market, stock, 3), 40)
+        self.assertEqual(anti_drop._rebound(market[:-1], stock[:-1], 3), 0)
+        self.assertIn("不足", anti_drop._rebound_result(market[:-1], stock[:-1], 3)[1])
+
+    def test_flat_bottom_uses_last_minimum(self):
+        market = [0, 0, 0, -.01, -.008, -.005, 0]
+        score = anti_drop._rebound(market, [0, 0, 0, 0, .01, .02, .03], 3)
+        self.assertEqual(score, 40)
+
+    def test_minute_windows_do_not_cross_lunch(self):
+        market = _min_bars(100, [0, 0, 0], "2026-06-19 11:28") + _min_bars(100, [-1, -1, -1], "2026-06-19 13:00")
+        stock = _min_bars(10, [0, 0, 0], "2026-06-19 11:28") + _min_bars(10, [1, 1, 1], "2026-06-19 13:00")
+        _, detail = anti_drop._antidrop_vs(market, stock)
+        self.assertTrue(detail["no_dip"])
+        stock = _min_bars(10, [0, 0, 0], "2026-06-19 11:28") + _min_bars(10, [4, 4, 4], "2026-06-19 13:00")
+        _, detail = drive._lead_sector(stock, market)
+        self.assertEqual(detail["n_thrust"], 0)
+
+    def test_all_scoring_errors_reject(self):
+        def fail(*args, **kwargs):
+            raise RuntimeError("synthetic failure")
+        with patch.dict(aggregator._SCORERS, {dim: fail for dim in R.DIM_WEIGHTS}):
+            result = evaluate("600001", self.cache)
+        self.assertFalse(result.is_true_dragon)
+        self.assertIn("评分异常", result.reject_reason)
+        self.assertEqual(result.dims["absorption"].score, 50)
+
+    def test_low_or_failed_absorption_does_not_veto(self):
+        from dragon_quant.models.types import ScoreResult
+        def passing(*args, **kwargs):
+            return ScoreResult("test", 80, 0)
+        def fail(*args, **kwargs):
+            raise RuntimeError("synthetic failure")
+        for fn in (fail, lambda *a, **kw: ScoreResult("absorption", 0, .1)):
+            with patch.dict(aggregator._SCORERS, {dim: passing for dim in R.DIM_WEIGHTS}):
+                with patch.dict(aggregator._SCORERS, {"absorption": fn}):
+                    result = evaluate("600001", self.cache)
+            self.assertTrue(result.is_true_dragon)
+
+    def test_rank_clears_stale_rejected_rank(self):
+        from dragon_quant.scorers.base import DragonVerdict
+        rejected = DragonVerdict("A", False, 99, rank=1)
+        passed = DragonVerdict("B", True, 60)
+        rank_verdicts([rejected, passed])
+        self.assertIsNone(rejected.rank)
+        self.assertEqual(passed.rank, 1)
+
+    def test_leadership_deduplicates_primary_sector_samples(self):
+        a = Candidate("A", "A", primary_sector="S", board_count=1, fived_pct=20)
+        b = Candidate("B", "B", primary_sector="T", concepts=["S"], board_count=5, fived_pct=30)
+        result = leadership.score("A", self.cache, primary_sector="S", candidate_pool=[a, a, b])
+        self.assertEqual(result.details["pct_n"], 1)
+        self.assertEqual(result.details["b_max"], 1)
+
+
+class TestAbsorptionEvents(unittest.TestCase):
+
+    def bars(self, pcts, start="2026-06-19 09:35"):
+        bars = _min_bars(100, pcts, start)
+        ts = bars[0].timestamp
+        for i, bar in enumerate(bars):
+            bar.timestamp = ts + i * 300000
+        return bars
+
+    def test_gradual_drop_is_valid_and_same_lead_not_duplicated(self):
+        target = self.bars([0, .05, .15, .25, .35, .45])
+        other = self.bars([0, -.1, -.2, -.3, -.4, -.5])
+        events = absorption._detect_events(target, {"A": other, "B": other}, {})
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["fleeing_count"], 2)
+
+    def test_previous_window_match_is_counted_once_per_sector(self):
+        target = self.bars([0, 0, .1, .2, .3, .4, .5])
+        other = self.bars([0, -.1, -.2, -.3, -.4, -.5, -.6])
+        events = absorption._detect_events(target, {"A": other, "B": other}, {})
+        event = next(e for e in events if e["start_bar"] == 1)
+        self.assertEqual(event["fleeing_count"], 2)
+        self.assertEqual(len({s["code"] for s in event["fleeing_sectors"]}), 2)
+
+    def test_forward_window_cannot_cross_lunch(self):
+        target = self.bars([0, 0, .2, .4, .6, .8], "2026-06-19 13:05")
+        other = self.bars([0, -.1, -.2, -.3, -.4, -.5], "2026-06-19 13:05")
+        morning = self.bars([0], "2026-06-19 11:30")[0]
+        self.assertIsNone(absorption._wret_opt([morning] + other, 0, 5))
+        self.assertEqual(len(absorption._detect_events(target, {"A": other, "B": other}, {})), 1)
+
+    def test_late_fleeing_sector_does_not_satisfy_breadth(self):
+        target = self.bars([0, 0, .2, .4, .6, .8])
+        early = self.bars([0, -.6, -.7, -.8, -.9, -1])
+        late = self.bars([0, 0, 0, -.6, -.7, -.8])
+        self.assertEqual(absorption._detect_events(target, {"A": early, "B": late}, {}), [])
+
+    def test_cross_session_or_missing_bars_are_rejected(self):
+        for gap in (5 * 60000, 90 * 60000, 18 * 3600000):
+            with self.subTest(gap=gap):
+                target = self.bars([0, 0, .2, .4, .6, .8])
+                other = self.bars([0, -.6, -.7, -.8, -.9, -1])
+                for bars in (target, other):
+                    for bar in bars[4:]:
+                        bar.timestamp += gap
+                self.assertEqual(absorption._detect_events(target, {"A": other, "B": other}, {}), [])
+
+    def test_missing_opponent_middle_bar_is_not_interpolated(self):
+        target = self.bars([0, .05, .15, .25, .35, .45])
+        other = self.bars([0, -.1, -.2, -.3, -.4, -.5])
+        incomplete = other[:2] + other[3:]
+        self.assertEqual(absorption._detect_events(target, {"A": other, "B": incomplete}, {}), [])
+
+    def test_no_signal_has_explicit_fallback(self):
+        cache = DataCache(cache_dir="")
+        bars = self.bars([0] * 6)
+        for sector in ("S", "A", "B"):
+            cache.set(f"kline:5min:sector:{sector}", bars)
+        result = absorption.score("x", cache, primary_sector="S", all_sector_codes=["A", "B"])
+        self.assertEqual(result.score, R.ABS_NEUTRAL)
+        self.assertTrue(result.details["fallback"])
+
+    def test_only_last_ten_dates_are_used(self):
+        bars = [self.bars([0], start=f"2026-06-{day:02d} 09:35")[0] for day in range(1, 12)]
+        dates = absorption._last_n_dates(bars, 10)
+        self.assertEqual(len(dates), 10)
+        self.assertNotIn(datetime(2026, 6, 1).date(), dates)
 
 
 if __name__ == "__main__":

@@ -34,9 +34,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     # 口径说明：成分股 StockInfo.five_day_return 仅对当日拉过日K的涨停股为真实值，
     # 其余成分股为默认 0，会污染分位；故样本取候选池（均已在 Phase C 算真实 fived_pct）。
     sample = _peer_fived(primary_sector, candidate_pool)
-    degraded = len(sample) < 2
-    if fived_pct not in sample:
-        sample = sample + [fived_pct]
+    degraded = self_cand is None or len(sample) < 2
     s_pct, rank, n = desc_rank_score(fived_pct, sample)
 
     total = clip(s_board * R.BOARD_W + s_pct * R.PCT_W)
@@ -62,10 +60,10 @@ def _peer_board_counts(sector, pool) -> list[int]:
 
 
 def _peer_fived(sector, pool) -> list[float]:
-    return [c.fived_pct for c in (pool or []) if _same_sector(c, sector)]
+    return list({c.code: c.fived_pct for c in (pool or []) if _same_sector(c, sector)}.values())
 
 
 def _same_sector(cand: Candidate, sector: str) -> bool:
     if not sector:
         return True
-    return cand.primary_sector == sector or sector in (cand.concepts or [])
+    return cand.primary_sector == sector

@@ -24,13 +24,15 @@
 - innerCode：行业 clid 即 code(881xxx)，解析详情页 `<input id="clid">`，进程内缓存
 
 ### XueqiuProvider (`xueqiu.py:102`) — 个股，需 Cookie
-- `get_minute_kline`(:160) 当日1分K；`get_kline`(:110) 日K；Referer `xueqiu.com/S/{SH/SZ}{code}`
+- `get_minute_kline`（`xueqiu.py:164`）当日1分K；`get_kline`（`xueqiu.py:113`）日K。
+- 上证指数显式传 `SH000001`，写 `kline:1min:SH000001`；裸 `000001` 经 `xueqiu.py:33` 正常解析为平安银行 `SZ000001`，不得全局改成指数。
 - `get_quote`(:204) 存在但行情主用 tencent
 - 注意：`pankou.json` 盘后空体已弃用，封单改走 tencent
 
 ### TencentProvider (`tencent.py:89`) — 零认证
 - `batch_get_quotes`(:114) gtimg 批量行情；含**收盘盘口** `bid1_price`(f[9])/`bid1_volume`(f[10],手)/`ask1_volume`(f[20])
-- 封单量 = `bid1_volume`，与成交量 `volume`(f[36]) 同为「手」
+- 只有涨停现价和涨停买一价确认后，`bid1_volume` 才按封单量使用；与成交量 `volume`(f[36]) 同为「手」。消费校验见 `../scorers/liquidity.py:42`。
+- 编排器按代码排序，每批最多 200 只顺序请求并合并，不截断总量（`../orchestrator.py:587`）。
 
 ### EastMoneyProvider (`eastmoney.py:347`) — 保留备用
 - curl + DoH 多 CDN 节点轮询，全节点失败抛 `EastMoneyAllNodesDown`(:55)；默认不参与扫描

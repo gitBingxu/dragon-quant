@@ -8,37 +8,25 @@
 ## 一、执行路径地图
 
 ### scan（五维识别真龙）
+
+以下路径相对 `dragon_quant/`。
+
+```text
+cli.main cli.py:458，scan_v2 在 cli.py:769 归一化为 scan
+  → _cmd_scan cli.py:58 → orchestrator.scan orchestrator.py:291
+  A 行业 Top5 / Bottom20、黑名单       orchestrator.py:406
+  B 行业最多五页成分股、主板涨停候选    orchestrator.py:450
+  C 日K连板与五日收益 → Candidate      orchestrator.py:532
+  D 全候选/行业分钟线、SH000001、十日5分K orchestrator.py:557
+    腾讯排序分批取数、合并 list[Quote]  orchestrator.py:587
+  E _score_one → aggregator.evaluate    orchestrator.py:196 / scorers/aggregator.py:30
+  F 全候选诊断分 + 通过者真龙 rank      orchestrator.py:648 / scorers/aggregator.py:74
+    全部结果 → scan_stocks_v2/raw_output storage/db.py:431
+    通过者 TopN → 报告 → 五日去重 → dragons_v2 storage/db.py:666
+    无真龙保留明细与原因，不以否决票补位
 ```
-cli.main 分发                                  cli.py:388 / :638
-  ├ _cmd_scan      → orchestrate_scan(..., scorers="v2")  cli.py:57
-  └ _cmd_scan_v2   → _cmd_scan(args) 隐藏兼容别名          cli.py:74
-      → orchestrator.scan(source 固定 "v2")                orchestrator.py:289 / :301
 
-  Phase A 板块排行                              orchestrator.py:403
-    ths.get_sector_ranking(asc=False)          orchestrator.py:408  → 行业涨跌幅榜(field=zdf)
-    _sector_ok 过滤(统计概念前缀+DB黑名单)       orchestrator.py:394
-    top10_up = [:5]                            orchestrator.py:411
-    top10_down = sorted(pct)[:20]              orchestrator.py:412
-
-  Phase B 候选筛选                              orchestrator.py:427
-    ths.get_sector_components(all_pages=True)  orchestrator.py:439 → sector:components:{}
-    每板块当日所有涨停股(pct≥9.9)               orchestrator.py:475
-
-  Phase C 连板+排序                             orchestrator.py:509
-    _compute_consecutive_boards                orchestrator.py:151
-    _compute_5day_return → Candidate.fived_pct orchestrator.py:167 / :520
-    按(连板,概念数)降序，ranking=全候选池        orchestrator.py:523
-
-  Phase D 并发预填(RateLimiter)                 orchestrator.py:534  (cache 键见 §三)
-
-  Phase E 打分（候选池全部个股）                 orchestrator.py:577
-    _score_one → scorers.aggregator.evaluate orchestrator.py:197 / :600
-
-  Phase F 输出+持久化                           orchestrator.py:618
-    ReportBuilder.build_stock_report        orchestrator.py:646
-    scan_id = v2_YYYYMMDD_topN                 orchestrator.py:691
-    db.save_scan / save_scan_logs / save_dragons(source="v2")  orchestrator.py:696 / :717 / :787
-```
+缓存回显入口 `orchestrator.py:228` 同样只展示 Top N 真龙。历史重建 `storage/db.py:783` 过滤明确否决及超过原扫描 Top N 的贡献，保留旧无真龙标记记录的兼容语义。
 
 ### 五维评分聚合（Phase E 内部）
 ```
@@ -48,8 +36,8 @@ scorers.aggregator.evaluate(code, cache, ...)     scorers/aggregator.py
   ├ anti_drop.score    抗跌 15%  scorers/anti_drop.py    大盘+板块双基准
   ├ liquidity.score    流动 20%  scorers/liquidity.py    换手+封板质量(一字不罚)
   └ absorption.score   承接 10%  scorers/absorption.py   跨板块虹吸(回看10日,不否决)
-  门槛: 四大特征任一 < floor → is_true_dragon=False；通过者 composite 加权
-  rank_verdicts 按 composite 降序赋 rank
+  门槛: 四大特征任一低分或异常 → is_true_dragon=False；承接异常中性50不否决
+  所有候选保留 composite 诊断分，rank_verdicts 只给通过者赋 rank
   权重/门槛/阈值常量集中: scorers/registry.py
 ```
 
@@ -58,9 +46,9 @@ scorers.aggregator.evaluate(code, cache, ...)     scorers/aggregator.py
 |------|------|---------|
 | 板块 5分K | 近10日历史，资金承接回看 | `kline:5min:sector:{}` |
 | 板块当日1分K | 领涨行业，带动/抗跌基准 | `kline:1min:sector:{}` |
-| 大盘当日1分K | 上证指数 000001，抗跌基准 | `kline:1min:000001` |
+| 大盘当日1分K | 显式请求 SH000001 上证指数，与平安银行分离 | `kline:1min:SH000001` |
 | 个股当日1分K | 全候选(封板池) | `kline:1min:{}` |
-| 批量行情(含盘口) | 同花顺成分股去重后最多200只 | `quotes:batch` |
+| 批量行情(含盘口) | 成分股去重排序，每批200只，合并全部结果 | `quotes:batch`（list[Quote]） |
 
 ### review-account（账户级模拟回测）
 ```
@@ -171,15 +159,15 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 
 | cache 键 | 写入 (set) | 读取 (get) |
 |----------|-----------|-----------|
-| `sector:components:{}` | orchestrator | orchestrator, scorers/{drive,leadership,liquidity} |
+| `sector:components:{}` | orchestrator | orchestrator, scorers/{drive,liquidity}；leadership 仅用候选池参数 |
 | `kline:day:{}` | orchestrator | orchestrator |
 | `kline:1min:{}` | orchestrator | scorers/{drive,anti_drop,liquidity} |
-| `kline:1min:000001` | orchestrator | scorers/anti_drop |
+| `kline:1min:SH000001` | orchestrator.py:577 | scorers/anti_drop.py:28 |
 | `kline:1min:sector:{}` | orchestrator | scorers/{drive,anti_drop} |
 | `kline:5min:sector:{}` | orchestrator | scorers/absorption |
 | `quotes:batch` | orchestrator | orchestrator, scorers/{drive,liquidity} |
 | `__meta__:candidates` | orchestrator | 日志/调试快照 |
-| `__meta__:sector_codes` | orchestrator | 日志/调试快照 |
+| `__meta__:sector_codes` | orchestrator（领跌 Top20） | absorption.py:26，未显式传入代码时使用 |
 | `__meta__:sector_name_map` | orchestrator | 日志/调试快照 |
 
 > 封单数据不走 cache 键，随 `quotes:batch` 的 `Quote.bid1_volume`(gtimg f[10]) 一起来。
@@ -204,6 +192,15 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 14. **删除账户回测记录显式删子表**：`delete_review_account_run`（db.py:1513）逐表 `DELETE` snapshots/trades/positions/events 后再删 run，不依赖 `PRAGMA foreign_keys` 级联（裸连接也彻底清理）。
 
 ---
+
+### 评分链路补充约束
+
+- `scorers/base.py:27`：分钟窗口按连续交易时段分割；`scorers/absorption.py:53`：五分钟窗口必须六根连续，不能跨午休、隔夜或缺失点。
+- `scorers/drive.py:79`：封板排名按最后回封段；`scorers/drive.py:113`：带动/跟风事件互斥，同步启动不判方向。
+- `scorers/anti_drop.py:154`：双方实际反弹才奖励，横盘只由稳定性奖励。
+- `scorers/liquidity.py:42`：普通买一量不能当封单；`scorers/absorption.py:61`：每个出逃板块单独满足时序条件。
+- `scorers/aggregator.py:74`：否决者无真龙 rank；扫描全明细可读，但报告/入选只看通过者 Top N。
+- 缓存不会自动作历史算法迁移；盘后 `scan --force --no-cache` 才重新取数评分，不自动删除或重写旧记录。
 
 ## 五、再生成
 

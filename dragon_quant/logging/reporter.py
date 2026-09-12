@@ -129,8 +129,13 @@ class ReportBuilder:
         be = det.get("best_event") or (det.get("all_events") or [{}])[0]
         fleeing = be.get("fleeing_sectors", [])
         names = ReportBuilder._fmt_fleeing_sectors(fleeing)
-        return (f"检测到{det.get('event_count', 0)}次资金承接；"
-                f"{be.get('dive_time', '时间缺失')} {names}板块跳水"
+        summary = f"检测到{det.get('event_count', 0)}次资金承接；"
+        if "raw_event_count" in det:
+            summary = (f"{det['raw_event_count']}个窗口合并为{det['event_count']}次独立承接，"
+                       f"取衰减后最强{det['selected_event_count']}次均值；"
+                       f"代表事件原始{be['score']:.2f}分，距最新样本{be['age_trade_days']}个交易日，"
+                       f"衰减系数{be['recency_weight']:.3f}，调整后{be['adjusted_score']:.2f}分；")
+        return (summary + f"{be.get('dive_time', '时间缺失')} {names}板块跳水"
                 f"(平均{ReportBuilder._fmt_pct(be.get('fleeing_avg_drop', 0))})，"
                 f"{be.get('rally_time', '时间缺失')} 目标板块拉升"
                 f"{ReportBuilder._fmt_pct(be.get('target_pct', 0))}，承接上述板块出逃资金")

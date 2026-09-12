@@ -30,8 +30,8 @@
 | `reporter.py:96` _lead | 连板差、五日收益分位及样本数 |
 | `reporter.py:103` _anti | 双基准跳水段，含反弹确认或未确认原因 |
 | `reporter.py:114` _liq | 换手、封单强度、开板数、降级原因 |
-| `reporter.py:125` _abs | 有效逐板块事件与 fallback 原因 |
-| `reporter.py:196` build_summary_report | 调用方传入真龙列表，格式化摘要 |
+| `reporter.py:125` _abs | 原始窗口/独立事件数、所选数量、代表事件原始分及衰减说明；历史记录仍可展示 |
+| `reporter.py:201` build_summary_report | 调用方传入真龙列表，格式化摘要 |
 | `query.py:36` tail_logs | 最新或指定日期末尾日志，默认 v2 |
 | `query.py:51` query_logs | 按日期、类别、级别、代码筛选 |
 | `query.py:76` clear_logs | 显式清理历史日志操作 |
@@ -44,7 +44,7 @@
 - drive 使用 `early.seal_time/degraded/reason`、`lead.lead_events/follow_events/reason`；缺数据不得描述成已确认纯跟风。
 - anti_drop 使用 `market/sector.deepest_event` 和 `rebound_reason`；无回升不能宣称率先起飞。
 - liquidity 使用 `n_open`、`s_seal_strength`、`degraded/reasons`；未知开板数为 −1。
-- absorption 使用 `fallback/fallback_reason` 或 `best_event/fleeing_sectors`；不把无数据等同于零承接能力。
+- absorption 使用 `fallback/fallback_reason` 或 `best_event/fleeing_sectors`；不把无数据等同于零承接能力。新记录另有 `raw_event_count/event_count/selected_event_count` 及代表事件 `score/age_trade_days/recency_weight/adjusted_score`，报告区分原始窗口和独立事件，解释最强三事件均值。历史缺这些字段时仍按原事件描述展示，不重算历史评分。
 - `raw_output.ranking` 与扫描明细保留所有候选；最终报告由编排器筛 Top N 真龙，无真龙仍留扫描与否决明细。
 - 旧 scan_id 格式和 v2 物理表保持不变；日志保存同 scan_id 仍是覆盖语义，不是追加审计流。
 

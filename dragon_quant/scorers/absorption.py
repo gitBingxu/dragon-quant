@@ -34,15 +34,43 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     events = _detect_events(target, other_map, sector_name_map or {})
     if not events:
         return _fallback("暂无显著跨板块资金虹吸信号")
-    scored = [{**e, "score": round(_score_event(e), 2)} for e in events]
-    best = max(scored, key=lambda e: e["score"])
-    multi = min((len(events) - 1) * R.ABS_MULTI_BONUS_STEP, R.ABS_MULTI_BONUS_CAP)
-    return ScoreResult(
-        dim=DIM, score=round(min(best["score"] + multi, 100), 2), weight=WEIGHT,
-        details={"event_count": len(events), "best_event": best,
-                 "all_events": sorted(scored, key=lambda e: e["score"], reverse=True)[:3],
-                 "best_event_score": best["score"], "multi_event_bonus": multi},
-    )
+    dates = sorted(_last_n_dates(target, R.ABS_MAX_TRADE_DAYS))
+    final, details = _aggregate_events(events, dates)
+    return ScoreResult(dim=DIM, score=final, weight=WEIGHT, details=details)
+
+
+def _aggregate_events(events: list[dict], dates: list) -> tuple[float, dict]:
+    scored = [{**event, "score": _score_event(event)} for event in events]
+    groups = []
+    for event in sorted(scored, key=lambda e: (e["start_timestamp"], e["end_timestamp"])):
+        session = trading_session(event["start_timestamp"])
+        if (groups and session == groups[-1]["session"]
+                and event["start_timestamp"] <= groups[-1]["end_timestamp"]):
+            group = groups[-1]
+            group["end_timestamp"] = max(group["end_timestamp"], event["end_timestamp"])
+            group["window_count"] += 1
+            if (event["score"], event["end_timestamp"]) > (group["best"]["score"], group["best"]["end_timestamp"]):
+                group["best"] = event
+        else:
+            groups.append({"session": session, "start_timestamp": event["start_timestamp"],
+                           "end_timestamp": event["end_timestamp"], "window_count": 1, "best": event})
+    date_ages = {day: len(dates) - 1 - i for i, day in enumerate(dates)}
+    independent = []
+    for group in groups:
+        event = group["best"]
+        age = date_ages[trading_session(event["end_timestamp"])[0]]
+        decay = 2 ** (-age / R.ABS_RECENCY_HALF_LIFE_DAYS)
+        adjusted = R.ABS_NEUTRAL + (event["score"] - R.ABS_NEUTRAL) * decay
+        independent.append({**event, "age_trade_days": age, "recency_weight": decay,
+                            "adjusted_score": adjusted, "window_count": group["window_count"],
+                            "group_start_timestamp": group["start_timestamp"],
+                            "group_end_timestamp": group["end_timestamp"]})
+    independent.sort(key=lambda e: (-e["adjusted_score"], -e["end_timestamp"]))
+    selected = independent[:R.ABS_TOP_EVENTS]
+    final = sum(e["adjusted_score"] for e in selected) / len(selected)
+    return round(final, 2), {"raw_event_count": len(events), "event_count": len(groups),
+                             "selected_event_count": len(selected), "best_event": selected[0],
+                             "all_events": selected, "best_event_score": selected[0]["score"]}
 
 
 def _fallback(reason: str) -> ScoreResult:
@@ -112,6 +140,7 @@ def _detect_events(target: list[KBar], other_map: dict[str, list[KBar]], name_ma
         rdt = datetime.fromtimestamp(rally_ts / 1000, CHINA_TZ)
         events.append({
             "start_bar": start, "end_bar": end,
+            "start_timestamp": window[0].timestamp, "end_timestamp": window[-1].timestamp,
             "dive_time": f"{ddt.month}月{ddt.day}日 {ddt.hour}:{ddt.minute:02d}",
             "rally_time": f"{rdt.month}月{rdt.day}日 {rdt.hour}:{rdt.minute:02d}",
             "time_diff_min": round((rally_ts - dive_ts) / 60000, 1),

@@ -195,10 +195,11 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 
 ### 评分链路补充约束
 
-- `scorers/base.py:27`：分钟窗口按连续交易时段分割；`scorers/absorption.py:53`：五分钟窗口必须六根连续，不能跨午休、隔夜或缺失点。
+- `scorers/base.py:27`：分钟窗口按连续交易时段分割；`scorers/absorption.py:81`：五分钟窗口必须六根连续，不能跨午休、隔夜或缺失点。
 - `scorers/drive.py:79`：封板排名按最后回封段；`scorers/drive.py:113`：带动/跟风事件互斥，同步启动不判方向。
 - `scorers/anti_drop.py:154`：双方实际反弹才奖励，横盘只由稳定性奖励。
-- `scorers/liquidity.py:42`：普通买一量不能当封单；`scorers/absorption.py:61`：每个出逃板块单独满足时序条件。
+- `scorers/liquidity.py:42`：普通买一量不能当封单；`scorers/absorption.py:89`：每个出逃板块单独满足时序条件。
+- `scorers/absorption.py:42`：重叠窗口合并为独立事件，取消次数奖励，按三交易日半衰期向 50 衰减后取最强三事件均值；强度/广度/持续性为 60%/20%/20%。
 - `scorers/aggregator.py:74`：否决者无真龙 rank；扫描全明细可读，但报告/入选只看通过者 Top N。
 - 缓存不会自动作历史算法迁移；盘后 `scan --force --no-cache` 才重新取数评分，不自动删除或重写旧记录。
 

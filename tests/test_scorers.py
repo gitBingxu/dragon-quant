@@ -484,5 +484,103 @@ class TestAbsorptionEvents(unittest.TestCase):
         self.assertNotIn(datetime(2026, 6, 1).date(), dates)
 
 
+class TestAbsorptionAggregation(unittest.TestCase):
+
+    def event(self, start="2026-06-19 09:35", target=3.0, drop=-1.0, count=10, universe=10, drawdown=0.0):
+        ts = int(datetime.strptime(start, "%Y-%m-%d %H:%M").replace(tzinfo=CHINA_TZ).timestamp() * 1000)
+        return {"start_timestamp": ts, "end_timestamp": ts + 25 * 60000,
+                "target_pct": target, "fleeing_avg_drop": drop, "fleeing_count": count,
+                "sector_universe": universe, "drawdown_ratio": drawdown}
+
+    def test_duplicate_windows_do_not_increase_score(self):
+        event = self.event(target=1.5)
+        dates = [datetime(2026, 6, 19).date()]
+        single, _ = absorption._aggregate_events([event], dates)
+        duplicated, details = absorption._aggregate_events([event] * 10, dates)
+        self.assertEqual(single, duplicated)
+        self.assertEqual(details["raw_event_count"], 10)
+        self.assertEqual(details["event_count"], 1)
+        self.assertEqual(details["selected_event_count"], 1)
+        self.assertNotIn("multi_event_bonus", details)
+
+    def test_chain_overlaps_merge_and_use_strongest_representative(self):
+        events = [self.event("2026-06-19 09:35", target=1),
+                  self.event("2026-06-19 09:55", target=2),
+                  self.event("2026-06-19 10:15", target=1.5)]
+        score, details = absorption._aggregate_events(list(reversed(events)), [datetime(2026, 6, 19).date()])
+        self.assertEqual(details["event_count"], 1)
+        self.assertEqual(details["best_event"]["start_timestamp"], events[1]["start_timestamp"])
+        self.assertEqual(details["best_event"]["window_count"], 3)
+        self.assertAlmostEqual(score, absorption._score_event(events[1]))
+
+    def test_representative_tie_prefers_newer_window(self):
+        older = self.event()
+        newer = self.event("2026-06-19 09:40")
+        _, details = absorption._aggregate_events([newer, older], [datetime(2026, 6, 19).date()])
+        self.assertEqual(details["best_event"]["start_timestamp"], newer["start_timestamp"])
+
+    def test_distinct_sessions_and_dates_remain_separate(self):
+        events = [self.event("2026-06-18 14:35"), self.event("2026-06-19 11:05"),
+                  self.event("2026-06-19 13:05")]
+        _, details = absorption._aggregate_events(events, [datetime(2026, 6, 18).date(), datetime(2026, 6, 19).date()])
+        self.assertEqual(details["event_count"], 3)
+
+    def test_half_life_uses_trading_dates_not_weekend_days(self):
+        event = self.event("2026-06-19 09:35")
+        dates = [datetime(2026, 6, d).date() for d in (19, 22, 23, 24)]
+        score, details = absorption._aggregate_events([event], dates)
+        self.assertEqual(score, 75.0)
+        self.assertEqual(details["best_event"]["age_trade_days"], 3)
+        self.assertEqual(details["best_event"]["recency_weight"], .5)
+        monday, _ = absorption._aggregate_events([event], dates[:2])
+        self.assertAlmostEqual(monday, round(50 + 50 * 2 ** (-1 / 3), 2))
+
+    def test_weaker_old_evidence_returns_toward_neutral(self):
+        event = self.event(target=.4, drop=-.4, count=2)
+        dates = [datetime(2026, 6, d).date() for d in (19, 22, 23, 24)]
+        score, _ = absorption._aggregate_events([event], dates)
+        raw = absorption._score_event(event)
+        self.assertLess(raw, score)
+        self.assertLess(score, 50)
+        self.assertAlmostEqual(score, round(50 + (raw - 50) * .5, 2))
+
+    def test_top_three_mean_uses_adjusted_scores(self):
+        events = [self.event("2026-06-19 09:35", target=3),
+                  self.event("2026-06-24 09:35", target=1),
+                  self.event("2026-06-24 10:35", target=1.5),
+                  self.event("2026-06-24 13:05", target=2)]
+        score, details = absorption._aggregate_events(events, [datetime(2026, 6, d).date() for d in (19, 22, 23, 24)])
+        self.assertEqual(details["event_count"], 4)
+        self.assertEqual(details["selected_event_count"], 3)
+        self.assertEqual([e["adjusted_score"] for e in details["all_events"]], [90, 85, 80])
+        self.assertEqual(score, 85)
+
+    def test_new_extreme_event_can_still_score_one_hundred(self):
+        score, _ = absorption._aggregate_events([self.event()], [datetime(2026, 6, 19).date()])
+        self.assertEqual(score, 100)
+        self.assertEqual(R.DIM_WEIGHTS["absorption"], .1)
+        self.assertNotIn("absorption", R.DIM_FLOORS)
+
+    def test_stricter_intensity_scales_monotonically(self):
+        weak = absorption._score_event(self.event(target=.4, drop=-3, count=20, universe=20))
+        medium = absorption._score_event(self.event(target=1.5, drop=-3, count=20, universe=20))
+        strong = absorption._score_event(self.event(target=3, drop=-3, count=20, universe=20))
+        self.assertAlmostEqual(weak, 74)
+        self.assertLess(weak, medium)
+        self.assertLess(medium, strong)
+        self.assertLess(absorption._score_event(self.event(drop=-.5)), absorption._score_event(self.event(drop=-1)))
+
+    def test_score_integrates_detection_and_deduplication(self):
+        fixture = TestAbsorptionEvents()
+        cache = DataCache(cache_dir="")
+        cache.set("kline:5min:sector:S", fixture.bars([0, .05, .15, .25, .35, .45, .55]))
+        for sector in ("A", "B"):
+            cache.set(f"kline:5min:sector:{sector}", fixture.bars([0, -.1, -.2, -.3, -.4, -.5, -.6]))
+        result = absorption.score("x", cache, primary_sector="S", all_sector_codes=["A", "B"])
+        self.assertEqual(result.details["raw_event_count"], 2)
+        self.assertEqual(result.details["event_count"], 1)
+        self.assertEqual(result.score, round(result.details["best_event"]["adjusted_score"], 2))
+
+
 if __name__ == "__main__":
     unittest.main()

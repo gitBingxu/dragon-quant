@@ -23,6 +23,7 @@ class TestTypeRegistry(unittest.TestCase):
         self.assertIs(_resolve_type("kline:5min:sector:881101")[0], KBar)
         self.assertIs(_resolve_type("kline:1min:600000")[0], KBar)
         self.assertIs(_resolve_type("kline:1min:000001")[0], KBar)
+        self.assertIs(_resolve_type("kline:1min:SH000001")[0], KBar)
         self.assertIs(_resolve_type("kline:day:600000")[0], KBar)
         self.assertIs(_resolve_type("sector:components:881101")[0], StockInfo)
         self.assertIs(_resolve_type("quotes:batch")[0], Quote)
@@ -103,6 +104,17 @@ class TestTradeDateCache(unittest.TestCase):
             "sector:components:881101", "2026-06-26", namespace="v1"))
         self.assertIsNotNone(fresh.load_for_trade_date(
             "sector:components:881101", "2026-06-26", namespace="v2"))
+
+    def test_explicit_index_cache_does_not_read_old_stock_cache(self):
+        stock = _mk_kbar()
+        index = _mk_kbar()
+        index.close = 3000
+        self.cache.set_for_trade_date("kline:1min:000001", [stock], "2026-06-26")
+        fresh = DataCache(cache_dir=Path(self._tmp.name))
+        self.assertIsNone(fresh.load_for_trade_date("kline:1min:SH000001", "2026-06-26"))
+        self.cache.set_for_trade_date("kline:1min:SH000001", [index], "2026-06-26")
+        self.assertEqual(fresh.load_for_trade_date("kline:1min:SH000001", "2026-06-26")[0].close, 3000)
+        self.assertEqual(fresh.load_for_trade_date("kline:1min:000001", "2026-06-26")[0].close, stock.close)
 
     def test_meta_not_resolved(self):
         # __meta__ 不在注册表，磁盘恢复时原样返回 dict（不还原 dataclass）

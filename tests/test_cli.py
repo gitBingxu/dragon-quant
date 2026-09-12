@@ -37,6 +37,7 @@ class TestCliHelp(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         self.assertIn("Usage: dragon-quant scan [options]", output)
         self.assertIn("--top TOP", output)
+        self.assertIn("真龙数量", output)
         self.assertIn("--force", output)
         self.assertIn("--no-cache", output)
         mock_scan.assert_not_called()

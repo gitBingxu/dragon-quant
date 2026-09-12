@@ -13,7 +13,9 @@ from typing import Optional
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, ScoreResult
 from dragon_quant.scorers import registry as R
-from dragon_quant.scorers.base import clip, common_minute_axis, gain_curve
+from dragon_quant.scorers.base import (
+    CHINA_TZ, clip, common_minute_axis, continuous_ranges, gain_curve,
+)
 
 DIM = "anti_drop"
 WEIGHT = R.DIM_WEIGHTS[DIM]
@@ -23,7 +25,7 @@ EPS = 1e-9
 def score(code: str, cache: DataCache, primary_sector: str = "",
           **kwargs) -> ScoreResult:
     stock: list[KBar] = cache.get(f"kline:1min:{code}") or []
-    market: list[KBar] = cache.get("kline:1min:000001") or []
+    market: list[KBar] = cache.get(f"kline:1min:{R.MARKET_SYMBOL}") or []
     sector: list[KBar] = cache.get(f"kline:1min:sector:{primary_sector}") or []
 
     if not stock:
@@ -53,7 +55,9 @@ def _antidrop_vs(base: list[KBar], stock: list[KBar]) -> tuple[float, dict]:
     g_x = gain_curve(base, axis)
     g_s = gain_curve(stock, axis)
 
-    segs = _dip_segments(g_x)
+    sessions = continuous_ranges(axis)
+    segs = [(start + a, start + b) for start, end in sessions
+            for a, b in _dip_segments(g_x[start:end])]
     if not segs:
         return R.ANTIDROP_NEUTRAL, {"no_dip": True}
 
@@ -88,20 +92,21 @@ def _antidrop_vs(base: list[KBar], stock: list[KBar]) -> tuple[float, dict]:
     # ── 率先起飞：取最深跳水段的底部 b，看个股领先见底 + 反弹更猛 ──
     deepest = max(segs, key=lambda ab: (g_x[ab[0]] - g_x[ab[1]])
                   if None not in (g_x[ab[0]], g_x[ab[1]]) else -1)
-    s_rebound = _rebound(g_x, g_s, deepest[1])
+    start, end = next((a, b) for a, b in sessions if a <= deepest[1] < b)
+    s_rebound, rebound_reason = _rebound_result(g_x[start:end], g_s[start:end], deepest[1] - start)
     deepest_event = None
     if dip_events:
         deepest_event = max(dip_events, key=lambda e: e.get("base_drop_abs", 0))
 
     s_dim = clip(s_hold * R.HOLD_W + s_rebound * R.REBOUND_W)
     return s_dim, {"n_dip_seg": len(segs), "s_hold": round(s_hold, 2),
-                   "s_rebound": round(s_rebound, 2),
+                   "s_rebound": round(s_rebound, 2), "rebound_reason": rebound_reason,
                    "dip_events": dip_events[:3],
                    "deepest_event": deepest_event}
 
 
 def _fmt_minute_bucket(bucket: int) -> str:
-    return datetime.fromtimestamp(bucket * 60).strftime("%H:%M")
+    return datetime.fromtimestamp(bucket * 60, CHINA_TZ).strftime("%H:%M")
 
 
 def _dip_segments(g_x: list[Optional[float]]) -> list[tuple[int, int]]:
@@ -143,30 +148,32 @@ def _dip_segments(g_x: list[Optional[float]]) -> list[tuple[int, int]]:
 
 
 def _rebound(g_x, g_s, b: int) -> float:
-    """率先起飞：早见底 REBOUND_LEAD_W + 反弹幅度 REBOUND_AMP_W。"""
+    return _rebound_result(g_x, g_s, b)[0]
+
+
+def _rebound_result(g_x, g_s, b: int) -> tuple[float, str]:
     L = R.REBOUND_LEAD_BARS
-    n = len(g_x)
-    # 个股触底分钟（基准底 b 附近 ±L 窗口内 g_s 最低点）
+    end = b + L
     lo = max(0, b - L)
-    hi = min(n - 1, b + L)
-    tb_s = b
-    val = None
-    for k in range(lo, hi + 1):
-        if g_s[k] is None:
-            continue
-        if val is None or g_s[k] < val:
-            val = g_s[k]
-            tb_s = k
-    lead = clip(b - tb_s, 0, L)  # 个股更早见底=领先
-
-    # 反弹幅度比：b 后 L 根内回升
-    end = min(n - 1, b + L)
+    if end >= len(g_x):
+        return 0.0, "反弹确认窗口不足"
+    if any(v is None for v in g_x[b:end + 1] + g_s[lo:end + 1]):
+        return 0.0, "反弹确认数据缺失"
+    if min(g_x[b:end + 1]) < g_x[b] - EPS:
+        return 0.0, "基准仍在创新低"
     up_x = _rise(g_x, b, end)
+    if up_x <= EPS:
+        return 0.0, "基准未确认反弹"
+    stock_low = min(g_s[lo:end + 1])
+    tb_s = max(k for k in range(lo, end + 1) if abs(g_s[k] - stock_low) <= EPS)
     up_s = _rise(g_s, b, end)
-    amp = clip(up_s / max(up_x, EPS), 0, 2)
-
-    return clip((lead / L) * 100.0 * R.REBOUND_LEAD_W
-                + (amp / 2.0) * 100.0 * R.REBOUND_AMP_W)
+    if tb_s >= end or _rise(g_s, tb_s, end) <= EPS or up_s <= EPS:
+        return 0.0, "个股未确认反弹"
+    lead = clip(b - tb_s, 0, L)
+    amp = clip(up_s / up_x, 0, 2)
+    result = ((lead / L) * 100 * R.REBOUND_LEAD_W
+              + (amp / 2) * 100 * R.REBOUND_AMP_W)
+    return clip(result), "基准与个股均确认反弹"
 
 
 def _rise(g, a: int, b: int) -> float:

@@ -7,12 +7,37 @@ ScoreResult 复用 models/types.py；本模块新增 DragonVerdict（聚合产�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+from dragon_quant.scorers import registry as R
 
 from dragon_quant.models.types import KBar, ScoreResult  # noqa: F401  (re-export)
 
 MIN_BUCKET_MS = 60_000     # 1 分钟
 FIVE_BUCKET_MS = 300_000   # 5 分钟
+CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def trading_session(timestamp: int) -> tuple:
+    dt = datetime.fromtimestamp(timestamp / 1000, CHINA_TZ)
+    return dt.date(), dt.hour >= 12
+
+
+def continuous_ranges(axis: list[int]) -> list[tuple[int, int]]:
+    if not axis:
+        return []
+    starts = [0]
+    for i in range(1, len(axis)):
+        if (axis[i] - axis[i - 1] != 1
+                or trading_session(axis[i] * MIN_BUCKET_MS)
+                != trading_session(axis[i - 1] * MIN_BUCKET_MS)):
+            starts.append(i)
+    return list(zip(starts, starts[1:] + [len(axis)]))
+
+
+def at_limit(price: float, limit_up: float) -> bool:
+    return limit_up > 0 and abs(price - limit_up) <= limit_up * R.PRICE_TOLERANCE
 
 
 @dataclass
@@ -58,7 +83,12 @@ def gain_curve(bars: list[KBar], axis: list[int]) -> list[Optional[float]]:
     m = align_1min(bars)
     out: list[Optional[float]] = []
     last: Optional[float] = None
+    session = None
     for b in axis:
+        current_session = trading_session(b * MIN_BUCKET_MS)
+        if current_session != session:
+            last = None
+            session = current_session
         bar = m.get(b)
         if bar is not None:
             last = bar.pct / 100.0

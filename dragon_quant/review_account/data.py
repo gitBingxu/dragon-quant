@@ -5,7 +5,7 @@ from datetime import datetime
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.providers.xueqiu import XueqiuProvider
 from dragon_quant.review_account.market import (
-    SHANGHAI, DataCoverageError, at, bar_times, build_row, event_date, validate_bars,
+    SHANGHAI, DataCoverageError, at, bar_times, build_daily_row, build_row, event_date, validate_bars,
 )
 from dragon_quant.review_account.models import MarketEvent
 
@@ -72,16 +72,36 @@ class MarketData:
                 return bars
         return validate_bars(self._bars[key], day, until)
 
+    def try_intraday(self, code: str, day: str) -> list | None:
+        """取完整当日5分钟K；缺失/不完整则返回 None（供日K兜底），不抛错。"""
+        try:
+            return self.intraday(code, day)
+        except DataCoverageError:
+            return None
+
 
 def historical_events(day: str, candidates: list[dict], codes: set[str], data: MarketData):
-    histories, intraday = {}, {}
+    """生成当日事件流。
+
+    仅当**所有**相关个股（候选 + 持仓）当日都有完整48根5分钟K时，走严格盘中
+    撮合（open→各fill→bar→late→close）；只要有任一缺失，则整日降级为日K兜底
+    （开盘事件按开盘价成交，收盘事件按当日OHLC判定止损止盈），保证多月回测
+    在分时历史已过期时仍能运行。买卖决策始终复用同一 evaluate_buy/evaluate_sell。
+    """
     for code in sorted(codes):
-        histories[code] = data.daily(code, day)
-        intraday[code] = data.intraday(code, day)
-        build_row(histories[code], day, intraday[code][0].open, [], at(day, "09:30"))
+        data.daily(code, day)  # 校验日K/预热，缺失即抛错
+    intraday = {code: data.try_intraday(code, day) for code in sorted(codes)}
+    if codes and all(intraday[c] is not None for c in codes):
+        yield from _intraday_events(day, candidates, sorted(codes), data, intraday)
+    else:
+        yield from _daily_events(day, candidates, sorted(codes), data)
+
+
+def _intraday_events(day, candidates, codes, data, intraday):
+    histories = {code: data.daily(code, day) for code in codes}
     def make(ts, phase, prices=None):
         rows = {}
-        for code in sorted(codes):
+        for code in codes:
             row = build_row(histories[code], day, intraday[code][0].open, intraday[code], ts,
                             execution_price=(prices or {}).get(code))
             row["phase"] = phase
@@ -93,3 +113,28 @@ def historical_events(day: str, candidates: list[dict], codes: set[str], data: M
         yield make(opening_ts + 1, "fill", {c: intraday[c][i].open for c in codes})
         phase = "late" if timestamp == at(day, "14:55") else "close" if timestamp == at(day, "15:00") else "bar"
         yield make(timestamp, phase)
+
+
+def _daily_events(day, candidates, codes, data):
+    histories = {code: data.daily(code, day) for code in codes}
+    def row(code, phase, ts, price=None):
+        return build_daily_row(histories[code], day, phase, ts, execution_price=price)
+    open_ts, close_ts = at(day, "09:30"), at(day, "15:00")
+    # 开盘：判定开盘买点（不成交）→ 开盘价成交
+    yield MarketEvent(open_ts, "open", {c: row(c, "open", open_ts) for c in codes}, candidates)
+    yield MarketEvent(open_ts + 1, "fill",
+                      {c: row(c, "open", open_ts + 1, histories_open(histories[c], day)) for c in codes}, candidates)
+    # 收盘：按当日OHLC判定卖出（不成交）→ 收盘价成交（卖价按原因在引擎侧近似）
+    yield MarketEvent(close_ts, "late", {c: row(c, "late", close_ts) for c in codes}, candidates)
+    yield MarketEvent(close_ts + 1, "fill",
+                      {c: row(c, "late", close_ts + 1, histories_close(histories[c], day)) for c in codes}, candidates)
+
+
+def histories_open(history, day):
+    bar = next((b for b in history if event_date(b.timestamp) == day), None)
+    return bar.open if bar else None
+
+
+def histories_close(history, day):
+    bar = next((b for b in history if event_date(b.timestamp) == day), None)
+    return bar.close if bar else None

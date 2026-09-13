@@ -41,14 +41,22 @@ def position(entry="2026-09-04", **kw):
 
 
 class FakeData:
-    def __init__(self, days=None):
+    def __init__(self, days=None, intraday_missing=None):
         self.days = days or ["2026-09-04", DAY, "2026-09-08"]
+        self.intraday_missing = set(intraday_missing or [])
     def calendar(self, start, end, include_today=False):
         return [d for d in self.days if start <= d <= end]
-    def daily(self, code, start):
+    def daily(self, code, start, refresh=False):
         return history("2026-09-09")
     def intraday(self, code, day, until=None):
+        if day in self.intraday_missing:
+            raise DataCoverageError(f"{day} 无完整5分钟K")
         return validate_bars(bars(day), day, until)
+    def try_intraday(self, code, day):
+        try:
+            return self.intraday(code, day)
+        except DataCoverageError:
+            return None
 
 
 class TestStrategy(unittest.TestCase):
@@ -241,9 +249,37 @@ class TestMarketAndSimulator(unittest.TestCase):
         self.assertEqual(result["trades"][0].trade_date, DAY)
         self.assertEqual(result["account_state"]["positions"][0]["code"], CAND["code"])
 
+    def test_daily_fallback_runs_when_intraday_missing(self):
+        data = FakeData(intraday_missing={DAY})
+        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]):
+            result = AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
+        self.assertEqual(result["data_quality"], "daily_fallback")
+        self.assertEqual(result["fallback_days"], 1)
+        self.assertEqual(len(result["trades"]), 1)
+        self.assertEqual(result["trades"][0].signal.get("data_quality"), "daily_fallback")
+
+    def test_missing_daily_still_fails(self):
+        data = FakeData(intraday_missing={DAY})
+        data.daily = MagicMock(side_effect=DataCoverageError("no daily"))
+        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]), self.assertRaises(DataCoverageError):
+            AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
+
+    def test_daily_fallback_stop_loss_price_by_reason(self):
+        from dragon_quant.review_account.execution import daily_fallback_sell_price
+        cfg = StrategyConfig()
+        p = position()
+        row_gap = {"open": 9.0, "bar_close": 9.5}
+        # 跳空低开穿止损 → 按开盘价
+        self.assertEqual(daily_fallback_sell_price(p, row_gap, "hard_stop_loss", cfg), 9.0)
+        # 未跳空 → 按止损线
+        self.assertAlmostEqual(daily_fallback_sell_price(p, {"open": 9.9, "bar_close": 9.4}, "hard_stop_loss", cfg),
+                               10 * (1 + cfg.stop_loss_pct / 100))
+        # 其它原因 → 收盘价
+        self.assertEqual(daily_fallback_sell_price(p, {"open": 10, "bar_close": 10.6}, "trailing_take_profit", cfg), 10.6)
+
     def test_missing_intraday_fails_instead_of_faking_returns(self):
         data = FakeData()
-        data.intraday = MagicMock(side_effect=DataCoverageError("missing"))
+        data.daily = MagicMock(side_effect=DataCoverageError("missing"))
         with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]), self.assertRaises(DataCoverageError):
             AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
 

@@ -140,7 +140,8 @@ def _weak_close_break(row: dict, cfg: StrategyConfig) -> bool:
 
 def _payload(row: dict) -> dict:
     return {key: row.get(key) for key in ("date", "phase", "observed_at", "open", "close", "ma5",
-            "prev_close", "open_gap_pct", "bar_high", "bar_low", "bar_close", "limit_up", "limit_down")}
+            "prev_close", "open_gap_pct", "bar_high", "bar_low", "bar_close", "limit_up", "limit_down",
+            "data_quality")}
 
 
 def _buy(candidate: dict, row: dict, code: str, text: str, priority: int) -> dict:

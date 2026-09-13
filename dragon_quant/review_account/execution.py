@@ -11,8 +11,8 @@ def fee(amount: float, side: str, cfg: StrategyConfig) -> float:
     )
 
 
-def fill_price(row: dict, side: str, cfg: StrategyConfig) -> float | None:
-    price = row.get("execution_price")
+def fill_price(row: dict, side: str, cfg: StrategyConfig, raw: float | None = None) -> float | None:
+    price = raw if raw is not None else row.get("execution_price")
     if not price or not math.isfinite(price) or price <= 0:
         return None
     upper, lower = row.get("limit_up"), row.get("limit_down")
@@ -26,6 +26,22 @@ def fill_price(row: dict, side: str, cfg: StrategyConfig) -> float | None:
     if (upper and result > upper) or (lower and result < lower):
         return None
     return round(result, 4)
+
+
+def daily_fallback_sell_price(position: Position, row: dict, reason: str, cfg: StrategyConfig) -> float:
+    """日K兜底日的卖出成交价（无分时，按原保守约定按原因近似）。
+
+    止损：跌破止损线，若当日开盘已低于止损线则按开盘价（跳空），否则按止损线；
+    保本：按完整成本线；其余（移动止盈/弱势/放量等）：按当日收盘价。
+    """
+    entry = position.entry_price
+    if reason in {"hard_stop_loss", "first_day_stop_loss"}:
+        pct = cfg.first_day_stop_loss_pct if reason == "first_day_stop_loss" else cfg.stop_loss_pct
+        stop = entry * (1 + pct / 100)
+        return row["open"] if row["open"] <= stop else stop
+    if reason == "profit_back_to_cost_take_profit":
+        return break_even_price(position, cfg)
+    return row["bar_close"]
 
 
 def buy_quantity(cash: float, equity: float, price: float, cfg: StrategyConfig) -> int:

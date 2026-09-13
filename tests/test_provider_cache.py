@@ -116,6 +116,14 @@ class TestTradeDateCache(unittest.TestCase):
         self.assertEqual(fresh.load_for_trade_date("kline:1min:SH000001", "2026-06-26")[0].close, 3000)
         self.assertEqual(fresh.load_for_trade_date("kline:1min:000001", "2026-06-26")[0].close, stock.close)
 
+    def test_same_instance_isolates_dates_and_namespaces(self):
+        first, second = _mk_kbar(), _mk_kbar()
+        second.close = 1.9
+        self.cache.set_for_trade_date("kline:5min:600000", [first], "2026-06-26", namespace="normal")
+        self.cache.set_for_trade_date("kline:5min:600000", [second], "2026-06-29", namespace="normal")
+        self.assertEqual(self.cache.load_for_trade_date("kline:5min:600000", "2026-06-26", namespace="normal")[0].close, 1.5)
+        self.assertIsNone(self.cache.load_for_trade_date("kline:5min:600000", "2026-06-26", namespace="after"))
+
     def test_meta_not_resolved(self):
         # __meta__ 不在注册表，磁盘恢复时原样返回 dict（不还原 dataclass）
         self.cache.set_for_trade_date("__meta__:foo", {"a": 1}, "2026-06-26")

@@ -38,28 +38,47 @@ def init_account(name: str = DEFAULT_ACCOUNT, capital: float = 100_000.0,
     return account
 
 
+def _account_config(account: Optional[dict], capital: float, source: str,
+                    strategy_params: Optional[dict]) -> StrategyConfig:
+    saved = json.loads(account.get("strategy_params_json") or "{}") if account else {}
+    cfg = StrategyConfig.from_dict(saved or {"source": source, "initial_cash": capital})
+    if strategy_params is not None:
+        StrategyConfig.from_dict(strategy_params)
+        requested = StrategyConfig.from_dict({**cfg.to_json_dict(), **strategy_params,
+                                             "initial_cash": cfg.initial_cash, "source": source})
+        if account and requested != cfg:
+            raise ValueError("账户已存在，不能静默切换策略；请使用新的 --account 创建独立实验账户")
+        cfg = requested
+    if cfg.source != source:
+        raise ValueError("--source 与账户持久化策略不一致")
+    return cfg
+
+
 def run_buy(trade_date: str, capital: float = 100_000.0,
             account_name: str = DEFAULT_ACCOUNT, source: str = "v2",
-            verbose: bool = True) -> dict:
-    cfg = StrategyConfig(source=source, initial_cash=capital)
-    account = _load_account(account_name, cfg, create_capital=capital)
+            verbose: bool = True, as_of: Optional[str] = None,
+            strategy_params: Optional[dict] = None) -> dict:
+    account = db.get_live_account(account_name)
+    cfg = _account_config(account, capital, source, strategy_params)
+    account = account or _load_account(account_name, cfg, create_capital=capital)
     trader = LiveTrader(account, cfg)
-    result = trader.buy(trade_date)
+    result = trader.buy(trade_date, as_of)
     if verbose:
         _print_buy(trade_date, account_name, result)
     return result
 
 
 def run_sell(trade_date: str, account_name: str = DEFAULT_ACCOUNT,
-             source: str = "v2", verbose: bool = True) -> dict:
-    cfg = StrategyConfig(source=source)
-    account = _load_account(account_name, cfg, create_capital=None)
+             source: str = "v2", verbose: bool = True, as_of: Optional[str] = None,
+             strategy_params: Optional[dict] = None) -> dict:
+    account = db.get_live_account(account_name)
+    cfg = _account_config(account, account["initial_cash"] if account else 100_000, source, strategy_params)
     if not account:
         if verbose:
             print(f"账户「{account_name}」不存在，请先执行 buy 或 account init")
         return {"results": [], "error": "no_account"}
     trader = LiveTrader(account, cfg)
-    result = trader.sell(trade_date)
+    result = trader.sell(trade_date, as_of)
     if verbose:
         _print_sell(trade_date, account_name, result)
     return result
@@ -80,24 +99,24 @@ def run_account_status(account_name: str = DEFAULT_ACCOUNT) -> dict:
 
 def _print_buy(trade_date: str, account_name: str, result: dict):
     print(f"【买入建议 · {trade_date} · 账户 {account_name}】")
-    if result.get("action") == "buy":
-        t = result["trade"]
-        print(f"  ✅ 买入 {t['name'] or t['code']}（{t['code']}）")
-        print(f"     成交价 {t['price']:.2f} × {t['qty']} 股 = {t['amount']:,.0f} 元（含费 {t['fee']:.1f}）")
-        print(f"     理由：{t['reason_text']}")
-        print(f"     剩余现金 {t['cash_after']:,.0f} 元")
-    else:
-        print(f"  ⏸ 今日不开仓：{result.get('reason_text', '')}")
-        for d in [d for d in result.get("details", []) if not d.get("passed")][:3]:
-            if d.get("reason_text"):
-                print(f"     - {d['reason_text']}")
+    for t in result.get("trades", []):
+        print(f"  {t['side']} {t['name'] or t['code']} {t['qty']}股 @ {t['price']:.4f}，费用{t['fee']:.2f}")
+        print(f"     {t['reason_text']}，剩余现金{t['cash_after']:.2f}")
+    if not result.get("trades"):
+        print(f"  {result.get('reason_text', '')}")
+    for order in result.get("pending", []):
+        print(f"  待执行 {order['side']} {order['stock_code']}：{order['reason_text']}")
+    for d in [d for d in result.get("details", []) if not d.get("passed")][:3]:
+        print(f"     - {d.get('reason_text', '')}")
 
 
 def _print_sell(trade_date: str, account_name: str, result: dict):
     print(f"【卖出建议 · {trade_date} · 账户 {account_name}】")
     results = result.get("results", [])
     if not results:
-        print("  当前无持仓")
+        print(f"  {result.get('reason_text', '本次没有成交')}")
+        for order in result.get("pending", []):
+            print(f"  待执行 {order['side']} {order['stock_code']}：{order['reason_text']}")
         return
     for r in results:
         if r.get("action") == "sell":

@@ -36,6 +36,7 @@ _TYPE_REGISTRY: list[tuple[str, type, bool]] = sorted(
         ("kline:5min:sector:", KBar, True),
         ("sector:components:", StockInfo, True),
         ("kline:1min:", KBar, True),
+        ("kline:5min:", KBar, True),
         ("kline:day:", KBar, True),
         ("quotes:batch", Quote, True),
         ("sector:ranking", SectorPerformance, True),
@@ -250,6 +251,7 @@ class DataCache:
         # 内存：保持本轮 scorer 的 cache.get 行为不变
         with self._lock:
             self._mem[key] = CacheEntry(data, _today_end())
+            self._mem[f"trade-date:{trade_date}:{namespace}:{key}"] = CacheEntry(data, _today_end())
         p = self._trade_date_path(key, trade_date, namespace)
         if p is None:
             return
@@ -266,7 +268,8 @@ class DataCache:
     def load_for_trade_date(self, key: str, trade_date: str,
                             namespace: str = "") -> Optional[Any]:
         """先查内存；未命中读交易日磁盘缓存并反序列化回 dataclass，回填内存。"""
-        mem = self.get(key)
+        scoped_key = f"trade-date:{trade_date}:{namespace}:{key}"
+        mem = self.get(scoped_key)
         if mem is not None:
             return mem
         p = self._trade_date_path(key, trade_date, namespace)
@@ -280,7 +283,9 @@ class DataCache:
             return None
         if restored is None:
             return None
-        self.set(key, restored, ttl=_today_end())
+        with self._lock:
+            self._mem[key] = CacheEntry(restored, _today_end())
+            self._mem[scoped_key] = CacheEntry(restored, _today_end())
         return restored
 
     # ─── 统计 ───

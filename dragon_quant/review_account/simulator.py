@@ -16,6 +16,7 @@ class AccountSimulator:
         self.trades, self.snapshots, self.closed_positions, self.events = [], [], [], []
         self._peak = self._previous = cfg.initial_cash
         self._calendar = []
+        self._day_quality = {}
 
     def run(self, date_from: str, date_to: str) -> dict:
         if date_from > date_to:
@@ -33,6 +34,8 @@ class AccountSimulator:
             day_trades = []
             details = {}
             for event in historical_events(day, candidates, codes, self.data):
+                if event.rows:
+                    self._day_quality[day] = next(iter(event.rows.values())).get("data_quality", "strict_5min")
                 result = self.engine.step(event)
                 self.trades.extend(result["trades"])
                 day_trades.extend(result["trades"])
@@ -79,10 +82,14 @@ class AccountSimulator:
         final = self.snapshots[-1].total_equity
         count = len(self.closed_positions)
         positions = list(self.closed_positions)
+        fallback_days = sum(1 for q in self._day_quality.values() if q == "daily_fallback")
+        quality = ("strict_5min" if not fallback_days
+                   else "daily_fallback" if fallback_days == len(self._day_quality) else "mixed")
         return {"date_from": start, "date_to": end, "initial_cash": self.cfg.initial_cash,
                 "final_equity": final, "total_return": (final / self.cfg.initial_cash - 1) * 100,
                 "max_drawdown": min(s.drawdown for s in self.snapshots), "trade_count": len(self.trades),
                 "win_rate": sum(p.realized_return > 0 for p in self.closed_positions) / count * 100 if count else None,
                 "trades": self.trades, "snapshots": self.snapshots, "positions": positions, "events": self.events,
-                "account_state": self.state.to_dict(), "data_quality": "strict_5min",
+                "account_state": self.state.to_dict(), "data_quality": quality,
+                "fallback_days": fallback_days, "total_days": len(self._day_quality),
                 "strategy_params": self.cfg.to_json_dict()}

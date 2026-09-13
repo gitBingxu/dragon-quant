@@ -1,4 +1,4 @@
-from dragon_quant.review_account.execution import buy_quantity, fee, fill_price, sell_quantity
+from dragon_quant.review_account.execution import buy_quantity, daily_fallback_sell_price, fee, fill_price, sell_quantity
 from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade
 from dragon_quant.review_account.strategy import evaluate_buy, evaluate_sell, explain_buy_candidate
@@ -33,7 +33,7 @@ class TradingEngine:
                     or state.buys_today >= cfg.max_daily_buys):
                 state.pending.remove(order)
                 continue
-            price = fill_price(row, order["side"], cfg)
+            price = fill_price(row, order["side"], cfg, raw=self._raw_fill_price(order, row))
             if price is None:
                 if row.get("execution_price") is None:
                     continue
@@ -111,6 +111,14 @@ class TradingEngine:
     def _order(code, name, signal, timestamp):
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
                 "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+
+    def _raw_fill_price(self, order, row):
+        """日K兜底日的卖出按原因近似定价；盘中及买入仍用 execution_price。"""
+        if order["side"] == "SELL" and row.get("data_quality") == "daily_fallback":
+            p = next((p for p in self.state.positions if p.code == order["stock_code"]), None)
+            if p is not None:
+                return daily_fallback_sell_price(p, row, order["code"], self.cfg)
+        return None
 
     def _fill(self, order, row, price, day):
         state, cfg = self.state, self.cfg

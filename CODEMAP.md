@@ -56,7 +56,9 @@ scorers.aggregator.evaluate(code, cache, ...)     scorers/aggregator.py
 cli._cmd_review_account → review_account/service.py:11
   → StrategyConfig.from_dict → AccountSimulator.run（review_account/simulator.py:20）
   → MarketData.calendar（日历+前置窗口）、collect_candidates（review_account/market.py:33）
-  → historical_events（review_account/data.py）：open → fill → bar → … → late → fill → close
+  → historical_events（review_account/data.py）：
+      全员有完整48根5分钟K → _intraday_events(open→fill→bar…→late→fill→close)
+      任一缺失 → _daily_events 日K兜底(open→fill→late→fill，intraday_bars 恒空)
   → TradingEngine.step（review_account/engine.py:11）
       待执行卖出/买入撮合 → evaluate_sell / evaluate_buy（strategy.py）→ 新待执行信号
       execution.py：整手、风险预算、滑点、最低佣金、涨跌停可执行性
@@ -70,7 +72,7 @@ cli._cmd_buy / _cmd_sell → live_trade/service.py：读取账户保存的完整
 ```
 
 - `buy` 开启买入并先处理卖出；`sell` 禁止新增买入，不实现另一套卖出规则。
-- `market.build_row` 仅暴露截至事件时间已知数据，开盘量额来自上日；`data.MarketData` 使用不复权日K/5分钟K，严格验证48根交易时段及OHLC。
+- `market.build_row` / `build_daily_row` 仅暴露截至事件时间已知数据，开盘量额来自上日；`data.MarketData` 用不复权日K/5分钟K，严格验证48根交易时段及OHLC，缺失则 `try_intraday` 返回 None 触发整日日K兜底（成交价保守近似，`data_quality=daily_fallback`）。
 - 信号不能在同事件成交，历史按下一根K开盘、实时按更晚的新鲜报价；相同参数、事件和账户状态产生相同交易。
 - `review_account/evaluation.py` 提供固定四组参数、60/20/20时间划分、最少交易数/回撤门槛、双倍滑点测试；缺数返回不可验证，不自动推广策略。
 - `--config` 共享参数；已有纸上账户拒绝静默换参数；`--account` 独立账户；历史日期必须 `--at`，不混用当前报价。

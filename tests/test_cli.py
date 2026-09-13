@@ -136,6 +136,20 @@ class TestCliSourceArgs(unittest.TestCase):
             port=8765, open_browser=False, default_source="v2", default_page="account"
         )
 
+    def test_buy_passes_replay_time_and_account(self):
+        with patch("sys.argv", ["dragon-quant", "buy", "--date", "20260907", "--at", "10:00", "--account", "experiment"]), \
+             patch("dragon_quant.live_trade.run_buy") as run:
+            cli.main()
+        self.assertEqual(run.call_args.kwargs["as_of"], "10:00")
+        self.assertEqual(run.call_args.kwargs["account_name"], "experiment")
+
+    def test_review_account_passes_shared_config(self):
+        with patch("sys.argv", ["dragon-quant", "review-account", "--from", "20260907", "--to", "20260911", "--config", "params.json"]), \
+             patch("dragon_quant.cli._strategy_params", return_value={"max_position_pct": 25}), \
+             patch("dragon_quant.review_account.run_review_account") as run:
+            cli.main()
+        self.assertEqual(run.call_args.kwargs["strategy_params"], {"max_position_pct": 25})
+
     def test_scan_history_uses_v2_source(self):
         scan = {
             "id": "v2_20260519_5",

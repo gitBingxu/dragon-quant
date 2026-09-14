@@ -32,17 +32,29 @@ def candidate_dates(calendar: list[str], day: str, count: int) -> list[str]:
 
 
 def collect_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
+    """前 candidate_lookback_days 个交易日的**全部真龙**并集去重。
+
+    取每日 dragons 全量（真龙物化表），按 code 去重保留综合分更高者，并在共享层
+    统一做真龙标记与综合分门槛过滤，确保 review-account 与 buy/sell 候选池一致。
+    不再截断为前 N 只——买点择优交由 engine 按买点得分 + 五维分排序。
+    """
     merged = {}
     for date in candidate_dates(calendar, day, cfg.candidate_lookback_days):
-        for cand in loader(date, top_n=cfg.candidate_top_n, source=cfg.source):
+        for cand in loader(date, top_n=None, source=cfg.source):
             code = cand.get("code")
-            if code and (code not in merged or candidate_key(cand) < candidate_key(merged[code])):
+            if not code:
+                continue
+            if cand.get("is_true_dragon") is False or (cand.get("composite_score") or 0) < cfg.min_score:
+                continue
+            if code not in merged or candidate_key(cand) < candidate_key(merged[code]):
                 merged[code] = cand
-    return sorted(merged.values(), key=candidate_key)[:cfg.candidate_top_n]
+    return sorted(merged.values(), key=candidate_key)
 
 
 def candidate_key(candidate: dict) -> tuple:
-    return (candidate.get("rank") or 999999, -(candidate.get("composite_score") or 0), candidate.get("code", ""))
+    """去重/展示序：综合分越高越优先，同分按 rank、代码稳定排序。"""
+    return (-(candidate.get("composite_score") or 0), candidate.get("rank") or 999999,
+            candidate.get("code", ""))
 
 
 def validate_bars(bars: list[KBar], day: str, until: int | None = None) -> list[KBar]:

@@ -19,6 +19,7 @@ class StrategyConfig:
     min_turnover: float = 5.0
     strong_turnover_min: float = 8.0
     strong_turnover_max: float = 35.0
+    turn_strong_bar_turnover_min: float = 0.5
     max_open_gap: float = 7.0
     max_close_to_ma5: float = 12.0
     divergence_enabled: bool = True

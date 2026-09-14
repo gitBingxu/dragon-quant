@@ -350,16 +350,24 @@ def _cmd_buy(args):
     """执行当前时点的账户交易。"""
     from dragon_quant.live_trade import run_buy
     trade_date = _resolve_trade_date(args.date)
-    run_buy(trade_date, capital=args.capital, source=args.source, verbose=True,
-            account_name=args.account, as_of=args.at, strategy_params=_strategy_params(args.config))
+    try:
+        run_buy(trade_date, capital=args.capital, source=args.source, verbose=True,
+                account_name=args.account, as_of=args.at, strategy_params=_strategy_params(args.config))
+    except ValueError as e:
+        print(f"⏸ 暂不执行买入：{e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_sell(args):
     """执行当前时点的共享卖出逻辑。"""
     from dragon_quant.live_trade import run_sell
     trade_date = _resolve_trade_date(args.date)
-    run_sell(trade_date, source=args.source, verbose=True, account_name=args.account,
-             as_of=args.at, strategy_params=_strategy_params(args.config))
+    try:
+        run_sell(trade_date, source=args.source, verbose=True, account_name=args.account,
+                 as_of=args.at, strategy_params=_strategy_params(args.config))
+    except ValueError as e:
+        print(f"⏸ 暂不执行卖出：{e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_account(args):

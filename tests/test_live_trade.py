@@ -127,6 +127,22 @@ class TestSharedExecution(unittest.TestCase):
         with patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[]), self.assertRaisesRegex(ValueError, "--at"):
             trader.buy(DAY)
 
+    def test_realtime_session_messages_by_clock(self):
+        from datetime import datetime
+        from dragon_quant.review_account.market import SHANGHAI
+        # 用今日日历，仅驱动挂钟到不同时段，断言各自明确提示
+        today = datetime.now(SHANGHAI).strftime("%Y-%m-%d")
+        data = FakeData(days=[today])
+        trader = LiveTrader(self.account, self.cfg, data=data)
+        cases = {"08:00:00": "尚未开盘", "12:00:00": "午间休市", "15:30:00": "已收盘"}
+        for clock, expect in cases.items():
+            with patch("dragon_quant.live_trade.trader.datetime") as dt, \
+                 patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[]):
+                dt.now.return_value = datetime.strptime(f"{today} {clock}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=SHANGHAI)
+                dt.strptime = datetime.strptime
+                with self.assertRaisesRegex(ValueError, expect):
+                    trader.buy(today)
+
 
 if __name__ == "__main__":
     unittest.main()

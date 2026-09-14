@@ -2,7 +2,7 @@
 import io
 import json
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from unittest.mock import patch
 
 from dragon_quant._version import __version__
@@ -149,6 +149,27 @@ class TestCliSourceArgs(unittest.TestCase):
              patch("dragon_quant.review_account.run_review_account") as run:
             cli.main()
         self.assertEqual(run.call_args.kwargs["strategy_params"], {"max_position_pct": 25})
+
+    def test_buy_session_error_prints_message_and_exits(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "buy"]), \
+             patch("dragon_quant.live_trade.run_buy", side_effect=ValueError("当前午间休市（11:30–13:00），请 13:00 后执行")), \
+             redirect_stderr(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("午间休市", buf.getvalue())
+        self.assertNotIn("Traceback", buf.getvalue())
+
+    def test_sell_session_error_prints_message_and_exits(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "sell"]), \
+             patch("dragon_quant.live_trade.run_sell", side_effect=ValueError("当前已收盘")), \
+             redirect_stderr(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("已收盘", buf.getvalue())
 
     def test_scan_history_uses_v2_source(self):
         scan = {

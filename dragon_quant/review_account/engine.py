@@ -96,8 +96,8 @@ class TradingEngine:
                     if detail["passed"]:
                         sig = evaluate_buy(cand, row, cfg, row["prev_row"], row["hist_rows"], row["intraday_bars"])
                         signals.append((sig, cand))
-                signals.sort(key=lambda x: (-x[0]["priority"], x[1].get("rank") or 999999,
-                                           -(x[1].get("composite_score") or 0), x[1]["code"]))
+                # 择优：买点得分越高越优先，同分看五维综合分，再按代码稳定排序。
+                signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))
                 if signals:
                     sig, cand = signals[0]
                     state.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))

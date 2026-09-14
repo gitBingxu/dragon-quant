@@ -160,7 +160,7 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 8. **provider 基类新方法用默认 `NotImplementedError`**（非 `@abstractmethod`），否则 `create_providers()` 实例化全部 4 个 provider 时崩。
 9. **账户严格 T+1 + 保守成交**：当日买入不可卖，但跟踪买入后峰值；完成K产生信号，后续事件成交，同K内顺序不明时不能倒推保护。日K不可替代缺失的盘中数据。
 10. **账户策略单一真相**：买卖逻辑只在 `review_account/strategy.py`；`live_trade` 100% 复用同一套 `StrategyConfig`/`evaluate_buy`/`evaluate_sell`，不得在 live 层另写决策。改策略须同步 `STRATEGY.md` + `tests/test_review_account.py`。
-11. **候选池 = 近 N 日并集**：`candidate_lookback_days`（默认 3）取**严格上一交易日**起的 `dragons_v2` 真龙池并集，按 `code` 去重保留 rank 更优者；近 N 日无记录当日空仓，不回退更早数据。
+11. **候选池 = 近 N 日全部真龙并集**：`candidate_lookback_days`（默认 3）取严格上一交易日起 `dragons_v2` **全部真龙**（`get_dragons_by_date(top_n=None)`），共享层过滤 `is_true_dragon=False`/综合分<50，按 `code` 去重保留综合分更高者，不再截断前 N 只；近 N 日无记录当日空仓，不回退更早数据。择优在 engine 按**买点得分 → 五维综合分 → 代码**（不看 rank）。突破前高买点在首根5分钟K确认且需换手≥`turn_strong_bar_turnover_min`。
 12. **分时协议一致**：开盘只判断开盘买点；分歧买点等完整窗口；14:55尾盘判断；15:00只更新估值与峰值。实时需重复调用取得信号后的报价，错过时点不补记过去成交。
 13. **Web UI 运行期零 Node**：`web_ui/dist` 由 Vite 构建后**入库**，运行仅靠 Python stdlib `HTTPServer` 托管；改前端须 `npm run build` 刷 dist。server 单线程，`POST /api/account/runs` 同步跑完整回测会阻塞其它请求。
 14. **删除账户回测记录显式删子表**：`delete_review_account_run`（db.py:1513）逐表 `DELETE` snapshots/trades/positions/events 后再删 run，不依赖 `PRAGMA foreign_keys` 级联（裸连接也彻底清理）。

@@ -48,8 +48,6 @@ class LiveTrader:
         if day < today and clock and raw["last_event"] > at(day, clock):
             raise ValueError("不能回放到已处理时点之前")
         candidates = collect_candidates(calendar, day, self.cfg, db.get_dragons_by_date) if command == "buy" else []
-        candidates = [c for c in candidates if c.get("is_true_dragon") is not False
-                      and (c.get("composite_score") or 0) >= self.cfg.min_score]
         codes = {c["code"] for c in candidates} | {p["code"] for p in raw["positions"]}
         if day < today:
             if not clock:
@@ -72,7 +70,11 @@ class LiveTrader:
             ts = int(now.timestamp() * 1000)
             time = now.strftime("%H:%M:%S")
             if not ("09:30:00" <= time < "11:30:01" or "13:00:00" <= time < "15:06:00"):
-                raise ValueError("当前不在可执行交易时段，不能补记过去价格")
+                if time < "09:30:00":
+                    raise ValueError("当前尚未开盘（09:30 开始），请开盘后执行")
+                if "11:30:01" <= time < "13:00:00":
+                    raise ValueError("当前午间休市（11:30–13:00），请 13:00 后执行")
+                raise ValueError("当前已收盘，请在交易时段执行，或用 --date/--at 回放历史")
             completed = [t for t in bar_times(day) if t <= ts]
             phase = ("close" if time >= "15:00:00" else "open" if time < "09:31:00"
                      else "late" if time >= "14:55:00" else "bar")

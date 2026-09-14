@@ -28,8 +28,6 @@ class AccountSimulator:
             raise DataCoverageError("回测区间没有完整交易日")
         for day in days:
             candidates = collect_candidates(self._calendar, day, self.cfg, db.get_dragons_by_date)
-            candidates = [c for c in candidates if c.get("is_true_dragon") is not False
-                          and (c.get("composite_score") or 0) >= self.cfg.min_score]
             codes = {c["code"] for c in candidates} | {p.code for p in self.state.positions}
             day_trades = []
             details = {}

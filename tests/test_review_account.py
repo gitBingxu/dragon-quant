@@ -24,8 +24,8 @@ def history(day=DAY, price=10):
                  price, 0, 0, 12, 1_000_000_000) for d in days]
 
 
-def bars(day=DAY, price=10):
-    return [KBar(t, 10000, price, price + .05, price - .05, price, 0, 0, 0, 100000)
+def bars(day=DAY, price=10, turnover=1.0):
+    return [KBar(t, 10000, price, price + .05, price - .05, price, 0, 0, turnover, 100000)
             for t in bar_times(day)]
 
 
@@ -77,11 +77,18 @@ class TestStrategy(unittest.TestCase):
         self.assertIsNone(evaluate_buy(CAND, r, StrategyConfig(ma5_min_distance_pct=-1), r["prev_row"]))
         self.assertIsNone(evaluate_buy(CAND, row(), StrategyConfig(require_rising_ma5=True), row()["prev_row"]))
 
-    def test_turn_strong_and_open_gap_limits(self):
-        r = row(price=10.4)
-        self.assertEqual(evaluate_buy(CAND, r, StrategyConfig(), r["prev_row"])["code"], "buy_open_turn_strong")
-        r = row(price=10.8)
-        self.assertIsNone(evaluate_buy(CAND, r, StrategyConfig(), r["prev_row"]))
+    def test_turn_strong_needs_first_bar_volume(self):
+        cfg = StrategyConfig()
+        # 高开突破前高发生在首根5分钟K(phase=bar, 1根)；带量则触发，无量则不触发
+        strong = bars(price=10.4, turnover=0.6)[:1]
+        weak = bars(price=10.4, turnover=0.3)[:1]
+        r_strong = row(phase="bar", price=10.4, timestamp=at(DAY, "09:35"), known=strong)
+        r_weak = row(phase="bar", price=10.4, timestamp=at(DAY, "09:35"), known=weak)
+        self.assertEqual(evaluate_buy(CAND, r_strong, cfg, r_strong["prev_row"], None, strong)["code"],
+                         "buy_open_turn_strong")
+        self.assertIsNone(evaluate_buy(CAND, r_weak, cfg, r_weak["prev_row"], None, weak))
+        # 开盘事件(phase=open)不再直接给突破买点
+        self.assertIsNone(evaluate_buy(CAND, row(price=10.4), cfg, row(price=10.4)["prev_row"]))
 
     def test_no_open_signal_after_open(self):
         r = row(phase="bar")
@@ -146,6 +153,16 @@ class TestStrategy(unittest.TestCase):
 
 
 class TestEngine(unittest.TestCase):
+    def test_buy_selection_prefers_priority_then_composite(self):
+        # 同为开盘MA5承接(priority300)时，综合分更高者优先，不再看rank
+        cfg = StrategyConfig()
+        state = AccountState(100000)
+        low = {**CAND, "code": "600001", "composite_score": 60, "rank": 1}
+        high = {**CAND, "code": "600002", "composite_score": 95, "rank": 4}
+        rows = {"600001": row(), "600002": row()}
+        result = TradingEngine(cfg, state).step(MarketEvent(at(DAY, "09:30"), "open", rows, [low, high]))
+        self.assertEqual(state.pending[0]["stock_code"], "600002")
+
     def test_signal_then_fill_and_duplicate(self):
         state = AccountState(100000)
         engine = TradingEngine(StrategyConfig(), state)
@@ -218,13 +235,27 @@ class TestMarketAndSimulator(unittest.TestCase):
         collect_candidates(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", DAY], DAY, StrategyConfig(), loader)
         self.assertEqual([c.args[0] for c in loader.call_args_list], ["2026-09-02", "2026-09-03", "2026-09-04"])
 
-    def test_merge_ranking_top_five_and_best_record(self):
-        candidates = [{**CAND, "code": str(i), "rank": i} for i in range(1, 6)]
+    def test_candidate_pool_is_all_true_dragons_filtered_and_score_sorted(self):
+        # 前三日全部真龙并集，共享层过滤否决/低分，按综合分降序，不再截断前5
+        pool = [{**CAND, "code": "A", "composite_score": 60, "rank": 3},
+                {**CAND, "code": "B", "composite_score": 90, "rank": 2},
+                {**CAND, "code": "C", "composite_score": 49},        # 低于门槛剔除
+                {**CAND, "code": "D", "composite_score": 70, "is_true_dragon": False},  # 否决剔除
+                {**CAND, "code": "E", "composite_score": 55, "rank": 1}]
+        got = collect_candidates(["2026-09-04"], DAY, StrategyConfig(), lambda day, **kw: pool)
+        self.assertEqual([c["code"] for c in got], ["B", "A", "E"])
+        # loader 以 top_n=None 取全部真龙
+        cap = MagicMock(return_value=[])
+        collect_candidates(["2026-09-04"], DAY, StrategyConfig(), cap)
+        self.assertIsNone(cap.call_args.kwargs["top_n"])
+
+    def test_merge_dedup_keeps_higher_score(self):
         def loader(day, **kw):
-            return candidates if day == "2026-09-03" else [{**CAND, "code": "6", "rank": 1}]
-        selected = collect_candidates(["2026-09-03", "2026-09-04"], DAY, StrategyConfig(), loader)
-        self.assertEqual(len(selected), 5)
-        self.assertNotIn("5", [c["code"] for c in selected])
+            return ([{**CAND, "code": "X", "composite_score": 60}] if day == "2026-09-03"
+                    else [{**CAND, "code": "X", "composite_score": 88}])
+        got = collect_candidates(["2026-09-03", "2026-09-04"], DAY, StrategyConfig(), loader)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["composite_score"], 88)
 
     def test_validate_full_window_and_no_lunch_gap(self):
         self.assertEqual(len(validate_bars(bars(), DAY)), 48)

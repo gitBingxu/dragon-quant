@@ -11,6 +11,11 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
         return None
     phase = row["phase"]
     if phase == "bar":
+        # 突破前高需首根5分钟K带量确认；否则交给分歧买龙。
+        if len(intraday_bars or []) == 1:
+            strong = _turn_strong_signal(candidate, row, cfg, prev_row, intraday_bars[0])
+            if strong:
+                return strong
         return evaluate_divergence_buy(candidate, row, cfg, hist_rows, intraday_bars, prev_row)
     if phase != "open" or not prev_row:
         return None
@@ -26,11 +31,38 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
         return None
     if cfg.ma5_min_distance_pct <= distance <= 3 and -3 < gap <= cfg.max_open_gap:
         return _buy(candidate, row, "buy_open_ma5_pullback", "开盘贴近上日MA5，回踩承接", 300)
+    return None
+
+
+def _turn_strong_signal(candidate: dict, row: dict, cfg: StrategyConfig,
+                        prev_row: Optional[dict], first_bar) -> Optional[dict]:
+    """高开突破前高，且首根5分钟K带量（换手≥turn_strong_bar_turnover_min）。
+
+    开盘/缺口/前高/上日换手区间等沿用原开盘弱转强门槛，新增首根5分钟K换手确认：
+    只有真实带量才认可突破有效，避免无量假突破。缺分时（日K兜底）时不触发。
+    """
+    if not prev_row:
+        return None
+    opening, ma5 = row["open"], prev_row.get("ma5")
+    gap = row.get("open_gap_pct")
+    amount, turnover = prev_row.get("amount") or 0, prev_row.get("turnover") or 0
+    if not ma5 or gap is None or amount < cfg.min_amount or turnover < cfg.min_turnover:
+        return None
+    if opening >= row["limit_up"] * .999 or opening <= row["limit_down"] * 1.001:
+        return None
+    distance = (opening / ma5 - 1) * 100
+    if cfg.require_rising_ma5 and ma5 <= (row.get("previous_ma5") or ma5):
+        return None
+    bar_turnover = getattr(first_bar, "turnover", 0) or 0
     if (opening > prev_row["high"] and 0 <= gap <= min(5.5, cfg.max_open_gap)
             and distance <= cfg.max_close_to_ma5
             and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
-            and amount >= 500_000_000):
-        return _buy(candidate, row, "buy_open_turn_strong", "开盘突破上日高点，弱转强", 200)
+            and amount >= 500_000_000
+            and bar_turnover >= cfg.turn_strong_bar_turnover_min):
+        result = _buy(candidate, row, "buy_open_turn_strong",
+                      f"开盘突破上日高点，首根5分钟K带量{bar_turnover:.2f}%，弱转强", 200)
+        result["signal"]["first_bar_turnover"] = bar_turnover
+        return result
     return None
 
 

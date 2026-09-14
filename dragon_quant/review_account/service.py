@@ -15,13 +15,13 @@ def run_review_account(date_from: str,
                        source: str = "v2",
                        strategy_name: str = "dragon_pullback_daily",
                        verbose: bool = True,
-                       display_name: Optional[str] = None) -> dict:
+                       display_name: Optional[str] = None,
+                       strategy_params: Optional[dict] = None) -> dict:
     """运行账户级交易模拟并持久化结果。"""
-    cfg = StrategyConfig(
-        source=source,
-        strategy_name=strategy_name,
-        initial_cash=initial_cash,
-    )
+    if strategy_params is not None and not isinstance(strategy_params, dict):
+        raise ValueError("strategy_params 必须是 JSON 对象")
+    cfg = StrategyConfig.from_dict({**(strategy_params or {}), "source": source,
+                                    "strategy_name": strategy_name, "initial_cash": initial_cash})
     sim = AccountSimulator(cfg)
     result = sim.run(date_from, date_to)
 

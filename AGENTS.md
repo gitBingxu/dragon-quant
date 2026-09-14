@@ -10,7 +10,7 @@
 
 系统当前使用**五维「识别真龙」评分体系**，由 `scan` 命令触发：
 
-- **五维「识别真龙」**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，**门槛+加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。详见《评分器Refactor.md》。
+- **五维「识别真龙」**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，**门槛+加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。详见 [评分规范](dragon_quant/scorers/评分器Refactor.md)。
 
 > 为兼容历史数据，SQLite 物理表继续沿用 `*_v2`（如 `dragons_v2` / `scans_v2`），`scan_id` 继续使用 `v2_YYYYMMDD_topN`。`scan_v2` 命令保留为隐藏兼容别名，行为等同 `scan`；旧 `*_v1` 表不再由主流程写入，仅可通过显式 `--source v1` 查询历史记录。
 
@@ -114,7 +114,7 @@ dragon_quant/
 │   └── db.py                    # SQLite（主流程读写 *_v2，兼容查询 *_v1）
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
-├── review_account/              # 账户级模拟交易（回测；strategy/simulator/models/indicators/service）
+├── review_account/              # 共享策略/事件引擎/成交/数据/评估（strategy/engine/execution/data/market/evaluation）
 ├── live_trade/                  # 实盘辅助交易（buy/sell/account；复用 review_account 策略）
 │   ├── row_builder.py           # 实时 Quote + 历史日K → 策略消费的 row
 │   ├── trader.py                # LiveTrader.buy/sell（纸上账户）
@@ -136,7 +136,7 @@ dragon_quant/
 | **C** 连板+排序 | 雪球日K 算连板天数，写 `Candidate.fived_pct`，按(连板,概念数)降序，候选池全部评分 |
 | **D** 并发加载 | 板块历史10日5分K + 板块当日1分K + 大盘1分K + 全候选1分K + 腾讯批量行情 |
 | **E** 打分 | `_score_one` 调 `scorers.aggregator.evaluate()`，五维门槛+加权 → DragonVerdict |
-| **F** 输出+持久化 | 排序 + 五维报告 + SQLite `*_v2` + 5日去重 |
+| **F** 输出+持久化 | 所有候选保留诊断分与明细，仅通过者排名；Top N 真龙报告/入库 + 5日去重，保留原始排名 |
 
 总耗时约 40-80 秒（取决于网络、并发数、v2 拉取量更大）。
 
@@ -211,6 +211,7 @@ dragon_quant/
 | `live_account` | 实盘辅助纸上账户 | buy/sell 命令的账户（默认单账户 `default`），存初始资金、可用现金、策略参数 |
 | `live_positions` | 实盘辅助持仓 | 每笔持仓含成本、最高浮盈/价、半仓标记、平仓退出字段（open/closed） |
 | `live_trades` | 实盘辅助交割单 | 每笔 buy/sell 含 `command` / `reason_code` / `reason_text` / `signal_json` |
+| `live_engine_state` | 共享引擎进度 | revision + state_json 保存待执行信号、完整账户状态与幂等进度，与交易同事务提交 |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -238,7 +239,17 @@ python -m dragon_quant review-account --from 20260501 --to 20260601
 python -m dragon_quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
 python -m dragon_quant review-account --ui-only --source v2
 ```
-`review-account` 不替代现有 `review`，而是按真实账户逐交易日模拟：先根据止盈止损处理持仓，再从**近 `candidate_lookback_days`（默认 3）个交易日**的 `dragons_v2` 真龙池并集（按 `code` 去重、保留 rank 更优者）择优买入，同等信号下优先选择 `rank` 更高、综合分更高的股票；候选必须满足真龙标记与综合分门槛（默认 50）。如果近 3 日都没有龙头记录，则当日不开仓，不再回退使用更早的有记录日期。账户允许多持仓，每次开仓使用可用现金买入，卖出当日释放的现金不再买入，次日起再按策略继续开仓。买入信号按优先级从高到低为：分歧买龙（400）> 开盘贴近 MA5 承接（300）> 开盘突破前高弱转强（200）。分歧买龙针对「连续缩量一字板 → 第一次断板 → 有承接才买」：用截至上日日 K 判定连续一字涨停（`divergence_min_boards` 默认 2 板）且期间缩量，当日开盘价低于「涨停价 × `divergence_break_open_ratio`（默认 0.998）」视为断板，再用断板日开盘后 `divergence_confirm_bars`（默认 6 根=30 分钟）5 分钟 K 确认承接——窗口内最低不破昨收且收盘企稳，或回封涨停即买入，5 分钟 K 缺失则跳过；分歧买点**不套用成交额/换手率/非一字板过滤**，改用连板+缩量+盘中承接把关，成交价取承接窗口末根收盘价（回封则取涨停价）。开盘两类买点仍要求成交额（默认 2 亿）、换手率门槛与非一字板，按当日开盘价成交。卖出信号保留 T+1 约束（买入当日不可卖出，模拟器对 `entry_date==day` 跳过卖出，首个可卖日为 `hold_days==1`）：硬止损优先，买入后首个可卖日（`hold_days<=1`）用 `first_day_stop_loss_pct`（默认 -3.5%）、持有第 2 日起用 `stop_loss_pct`（默认 -5%），触发 `first_day_stop_loss` / `hard_stop_loss`；峰值浮盈（用上一日 `previous_highest_return` 避免未来函数）达到 `trailing_activate_pct`（默认 8%）后启用移动止盈 `trailing_take_profit`，收盘自 `highest_price` 回撤 `trailing_drawdown_pct`（默认 3.5%）或跌破 MA5 则离场；最高浮盈达到 `breakeven_activate_pct`（默认 6%）后，只有在已有浮盈记录或 5 分钟 K 能确认先浮盈后回落时，才按覆盖买入费、卖出滑点及卖出费用的完整成本线保护性卖出（移动止盈层级高于保本，峰值∈[6%,8%) 仍走保本）；开盘高开 7% 以上且 5 分钟内未涨停清仓，开盘高开 5% 以上且 30 分钟内未涨停清仓（历史 5 分钟线缺失时跳过窗口规则）；买入次日收盘涨停卖出半仓，若同时收盘转弱则清仓；弱势清仓加容忍带 `weak_close_tolerance_pct`（默认 1%，`_weak_close_break`）：收盘小幅低于开盘但仍站上 MA5/昨收视为洗盘、继续持有，否则清仓（作用于 `next_day_close_below_open` 与 `close_below_open_stop`）；常规持仓收盘低于日内均线（当前用 MA5 近似）止损，成交量较上日增加 30% 且未涨停则清仓，涨停则继续持有。不再按收盘高于 MA5 止盈，也不按最长持有天数强制卖出。回测仅纳入已收盘交易日，区间末未平仓持仓按最后可得收盘价估值。完整策略见 `dragon_quant/review_account/STRATEGY.md`。UI 独立页面为 `/account`，展示账户持仓、交割单、权益和收益率曲线，并提供“生成回测记录”入口，可在 Modal 中填写记录名称、日期范围和初始资金后直接生成账户回测批次。批次下拉框右侧提供删除按钮（弹窗二次确认），调用 `DELETE /api/account/runs?run_id=` 删除该批次并级联清理其快照/交割单/持仓/时间线（`db.delete_review_account_run` 显式删除子表，不依赖 `PRAGMA foreign_keys`）；首次打开且无任何记录时展示引导空态并给出“生成回测记录”按钮。
+`review-account` 不替代 `review`。统一实现位于 `review_account/`：`market.py` 负责候选与时间/指标切片，`data.py` 校验日K和完整5分钟K，`strategy.py` 产生信号，`engine.py` 顺序推进账户，`execution.py` 计算撮合、仓位和费用。`simulator.py` 与 `live_trade/trader.py` 必须调用同一 `TradingEngine.step`，不得复制买卖/成交规则。
+
+- 候选取之前3个真实交易日的**全部真龙**并集（`get_dragons_by_date(top_n=None)`，共享层过滤否决/低于50分），按 code 去重保留综合分更高者；不补更早有记录日期，不再截断前N只。回测额外加载区间前交易日，首日可开仓。
+- Asia/Shanghai 时序：开盘MA5承接仅用上日指标和量能；突破前高改为**首根5分钟K完成后确认**，要求首根5分钟K换手≥`turn_strong_bar_turnover_min`（默认0.5%）带量，日K兜底日不触发；分歧买龙要求连续缩量一字板后完整6根5分钟K未破昨收且企稳；不允许用未来信号倒选。
+- 择优：**买点得分(priority)降序 → 五维综合分降序 → 代码**，不再参考真龙 rank。
+- 信号待下一可执行事件成交，实时需更晚的新鲜报价；封死涨跌停不假定成交，跳空不能补填止损或成本线。T+1不卖当日仓，但跟踪买入后峰值；同一根K的高点不能反向激活该根K内的保护。
+- 卖出顺序：首个可卖日-3.5%/以后-5%止损 → 已有峰值8%后回撤3.5%移动止盈 → 已有峰值6%后完整成本保护 → 高开7%/5%的5/30分钟窗口 → 14:55弱势/MA5/次日涨停半仓/放量。15:00只估值与更新峰值，不以最终收盘价补成交。
+- 当天卖出后不买入；不因下午卖出而取消早上交易。默认每日最多买一次，仓位基线仍使用可用现金；共享配置可开启单票25%/风险1%、MA5距离/趋势、ATR移动止盈实验，未验证参数不自动推广。
+- `--config` JSON 原样传给共享 StrategyConfig；滑点0.2%、佣金0.03%、卖出印花税0.05%、每笔最低佣金5元。`evaluation.compare_strategies` 按60/20/20时间划分、最少交易数与双倍滑点验证，不自动换默认参数。
+- 数据分级：当日所有相关个股都有完整48根5分钟K → 严格盘中撮合；任一缺失 → 整日**日K兜底**（开盘价买、当日OHLC判卖，分时相关规则自然跳过），因雪球5分钟仅约14天，多月回测常见。日K本身缺失/预热不足/无效OHLC仍报 DataCoverageError，不持久化部分结果。兜底成交价保守近似，结果标 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。行情按日期/周期/不复权口径隔离缓存；SH000001用于交易日历，个股000001仍是平安银行。
+- `/account` 生成/删除和历史批次查询保持不变；API可传 `strategy_params`，快照增量补 `positions_json` 存全部持仓（查询返回 `positions`），旧数据仍可读取；已平仓表保持原语义。完整规则见 `review_account/STRATEGY.md`。
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
@@ -246,22 +257,31 @@ python -m dragon_quant review-account --ui-only --source v2
 ### 实盘辅助交易（buy / sell / account）
 ```bash
 python -m dragon_quant account init --capital 100000
-python -m dragon_quant buy --date 20260904 --capital 100000
-python -m dragon_quant sell --date 20260905
+python -m dragon_quant buy --date 20260907 --at 10:00 --account replay
+python -m dragon_quant sell
 python -m dragon_quant account
 ```
-`buy` / `sell` 把 `review_account` 操盘策略用于每日实盘辅助决策，**策略逻辑 100% 复用**（同一套 `StrategyConfig` / `evaluate_buy` / `evaluate_sell`）。新增模块 `dragon_quant/live_trade/`：`row_builder.py`（用腾讯实时 `Quote` + 雪球历史日 K 现场拼出策略消费的 `row`：buy 用今日开盘价拼开盘决策 row，sell 用实时快照合成今日 KBar 追加历史后 `enrich_daily_klines` 取末行）、`trader.py`（`LiveTrader.buy/sell`）、`service.py`（`run_buy/run_sell/run_account_status/init_account`）。持久化为默认单账户三表 `live_account` / `live_positions` / `live_trades`。
-- `buy`（9:25）：近 `candidate_lookback_days`（默认 3）个有龙头记录交易日票池并集去重，用实时开盘价判定**开盘买点**（贴近 MA5 / 突破前高弱转强），择优后默认开盘价整手买入并记账。**9:25 无当日 5 分钟 K，不评估分歧买龙**（待 easy-tdx）。
-- `sell`（14:55）：对已持仓按 `review_account` 卖出优先级判定并记账；**严格 T+1**：`entry_date == 交易日` 的持仓（当日买入）跳过卖出。
-- 交易日期默认 Asia/Shanghai 当日，可 `--date YYYYMMDD` 覆盖（补录/回放）。成交价/半仓复用 review_account 同款逻辑。
+`buy/sell` 只适配行情与持久化，完全使用 `review_account` 事件引擎。`buy` 每次先处理卖出再允许买入，`sell` 只允许卖出。需在09:30、随后各5分钟边界、14:55主动重复执行，并在信号后取得下一新鲜报价撮合；不是后台自动交易，迟到不得回填过去价格。买入待执行超过5分钟失效，报价时间必须晚于决策且新鲜，分钟缺失不执行本轮状态更新。15:00–15:05可调用更新收盘峰值和估值，不成交。
+- `--account NAME` 新建独立纸上账户；`--config params.json` 用于新账户参数，已有账户读取保存的参数并拒绝静默改变。`account --account NAME` 查看。
+- 历史必须同时传 `--date YYYYMMDD --at HH:MM`，重放历史事件，绝不使用当前腾讯报价；已有账户不能回放到已处理时点之前。
+- `live_engine_state` 增量表保存 revision/完整账户状态/待执行信号/处理进度；与 `live_account`、`live_positions`、`live_trades` 同事务提交，冲突拒绝并重试，重复事件幂等。旧账户首次使用从原持仓及交割单导入状态，不重置账户。
+- 同输入/参数/账户状态下信号和账户变化一致，实时延迟与成交条件仍可能导致结果不同，不保证收益。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：
 ```python
 def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 ```
-- `scorers/aggregator.evaluate()` 统一调度五维 + 门槛聚合，产出 `DragonVerdict`。
-- cache 键：`kline:1min:{code}` / `kline:1min:000001`（大盘）/ `kline:1min:sector:{s}` / `kline:5min:sector:{s}`（10日历史）/ `quotes:batch`（含盘口）/ `sector:components:{s}`。
+- `scorers/aggregator.evaluate()` 统一调度五维 + 门槛聚合，产出 `DragonVerdict`；四大特征异常必须否决，资金承接异常降级 50 分且不否决。
+- 所有候选保留诊断综合分，但 `rank_verdicts()` 只给通过者赋真龙排名（同分按代码排序），否决票 `rank=None`；`raw_output.ranking` 与 `scan_stocks_v2` 保存全部诊断结果，`dragons_v2` 和最终报告只收 Top N 真龙。无真龙仍保存扫描，不用否决票补位；五日去重后不重排 rank。
+- `rebuild_dragons_for_date` 仅使用非明确否决、rank 非空且不超原扫描 Top N 的贡献；不改旧表名与 ID，不自动重算历史记录。盘后重新取数评分需 `scan --force --no-cache`。
+- cache 键：`kline:1min:{code}` / `kline:1min:SH000001`（上证指数）/ `kline:1min:sector:{s}` / `kline:5min:sector:{s}`（10日历史）/ `quotes:batch`（`list[Quote]`，含盘口）/ `sector:components:{s}`。裸代码 `000001` 是平安银行，不得用于指数请求或缓存。
+- 腾讯行情按代码排序、每批最多 200 只获取并合并，不截断成分股总数；封板池只用同板块主板涨停候选，记录有效样本与缺失情况。
+- 稳定封板按最后开板后持续封至最后有效分钟的起点排名，同分钟并列；脉冲使用局部峰抑制，每次匹配只能判带动或跟风之一，同步启动不判方向；相关性 bonus 仅看首次触板前。分时缺失或全程平线时带动子项 40 分降级。
+- 抗跌反弹必须确认基准及个股实际回升，个股横盘不获反弹奖励；分钟时序窗口不跨午休、隔夜或双方缺点区间。
+- 封单强度需确认现价涨停且买一价在涨停价附近；未涨停买一量不能当封单，从未触板的完整分时稳定性为 0。价格容差统一为涨停价的 0.1%。
+- 承接对手盘是扫描日领跌 Top20 行业；六根五分钟 K 必须同连续交易时段，允许累计缓跌达标，不设单根跌超 0.5% 隐藏门槛；每个出逃板块独立通过不晚于拉升且间隔不超十分钟的检查，至少两个有效板块。
+- 承接单事件强度/广度/持续性为 60%/20%/20%，拉升满分参考 3%、出逃规模参考 10；重叠窗口（含链式重叠）同交易时段内合并，保留最高分代表，同分取较新窗口，取消次数奖励。按目标 K 线日期计算年龄，事件分 `50+(原始分-50)*2**(-年龄/3)` 向中性衰减，取最强的最多三个独立事件均值。details 保存原始窗口数、独立事件数、所选事件及原始分/年龄/衰减系数/调整分；不保留无效 multi_event_bonus 字段，不重算历史数据。
 - 阈值/权重集中在 `scorers/registry.py`，便于回测调参。
 
 ### 必须遵守的约束

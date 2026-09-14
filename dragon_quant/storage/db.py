@@ -222,6 +222,12 @@ CREATE TABLE IF NOT EXISTS live_trades (
 );
 
 CREATE INDEX IF NOT EXISTS idx_live_trades_account ON live_trades(account_id, trade_date, id);
+
+CREATE TABLE IF NOT EXISTS live_engine_state (
+    account_id INTEGER PRIMARY KEY REFERENCES live_account(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0,
+    state_json TEXT NOT NULL
+);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
@@ -259,6 +265,9 @@ def _ensure_review_account_columns(conn: sqlite3.Connection):
     run_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_runs)")}
     if "display_name" not in run_cols:
         conn.execute("ALTER TABLE review_account_runs ADD COLUMN display_name TEXT")
+    snapshot_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_snapshots)")}
+    if "positions_json" not in snapshot_cols:
+        conn.execute("ALTER TABLE review_account_snapshots ADD COLUMN positions_json TEXT DEFAULT '[]'")
 
     cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_trades)")}
     if "realized_pnl" not in cols:
@@ -455,7 +464,7 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
                     scan_id,
                     s.get("code", ""),
                     s.get("name", ""),
-                    i + 1,
+                    s.get("rank", i + 1),
                     s.get("composite_score", 0),
                     s.get("board_count", 0),
                     json.dumps(concepts, ensure_ascii=False),
@@ -627,7 +636,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
             "  ss.code, ss.name, ss.rank, ss.composite_score, ss.board_count, "
             "  ss.concepts_json, ss.report_text, "
             "  ss.open_px, ss.close_px, ss.high_px, ss.low_px, ss.pct, "
-            "  ss.turnover_rate, ss.amount, ss.market_cap "
+            "  ss.turnover_rate, ss.amount, ss.market_cap, ss.is_true_dragon "
             f"FROM {t['scans']} s "
             f"JOIN {t['scan_stocks']} ss ON ss.scan_id = s.id "
             "WHERE s.scan_date = ?",
@@ -655,6 +664,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
                 "turnover_rate": r[15],
                 "amount": r[16],
                 "market_cap": r[17],
+                "is_true_dragon": bool(r[18]) if r[18] is not None else None,
                 "source": source,
             })
         return result
@@ -798,7 +808,9 @@ def rebuild_dragons_for_date(
     from dragon_quant.utils.trading import trade_days_between
 
     source = _normalize_source(source)
-    contribs = list_scan_stock_contributions_by_date(trade_date, source=source)
+    contribs = [c for c in list_scan_stock_contributions_by_date(trade_date, source=source)
+                if c.get("is_true_dragon") is not False and c.get("rank") is not None
+                and c["rank"] <= c["scan_top_n"]]
     if not contribs:
         deleted = delete_pending_dragons_not_in(trade_date, set(), source=source)
         return {"contrib_codes": 0, "upserted": 0, "kept": 0, "deleted": deleted}
@@ -869,6 +881,7 @@ def rebuild_dragons_for_date(
                 "market_cap": b.get("market_cap"),
                 "concepts": b.get("concepts", []),
                 "report_text": b.get("report_text", ""),
+                **({"is_true_dragon": b["is_true_dragon"]} if b.get("is_true_dragon") is not None else {}),
             })
         else:
             meta = get_dragon_meta(trade_date, code, source=source)
@@ -1443,15 +1456,15 @@ def save_review_account_results(run_id: int,
                 "INSERT INTO review_account_snapshots("
                 "run_id, trade_date, cash, market_value, total_equity, daily_return, "
                 "cumulative_return, drawdown, position_code, position_name, position_qty, "
-                "position_cost, position_market_price, position_unrealized_return"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "position_cost, position_market_price, position_unrealized_return, positions_json"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         run_id, s.get("trade_date"), s.get("cash"), s.get("market_value"),
                         s.get("total_equity"), s.get("daily_return"), s.get("cumulative_return"),
                         s.get("drawdown"), s.get("position_code"), s.get("position_name"),
                         s.get("position_qty"), s.get("position_cost"),
-                        s.get("position_market_price"), s.get("position_unrealized_return"),
+                        s.get("position_market_price"), s.get("position_unrealized_return"), s.get("positions_json", "[]"),
                     )
                     for s in snapshots
                 ],
@@ -1598,7 +1611,7 @@ def query_review_account_snapshots(run_id: int) -> list[dict]:
         rows = conn.execute(
             "SELECT trade_date, cash, market_value, total_equity, daily_return, cumulative_return, "
             "drawdown, position_code, position_name, position_qty, position_cost, "
-            "position_market_price, position_unrealized_return "
+            "position_market_price, position_unrealized_return, positions_json "
             "FROM review_account_snapshots WHERE run_id = ? ORDER BY trade_date ASC",
             (run_id,),
         ).fetchall()
@@ -1609,6 +1622,7 @@ def query_review_account_snapshots(run_id: int) -> list[dict]:
                 "drawdown": r[6], "position_code": r[7] or "", "position_name": r[8] or "",
                 "position_qty": r[9] or 0, "position_cost": r[10],
                 "position_market_price": r[11], "position_unrealized_return": r[12],
+                "positions": json.loads(r[13]) if r[13] else [],
             }
             for r in rows
         ]
@@ -1761,6 +1775,84 @@ def get_live_account(name: str = "default") -> Optional[dict]:
         }
     finally:
         conn.close()
+
+
+def load_live_engine_state(account: dict) -> tuple[dict, int]:
+    from dataclasses import fields
+    from dragon_quant.review_account.models import AccountState, Position
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        row = conn.execute("SELECT state_json, revision FROM live_engine_state WHERE account_id = ?",
+                           (account["id"],)).fetchone()
+        if row:
+            return json.loads(row[0]), row[1]
+        names = {f.name for f in fields(Position)}
+        positions = [Position(**{k: v for k, v in p.items() if k in names})
+                     for p in list_live_positions(account["id"])]
+        state = AccountState(account["cash"], positions)
+        trades = list_live_trades(account["id"])
+        if trades:
+            state.trade_date = trades[-1]["trade_date"]
+            state.sold_today = any(t["side"] == "SELL" and t["trade_date"] == state.trade_date for t in trades)
+            state.buys_today = sum(t["side"] == "BUY" and t["trade_date"] == state.trade_date for t in trades)
+        return state.to_dict(), 0
+    finally:
+        conn.close()
+
+
+def save_live_engine_step(account_id: int, revision: int, state: dict, result: dict, command: str):
+    from dataclasses import asdict
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            old = conn.execute("SELECT revision FROM live_engine_state WHERE account_id = ?", (account_id,)).fetchone()
+            if (old[0] if old else 0) != revision:
+                raise ValueError("账户状态已被另一命令更新，请重新执行")
+            existing = {r[0]: r[1] for r in conn.execute(
+                "SELECT code, id FROM live_positions WHERE account_id = ? AND status = 'open'", (account_id,))}
+            for p in state["positions"]:
+                values = (p["qty"], p["cost"], p["highest_return"], p["highest_price"], p["realized_pnl"],
+                          int(p["took_profit_half"]))
+                if p["code"] in existing:
+                    conn.execute("UPDATE live_positions SET qty=?, cost=?, highest_return=?, highest_price=?, "
+                                 "realized_pnl=?, took_profit_half=? WHERE id=?", (*values, existing[p["code"]]))
+                else:
+                    conn.execute("INSERT INTO live_positions(account_id, code, name, qty, entry_date, entry_price, cost, "
+                        "entry_reason_code, entry_reason_text, entry_signal_json, highest_return, highest_price, "
+                        "initial_qty, initial_cost, realized_pnl, took_profit_half, status) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open')", (
+                            account_id, p["code"], p["name"], p["qty"], p["entry_date"], p["entry_price"], p["cost"],
+                            p["entry_reason_code"], p["entry_reason_text"], json.dumps(p["entry_signal"], ensure_ascii=False),
+                            p["highest_return"], p["highest_price"], p["initial_qty"], p["initial_cost"],
+                            p["realized_pnl"], int(p["took_profit_half"])))
+            for p in result["positions"]:
+                conn.execute("UPDATE live_positions SET qty=0, cost=0, status='closed', exit_date=?, exit_price=?, "
+                    "exit_reason_code=?, exit_signal_json=?, realized_return=?, hold_days=?, "
+                    "realized_pnl=initial_cost * ? / 100 WHERE account_id=? AND code=? AND status='open'", (
+                        p.exit_date, p.exit_price, p.exit_reason_code, json.dumps(p.exit_signal, ensure_ascii=False),
+                        p.realized_return, p.hold_days, p.realized_return, account_id, p.code))
+            for trade in result["trades"]:
+                t = asdict(trade)
+                conn.execute("INSERT INTO live_trades(account_id, trade_date, command, code, name, side, price, qty, "
+                    "amount, fee, realized_pnl, cash_after, position_after, reason_code, reason_text, signal_json) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                        account_id, t["trade_date"], command, t["code"], t["name"], t["side"], t["price"], t["qty"],
+                        t["amount"], t["fee"], t["realized_pnl"], t["cash_after"], t["position_after"],
+                        t["reason_code"], t["reason_text"], json.dumps(t["signal"], ensure_ascii=False)))
+            conn.execute("UPDATE live_account SET cash=?, updated_at=datetime('now','localtime') WHERE id=?",
+                         (state["cash"], account_id))
+            conn.execute("INSERT INTO live_engine_state(account_id,revision,state_json) VALUES (?,?,?) "
+                         "ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json",
+                         (account_id, revision + 1, json.dumps(state, ensure_ascii=False)))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def update_live_cash(account_id: int, cash: float):

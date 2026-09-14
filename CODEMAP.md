@@ -8,37 +8,25 @@
 ## 一、执行路径地图
 
 ### scan（五维识别真龙）
+
+以下路径相对 `dragon_quant/`。
+
+```text
+cli.main cli.py:475，隐藏 scan_v2 兼容别名归一化为 scan
+  → _cmd_scan cli.py:58 → orchestrator.scan orchestrator.py:291
+  A 行业 Top5 / Bottom20、黑名单       orchestrator.py:406
+  B 行业最多五页成分股、主板涨停候选    orchestrator.py:450
+  C 日K连板与五日收益 → Candidate      orchestrator.py:532
+  D 全候选/行业分钟线、SH000001、十日5分K orchestrator.py:557
+    腾讯排序分批取数、合并 list[Quote]  orchestrator.py:587
+  E _score_one → aggregator.evaluate    orchestrator.py:196 / scorers/aggregator.py:30
+  F 全候选诊断分 + 通过者真龙 rank      orchestrator.py:648 / scorers/aggregator.py:74
+    全部结果 → scan_stocks_v2/raw_output storage/db.py:431
+    通过者 TopN → 报告 → 五日去重 → dragons_v2 storage/db.py:666
+    无真龙保留明细与原因，不以否决票补位
 ```
-cli.main 分发                                  cli.py:388 / :638
-  ├ _cmd_scan      → orchestrate_scan(..., scorers="v2")  cli.py:57
-  └ _cmd_scan_v2   → _cmd_scan(args) 隐藏兼容别名          cli.py:74
-      → orchestrator.scan(source 固定 "v2")                orchestrator.py:289 / :301
 
-  Phase A 板块排行                              orchestrator.py:403
-    ths.get_sector_ranking(asc=False)          orchestrator.py:408  → 行业涨跌幅榜(field=zdf)
-    _sector_ok 过滤(统计概念前缀+DB黑名单)       orchestrator.py:394
-    top10_up = [:5]                            orchestrator.py:411
-    top10_down = sorted(pct)[:20]              orchestrator.py:412
-
-  Phase B 候选筛选                              orchestrator.py:427
-    ths.get_sector_components(all_pages=True)  orchestrator.py:439 → sector:components:{}
-    每板块当日所有涨停股(pct≥9.9)               orchestrator.py:475
-
-  Phase C 连板+排序                             orchestrator.py:509
-    _compute_consecutive_boards                orchestrator.py:151
-    _compute_5day_return → Candidate.fived_pct orchestrator.py:167 / :520
-    按(连板,概念数)降序，ranking=全候选池        orchestrator.py:523
-
-  Phase D 并发预填(RateLimiter)                 orchestrator.py:534  (cache 键见 §三)
-
-  Phase E 打分（候选池全部个股）                 orchestrator.py:577
-    _score_one → scorers.aggregator.evaluate orchestrator.py:197 / :600
-
-  Phase F 输出+持久化                           orchestrator.py:618
-    ReportBuilder.build_stock_report        orchestrator.py:646
-    scan_id = v2_YYYYMMDD_topN                 orchestrator.py:691
-    db.save_scan / save_scan_logs / save_dragons(source="v2")  orchestrator.py:696 / :717 / :787
-```
+缓存回显入口 `orchestrator.py:228` 同样只展示 Top N 真龙。历史重建 `storage/db.py:783` 过滤明确否决及超过原扫描 Top N 的贡献，保留旧无真龙标记记录的兼容语义。
 
 ### 五维评分聚合（Phase E 内部）
 ```
@@ -48,8 +36,8 @@ scorers.aggregator.evaluate(code, cache, ...)     scorers/aggregator.py
   ├ anti_drop.score    抗跌 15%  scorers/anti_drop.py    大盘+板块双基准
   ├ liquidity.score    流动 20%  scorers/liquidity.py    换手+封板质量(一字不罚)
   └ absorption.score   承接 10%  scorers/absorption.py   跨板块虹吸(回看10日,不否决)
-  门槛: 四大特征任一 < floor → is_true_dragon=False；通过者 composite 加权
-  rank_verdicts 按 composite 降序赋 rank
+  门槛: 四大特征任一低分或异常 → is_true_dragon=False；承接异常中性50不否决
+  所有候选保留 composite 诊断分，rank_verdicts 只给通过者赋 rank
   权重/门槛/阈值常量集中: scorers/registry.py
 ```
 
@@ -58,64 +46,37 @@ scorers.aggregator.evaluate(code, cache, ...)     scorers/aggregator.py
 |------|------|---------|
 | 板块 5分K | 近10日历史，资金承接回看 | `kline:5min:sector:{}` |
 | 板块当日1分K | 领涨行业，带动/抗跌基准 | `kline:1min:sector:{}` |
-| 大盘当日1分K | 上证指数 000001，抗跌基准 | `kline:1min:000001` |
+| 大盘当日1分K | 显式请求 SH000001 上证指数，与平安银行分离 | `kline:1min:SH000001` |
 | 个股当日1分K | 全候选(封板池) | `kline:1min:{}` |
-| 批量行情(含盘口) | 同花顺成分股去重后最多200只 | `quotes:batch` |
+| 批量行情(含盘口) | 成分股去重排序，每批200只，合并全部结果 | `quotes:batch`（list[Quote]） |
 
-### review-account（账户级模拟回测）
+### review-account 与 buy/sell：单一事件引擎
+
+```text
+cli._cmd_review_account → review_account/service.py:11
+  → StrategyConfig.from_dict → AccountSimulator.run（review_account/simulator.py:20）
+  → MarketData.calendar（日历+前置窗口）、collect_candidates（review_account/market.py:33）
+  → historical_events（review_account/data.py）：
+      全员有完整48根5分钟K → _intraday_events(open→fill→bar…→late→fill→close)
+      任一缺失 → _daily_events 日K兜底(open→fill→late→fill，intraday_bars 恒空)
+  → TradingEngine.step（review_account/engine.py:11）
+      待执行卖出/买入撮合 → evaluate_sell / evaluate_buy（strategy.py）→ 新待执行信号
+      execution.py：整手、风险预算、滑点、最低佣金、涨跌停可执行性
+      AccountState：现金、持仓、待执行、处理时间、当日买卖限制、峰值
+  → 每日快照 / 交割单 / 已平仓 / 时间线 → 原 review_account_* 表
+
+cli._cmd_buy / _cmd_sell → live_trade/service.py：读取账户保存的完整配置
+  → LiveTrader._run（live_trade/trader.py）：同一候选池、历史回放或实时行情适配
+  → build_live_row → 同一个 TradingEngine.step
+  → db.save_live_engine_step：revision 校验 + 同事务写现金/持仓/交割单/live_engine_state
 ```
-cli._cmd_review_account            cli.py:283  (--from/--to/--capital/--ui[-only])
-  → review_account.run_review_account   service.py:11
-      cfg = StrategyConfig(...)             service.py:20   (默认/门槛见 models.py:7)
-      sim = AccountSimulator(cfg)           service.py:25
-      result = sim.run(from, to)            service.py:26 → simulator.py:56
 
-  AccountSimulator.run                    simulator.py:56
-    build_trade_calendar(from,to)         simulator.py:57  (utils/trading，真实交易日历)
-    for day in trading_days: _process_day simulator.py:62 → :67
-
-  _process_day(day)                       simulator.py:67
-    ① 先卖：持仓遍历，entry_date>=day 跳过(T+1)  simulator.py:71
-        evaluate_sell(pos,row,hold,cfg,5min)     simulator.py:77 → strategy.py:346
-        命中 → _sell(...)                          simulator.py:85 → :249
-    ② 后买：_can_open_position 门控           simulator.py:97 → :541
-        _try_buy(day)                            simulator.py:98 → :114
-          _previous_candidate_date(day)          simulator.py:115 → :452 (严格上一交易日)
-          _collect_candidates(day)               simulator.py:123 → :466
-            近 lookback_days 池并集去重(rank优先) db.get_dragons_by_date  simulator.py:470 → db.py:1063
-          evaluate_buy(cand,row,cfg,...)         simulator.py:158 → strategy.py:8
-          signals.sort(priority,-rank,score)[0]  simulator.py:175
-    ③ _snapshot(day) + _finalize_events      simulator.py:111 / :112
-
-  持久化(回 service)                        service.py:28 / :42
-    db.create_review_account_run(...)         db.py:1400  → run_id
-    db.save_review_account_results(run_id,...) db.py:1432  (snapshots/trades/positions/events 批量)
-```
-买入优先级(高→低)：分歧买龙 400(`evaluate_divergence_buy` strategy.py:108) > 开盘贴 MA5 承接 300 > 开盘突破前高弱转强 200。
-卖出阶梯(首个命中即返回) strategy.py:346：硬止损(首日紧) → 移动止盈 → 保本(`_break_even_signal_price` strategy.py:562) → 高开未涨停清仓 → 次日涨停半仓/弱转清 → 弱势容忍带 → 破 MA5 → 放量止盈。
-
-### buy / sell / account（实盘辅助，复用 review_account 策略）
-```
-cli._cmd_buy      cli.py:334 → live_trade.run_buy       service.py:41
-cli._cmd_sell     cli.py:341 → live_trade.run_sell      service.py:53
-cli._cmd_account  cli.py:348 → run_account_status/init  service.py:68 / :28
-
-buy(9:25)  LiveTrader.buy                        trader.py:91
-  max_positions/现金门控                          trader.py:96 / :100
-  _collect_candidates(近3日池并集)                trader.py:67 (list_dragon_trade_dates db.py:1037 + get_dragons_by_date db.py:1063)
-  _get_quote 腾讯实时 + _get_klines 雪球日K        trader.py:119 / :49
-  build_buy_row(用今日开盘价拼开盘决策 row)        trader.py:126 → row_builder.py:27
-  evaluate_buy(..., intraday_bars=None)           trader.py:137 → strategy.py:8
-    ⚠ 9:25 无 5分K，显式剔除分歧买龙信号            trader.py:139
-  _execute_buy → add_live_position/update_live_cash/add_live_trade  trader.py:151 (db.py:1781/:1766/:1856)
-
-sell(14:55) LiveTrader.sell                       trader.py:203
-  ⚠ 严格 T+1：entry_date>=trade_date 跳过         trader.py:207
-  build_sell_row(实时快照合成今日 KBar 追加历史后 enrich 取末行)  trader.py:218 → row_builder.py:63
-  evaluate_sell(..., intraday_bars=None)          trader.py:242 → strategy.py:346
-  _execute_sell → update_live_cash/add_live_trade/update_live_position  trader.py:291 (db.py:1766/:1856/:1809)
-```
-策略 100% 复用 review_account：`trader.py:15-20` 直接 import `StrategyConfig`/`evaluate_buy`/`evaluate_sell`/`explain_buy_candidate`；live 层只负责用实时数据拼 `row`（`row_builder.py`）与记账，无独立决策逻辑。默认单账户 `DEFAULT_ACCOUNT="default"`（service.py:10）。
+- `buy` 开启买入并先处理卖出；`sell` 禁止新增买入，不实现另一套卖出规则。
+- `market.build_row` / `build_daily_row` 仅暴露截至事件时间已知数据，开盘量额来自上日；`data.MarketData` 用不复权日K/5分钟K，严格验证48根交易时段及OHLC，缺失则 `try_intraday` 返回 None 触发整日日K兜底（成交价保守近似，`data_quality=daily_fallback`）。
+- 信号不能在同事件成交，历史按下一根K开盘、实时按更晚的新鲜报价；相同参数、事件和账户状态产生相同交易。
+- `review_account/evaluation.py` 提供固定四组参数、60/20/20时间划分、最少交易数/回撤门槛、双倍滑点测试；缺数返回不可验证，不自动推广策略。
+- `--config` 共享参数；已有纸上账户拒绝静默换参数；`--account` 独立账户；历史日期必须 `--at`，不混用当前报价。
+- `review_account_snapshots.positions_json` 保存完整未平仓状态，查询返回 `positions`；已平仓表保持原语义，旧数据增量补列。
 
 ### Web UI /account（账户面板 + 生成/删除记录）
 ```
@@ -159,8 +120,8 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 | 改回测逻辑 | `review.py` | 默认读写 `dragons_v2` pending；写 review 字段 + vpa |
 | 改板块黑名单 | `storage/db.py`(表) + `cli.py`(blacklist 命令) | Phase A `_sector_ok` 消费 |
 | 改账户回测买卖策略 | `review_account/strategy.py`(evaluate_buy/sell) + `review_account/models.py`(StrategyConfig 门槛/默认) | live 层同步生效(100% 复用)；改后同步 `STRATEGY.md` 与 `tests/test_review_account.py` |
-| 改账户模拟推进/建仓 | `review_account/simulator.py` | 用 `build_trade_calendar` 逐真实交易日；候选取严格上一交易日近 `lookback_days` 池并集 |
-| 改实盘辅助 buy/sell 取数 | `live_trade/row_builder.py`(拼 row) + `live_trade/trader.py`(记账) | 决策全部委托 review_account；9:25 无 5分K 故剔除分歧买龙 |
+| 改账户模拟推进/建仓 | `review_account/engine.py` + `execution.py` | simulator只重放事件；市场数据/候选在data.py与market.py |
+| 改实盘辅助 buy/sell 取数 | `live_trade/row_builder.py` + `live_trade/trader.py` | 所有决策/撮合交给同一引擎；严格时间戳与缺失数据检查 |
 | 改账户级表结构 | `storage/db.py` 的 `review_account_*` / `live_*` DDL + `_ensure_schema` 补列 | 子表删除见 `delete_review_account_run`(显式删子表) |
 | 改 /account 面板/接口 | `web_ui/server.py`(路由) + `web_ui/frontend/src/{AccountApp.tsx,api.ts}` | 改前端后 `npm run build` 刷 `web_ui/dist`；server 单线程，POST 生成会阻塞 |
 | 加账户级 API 路由 | `web_ui/server.py` `do_GET/do_POST/do_DELETE` 分发 + `_serve_api_account_*` | 前端 fetch 封装在 `api.ts` |
@@ -171,15 +132,16 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 
 | cache 键 | 写入 (set) | 读取 (get) |
 |----------|-----------|-----------|
-| `sector:components:{}` | orchestrator | orchestrator, scorers/{drive,leadership,liquidity} |
+| `sector:components:{}` | orchestrator | orchestrator, scorers/{drive,liquidity}；leadership 仅用候选池参数 |
 | `kline:day:{}` | orchestrator | orchestrator |
+| `kline:day:{code}:normal:{days}` / `kline:5min:{code}:normal` | review_account/data.py | 共享历史/实时适配器；account namespace，按交易日隔离 |
 | `kline:1min:{}` | orchestrator | scorers/{drive,anti_drop,liquidity} |
-| `kline:1min:000001` | orchestrator | scorers/anti_drop |
+| `kline:1min:SH000001` | orchestrator.py:577 | scorers/anti_drop.py:28 |
 | `kline:1min:sector:{}` | orchestrator | scorers/{drive,anti_drop} |
 | `kline:5min:sector:{}` | orchestrator | scorers/absorption |
 | `quotes:batch` | orchestrator | orchestrator, scorers/{drive,liquidity} |
 | `__meta__:candidates` | orchestrator | 日志/调试快照 |
-| `__meta__:sector_codes` | orchestrator | 日志/调试快照 |
+| `__meta__:sector_codes` | orchestrator（领跌 Top20） | absorption.py:26，未显式传入代码时使用 |
 | `__meta__:sector_name_map` | orchestrator | 日志/调试快照 |
 
 > 封单数据不走 cache 键，随 `quotes:batch` 的 `Quote.bid1_volume`(gtimg f[10]) 一起来。
@@ -196,14 +158,24 @@ web_ui/server.py  ReviewHandler（stdlib HTTPServer，单线程，server.py:515�
 6. **板块排行字段铁律**：必须 `field=zdf`（涨跌幅），`tradezdf`(资金流) 无视 order/page；单页 DOM 非严格有序须本地按 pct 排序（ths.py `get_sector_ranking`）。
 7. **v2 表兼容**：新扫描固定写 `scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`，`scan_id` 保持 `v2_YYYYMMDD_topN`；旧 `*_v1` 表仅显式查询。
 8. **provider 基类新方法用默认 `NotImplementedError`**（非 `@abstractmethod`），否则 `create_providers()` 实例化全部 4 个 provider 时崩。
-9. **账户回测严格 T+1 + 保守成交**：`entry_date>=day` 当日买入不可卖（simulator.py:71 / live trader.py:207）；日 K 同时满足止损与止盈时，止损优先（`evaluate_sell` 首查止损 strategy.py:346）。
+9. **账户严格 T+1 + 保守成交**：当日买入不可卖，但跟踪买入后峰值；完成K产生信号，后续事件成交，同K内顺序不明时不能倒推保护。日K不可替代缺失的盘中数据。
 10. **账户策略单一真相**：买卖逻辑只在 `review_account/strategy.py`；`live_trade` 100% 复用同一套 `StrategyConfig`/`evaluate_buy`/`evaluate_sell`，不得在 live 层另写决策。改策略须同步 `STRATEGY.md` + `tests/test_review_account.py`。
-11. **候选池 = 近 N 日并集**：`candidate_lookback_days`（默认 3）取**严格上一交易日**起的 `dragons_v2` 真龙池并集，按 `code` 去重保留 rank 更优者；近 N 日无记录当日空仓，不回退更早数据。
-12. **9:25 无盘中 5分K**：`buy` 传 `intraday_bars=None` 并显式剔除分歧买龙（`buy_divergence_first_break`，trader.py:139）；分歧买点仅在有 5分K 的回测/待接入盘中数据时生效。
+11. **候选池 = 近 N 日全部真龙并集**：`candidate_lookback_days`（默认 3）取严格上一交易日起 `dragons_v2` **全部真龙**（`get_dragons_by_date(top_n=None)`），共享层过滤 `is_true_dragon=False`/综合分<50，按 `code` 去重保留综合分更高者，不再截断前 N 只；近 N 日无记录当日空仓，不回退更早数据。择优在 engine 按**买点得分 → 五维综合分 → 代码**（不看 rank）。突破前高买点在首根5分钟K确认且需换手≥`turn_strong_bar_turnover_min`。
+12. **分时协议一致**：开盘只判断开盘买点；分歧买点等完整窗口；14:55尾盘判断；15:00只更新估值与峰值。实时需重复调用取得信号后的报价，错过时点不补记过去成交。
 13. **Web UI 运行期零 Node**：`web_ui/dist` 由 Vite 构建后**入库**，运行仅靠 Python stdlib `HTTPServer` 托管；改前端须 `npm run build` 刷 dist。server 单线程，`POST /api/account/runs` 同步跑完整回测会阻塞其它请求。
 14. **删除账户回测记录显式删子表**：`delete_review_account_run`（db.py:1513）逐表 `DELETE` snapshots/trades/positions/events 后再删 run，不依赖 `PRAGMA foreign_keys` 级联（裸连接也彻底清理）。
 
 ---
+
+### 评分链路补充约束
+
+- `scorers/base.py:27`：分钟窗口按连续交易时段分割；`scorers/absorption.py:81`：五分钟窗口必须六根连续，不能跨午休、隔夜或缺失点。
+- `scorers/drive.py:79`：封板排名按最后回封段；`scorers/drive.py:113`：带动/跟风事件互斥，同步启动不判方向。
+- `scorers/anti_drop.py:154`：双方实际反弹才奖励，横盘只由稳定性奖励。
+- `scorers/liquidity.py:42`：普通买一量不能当封单；`scorers/absorption.py:89`：每个出逃板块单独满足时序条件。
+- `scorers/absorption.py:42`：重叠窗口合并为独立事件，取消次数奖励，按三交易日半衰期向 50 衰减后取最强三事件均值；强度/广度/持续性为 60%/20%/20%。
+- `scorers/aggregator.py:74`：否决者无真龙 rank；扫描全明细可读，但报告/入选只看通过者 Top N。
+- 缓存不会自动作历史算法迁移；盘后 `scan --force --no-cache` 才重新取数评分，不自动删除或重写旧记录。
 
 ## 五、再生成
 

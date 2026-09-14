@@ -1,711 +1,187 @@
-"""账户级 review 的买入/卖出策略。"""
-
 from typing import Optional
 
+from dragon_quant.review_account.execution import break_even_price
 from dragon_quant.review_account.models import Position, StrategyConfig
 
 
 def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
-                 prev_row: Optional[dict] = None,
-                 hist_rows: Optional[list] = None,
+                 prev_row: Optional[dict] = None, hist_rows: Optional[list] = None,
                  intraday_bars: Optional[list] = None) -> Optional[dict]:
-    """返回买入信号；不满足则返回 None。
+    if candidate.get("is_true_dragon") is False or (candidate.get("composite_score") or 0) < cfg.min_score:
+        return None
+    phase = row["phase"]
+    if phase == "bar":
+        # 突破前高需首根5分钟K带量确认；否则交给分歧买龙。
+        if len(intraday_bars or []) == 1:
+            strong = _turn_strong_signal(candidate, row, cfg, prev_row, intraday_bars[0])
+            if strong:
+                return strong
+        return evaluate_divergence_buy(candidate, row, cfg, hist_rows, intraday_bars, prev_row)
+    if phase != "open" or not prev_row:
+        return None
+    opening, ma5 = row["open"], prev_row.get("ma5")
+    gap = row.get("open_gap_pct")
+    amount, turnover = prev_row.get("amount") or 0, prev_row.get("turnover") or 0
+    if not ma5 or gap is None or amount < cfg.min_amount or turnover < cfg.min_turnover:
+        return None
+    if opening >= row["limit_up"] * .999 or opening <= row["limit_down"] * 1.001:
+        return None
+    distance = (opening / ma5 - 1) * 100
+    if cfg.require_rising_ma5 and ma5 <= (row.get("previous_ma5") or ma5):
+        return None
+    if cfg.ma5_min_distance_pct <= distance <= 3 and -3 < gap <= cfg.max_open_gap:
+        return _buy(candidate, row, "buy_open_ma5_pullback", "开盘贴近上日MA5，回踩承接", 300)
+    return None
 
-    优先判定分歧买龙（断板后承接确认，约 10:00 成交），其次是开盘买点
-    （贴近 MA5 / 突破前高，开盘成交）。开盘买点只使用上日龙头池、上日技术
-    指标和当日开盘价，不读取当日 close/high/low 决定是否买入，避免未来函数。
+
+def _turn_strong_signal(candidate: dict, row: dict, cfg: StrategyConfig,
+                        prev_row: Optional[dict], first_bar) -> Optional[dict]:
+    """高开突破前高，且首根5分钟K带量（换手≥turn_strong_bar_turnover_min）。
+
+    开盘/缺口/前高/上日换手区间等沿用原开盘弱转强门槛，新增首根5分钟K换手确认：
+    只有真实带量才认可突破有效，避免无量假突破。缺分时（日K兜底）时不触发。
     """
-    if cfg.divergence_enabled:
-        divergence = evaluate_divergence_buy(
-            candidate, row, cfg, hist_rows=hist_rows, intraday_bars=intraday_bars,
-            prev_row=prev_row,
-        )
-        if divergence:
-            return divergence
-
-    reasons: list[str] = []
-    rank = candidate.get("rank") or 999
-    score = candidate.get("composite_score") or 0.0
-    amount = _amount_yuan(candidate.get("amount") or row.get("amount") or 0.0)
-    turnover = candidate.get("turnover_rate") or row.get("turnover") or 0.0
-    ref = prev_row or row
-    open_px = row.get("open") or 0.0
-    open_gap = row.get("open_gap_pct")
-    prev_close = row.get("prev_close") or ref.get("close")
-    ma5 = ref.get("ma5")
-    prev_high = ref.get("high") or row.get("prev_high")
-    open_to_ma5 = (open_px / ma5 - 1) * 100 if ma5 and ma5 > 0 and open_px > 0 else None
-
-    if candidate.get("is_true_dragon") is False:
+    if not prev_row:
         return None
-    if score < cfg.min_score:
+    opening, ma5 = row["open"], prev_row.get("ma5")
+    gap = row.get("open_gap_pct")
+    amount, turnover = prev_row.get("amount") or 0, prev_row.get("turnover") or 0
+    if not ma5 or gap is None or amount < cfg.min_amount or turnover < cfg.min_turnover:
         return None
-    if amount < cfg.min_amount:
+    if opening >= row["limit_up"] * .999 or opening <= row["limit_down"] * 1.001:
         return None
-    if turnover < cfg.min_turnover:
+    distance = (opening / ma5 - 1) * 100
+    if cfg.require_rising_ma5 and ma5 <= (row.get("previous_ma5") or ma5):
         return None
-    if row.get("is_one_word_board"):
-        return None
-
-    if (
-        ma5
-        and open_px <= ma5 * 1.03
-        and (open_gap is None or -3.0 < open_gap <= cfg.max_open_gap)
-    ):
-        reasons.append("开盘贴近MA5，回踩后具备承接条件")
-        code = "buy_open_ma5_pullback"
-        priority = 300
-    elif (
-        prev_high and open_px > prev_high
-        and open_gap is not None and 0 <= open_gap <= min(5.5, cfg.max_open_gap)
-        and open_to_ma5 is not None and open_to_ma5 <= cfg.max_close_to_ma5
-        and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
-        and amount >= 500_000_000
-    ):
-        reasons.append("开盘突破前高，竞价弱转强")
-        code = "buy_open_turn_strong"
-        priority = 200
-    else:
-        return None
-
-    signal = _signal_payload(candidate, row, prev_row=prev_row, open_to_ma5=open_to_ma5)
-    reason_text = (
-        f"{'；'.join(reasons)}。上日真龙池排名{rank}，综合分{score:.1f}，"
-        f"换手率{turnover:.1f}%，成交额{amount / 100000000:.1f}亿"
-    )
-    return {
-        "action": "BUY",
-        "code": code,
-        "reason_text": reason_text,
-        "priority": priority,
-        "score": priority,
-        "signal": signal,
-    }
+    bar_turnover = getattr(first_bar, "turnover", 0) or 0
+    if (opening > prev_row["high"] and 0 <= gap <= min(5.5, cfg.max_open_gap)
+            and distance <= cfg.max_close_to_ma5
+            and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
+            and amount >= 500_000_000
+            and bar_turnover >= cfg.turn_strong_bar_turnover_min):
+        result = _buy(candidate, row, "buy_open_turn_strong",
+                      f"开盘突破上日高点，首根5分钟K带量{bar_turnover:.2f}%，弱转强", 200)
+        result["signal"]["first_bar_turnover"] = bar_turnover
+        return result
+    return None
 
 
 def _count_shrinking_one_word_boards(hist_rows: list, cfg: StrategyConfig) -> tuple[int, bool]:
-    """统计今日之前紧邻的连续一字涨停板数，以及期间成交量是否非递增（缩量）。
-
-    hist_rows 为该股截至上一交易日（含）的日 K（按日期升序），不含今日。
-    返回 (连续一字板数, 是否缩量)。缩量定义为板与板之间成交量非递增。
-    """
-    boards = 0
-    volumes: list[float] = []
-    for r in reversed(hist_rows or []):
-        if r.get("is_one_word_board") and (r.get("pct") or 0.0) >= 9.9:
-            boards += 1
-            volumes.append(r.get("volume") or 0.0)
-        else:
+    volumes = []
+    for row in reversed(hist_rows):
+        if not row.get("is_one_word_board") or (row.get("pct") or 0) < 9.9:
             break
-    # volumes 为从最近板往前，若要判断时间顺序上的非递增，需反转成时间升序
-    ordered = list(reversed(volumes))
-    shrinking = all(
-        ordered[i] <= ordered[i - 1] for i in range(1, len(ordered))
-    ) if len(ordered) >= 2 else True
-    return boards, shrinking
+        volumes.append(row.get("volume") or 0)
+    return len(volumes), all(volumes[i] <= volumes[i + 1] for i in range(len(volumes) - 1))
 
 
 def evaluate_divergence_buy(candidate: dict, row: dict, cfg: StrategyConfig,
-                            hist_rows: Optional[list] = None,
-                            intraday_bars: Optional[list] = None,
+                            hist_rows: Optional[list] = None, intraday_bars: Optional[list] = None,
                             prev_row: Optional[dict] = None) -> Optional[dict]:
-    """分歧买龙：连续缩量一字板 → 第一次断板 → 盘中承接确认才买入。
-
-    - 通用门槛：真龙候选 + 综合分达标（不套用 min_amount/min_turnover/一字板过滤）。
-    - 连板缩量：用截至上日的日 K 判定。
-    - 断板：当日开盘价低于涨停价（开盘打开一字，可成交）。
-    - 承接确认：前 divergence_confirm_bars 根 5 分钟 K，最低不破昨收且末根收盘不低于
-      首根开盘；回封涨停视为最强承接。5 分钟 K 缺失则跳过（返回 None）。
-    """
-    if candidate.get("is_true_dragon") is False:
+    if not cfg.divergence_enabled or candidate.get("is_true_dragon") is False:
         return None
-    score = candidate.get("composite_score") or 0.0
-    if score < cfg.min_score:
+    if (candidate.get("composite_score") or 0) < cfg.min_score:
         return None
-
     boards, shrinking = _count_shrinking_one_word_boards(hist_rows or [], cfg)
-    if boards < cfg.divergence_min_boards:
+    if boards < cfg.divergence_min_boards or (cfg.divergence_require_shrinking_volume and not shrinking):
         return None
-    if cfg.divergence_require_shrinking_volume and not shrinking:
+    bars = intraday_bars or []
+    if len(bars) != cfg.divergence_confirm_bars:
         return None
-
-    limit_up = _limit_up_price(row)
-    open_px = row.get("open") or 0.0
-    if not limit_up or open_px <= 0:
+    from dragon_quant.review_account.market import bar_times
+    if [b.timestamp for b in bars] != bar_times(row["date"])[:cfg.divergence_confirm_bars]:
         return None
-    if open_px >= limit_up * cfg.divergence_break_open_ratio:
-        return None  # 未断板（仍一字/近一字涨停开盘）
-
-    support = _divergence_support_signal(row, cfg, intraday_bars, limit_up)
-    if not support:
+    if row["open"] >= row["limit_up"] * cfg.divergence_break_open_ratio:
         return None
-
-    rank = candidate.get("rank") or 999
-    signal = _signal_payload(candidate, row, prev_row=prev_row)
-    signal.update(support["signal_extra"])
-    reason_text = (
-        f"连续{boards}个一字板后首次断板，{support['support_text']}。"
-        f"真龙池排名{rank}，综合分{score:.1f}"
-    )
-    return {
-        "action": "BUY",
-        "code": "buy_divergence_first_break",
-        "reason_text": reason_text,
-        "priority": 400,
-        "score": 400,
-        "signal": signal,
-    }
-
-
-def _divergence_support_signal(row: dict, cfg: StrategyConfig,
-                               intraday_bars: Optional[list],
-                               limit_up: float) -> Optional[dict]:
-    """判定断板日盘中承接；成功返回执行价与描述，失败/缺数据返回 None。"""
-    bars = sorted(intraday_bars or [], key=lambda b: b.timestamp)[:cfg.divergence_confirm_bars]
-    if not bars:
+    if min(b.low for b in bars) < row["prev_close"] or bars[-1].close < bars[0].open:
         return None
-
-    prev_close = row.get("prev_close")
-    if not prev_close and row.get("open") and row.get("open_gap_pct") is not None:
-        prev_close = row["open"] / (1 + row["open_gap_pct"] / 100)
-
-    # 回封涨停：最强承接
-    if any((getattr(bar, "high", 0) or 0) >= limit_up * 0.999 for bar in bars):
-        return {
-            "support_text": f"{cfg.divergence_confirm_bars * 5}分钟内回封涨停，承接最强",
-            "signal_extra": {
-                "intraday_mode": "divergence_5min",
-                "divergence_support": "limit_up_reseal",
-                "divergence_window_bars": len(bars),
-                "execution_price": limit_up,
-                "limit_up_price": limit_up,
-            },
-        }
-
-    window_low = min((getattr(bar, "low", 0) or 0) for bar in bars)
-    first_open = getattr(bars[0], "open", 0) or 0
-    last_close = getattr(bars[-1], "close", 0) or 0
-    if prev_close and window_low < prev_close:
-        return None  # 破昨收，宁可不做也不做弱
-    if last_close < first_open:
-        return None  # 窗口内单边下滑，无承接
-
-    return {
-        "support_text": (
-            f"{cfg.divergence_confirm_bars * 5}分钟内最低未破昨收且收盘企稳，具备承接"
-        ),
-        "signal_extra": {
-            "intraday_mode": "divergence_5min",
-            "divergence_support": "hold_prev_close",
-            "divergence_window_bars": len(bars),
-            "execution_price": last_close,
-            "limit_up_price": limit_up,
-            "divergence_window_low": window_low,
-        },
-    }
-
-
-def _explain_divergence(candidate: dict, row: dict, cfg: StrategyConfig, name: str,
-                        hist_rows: Optional[list],
-                        intraday_bars: Optional[list]) -> Optional[dict]:
-    """解释分歧买龙未触发的原因；若不构成分歧形态返回 None（交回开盘买点解释）。"""
-    boards, shrinking = _count_shrinking_one_word_boards(hist_rows or [], cfg)
-    if boards < cfg.divergence_min_boards:
-        return None  # 非连板一字形态，不属于分歧买点范畴
-
-    if cfg.divergence_require_shrinking_volume and not shrinking:
-        return _buy_explain(
-            candidate, "divergence_not_shrinking",
-            f"{name} 连续{boards}个一字板但期间未持续缩量，不符合分歧买龙",
-        )
-
-    limit_up = _limit_up_price(row)
-    open_px = row.get("open") or 0.0
-    if not limit_up or open_px <= 0:
-        return _buy_explain(
-            candidate, "divergence_missing_limit_up",
-            f"{name} 缺少涨停价基准，无法判断是否断板",
-        )
-    if open_px >= limit_up * cfg.divergence_break_open_ratio:
-        return _buy_explain(
-            candidate, "divergence_not_broken",
-            f"{name} 连续{boards}个一字板仍未开盘断板，等待断板",
-        )
-
-    bars = list(intraday_bars or [])
-    if not bars:
-        return _buy_explain(
-            candidate, "divergence_missing_5min",
-            f"{name} 断板日缺少5分钟K，无法确认承接，跳过",
-        )
-
-    if not _divergence_support_signal(row, cfg, intraday_bars, limit_up):
-        return _buy_explain(
-            candidate, "divergence_no_support",
-            f"{name} 断板后{cfg.divergence_confirm_bars * 5}分钟内未见承接（破昨收或收盘走弱）",
-        )
-    return None  # 承接达标，交由 evaluate_buy 命中路径处理
+    result = _buy(candidate, row, "buy_divergence_first_break", "连续缩量一字板断板，完整窗口未破昨收且企稳", 400)
+    result["signal"].update({"divergence_window_bars": len(bars), "board_count": boards})
+    return result
 
 
 def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyConfig,
-                          prev_row: Optional[dict] = None,
-                          hist_rows: Optional[list] = None,
+                          prev_row: Optional[dict] = None, hist_rows: Optional[list] = None,
                           intraday_bars: Optional[list] = None) -> dict:
-    """解释候选未买入原因；满足买入时返回买入信号摘要。"""
-    rank = candidate.get("rank") or 999
-    name = candidate.get("name") or candidate.get("code") or "候选"
-    if not row:
-        return _buy_explain(
-            candidate, "missing_kline", f"{name} 缺少当日开盘日K数据，无法判断买点"
-        )
-
-    signal = evaluate_buy(
-        candidate, row, cfg, prev_row=prev_row,
-        hist_rows=hist_rows, intraday_bars=intraday_bars,
-    )
+    signal = evaluate_buy(candidate, row, cfg, prev_row, hist_rows, intraday_bars) if row else None
     if signal:
-        return {
-            "code": candidate.get("code", ""),
-            "name": candidate.get("name", ""),
-            "rank": rank,
-            "passed": True,
-            "reason_code": signal["code"],
-            "reason_text": signal["reason_text"],
-            "signal": signal["signal"],
-        }
-
-    amount = _amount_yuan(candidate.get("amount") or row.get("amount") or 0.0)
-    turnover = candidate.get("turnover_rate") or row.get("turnover") or 0.0
-    ref = prev_row or row
-    open_px = row.get("open") or 0.0
-    open_gap = row.get("open_gap_pct")
-    ma5 = ref.get("ma5")
-    prev_high = ref.get("high") or row.get("prev_high")
-    open_to_ma5 = (open_px / ma5 - 1) * 100 if ma5 and ma5 > 0 and open_px > 0 else None
-
-    if candidate.get("is_true_dragon") is False:
-        return _buy_explain(candidate, "not_true_dragon", f"{name} 不是上日真龙候选")
-    score = candidate.get("composite_score") or 0.0
-    if score < cfg.min_score:
-        return _buy_explain(
-            candidate, "score_too_low",
-            f"{name} 综合分{score:.1f}，低于{cfg.min_score:.1f}分门槛",
-        )
-
-    if cfg.divergence_enabled:
-        divergence_explain = _explain_divergence(
-            candidate, row, cfg, name, hist_rows, intraday_bars
-        )
-        if divergence_explain:
-            return divergence_explain
-
-    if amount < cfg.min_amount:
-        return _buy_explain(
-            candidate, "amount_too_low",
-            f"{name} 成交额{amount / 100000000:.1f}亿，低于{cfg.min_amount / 100000000:.1f}亿门槛",
-        )
-    if turnover < cfg.min_turnover:
-        return _buy_explain(
-            candidate, "turnover_too_low",
-            f"{name} 换手率{turnover:.1f}%，低于{cfg.min_turnover:.1f}%门槛",
-        )
-    if row.get("is_one_word_board"):
-        return _buy_explain(candidate, "one_word_board", f"{name} 当日一字板，无法按开盘策略介入")
-    if not ma5:
-        return _buy_explain(candidate, "missing_ma5", f"{name} 缺少上日MA5，无法判断回踩承接")
-
-    pullback_ok = (
-        open_px <= ma5 * 1.03
-        and (open_gap is None or -3.0 < open_gap <= cfg.max_open_gap)
-    )
-    turn_strong_ok = (
-        bool(prev_high and open_px > prev_high)
-        and open_gap is not None and 0 <= open_gap <= min(5.5, cfg.max_open_gap)
-        and open_to_ma5 is not None and open_to_ma5 <= cfg.max_close_to_ma5
-        and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
-        and amount >= 500_000_000
-    )
-    if not pullback_ok and not turn_strong_ok:
-        parts = []
-        if open_to_ma5 is not None:
-            parts.append(f"开盘距MA5 {open_to_ma5:.1f}%")
-        if prev_high:
-            relation = "未突破" if open_px <= prev_high else "突破"
-            parts.append(f"{relation}上日高点")
-        if open_gap is not None:
-            parts.append(f"开盘涨幅{open_gap:.1f}%")
-        suffix = "，".join(parts) or "缺少有效开盘形态"
-        return _buy_explain(
-            candidate, "no_buy_pattern",
-            f"{name} 未触发回踩MA5或弱转强买点（{suffix}）",
-        )
-
-    return _buy_explain(candidate, "filtered", f"{name} 未触发买入")
+        reason, text = signal["code"], signal["reason_text"]
+    elif row is None:
+        reason, text = "missing_kline", "缺少决策时点行情"
+    elif candidate.get("is_true_dragon") is False:
+        reason, text = "not_true_dragon", "历史记录明确否决，跳过"
+    elif (candidate.get("composite_score") or 0) < cfg.min_score:
+        reason, text = "score_too_low", "综合分低于门槛"
+    else:
+        reason, text = "no_buy_pattern", "当前已知数据未触发买点"
+    return {"code": candidate["code"], "name": candidate.get("name", ""), "rank": candidate.get("rank"),
+            "passed": signal is not None, "reason_code": reason, "reason_text": text,
+            "signal": signal["signal"] if signal else {}}
 
 
 def evaluate_sell(position: Position, row: dict, hold_days: int,
                   cfg: StrategyConfig, intraday_bars: Optional[list] = None) -> list[dict]:
-    """按优先级返回卖出信号列表；继续持有返回空列表。"""
-    if position.entry_price <= 0:
+    if hold_days <= 0 or position.entry_date >= row["date"]:
         return []
-
-    high_ret = (row["high"] / position.entry_price - 1) * 100
-    low_ret = (row["low"] / position.entry_price - 1) * 100
-    close_ret = (row["close"] / position.entry_price - 1) * 100
-    previous_highest_return = position.highest_return
-    position.highest_return = max(position.highest_return, high_ret)
-    position.highest_price = max(position.highest_price, row["high"])
-    ma5 = row.get("ma5")
-    volume_change_pct = _volume_change_pct(row)
-
-    signal = {
-        "date": row["date"],
-        "open": row["open"],
-        "high": row["high"],
-        "low": row["low"],
-        "close": row["close"],
-        "ma5": row.get("ma5"),
-        "hold_days": hold_days,
-        "close_return": close_ret,
-        "low_return": low_ret,
-        "highest_return": position.highest_return,
-        "took_profit_half": position.took_profit_half,
-        "intraday_mode": "daily_k_approx",
-        "is_limit_up_close": row.get("is_limit_up_close"),
-        "volume": row.get("volume"),
-        "prev_volume": row.get("prev_volume"),
-        "volume_change_pct": volume_change_pct,
-    }
-
-    sells: list[dict] = []
-
-    applied_stop_pct = (
-        cfg.first_day_stop_loss_pct if hold_days <= 1 else cfg.stop_loss_pct
-    )
-    if low_ret <= applied_stop_pct:
-        signal["applied_stop_pct"] = applied_stop_pct
-        if hold_days <= 1:
-            return [_sell(
-                "first_day_stop_loss",
-                f"日K近似：买入次日最低价触及{applied_stop_pct:.1f}%首日紧止损，卖出全部持仓",
-                signal,
-            )]
-        return [_sell(
-            "hard_stop_loss",
-            f"日K近似：当日最低价触及{applied_stop_pct:.1f}%硬止损，卖出全部持仓",
-            signal,
-        )]
-
-    trailing_signal = _trailing_take_profit(
-        position, row, cfg, previous_highest_return, ma5
-    )
-    if trailing_signal:
-        signal.update(trailing_signal["signal_extra"])
-        return [_sell(
-            "trailing_take_profit",
-            trailing_signal["reason_text"],
-            signal,
-        )]
-
-    break_even_price = _break_even_signal_price(position, cfg)
-    if _is_breakeven_retrace(
-        position,
-        row,
-        cfg,
-        intraday_bars,
-        previous_highest_return,
-        break_even_price,
-    ):
-        signal.update({
-            "break_even_price": break_even_price,
-            "execution_price": break_even_price,
-            "breakeven_activated_before_today": (
-                previous_highest_return >= cfg.breakeven_activate_pct
-            ),
-            "intraday_mode": (
-                "prior_day_profit_daily_low"
-                if previous_highest_return >= cfg.breakeven_activate_pct
-                else "5min_ordered"
-            ),
-        })
-        return [_sell(
-            "profit_back_to_cost_take_profit",
-            (
-                f"最高浮盈达到{position.highest_return:.1f}%后回落至"
-                f"{break_even_price:.2f}完整成本线，止盈保护离场"
-            ),
-            signal,
-        )]
-
-    close_below_open = row["close"] < row["open"]
-    close_below_ma5 = bool(ma5 and row["close"] < ma5)
-    weak_close_break = _weak_close_break(row, cfg)
-    high_open_signal = _high_open_no_limit_signal(row, intraday_bars)
-
-    if high_open_signal:
-        window_minutes = high_open_signal["window_minutes"]
-        return [_sell(
-            high_open_signal["code"],
-            f"开盘高开{high_open_signal['open_gap_pct']:.1f}%，{window_minutes}分钟内未涨停，清仓离场",
-            {**signal, **high_open_signal},
-        )]
-
-    if hold_days == 1:
-        if row.get("is_limit_up_close"):
-            sells.append(_sell(
-                "next_day_limit_up_half",
-                "买入次日收盘涨停，按涨停价卖出半仓",
-                signal,
-            ))
-            if close_below_ma5 or close_below_open:
-                sells.append(_sell(
-                    "next_day_limit_up_clear",
-                    "买入次日涨停后收盘转弱，清仓剩余持仓",
-                    signal,
-                ))
-            return sells
-        if weak_close_break:
-            return [_sell(
-                "next_day_close_below_open",
-                "买入次日收盘走弱（跌破开盘超容忍带或失守MA5/昨收），清仓离场",
-                signal,
-            )]
-
-    if weak_close_break:
-        return [_sell(
-            "close_below_open_stop",
-            "收盘走弱（跌破开盘超容忍带或失守MA5/昨收），止损离场",
-            signal,
-        )]
-
-    if close_below_ma5:
-        return [_sell("break_intraday_ma_stop", "日K近似：收盘价低于日内均线，止损离场", signal)]
-
-    if (
-        volume_change_pct is not None
-        and volume_change_pct >= cfg.volume_spike_pct
-        and not row.get("is_limit_up_close")
-    ):
-        return [_sell(
-            "volume_spike_take_profit",
-            f"成交量较上日增加{volume_change_pct:.1f}%，且未涨停，清仓离场",
-            signal,
-        )]
-
+    close = row["bar_close"]
+    stop = cfg.first_day_stop_loss_pct if hold_days == 1 else cfg.stop_loss_pct
+    low_return = (row["bar_low"] / position.entry_price - 1) * 100
+    if low_return <= stop:
+        code = "first_day_stop_loss" if hold_days == 1 else "hard_stop_loss"
+        return [_sell(code, f"已完成K线触及{stop:.1f}%止损，等待可执行报价", row)]
+    if position.highest_return >= cfg.trailing_activate_pct:
+        drawdown = cfg.trailing_drawdown_pct
+        if cfg.trailing_atr_multiple and row.get("atr"):
+            drawdown = max(drawdown, row["atr"] / close * 100 * cfg.trailing_atr_multiple)
+        retrace = (position.highest_price - close) / position.highest_price * 100
+        if retrace >= drawdown or (row["phase"] == "late" and close < row["ma5"]):
+            return [_sell("trailing_take_profit", "已有浮盈后回撤或尾盘失守MA5，移动止盈", row)]
+    if position.highest_return >= cfg.breakeven_activate_pct and row["bar_low"] <= break_even_price(position, cfg):
+        return [_sell("profit_back_to_cost_take_profit", "已有浮盈后触及完整成本线，按随后可执行价保护退出", row)]
+    bars = intraday_bars or []
+    gap = row.get("open_gap_pct") or 0
+    window = 1 if gap >= 7 else 6 if gap >= 5 else 0
+    if window and len(bars) == window and not any(b.high >= row["limit_up"] * .999 for b in bars):
+        minutes = window * 5
+        code = "high_open_7pct_no_limit_5m_clear" if window == 1 else "high_open_5pct_no_limit_30m_clear"
+        return [_sell(code, f"高开后{minutes}分钟未触板，清仓", row)]
+    if row["phase"] != "late":
+        return []
+    weak = _weak_close_break(row, cfg)
+    below_ma = close < row["ma5"]
+    if weak or below_ma:
+        code = "next_day_close_below_open" if hold_days == 1 and weak else "close_below_open_stop" if weak else "break_intraday_ma_stop"
+        return [_sell(code, "14:55已知数据转弱，清仓", row)]
+    if (hold_days == 1 and cfg.next_day_half_enabled and not position.took_profit_half
+            and close >= row["limit_up"] * .999):
+        return [_sell("next_day_limit_up_half", "首个可卖日14:55仍封板，减半仓", row)]
+    volume = row.get("prev_volume")
+    if (volume and row["volume"] / volume >= 1 + cfg.volume_spike_pct / 100
+            and close < row["limit_up"] * .999):
+        return [_sell("volume_spike_take_profit", "14:55累计量较上日全天放大且未封板，清仓", row)]
     return []
 
 
-def _sell(code: str, reason_text: str, signal: dict) -> dict:
-    return {"action": "SELL", "code": code, "reason_text": reason_text, "signal": signal}
-
-
-def _trailing_take_profit(position: Position,
-                          row: dict,
-                          cfg: StrategyConfig,
-                          previous_highest_return: float,
-                          ma5: Optional[float]) -> Optional[dict]:
-    """移动止盈：峰值达标后让利润奔跑，回撤或失守 MA5 才离场。
-
-    门控使用 previous_highest_return（截至上一交易日的最高浮盈），避免用当日盘中高点
-    产生未来函数；与保本保护同款口径。仅当峰值 >= trailing_activate_pct 才启用，
-    该阈值高于 breakeven_activate_pct，因此强势盈利单优先由移动止盈接管、
-    尚未达标的浮盈单仍走保本保护。
-    """
-    if previous_highest_return < cfg.trailing_activate_pct:
-        return None
-    highest_price = position.highest_price
-    if highest_price <= 0:
-        return None
-
-    retrace_pct = (highest_price - row["close"]) / highest_price * 100
-    close_below_ma5 = bool(ma5 and row["close"] < ma5)
-    if retrace_pct < cfg.trailing_drawdown_pct and not close_below_ma5:
-        return None
-
-    trigger = (
-        f"收盘跌破MA5" if close_below_ma5
-        else f"收盘自最高价回撤{retrace_pct:.1f}%"
-    )
-    return {
-        "reason_text": (
-            f"最高浮盈达到{previous_highest_return:.1f}%后{trigger}，移动止盈让利润落袋"
-        ),
-        "signal_extra": {
-            "trailing_activated_return": previous_highest_return,
-            "trailing_retrace_pct": retrace_pct,
-            "trailing_highest_price": highest_price,
-            "trailing_close_below_ma5": close_below_ma5,
-        },
-    }
-
-
 def _weak_close_break(row: dict, cfg: StrategyConfig) -> bool:
-    """收盘弱势是否达到清仓标准。
-
-    收盘不低于开盘则不成立；小幅跌破开盘（不超过 weak_close_tolerance_pct）且仍站上
-    MA5 与昨收，视为日内洗盘，继续持有；否则（跌破开盘超容忍带，或失守 MA5/昨收）清仓。
-    """
-    close = row["close"]
-    open_ = row["open"]
-    if not open_ or close >= open_:
+    if row["close"] >= row["open"]:
         return False
-    drop_pct = (open_ - close) / open_ * 100
-    if drop_pct > cfg.weak_close_tolerance_pct:
-        return True
-    ma5 = row.get("ma5")
-    prev_close = row.get("prev_close")
-    below_ma5 = bool(ma5 and close < ma5)
-    below_prev = bool(prev_close and close < prev_close)
-    return below_ma5 or below_prev
+    drop = (row["open"] - row["close"]) / row["open"] * 100
+    return (drop > cfg.weak_close_tolerance_pct or row["close"] < row["ma5"]
+            or row["close"] < row["prev_close"])
 
 
-def _break_even_signal_price(position: Position, cfg: StrategyConfig) -> float:
-    """计算覆盖买入成本、卖出滑点和卖出费用后的保本委托价。"""
-    if position.qty <= 0:
-        return position.entry_price
-    net_factor = (
-        (1 - cfg.sell_slippage)
-        * (1 - cfg.commission_rate - cfg.stamp_tax_rate)
-    )
-    if net_factor <= 0:
-        return position.entry_price
-    return position.cost / position.qty / net_factor
+def _payload(row: dict) -> dict:
+    return {key: row.get(key) for key in ("date", "phase", "observed_at", "open", "close", "ma5",
+            "prev_close", "open_gap_pct", "bar_high", "bar_low", "bar_close", "limit_up", "limit_down",
+            "data_quality")}
 
 
-def _is_breakeven_retrace(position: Position,
-                           row: dict,
-                           cfg: StrategyConfig,
-                           intraday_bars: Optional[list],
-                           previous_highest_return: float,
-                           break_even_price: float) -> bool:
-    """判断浮盈后回落完整成本线，避免从日K高低点推断未知的盘中顺序。"""
-    if previous_highest_return >= cfg.breakeven_activate_pct:
-        return row["low"] <= break_even_price
-
-    activate_price = position.entry_price * (1 + cfg.breakeven_activate_pct / 100)
-    activated = False
-    for bar in sorted(intraday_bars or [], key=lambda item: item.timestamp):
-        if activated and (getattr(bar, "low", 0) or 0) <= break_even_price:
-            return True
-        if (getattr(bar, "high", 0) or 0) >= activate_price:
-            activated = True
-    return False
+def _buy(candidate: dict, row: dict, code: str, text: str, priority: int) -> dict:
+    signal = _payload(row)
+    signal.update({"candidate_trade_date": candidate.get("trade_date"), "rank": candidate.get("rank"),
+                   "composite_score": candidate.get("composite_score")})
+    return {"action": "BUY", "code": code, "reason_text": text, "priority": priority, "signal": signal}
 
 
-def _volume_change_pct(row: dict) -> Optional[float]:
-    prev_volume = row.get("prev_volume")
-    volume = row.get("volume")
-    if not prev_volume or prev_volume <= 0 or volume is None:
-        return None
-    return (volume / prev_volume - 1) * 100
-
-
-def _high_open_no_limit_signal(row: dict, intraday_bars: Optional[list]) -> Optional[dict]:
-    open_gap = row.get("open_gap_pct")
-    if open_gap is None or open_gap < 5.0:
-        return None
-
-    if open_gap >= 7.0:
-        return _no_limit_in_window_signal(
-            row, intraday_bars, window_bars=1, window_minutes=5,
-            code="high_open_7pct_no_limit_5m_clear",
-        )
-
-    return _no_limit_in_window_signal(
-        row, intraday_bars, window_bars=6, window_minutes=30,
-        code="high_open_5pct_no_limit_30m_clear",
-    )
-
-
-def _no_limit_in_window_signal(row: dict, intraday_bars: Optional[list],
-                               window_bars: int, window_minutes: int,
-                               code: str) -> Optional[dict]:
-    bars = list(intraday_bars or [])[:window_bars]
-    payload = {
-        "intraday_mode": "5min_window",
-        "intraday_window_minutes": window_minutes,
-        "intraday_window_bars": len(bars),
-        "intraday_missing": not bars,
-    }
-    if not bars:
-        return None
-
-    limit_up = _limit_up_price(row)
-    payload["limit_up_price"] = limit_up
-    if limit_up and any((getattr(bar, "high", 0) or 0) >= limit_up * 0.999 for bar in bars):
-        return None
-
-    last_bar = bars[-1]
-    payload.update({
-        "code": code,
-        "window_minutes": window_minutes,
-        "open_gap_pct": row.get("open_gap_pct") or 0.0,
-        "execution_price": getattr(last_bar, "close", None),
-        "window_high": max((getattr(bar, "high", 0) or 0) for bar in bars),
-        "window_close": getattr(last_bar, "close", None),
-        "intraday_missing": False,
-    })
-    return payload
-
-
-def _limit_up_price(row: dict) -> Optional[float]:
-    limit_up = row.get("limit_up")
-    if limit_up and limit_up > 0:
-        return float(limit_up)
-    prev_close = row.get("prev_close")
-    if not prev_close and row.get("open") and row.get("open_gap_pct") is not None:
-        prev_close = row["open"] / (1 + row["open_gap_pct"] / 100)
-    if not prev_close or prev_close <= 0:
-        return None
-    return round(prev_close * 1.1, 2)
-
-
-def _buy_explain(candidate: dict, reason_code: str, reason_text: str) -> dict:
-    return {
-        "code": candidate.get("code", ""),
-        "name": candidate.get("name", ""),
-        "rank": candidate.get("rank"),
-        "passed": False,
-        "reason_code": reason_code,
-        "reason_text": reason_text,
-        "signal": {},
-    }
-
-
-def _signal_payload(candidate: dict, row: dict,
-                    prev_row: Optional[dict] = None,
-                    open_to_ma5: Optional[float] = None) -> dict:
-    keys = (
-        "date", "open", "high", "low", "close", "pct", "ma5", "ma10", "ma20",
-        "open_gap_pct", "close_to_ma5_pct", "low_touch_ma5", "prev_high",
-        "return_3d", "return_5d", "max_drawdown_5d", "avg_amplitude_5",
-    )
-    payload = {k: row.get(k) for k in keys}
-    ref = prev_row or {}
-    payload.update({
-        "rank": candidate.get("rank"),
-        "candidate_trade_date": candidate.get("trade_date"),
-        "composite_score": candidate.get("composite_score"),
-        "turnover_rate": candidate.get("turnover_rate"),
-        "amount": candidate.get("amount"),
-        "amount_yuan": _amount_yuan(candidate.get("amount") or row.get("amount") or 0.0),
-        "board_count": candidate.get("board_count"),
-        "decision_price": row.get("open"),
-        "decision_timing": "open",
-        "prev_ma5": ref.get("ma5"),
-        "prev_close": row.get("prev_close") or ref.get("close"),
-        "prev_day_high": ref.get("high"),
-        "open_to_ma5_pct": open_to_ma5,
-    })
-    return payload
-
-
-def _amount_yuan(amount: float) -> float:
-    """兼容成交额元/万元两种口径。
-
-    当前腾讯快照入库常见为万元口径（如 74080 表示约 7.4 亿），
-    账户策略统一按元和 min_amount 比较。
-    """
-    if amount <= 0:
-        return 0.0
-    return amount * 10000 if amount < 10_000_000 else amount
+def _sell(code: str, text: str, row: dict) -> dict:
+    return {"action": "SELL", "code": code, "reason_text": text, "signal": _payload(row)}

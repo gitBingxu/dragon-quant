@@ -139,7 +139,8 @@ class XueqiuProvider(StockProvider):
 
     def get_5min_kline_for(self, code: str, target_ts: int,
                            bars_before: int = 48,
-                           bars_after: int = 96) -> list[KBar]:
+                           bars_after: int = 96,
+                           fq_type: str = "after") -> list[KBar]:
         """拉取指定日期附近的 5 分钟 K 线。
 
         雪球 5 分钟线回溯范围约 14 天，target_ts 在此范围内即可取到。
@@ -150,7 +151,7 @@ class XueqiuProvider(StockProvider):
         begin = max(0, target_ts - bars_before * 300 * 1000)
         path = (
             f"/v5/stock/chart/kline.json?symbol={symbol}"
-            f"&period=5m&type=after&count={count}"
+            f"&period=5m&type={fq_type}&count={count}"
             f"&indicator=kline&begin={begin}"
         )
         data = _fetch(path, logger=self._logger, endpoint="5min_kline_for")

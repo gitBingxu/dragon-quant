@@ -4,6 +4,8 @@ tests for provider pure functions:
   tencent:    _gtimg_codes, _parse_gtimg_quote
 """
 import unittest
+from unittest.mock import patch
+from dragon_quant.providers.xueqiu import XueqiuProvider
 from dragon_quant.providers.xueqiu import _symbol, _parse_kline
 from dragon_quant.providers.tencent import _gtimg_codes, _parse_gtimg_quote
 
@@ -15,6 +17,14 @@ class TestXueqiuSymbol(unittest.TestCase):
 
     def test_shenzhen(self):
         self.assertEqual(_symbol("000001"), "SZ000001")
+
+    def test_explicit_market_and_stock_symbols_are_distinct(self):
+        with patch("dragon_quant.providers.xueqiu._fetch", return_value={}) as fetch:
+            provider = XueqiuProvider()
+            provider.get_minute_kline("SH000001")
+            provider.get_minute_kline("000001")
+        self.assertIn("symbol=SH000001&", fetch.call_args_list[0].args[0])
+        self.assertIn("symbol=SZ000001&", fetch.call_args_list[1].args[0])
 
     def test_small_board(self):
         self.assertEqual(_symbol("002031"), "SZ002031")

@@ -19,6 +19,7 @@ class StrategyConfig:
     min_turnover: float = 5.0
     strong_turnover_min: float = 8.0
     strong_turnover_max: float = 35.0
+    turn_strong_bar_turnover_min: float = 0.5
     max_open_gap: float = 7.0
     max_close_to_ma5: float = 12.0
     divergence_enabled: bool = True
@@ -40,6 +41,66 @@ class StrategyConfig:
     commission_rate: float = 0.0003
     stamp_tax_rate: float = 0.0005
     lot_size: int = 100
+    max_position_pct: float = 100.0
+    risk_per_trade_pct: float = 0.0
+    ma5_min_distance_pct: float = -100.0
+    require_rising_ma5: bool = False
+    trailing_atr_multiple: float = 0.0
+    next_day_half_enabled: bool = True
+    max_daily_buys: int = 1
+    min_commission: float = 5.0
+    quote_max_age_seconds: int = 60
+
+    @classmethod
+    def from_dict(cls, values: dict) -> "StrategyConfig":
+        import math
+        from dataclasses import fields
+        if not isinstance(values, dict):
+            raise ValueError("策略配置必须是 JSON 对象")
+        names = {f.name for f in fields(cls)}
+        unknown = set(values) - names
+        if unknown:
+            raise ValueError(f"未知策略参数: {', '.join(sorted(unknown))}")
+        cfg = cls(**values)
+        defaults = cls()
+        for name in names:
+            value, default = getattr(cfg, name), getattr(defaults, name)
+            if isinstance(default, bool):
+                if not isinstance(value, bool):
+                    raise ValueError(f"{name} 必须是布尔值")
+            elif isinstance(default, (int, float)):
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise ValueError(f"{name} 必须是有限数值")
+                if isinstance(default, int) and not isinstance(value, int):
+                    raise ValueError(f"{name} 必须是整数")
+        if cfg.source not in {"v1", "v2"}:
+            raise ValueError("source 必须是 v1 或 v2")
+        for name in ("initial_cash", "candidate_top_n", "candidate_lookback_days", "max_positions",
+                     "lot_size", "max_daily_buys", "divergence_confirm_bars", "quote_max_age_seconds"):
+            if getattr(cfg, name) <= 0:
+                raise ValueError(f"{name} 必须大于 0")
+        if not 0 < cfg.max_position_pct <= 100 or not 0 <= cfg.risk_per_trade_pct <= 100:
+            raise ValueError("仓位和风险预算百分比超出范围")
+        for name in ("buy_slippage", "sell_slippage", "commission_rate", "stamp_tax_rate"):
+            if not 0 <= getattr(cfg, name) < 1:
+                raise ValueError(f"{name} 必须在 [0, 1) 内")
+        if cfg.commission_rate + cfg.stamp_tax_rate >= 1:
+            raise ValueError("卖出费率之和必须小于 1")
+        if not -100 < cfg.stop_loss_pct < 0 or not -100 < cfg.first_day_stop_loss_pct < 0:
+            raise ValueError("止损百分比必须在 (-100, 0) 内")
+        if not isinstance(cfg.strategy_name, str) or not cfg.strategy_name.strip():
+            raise ValueError("strategy_name 必须是非空字符串")
+        for name in ("min_commission", "trailing_atr_multiple", "min_amount", "min_turnover",
+                     "trailing_drawdown_pct", "weak_close_tolerance_pct", "breakeven_activate_pct"):
+            if getattr(cfg, name) < 0:
+                raise ValueError(f"{name} 不能为负")
+        if not 1 <= cfg.divergence_confirm_bars <= 24 or cfg.divergence_min_boards < 1:
+            raise ValueError("分歧窗口必须在上午交易时段内且连板门槛为正")
+        if not 0 < cfg.divergence_break_open_ratio <= 1:
+            raise ValueError("断板开盘比例必须在 (0,1] 内")
+        if cfg.trailing_activate_pct < cfg.breakeven_activate_pct:
+            raise ValueError("移动止盈激活阈值不能低于保本阈值")
+        return cfg
 
     def to_json_dict(self) -> dict:
         return dict(self.__dict__)
@@ -118,6 +179,7 @@ class Snapshot:
     position_cost: Optional[float] = None
     position_market_price: Optional[float] = None
     position_unrealized_return: Optional[float] = None
+    positions_json: str = "[]"
 
 
 @dataclass
@@ -136,3 +198,33 @@ class ClosedPosition:
     realized_return: float
     hold_days: int
     status: str = "closed"
+
+
+@dataclass
+class MarketEvent:
+    timestamp: int
+    phase: str
+    rows: dict[str, dict]
+    candidates: list[dict] = field(default_factory=list)
+    allow_buy: bool = True
+
+
+@dataclass
+class AccountState:
+    cash: float
+    positions: list[Position] = field(default_factory=list)
+    pending: list[dict] = field(default_factory=list)
+    last_event: int = 0
+    trade_date: str = ""
+    sold_today: bool = False
+    buys_today: int = 0
+    marks: dict[str, float] = field(default_factory=dict)
+    evaluated: dict[str, int] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        from dataclasses import asdict
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AccountState":
+        return cls(**{**data, "positions": [Position(**p) for p in data.get("positions", [])]})

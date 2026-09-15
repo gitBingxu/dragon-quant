@@ -106,8 +106,12 @@ def _print_buy(trade_date: str, account_name: str, result: dict):
         print(f"  {result.get('reason_text', '')}")
     for order in result.get("pending", []):
         print(f"  待执行 {order['side']} {order['stock_code']}：{order['reason_text']}")
-    for d in [d for d in result.get("details", []) if not d.get("passed")][:3]:
-        print(f"     - {d.get('reason_text', '')}")
+    rejected = [d for d in result.get("details", []) if not d.get("passed")]
+    if rejected:
+        print(f"  候选未触发买点（{len(rejected)} 只）：")
+        for d in rejected:
+            label = d.get("name") or d.get("code") or "?"
+            print(f"     - {label}（{d.get('code', '')}）：{d.get('reason_text', '')}")
 
 
 def _print_sell(trade_date: str, account_name: str, result: dict):

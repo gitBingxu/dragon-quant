@@ -94,6 +94,25 @@ class TestStrategy(unittest.TestCase):
         r = row(phase="bar")
         self.assertIsNone(evaluate_buy(CAND, r, StrategyConfig(), r["prev_row"]))
 
+    def test_explain_no_pattern_gives_specific_reason(self):
+        from dragon_quant.review_account.strategy import explain_buy_candidate
+        cfg = StrategyConfig()
+        # 开盘高开远离MA5：说明具体距离
+        r = row(price=10.9)
+        d = explain_buy_candidate(CAND, r, cfg, r["prev_row"])
+        self.assertEqual(d["reason_code"], "no_buy_pattern")
+        self.assertIn("距MA5", d["reason_text"])
+        self.assertEqual(d["code"], CAND["code"])
+        # 综合分不足：给出分数与门槛
+        low = explain_buy_candidate({**CAND, "composite_score": 40}, r, cfg, r["prev_row"])
+        self.assertEqual(low["reason_code"], "score_too_low")
+        self.assertIn("40", low["reason_text"])
+        # 首根5分钟无量突破：点名换手不足
+        wb = bars(price=10.4, turnover=0.2)[:1]
+        rb = row(phase="bar", price=10.4, timestamp=at(DAY, "09:35"), known=wb)
+        db = explain_buy_candidate(CAND, rb, cfg, rb["prev_row"], None, wb)
+        self.assertIn("换手", db["reason_text"])
+
     def test_divergence_requires_full_contiguous_window(self):
         cfg = StrategyConfig()
         hist = [{"is_one_word_board": True, "pct": 10, "volume": 200},

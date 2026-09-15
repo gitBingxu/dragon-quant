@@ -100,6 +100,81 @@ def evaluate_divergence_buy(candidate: dict, row: dict, cfg: StrategyConfig,
     return result
 
 
+def _no_pattern_reason(candidate: dict, row: dict, cfg: StrategyConfig,
+                       prev_row: Optional[dict], hist_rows: Optional[list],
+                       intraday_bars: Optional[list]) -> str:
+    """逐条说明当前已知数据为何未触发任一买点（给用户看的可读原因）。"""
+    phase = row.get("phase")
+    ma5 = (prev_row or {}).get("ma5")
+    gap = row.get("open_gap_pct")
+    amount = (prev_row or {}).get("amount") or 0
+    turnover = (prev_row or {}).get("turnover") or 0
+    opening = row.get("open") or 0
+    limit_up = row.get("limit_up") or 0
+    limit_down = row.get("limit_down") or 0
+    prev_high = (prev_row or {}).get("high")
+
+    # 通用量能门槛（开盘两类买点共用）
+    if not prev_row or ma5 is None:
+        base = "缺少上一交易日MA5/量能基准"
+    elif amount < cfg.min_amount:
+        base = f"上日成交额{amount / 1e8:.2f}亿 < 门槛{cfg.min_amount / 1e8:.1f}亿"
+    elif turnover < cfg.min_turnover:
+        base = f"上日换手{turnover:.1f}% < 门槛{cfg.min_turnover:.1f}%"
+    elif limit_up and opening >= limit_up * .999:
+        base = f"开盘{opening:.2f}近涨停，无法开盘介入"
+    elif limit_down and opening <= limit_down * 1.001:
+        base = f"开盘{opening:.2f}近跌停，放弃"
+    else:
+        base = None
+
+    if base:
+        return base
+
+    distance = (opening / ma5 - 1) * 100 if ma5 else None
+    parts = []
+    # 买点B：开盘贴近MA5
+    if phase == "open":
+        if distance is not None and distance > 3:
+            parts.append(f"开盘距MA5 {distance:+.1f}% > 3%（未贴近，不满足回踩承接）")
+        elif gap is not None and not (-3 < gap <= cfg.max_open_gap):
+            parts.append(f"开盘涨幅{gap:+.1f}% 不在(-3%, {cfg.max_open_gap:.0f}%]（回踩承接买点）")
+        else:
+            parts.append("未满足开盘贴近MA5回踩承接")
+    # 买点C：首根5分钟带量突破前高
+    if phase == "bar" and len(intraday_bars or []) == 1:
+        bar_turnover = getattr(intraday_bars[0], "turnover", 0) or 0
+        if prev_high and opening <= prev_high:
+            parts.append(f"开盘{opening:.2f} 未突破上日高点{prev_high:.2f}")
+        elif gap is not None and not (0 <= gap <= min(5.5, cfg.max_open_gap)):
+            parts.append(f"开盘涨幅{gap:+.1f}% 不在[0, {min(5.5, cfg.max_open_gap):.1f}%]（弱转强买点）")
+        elif not (cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max):
+            parts.append(f"上日换手{turnover:.1f}% 不在弱转强区间[{cfg.strong_turnover_min:.0f}%, {cfg.strong_turnover_max:.0f}%]")
+        elif amount < 500_000_000:
+            parts.append(f"上日成交额{amount / 1e8:.2f}亿 < 弱转强要求5亿")
+        elif bar_turnover < cfg.turn_strong_bar_turnover_min:
+            parts.append(f"首根5分钟K换手{bar_turnover:.2f}% < {cfg.turn_strong_bar_turnover_min:.1f}%（突破无量，不认可）")
+        else:
+            parts.append("未满足首根5分钟带量突破前高")
+    # 买点A：分歧买龙
+    if phase == "bar":
+        boards, shrinking = _count_shrinking_one_word_boards(hist_rows or [], cfg)
+        if not cfg.divergence_enabled:
+            pass
+        elif boards < cfg.divergence_min_boards:
+            parts.append(f"连续一字板{boards} < {cfg.divergence_min_boards}板（非分歧形态）")
+        elif cfg.divergence_require_shrinking_volume and not shrinking:
+            parts.append("一字板期间未持续缩量（分歧买龙）")
+        elif len(intraday_bars or []) != cfg.divergence_confirm_bars:
+            parts.append(f"承接窗口需{cfg.divergence_confirm_bars}根5分钟K，当前{len(intraday_bars or [])}根")
+        elif row["open"] >= row["limit_up"] * cfg.divergence_break_open_ratio:
+            parts.append("开盘仍近涨停，未断板（分歧买龙）")
+        else:
+            parts.append("断板后承接不足（破昨收或收盘走弱）")
+
+    return "；".join(parts) if parts else "当前已知数据未触发买点"
+
+
 def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyConfig,
                           prev_row: Optional[dict] = None, hist_rows: Optional[list] = None,
                           intraday_bars: Optional[list] = None) -> dict:
@@ -111,9 +186,10 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
     elif candidate.get("is_true_dragon") is False:
         reason, text = "not_true_dragon", "历史记录明确否决，跳过"
     elif (candidate.get("composite_score") or 0) < cfg.min_score:
-        reason, text = "score_too_low", "综合分低于门槛"
+        reason, text = "score_too_low", f"综合分{candidate.get('composite_score') or 0:.1f} < 门槛{cfg.min_score:.0f}"
     else:
-        reason, text = "no_buy_pattern", "当前已知数据未触发买点"
+        reason, text = "no_buy_pattern", _no_pattern_reason(
+            candidate, row, cfg, prev_row, hist_rows, intraday_bars)
     return {"code": candidate["code"], "name": candidate.get("name", ""), "rank": candidate.get("rank"),
             "passed": signal is not None, "reason_code": reason, "reason_text": text,
             "signal": signal["signal"] if signal else {}}

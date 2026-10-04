@@ -22,6 +22,9 @@ class StrategyConfig:
     turn_strong_bar_turnover_min: float = 0.5
     max_open_gap: float = 7.0
     max_close_to_ma5: float = 12.0
+    max_avg_amplitude: float = 0.0
+    max_return_3d: float = 0.0
+    drawdown_5d_floor: float = 0.0
     divergence_enabled: bool = True
     divergence_min_boards: int = 2
     divergence_require_shrinking_volume: bool = True
@@ -100,6 +103,11 @@ class StrategyConfig:
             raise ValueError("断板开盘比例必须在 (0,1] 内")
         if cfg.trailing_activate_pct < cfg.breakeven_activate_pct:
             raise ValueError("移动止盈激活阈值不能低于保本阈值")
+        for name in ("max_avg_amplitude", "max_return_3d"):
+            if getattr(cfg, name) < 0:
+                raise ValueError(f"{name} 不能为负（0 表示禁用）")
+        if not -100 < cfg.drawdown_5d_floor <= 0:
+            raise ValueError("drawdown_5d_floor 必须在 (-100, 0] 内（0 表示禁用）")
         return cfg
 
     def to_json_dict(self) -> dict:

@@ -77,6 +77,25 @@ class TestStrategy(unittest.TestCase):
         self.assertIsNone(evaluate_buy(CAND, r, StrategyConfig(ma5_min_distance_pct=-1), r["prev_row"]))
         self.assertIsNone(evaluate_buy(CAND, row(), StrategyConfig(require_rising_ma5=True), row()["prev_row"]))
 
+    def test_entry_quality_gate_rejects_volatile_chased_weak(self):
+        from dragon_quant.review_account.strategy import explain_buy_candidate
+        cfg = StrategyConfig(max_avg_amplitude=9, max_return_3d=15, drawdown_5d_floor=-15)
+        # 波动过大
+        r = row()
+        r["prev_row"]["avg_amplitude_5"] = 9.5
+        self.assertIsNone(evaluate_buy(CAND, r, cfg, r["prev_row"]))
+        self.assertIn("振幅", explain_buy_candidate(CAND, r, cfg, r["prev_row"])["reason_text"])
+        # 短期追高
+        r = row()
+        r["prev_row"]["return_3d"] = 16
+        self.assertIsNone(evaluate_buy(CAND, r, cfg, r["prev_row"]))
+        self.assertIn("涨幅", explain_buy_candidate(CAND, r, cfg, r["prev_row"])["reason_text"])
+        # 弱势下行
+        r = row()
+        r["prev_row"]["max_drawdown_5d"] = -16
+        self.assertIsNone(evaluate_buy(CAND, r, cfg, r["prev_row"]))
+        self.assertIn("回撤", explain_buy_candidate(CAND, r, cfg, r["prev_row"])["reason_text"])
+
     def test_turn_strong_needs_first_bar_volume(self):
         cfg = StrategyConfig()
         # 高开突破前高发生在首根5分钟K(phase=bar, 1根)；带量则触发，无量则不触发

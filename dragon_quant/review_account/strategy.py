@@ -4,6 +4,25 @@ from dragon_quant.review_account.execution import break_even_price
 from dragon_quant.review_account.models import Position, StrategyConfig
 
 
+def _entry_quality_gate(prev_row: Optional[dict], cfg: StrategyConfig) -> Optional[str]:
+    """入场质量硬门槛：剔除高波动、短期追高、弱势下行的标的。
+
+    全部基于上一交易日日K指标（与开盘量能口径一致）。返回拒绝原因或 None。
+    """
+    if not prev_row:
+        return None
+    amp = prev_row.get("avg_amplitude_5")
+    if cfg.max_avg_amplitude and amp is not None and amp > cfg.max_avg_amplitude:
+        return f"上日5日平均振幅{amp:.1f}% > 门槛{cfg.max_avg_amplitude:.1f}%（波动过大）"
+    r3 = prev_row.get("return_3d")
+    if cfg.max_return_3d and r3 is not None and r3 > cfg.max_return_3d:
+        return f"上日3日涨幅{r3:.1f}% > 门槛{cfg.max_return_3d:.0f}%（短期追高）"
+    dd = prev_row.get("max_drawdown_5d")
+    if cfg.drawdown_5d_floor and dd is not None and dd < cfg.drawdown_5d_floor:
+        return f"上日5日最大回撤{dd:.1f}% 低于门槛{cfg.drawdown_5d_floor:.1f}%（弱势下行）"
+    return None
+
+
 def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
                  prev_row: Optional[dict] = None, hist_rows: Optional[list] = None,
                  intraday_bars: Optional[list] = None) -> Optional[dict]:
@@ -23,6 +42,8 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
     gap = row.get("open_gap_pct")
     amount, turnover = prev_row.get("amount") or 0, prev_row.get("turnover") or 0
     if not ma5 or gap is None or amount < cfg.min_amount or turnover < cfg.min_turnover:
+        return None
+    if _entry_quality_gate(prev_row, cfg):
         return None
     if opening >= row["limit_up"] * .999 or opening <= row["limit_down"] * 1.001:
         return None
@@ -47,6 +68,8 @@ def _turn_strong_signal(candidate: dict, row: dict, cfg: StrategyConfig,
     gap = row.get("open_gap_pct")
     amount, turnover = prev_row.get("amount") or 0, prev_row.get("turnover") or 0
     if not ma5 or gap is None or amount < cfg.min_amount or turnover < cfg.min_turnover:
+        return None
+    if _entry_quality_gate(prev_row, cfg):
         return None
     if opening >= row["limit_up"] * .999 or opening <= row["limit_down"] * 1.001:
         return None
@@ -130,6 +153,10 @@ def _no_pattern_reason(candidate: dict, row: dict, cfg: StrategyConfig,
 
     if base:
         return base
+
+    gate = _entry_quality_gate(prev_row, cfg)
+    if gate:
+        return gate
 
     distance = (opening / ma5 - 1) * 100 if ma5 else None
     parts = []

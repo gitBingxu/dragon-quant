@@ -289,6 +289,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scorers/` 与 `*_v2` 表，不再保留旧四维评分代码。
+- **provider 接口兼容**：`StockProvider` 新增板块 K 线方法用默认 `raise NotImplementedError`（非 `@abstractmethod`），否则 `create_providers()` 一次实例化全部 4 个 provider 时会崩。
 
 ### AI Agent 协作规范
 > **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。** 纯查询类操作（读文件、查数据库、搜索代码）不受此限。
@@ -300,7 +301,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 仓库：`gitBingxu/dragon-quant`；main 合入需 CODEOWNERS 审批。
 - Commit 风格：中文 + emoji 前缀（见 git log）。
 - **文档同步（强制）**：每次提交涉及功能/命令/接口/数据源/表结构变更时，**必须在同一 commit 内同步更新 `AGENTS.md` 与 `README.md`**，保证文档与代码一致；纯文档或纯内部重构可酌情豁免。
-- **代码地图（codemap）**：模块结构/调用链/数据流有较大调整后，刷新 `CODEMAP.md`（执行路径、任务导航、不变式），供 agent 与人快速导航。
+- **代码结构导航**：模块结构/调用链/数据流由 codebase-memory 索引承担（`.codebase-memory/graph.db.zst`，经 `query_graph`/`trace_path`/`get_architecture` 查询）；较大调整后重跑 `index_repository` 刷新。
 
 ---
 

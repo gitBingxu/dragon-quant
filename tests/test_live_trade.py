@@ -1,186 +1,131 @@
-"""tests for live_trade buy/sell commands (实盘辅助交易)."""
-
-import datetime as dt
+"""tests for dragon_quant.live_trade — 纯信号 buy/sell 命令（复用 review_account 策略与成交）。"""
+import copy
+import sqlite3
+import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import patch
 
-from dragon_quant.live_trade.row_builder import build_buy_row, build_sell_row
-from dragon_quant.live_trade.trader import LiveTrader
-from dragon_quant.models.types import KBar, Quote
-from dragon_quant.review_account.models import StrategyConfig
+from dragon_quant.live_trade.signal_engine import SignalEngine
+from dragon_quant.review_account.data import historical_events
+from dragon_quant.review_account.engine import TradingEngine
+from dragon_quant.review_account.market import at
+from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
 from dragon_quant.storage import db
-
-TEST_ACCOUNT = "__test_live_trade__"
-
-
-def _kbar(date: str, open_: float, close: float, high: float, low: float,
-          pct: float = 0.0, volume: float = 1_000_000, turnover: float = 10.0,
-          amount: float = 1_000_000_000) -> KBar:
-    ts = int(dt.datetime.strptime(date, "%Y-%m-%d").timestamp() * 1000)
-    return KBar(timestamp=ts, volume=volume, open=open_, high=high, low=low,
-                close=close, chg=close - open_, pct=pct, turnover=turnover, amount=amount)
+from tests.test_review_account import CAND, DAY, FakeData, position, row
 
 
-def _quote(code="000001", name="样本", price=10.0, prev_close=10.0, open_px=10.0,
-           high=10.5, low=9.8, turnover_rate=12.0, amount=1_000_000_000,
-           volume=1_000_000, limit_up=0.0) -> Quote:
-    pct = (price / prev_close - 1) * 100 if prev_close else 0.0
-    return Quote(
-        code=code, name=name, price=price, prev_close=prev_close, open_px=open_px,
-        high=high, low=low, pct=pct, chg=price - prev_close, turnover_rate=turnover_rate,
-        amplitude=0.0, volume=volume, amount=amount, market_cap=0.0, float_market_cap=0.0,
-        volume_ratio=0.0, pe=0.0, limit_up=limit_up or round(prev_close * 1.1, 2),
-        limit_down=0.0, avg_price=price,
-    )
+class TestSignalEngine(unittest.TestCase):
+    """SignalEngine 与 TradingEngine 共享策略/成交，但去掉账户/数量/仓位限制，buy-all。"""
 
-
-def _hist(prefix_close=10.0):
-    """一段平稳历史日 K（截至 2026-05-21），MA5≈10。"""
-    return [
-        _kbar("2026-05-15", 10, 10, 10.2, 9.9),
-        _kbar("2026-05-18", 10, 10, 10.2, 9.9),
-        _kbar("2026-05-19", 10, 10, 10.2, 9.9),
-        _kbar("2026-05-20", 10, 10, 10.2, 9.9),
-        _kbar("2026-05-21", 10, 10, 10.3, 9.9),
-    ]
-
-
-class TestRowBuilder(unittest.TestCase):
-    def test_build_buy_row_open_gap_and_prev_high(self):
-        built = build_buy_row(_hist(), _quote(open_px=10.1, prev_close=10.0), "2026-05-22")
-        self.assertIsNotNone(built)
-        row = built["row"]
-        self.assertAlmostEqual(row["open"], 10.1)
-        self.assertAlmostEqual(row["open_gap_pct"], 1.0)
-        self.assertAlmostEqual(row["prev_high"], 10.3)
-        self.assertFalse(row["is_one_word_board"])
-
-    def test_build_buy_row_none_when_history_missing(self):
-        self.assertIsNone(build_buy_row([], _quote(), "2026-05-22"))
-
-    def test_build_sell_row_has_today_ma5_and_volume_change(self):
-        q = _quote(open_px=10.4, price=10.6, high=10.8, low=10.3,
-                   prev_close=10.0, volume=2_000_000)
-        built = build_sell_row(_hist(), q, "2026-05-22")
-        self.assertIsNotNone(built)
-        row = built["row"]
-        self.assertEqual(row["date"], "2026-05-22")
-        self.assertAlmostEqual(row["close"], 10.6)
-        self.assertIsNotNone(row["ma5"])
-        # 今日量 2e6 vs 上日 1e6 → +100%
-        self.assertAlmostEqual(row["prev_volume"], 1_000_000)
-
-
-class TestLiveTraderBuy(unittest.TestCase):
-    def setUp(self):
-        db.ensure_live_account(TEST_ACCOUNT, 100000, reset=True)
-        self.account = db.get_live_account(TEST_ACCOUNT)
-
-    def tearDown(self):
-        conn = db._connect()
-        conn.execute("DELETE FROM live_account WHERE name = ?", (TEST_ACCOUNT,))
-        conn.commit()
-        conn.close()
-
-    def _trader(self, cfg, quote, klines=None):
-        qp = MagicMock()
-        qp.get_quote.return_value = quote
-        kp = MagicMock()
-        kp.get_kline.return_value = klines if klines is not None else _hist()
-        trader = LiveTrader(self.account, cfg, quote_provider=qp, kline_provider=kp)
-        trader._lookback_pool_dates = lambda td: ["2026-05-21"]
-        return trader
-
-    def test_buy_hits_open_ma5_pullback(self):
-        cfg = StrategyConfig(min_amount=200_000_000, min_turnover=5)
-        cand = {"code": "000001", "name": "样本", "rank": 1, "composite_score": 80.0,
-                "turnover_rate": 12.0, "amount": 1_000_000_000, "is_true_dragon": True}
-        trader = self._trader(cfg, _quote(open_px=10.1, prev_close=10.0))
-        with patch("dragon_quant.live_trade.trader.db.get_dragons_by_date",
-                   return_value=[cand]):
-            result = trader.buy("2026-05-22")
-        self.assertEqual(result["action"], "buy")
-        self.assertEqual(result["reason_code"], "buy_open_ma5_pullback")
-        positions = db.list_live_positions(self.account["id"], status="open")
-        self.assertEqual(len(positions), 1)
-        self.assertEqual(positions[0]["code"], "000001")
-        self.assertLess(db.get_live_account(TEST_ACCOUNT)["cash"], 100000)
-
-    def test_buy_idle_when_pool_empty(self):
+    def test_buy_all_not_just_top_one(self):
         cfg = StrategyConfig()
-        trader = self._trader(cfg, _quote())
-        with patch("dragon_quant.live_trade.trader.db.get_dragons_by_date",
-                   return_value=[]):
-            result = trader.buy("2026-05-22")
-        self.assertEqual(result["action"], "idle")
-        self.assertEqual(result["reason_code"], "empty_pool")
-
-
-class TestLiveTraderSell(unittest.TestCase):
-    def setUp(self):
-        db.ensure_live_account(TEST_ACCOUNT, 100000, reset=True)
-        self.account = db.get_live_account(TEST_ACCOUNT)
-
-    def tearDown(self):
-        conn = db._connect()
-        conn.execute("DELETE FROM live_account WHERE name = ?", (TEST_ACCOUNT,))
-        conn.commit()
-        conn.close()
-
-    def _seed_position(self, entry_date="2026-05-21", entry_price=10.0, qty=1000):
-        db.add_live_position(self.account["id"], {
-            "code": "000001", "name": "样本", "qty": qty, "entry_date": entry_date,
-            "entry_price": entry_price, "cost": entry_price * qty,
-            "entry_reason_code": "buy_open_ma5_pullback", "entry_reason_text": "buy",
-            "initial_qty": qty, "initial_cost": entry_price * qty,
-        })
-
-    def _trader(self, cfg, quote, klines=None):
-        qp = MagicMock()
-        qp.get_quote.return_value = quote
-        kp = MagicMock()
-        kp.get_kline.return_value = klines if klines is not None else _hist()
-        return LiveTrader(self.account, cfg, quote_provider=qp, kline_provider=kp)
-
-    def test_t_plus_1_blocks_same_day_sell(self):
-        cfg = StrategyConfig()
-        self._seed_position(entry_date="2026-05-22")
-        trader = self._trader(cfg, _quote(price=9.0, open_px=10.0, high=10.0, low=8.9,
-                                          prev_close=10.0))
-        result = trader.sell("2026-05-22")
-        self.assertEqual(result["results"][0]["reason_code"], "t_plus_1")
-        # 未卖出：持仓仍 open
-        self.assertEqual(len(db.list_live_positions(self.account["id"], "open")), 1)
-
-    def test_sell_first_day_stop_loss(self):
-        cfg = StrategyConfig(first_day_stop_loss_pct=-3.5, stop_loss_pct=-5.0)
-        self._seed_position(entry_date="2026-05-21", entry_price=10.0)
-        # 次日（hold_days==1）最低 9.6 → -4%，触发首日紧止损
-        q = _quote(price=9.7, open_px=9.9, high=9.95, low=9.6, prev_close=10.0)
-        trader = self._trader(cfg, q)
-        result = trader.sell("2026-05-22")
-        actions = [r for r in result["results"] if r["action"] == "sell"]
-        self.assertEqual(actions[0]["reason_code"], "first_day_stop_loss")
-        self.assertEqual(len(db.list_live_positions(self.account["id"], "open")), 0)
-
-    def test_sell_holds_within_tolerance(self):
-        cfg = StrategyConfig(weak_close_tolerance_pct=1.0, stop_loss_pct=-5.0,
-                             first_day_stop_loss_pct=-3.5)
-        self._seed_position(entry_date="2026-05-20", entry_price=9.5)
-        # 历史收盘偏低使 MA5 < 今日收盘，确保未跌破 MA5
-        low_hist = [
-            _kbar("2026-05-15", 9.5, 9.6, 9.7, 9.4),
-            _kbar("2026-05-18", 9.6, 9.6, 9.7, 9.5),
-            _kbar("2026-05-19", 9.6, 9.6, 9.7, 9.5),
-            _kbar("2026-05-20", 9.6, 9.6, 9.7, 9.5),
-            _kbar("2026-05-21", 9.6, 9.6, 9.7, 9.5),
+        engine = SignalEngine(cfg)
+        cands = [
+            {**CAND, "code": "600001", "composite_score": 95, "rank": 1},
+            {**CAND, "code": "600002", "composite_score": 60, "rank": 2},
         ]
-        # hold_days>=2，收盘较开盘仅低 0.5% 且站上 MA5/昨收 → 继续持有
-        q = _quote(price=9.95, open_px=10.0, high=10.2, low=9.9, prev_close=9.9)
-        trader = self._trader(cfg, q, klines=low_hist)
-        result = trader.sell("2026-05-22")
-        self.assertEqual(result["results"][0]["action"], "hold")
-        self.assertEqual(len(db.list_live_positions(self.account["id"], "open")), 1)
+        rows = {"600001": row(), "600002": row()}
+        result = engine.step(MarketEvent(at(DAY, "09:30"), "open", rows, cands))
+        # 两只都触发买点 → 都进入 pending（不择优只取第一只）
+        self.assertEqual({o["stock_code"] for o in result["pending"]}, {"600001", "600002"})
+        # 下一事件全部撮合
+        fill_rows = {"600001": row(timestamp=at(DAY, "09:30") + 1),
+                     "600002": row(timestamp=at(DAY, "09:30") + 1)}
+        result2 = engine.step(MarketEvent(at(DAY, "09:30") + 1, "fill", fill_rows, cands))
+        self.assertEqual({b["code"] for b in result2["buys"]}, {"600001", "600002"})
+
+    def test_buy_entry_price_parity_with_backtest(self):
+        cfg = StrategyConfig()
+        sig = SignalEngine(cfg)
+        acc = TradingEngine(cfg, AccountState(100000))
+        sig_prices, acc_prices = [], []
+        for event in historical_events(DAY, [CAND], {CAND["code"]}, FakeData()):
+            event.allow_buy = True
+            sr = sig.step(copy.deepcopy(event))
+            ar = acc.step(copy.deepcopy(event))
+            sig_prices += [b["entry_price"] for b in sr["buys"]]
+            acc_prices += [t.price for t in ar["trades"]]
+        self.assertEqual(len(sig_prices), 1)
+        self.assertEqual(sig_prices, acc_prices)
+
+    def test_sell_exit_price_parity_with_backtest(self):
+        cfg = StrategyConfig()
+        p = position()  # entry 2026-09-04, price 10
+        sig = SignalEngine(cfg, positions=[copy.deepcopy(p)])
+        acc = TradingEngine(cfg, AccountState(100000, [copy.deepcopy(p)]))
+        # 首日止损：hold_days=1，bar_low 跌破 -3.5%（9.65）
+        r = row(phase="bar", timestamp=at(DAY, "09:35"))
+        r["bar_low"], r["bar_close"], r["bar_high"] = 9.6, 9.6, 9.7
+        e1 = MarketEvent(at(DAY, "09:35"), "bar", {p.code: r})
+        e1.allow_buy = False
+        s1 = sig.step(copy.deepcopy(e1))
+        a1 = acc.step(copy.deepcopy(e1))
+        self.assertEqual([o["side"] for o in s1["pending"]], ["SELL"])
+        self.assertEqual([o["side"] for o in a1["pending"]], ["SELL"])
+        # 下一事件按 execution_price 撮合
+        r2 = row(phase="fill", price=9.6, timestamp=at(DAY, "09:35") + 1000)
+        e2 = MarketEvent(r2["observed_at"], "fill", {p.code: r2})
+        e2.allow_buy = False
+        s2 = sig.step(copy.deepcopy(e2))
+        a2 = acc.step(copy.deepcopy(e2))
+        self.assertEqual(s2["sells"][0]["exit_price"], a2["trades"][0].price)
+        self.assertEqual(s2["sells"][0]["reason_code"], a2["trades"][0].reason_code)
+
+    def test_held_codes_block_rebuy(self):
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg, held_codes={CAND["code"]})
+        result = engine.step(MarketEvent(at(DAY, "09:30"), "open", {CAND["code"]: row()}, [CAND]))
+        self.assertEqual(result["pending"], [])
+        self.assertEqual(result["details"][0]["reason_code"], "already_holding")
+
+    def test_already_processed_guard(self):
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg)
+        event = MarketEvent(at(DAY, "09:30"), "open", {CAND["code"]: row()}, [CAND])
+        engine.step(event)
+        self.assertEqual(engine.step(event)["reason_code"], "already_processed")
+
+
+class TestSignalStorage(unittest.TestCase):
+    """buy_sell_signals 表的幂等写入 / before_date 过滤 / 平仓 / 峰值写回。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+        self._conn = sqlite3.connect(self._db_path)
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            db.init_db()
+
+    def tearDown(self):
+        self._conn.close()
+        self._tmpdir.cleanup()
+
+    def _connect(self):
+        return patch("dragon_quant.storage.db._connect",
+                     side_effect=lambda: sqlite3.connect(self._db_path))
+
+    def test_signal_roundtrip_idempotent_and_before_date(self):
+        code = "600001"
+        with self._connect():
+            i1 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+                                  "buy_open_ma5_pullback", "开盘承接", {"a": 1})
+            i2 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+                                  "buy_open_ma5_pullback", "开盘承接", {"a": 1})
+            self.assertEqual(i1, i2)  # 幂等：同一 code 未平仓不重复记录
+            self.assertEqual([s["code"] for s in db.list_open_signals(source="v2")], [code])
+            # before_date：只取 entry_date < 目标日的持仓
+            self.assertEqual([s["code"] for s in db.list_open_signals(before_date="2026-09-08", source="v2")], [code])
+            self.assertEqual(db.list_open_signals(before_date="2026-09-07", source="v2"), [])
+            # 峰值写回
+            self.assertTrue(db.update_signal_peaks(code, 8.5, 10.85))
+            row_sig = db.list_open_signals(source="v2")[0]
+            self.assertAlmostEqual(row_sig["highest_return"], 8.5)
+            self.assertAlmostEqual(row_sig["highest_price"], 10.85)
+            # 平仓后不再出现在未平仓列表
+            self.assertTrue(db.close_signal(code, "2026-09-08", 9.5, "hard_stop_loss", "止损", {}, 1))
+            self.assertEqual(db.list_open_signals(source="v2"), [])
 
 
 if __name__ == "__main__":

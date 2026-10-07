@@ -22,6 +22,7 @@ logs/
 # 环境
 .env
 *.local
+.venv/
 .trae/*
 !.trae/skills/
 .trae/skills/*

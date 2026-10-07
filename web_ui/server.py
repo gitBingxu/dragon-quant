@@ -285,6 +285,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             strategy_name=strategy_name,
             verbose=False,
             display_name=display_name,
+            strategy_params=payload.get("strategy_params"),
         )
 
         db = _get_db()

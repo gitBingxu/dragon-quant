@@ -115,6 +115,30 @@ class TestReportBuilder(unittest.TestCase):
         self.assertIn("流动", report)
         self.assertIn("真龙", report)
 
+    def test_reports_scoring_errors_and_degraded_reasons(self):
+        report = self.reporter.build_stock_report("600001", dimensions={
+            "drive": {"score": 0, "details": {"error": "broken", "lead": {"reason": "分时缺失"}}},
+            "liquidity": {"score": 60, "details": {"degraded": True, "reasons": ["盘口缺失"]}},
+        })
+        self.assertIn("评分异常：broken", report)
+        self.assertIn("分时缺失", report)
+        self.assertIn("盘口缺失", report)
+
+    def test_absorption_report_explains_independent_events_and_decay(self):
+        from dragon_quant.scorers import absorption
+        from tests.test_scorers import TestAbsorptionAggregation
+        from datetime import date
+        event = TestAbsorptionAggregation().event()
+        score, details = absorption._aggregate_events([event] * 8,
+                                                     [date(2026, 6, d) for d in (19, 22, 23, 24)])
+        text = self.reporter._abs({"score": score, "details": details})
+        self.assertIn("8个窗口合并为1次独立承接", text)
+        self.assertIn("最强1次均值", text)
+        self.assertIn("原始100.00分", text)
+        self.assertIn("3个交易日", text)
+        self.assertIn("衰减系数0.500", text)
+        self.assertIn("调整后75.00分", text)
+
     def test_build_stock_report_mentions_event_details(self):
         report = self.reporter.build_stock_report(
             code="600519", name="贵州茅台",

@@ -1,11 +1,12 @@
+"""tests for dragon_quant.live_trade — 纯信号 buy/sell 命令（复用 review_account 策略与成交）。"""
 import copy
-import json
+import sqlite3
+import tempfile
 import unittest
-from dataclasses import asdict
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import patch
 
-from dragon_quant.live_trade.service import _account_config
-from dragon_quant.live_trade.trader import LiveTrader
+from dragon_quant.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
 from dragon_quant.review_account.market import at
@@ -14,134 +15,117 @@ from dragon_quant.storage import db
 from tests.test_review_account import CAND, DAY, FakeData, position, row
 
 
-class TestSharedExecution(unittest.TestCase):
+class TestSignalEngine(unittest.TestCase):
+    """SignalEngine 与 TradingEngine 共享策略/成交，但去掉账户/数量/仓位限制，buy-all。"""
+
+    def test_buy_all_not_just_top_one(self):
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg)
+        cands = [
+            {**CAND, "code": "600001", "composite_score": 95, "rank": 1},
+            {**CAND, "code": "600002", "composite_score": 60, "rank": 2},
+        ]
+        rows = {"600001": row(), "600002": row()}
+        result = engine.step(MarketEvent(at(DAY, "09:30"), "open", rows, cands))
+        # 两只都触发买点 → 都进入 pending（不择优只取第一只）
+        self.assertEqual({o["stock_code"] for o in result["pending"]}, {"600001", "600002"})
+        # 下一事件全部撮合
+        fill_rows = {"600001": row(timestamp=at(DAY, "09:30") + 1),
+                     "600002": row(timestamp=at(DAY, "09:30") + 1)}
+        result2 = engine.step(MarketEvent(at(DAY, "09:30") + 1, "fill", fill_rows, cands))
+        self.assertEqual({b["code"] for b in result2["buys"]}, {"600001", "600002"})
+
+    def test_buy_entry_price_parity_with_backtest(self):
+        cfg = StrategyConfig()
+        sig = SignalEngine(cfg)
+        acc = TradingEngine(cfg, AccountState(100000))
+        sig_prices, acc_prices = [], []
+        for event in historical_events(DAY, [CAND], {CAND["code"]}, FakeData()):
+            event.allow_buy = True
+            sr = sig.step(copy.deepcopy(event))
+            ar = acc.step(copy.deepcopy(event))
+            sig_prices += [b["entry_price"] for b in sr["buys"]]
+            acc_prices += [t.price for t in ar["trades"]]
+        self.assertEqual(len(sig_prices), 1)
+        self.assertEqual(sig_prices, acc_prices)
+
+    def test_sell_exit_price_parity_with_backtest(self):
+        cfg = StrategyConfig()
+        p = position()  # entry 2026-09-04, price 10
+        sig = SignalEngine(cfg, positions=[copy.deepcopy(p)])
+        acc = TradingEngine(cfg, AccountState(100000, [copy.deepcopy(p)]))
+        # 首日止损：hold_days=1，bar_low 跌破 -3.5%（9.65）
+        r = row(phase="bar", timestamp=at(DAY, "09:35"))
+        r["bar_low"], r["bar_close"], r["bar_high"] = 9.6, 9.6, 9.7
+        e1 = MarketEvent(at(DAY, "09:35"), "bar", {p.code: r})
+        e1.allow_buy = False
+        s1 = sig.step(copy.deepcopy(e1))
+        a1 = acc.step(copy.deepcopy(e1))
+        self.assertEqual([o["side"] for o in s1["pending"]], ["SELL"])
+        self.assertEqual([o["side"] for o in a1["pending"]], ["SELL"])
+        # 下一事件按 execution_price 撮合
+        r2 = row(phase="fill", price=9.6, timestamp=at(DAY, "09:35") + 1000)
+        e2 = MarketEvent(r2["observed_at"], "fill", {p.code: r2})
+        e2.allow_buy = False
+        s2 = sig.step(copy.deepcopy(e2))
+        a2 = acc.step(copy.deepcopy(e2))
+        self.assertEqual(s2["sells"][0]["exit_price"], a2["trades"][0].price)
+        self.assertEqual(s2["sells"][0]["reason_code"], a2["trades"][0].reason_code)
+
+    def test_held_codes_block_rebuy(self):
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg, held_codes={CAND["code"]})
+        result = engine.step(MarketEvent(at(DAY, "09:30"), "open", {CAND["code"]: row()}, [CAND]))
+        self.assertEqual(result["pending"], [])
+        self.assertEqual(result["details"][0]["reason_code"], "already_holding")
+
+    def test_already_processed_guard(self):
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg)
+        event = MarketEvent(at(DAY, "09:30"), "open", {CAND["code"]: row()}, [CAND])
+        engine.step(event)
+        self.assertEqual(engine.step(event)["reason_code"], "already_processed")
+
+
+class TestSignalStorage(unittest.TestCase):
+    """buy_sell_signals 表的幂等写入 / before_date 过滤 / 平仓 / 峰值写回。"""
+
     def setUp(self):
-        self.cfg = StrategyConfig()
-        self.account = db.ensure_live_account("__unified_test__", 100000,
-            strategy_params_json=json.dumps(self.cfg.to_json_dict()), reset=True)
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+        self._conn = sqlite3.connect(self._db_path)
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            db.init_db()
 
     def tearDown(self):
-        conn = db._connect()
-        conn.execute("DELETE FROM live_account WHERE id=?", (self.account["id"],))
-        conn.commit()
-        conn.close()
+        self._conn.close()
+        self._tmpdir.cleanup()
 
-    def test_live_and_backtest_exact_event_parity_with_restarts(self):
-        state = AccountState(100000)
-        engine = TradingEngine(self.cfg, state)
-        for day in [DAY, "2026-09-08"]:
-            for event in historical_events(day, [CAND], {CAND["code"]}, FakeData()):
-                expected = engine.step(copy.deepcopy(event))
-                trader = LiveTrader(db.get_live_account("__unified_test__"), self.cfg, data=FakeData())
-                actual = trader.process_event(copy.deepcopy(event))
-                self.assertEqual([asdict(t) for t in actual["trades"]], [asdict(t) for t in expected["trades"]])
-                self.assertEqual(db.load_live_engine_state(self.account)[0], state.to_dict())
-        self.assertEqual(len(db.list_live_trades(self.account["id"])), 1)
+    def _connect(self):
+        return patch("dragon_quant.storage.db._connect",
+                     side_effect=lambda: sqlite3.connect(self._db_path))
 
-    def test_sell_parity_partial_then_full_and_atomic_ledger(self):
-        p = position()
-        db.add_live_position(self.account["id"], {**asdict(p), "entry_signal_json": "{}"})
-        state = AccountState(100000, [copy.deepcopy(p)])
-        engine = TradingEngine(self.cfg, state)
-        r = row(phase="late", price=11, timestamp=at(DAY, "14:55"))
-        r.update(limit_up=11, prev_close=10, bar_timestamp=at(DAY, "14:55"))
-        events = [MarketEvent(at(DAY, "14:55"), "late", {p.code: r}, allow_buy=False)]
-        r2 = row(phase="fill", price=10.99, timestamp=at(DAY, "14:55") + 1000)
-        events.append(MarketEvent(r2["observed_at"], "fill", {p.code: r2}, allow_buy=False))
-        r3 = row(day="2026-09-08", price=9.3)
-        events.append(MarketEvent(r3["observed_at"], "open", {p.code: r3}, allow_buy=False))
-        r4 = row(day="2026-09-08", price=9.3, timestamp=r3["observed_at"] + 1000)
-        events.append(MarketEvent(r4["observed_at"], "fill", {p.code: r4}, allow_buy=False))
-        for event in events:
-            expected = engine.step(copy.deepcopy(event))
-            actual = LiveTrader(db.get_live_account("__unified_test__"), self.cfg).process_event(copy.deepcopy(event), "sell")
-            self.assertEqual([asdict(t) for t in actual["trades"]], [asdict(t) for t in expected["trades"]])
-            self.assertEqual(db.load_live_engine_state(self.account)[0], state.to_dict())
-        trades = db.list_live_trades(self.account["id"])
-        self.assertEqual([t["qty"] for t in trades], [500, 500])
-        self.assertEqual(db.list_live_positions(self.account["id"]), [])
-        self.assertAlmostEqual(db.get_live_account("__unified_test__")["cash"], state.cash)
-
-    def test_repeated_command_does_not_duplicate(self):
-        trader = LiveTrader(self.account, self.cfg)
-        event = MarketEvent(at(DAY, "09:30"), "open", {CAND["code"]: row()}, [CAND])
-        trader.process_event(event)
-        self.assertEqual(trader.process_event(event)["reason_code"], "already_processed")
-        self.assertEqual(len(db.load_live_engine_state(self.account)[0]["pending"]), 1)
-
-    def test_concurrent_stale_revision_rejected(self):
-        state = AccountState(100000).to_dict()
-        result = {"positions": [], "trades": []}
-        db.save_live_engine_step(self.account["id"], 0, state, result, "buy")
-        with self.assertRaisesRegex(ValueError, "另一命令"):
-            db.save_live_engine_step(self.account["id"], 0, {**state, "cash": 0}, result, "buy")
-        self.assertEqual(db.get_live_account("__unified_test__")["cash"], 100000)
-
-    def test_account_changes_rollback_on_error(self):
-        state = AccountState(0).to_dict()
-        with self.assertRaises(TypeError):
-            db.save_live_engine_step(self.account["id"], 0, state, {"positions": [], "trades": [object()]}, "buy")
-        self.assertEqual(db.get_live_account("__unified_test__")["cash"], 100000)
-        self.assertEqual(db.load_live_engine_state(self.account)[1], 0)
-
-    def test_config_saved_and_change_requires_new_account(self):
-        cfg = _account_config(self.account, 123, "v2", None)
-        self.assertEqual(cfg, self.cfg)
-        with self.assertRaises(ValueError):
-            _account_config(self.account, 100000, "v2", {"min_score": 99})
-
-    def test_historical_command_never_fetches_current_quote(self):
-        quotes = MagicMock()
-        trader = LiveTrader(self.account, self.cfg, quote_provider=quotes, data=FakeData())
-        with patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[CAND]):
-            result = trader.buy(DAY, "10:00")
-        self.assertEqual(result["action"], "buy")
-        quotes.get_quote.assert_not_called()
-        with patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[CAND]):
-            result = trader.buy(DAY, "10:00")
-        self.assertEqual(result["trades"], [])
-
-    def test_current_quote_is_not_reused_before_signal(self):
-        from datetime import datetime
-        from dragon_quant.models.types import Quote
-        from dragon_quant.review_account.market import SHANGHAI
-        qp = MagicMock()
-        ts = at(DAY, "09:30:10")
-        q = Quote(CAND["code"], "样本", 10, 10, 10, 10.1, 9.9, 0, 0, 12, 0,
-                  10000, 100000, 0, 0, 0, 0, 11, 9, 10, timestamp=ts)
-        qp.get_quote.return_value = q
-        trader = LiveTrader(self.account, self.cfg, quote_provider=qp, data=FakeData())
-        with patch("dragon_quant.live_trade.trader.datetime") as clock, \
-             patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[CAND]):
-            clock.now.return_value = datetime.fromtimestamp(ts / 1000, SHANGHAI)
-            first = trader.buy(DAY)
-            self.assertEqual(first["trades"], [])
-            clock.now.return_value = datetime.fromtimestamp(ts / 1000 + 1, SHANGHAI)
-            self.assertEqual(trader.buy(DAY)["trades"], [])
-            q.timestamp += 2000
-            clock.now.return_value = datetime.fromtimestamp(ts / 1000 + 2, SHANGHAI)
-            self.assertEqual(trader.buy(DAY)["action"], "buy")
-
-    def test_historical_date_requires_explicit_time(self):
-        trader = LiveTrader(self.account, self.cfg, data=FakeData())
-        with patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[]), self.assertRaisesRegex(ValueError, "--at"):
-            trader.buy(DAY)
-
-    def test_realtime_session_messages_by_clock(self):
-        from datetime import datetime
-        from dragon_quant.review_account.market import SHANGHAI
-        # 用今日日历，仅驱动挂钟到不同时段，断言各自明确提示
-        today = datetime.now(SHANGHAI).strftime("%Y-%m-%d")
-        data = FakeData(days=[today])
-        trader = LiveTrader(self.account, self.cfg, data=data)
-        cases = {"08:00:00": "尚未开盘", "12:00:00": "午间休市", "15:30:00": "已收盘"}
-        for clock, expect in cases.items():
-            with patch("dragon_quant.live_trade.trader.datetime") as dt, \
-                 patch("dragon_quant.live_trade.trader.db.get_dragons_by_date", return_value=[]):
-                dt.now.return_value = datetime.strptime(f"{today} {clock}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=SHANGHAI)
-                dt.strptime = datetime.strptime
-                with self.assertRaisesRegex(ValueError, expect):
-                    trader.buy(today)
+    def test_signal_roundtrip_idempotent_and_before_date(self):
+        code = "600001"
+        with self._connect():
+            i1 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+                                  "buy_open_ma5_pullback", "开盘承接", {"a": 1})
+            i2 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+                                  "buy_open_ma5_pullback", "开盘承接", {"a": 1})
+            self.assertEqual(i1, i2)  # 幂等：同一 code 未平仓不重复记录
+            self.assertEqual([s["code"] for s in db.list_open_signals(source="v2")], [code])
+            # before_date：只取 entry_date < 目标日的持仓
+            self.assertEqual([s["code"] for s in db.list_open_signals(before_date="2026-09-08", source="v2")], [code])
+            self.assertEqual(db.list_open_signals(before_date="2026-09-07", source="v2"), [])
+            # 峰值写回
+            self.assertTrue(db.update_signal_peaks(code, 8.5, 10.85))
+            row_sig = db.list_open_signals(source="v2")[0]
+            self.assertAlmostEqual(row_sig["highest_return"], 8.5)
+            self.assertAlmostEqual(row_sig["highest_price"], 10.85)
+            # 平仓后不再出现在未平仓列表
+            self.assertTrue(db.close_signal(code, "2026-09-08", 9.5, "hard_stop_loss", "止损", {}, 1))
+            self.assertEqual(db.list_open_signals(source="v2"), [])
 
 
 if __name__ == "__main__":

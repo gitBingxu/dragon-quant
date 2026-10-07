@@ -52,9 +52,9 @@ class FakeData:
         if day in self.intraday_missing:
             raise DataCoverageError(f"{day} 无完整5分钟K")
         return validate_bars(bars(day), day, until)
-    def try_intraday(self, code, day):
+    def try_intraday(self, code, day, until=None):
         try:
-            return self.intraday(code, day)
+            return self.intraday(code, day, until)
         except DataCoverageError:
             return None
 

@@ -136,12 +136,13 @@ class TestCliSourceArgs(unittest.TestCase):
             port=8765, open_browser=False, default_source="v2", default_page="account"
         )
 
-    def test_buy_passes_replay_time_and_account(self):
-        with patch("sys.argv", ["dragon-quant", "buy", "--date", "20260907", "--at", "10:00", "--account", "experiment"]), \
+    def test_buy_passes_replay_time(self):
+        with patch("sys.argv", ["dragon-quant", "buy", "--date", "20260907", "--at", "10:00"]), \
              patch("dragon_quant.live_trade.run_buy") as run:
             cli.main()
         self.assertEqual(run.call_args.kwargs["as_of"], "10:00")
-        self.assertEqual(run.call_args.kwargs["account_name"], "experiment")
+        self.assertNotIn("account_name", run.call_args.kwargs)
+        self.assertNotIn("capital", run.call_args.kwargs)
 
     def test_review_account_passes_shared_config(self):
         with patch("sys.argv", ["dragon-quant", "review-account", "--from", "20260907", "--to", "20260911", "--config", "params.json"]), \

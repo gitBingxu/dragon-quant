@@ -62,11 +62,10 @@ dragon-quant review --ui-only
 # 账户级模拟交易回测（按真实账户逐日推进，可 --ui 打开 /account 面板）
 dragon-quant review-account --ui-only
 
-# 实盘辅助交易（复用 review-account 策略，维护纸上账户）
-dragon-quant account init --capital 100000   # 新建/重置纸上账户
-dragon-quant buy                              # 盘中共享引擎：先卖后买
-dragon-quant sell                             # 盘中共享引擎：仅卖出
-dragon-quant account                          # 查看现金、持仓与交割单
+# 实盘辅助交易（复用 review-account 策略，纯信号记账，不维护模拟账户）
+dragon-quant buy                              # 盘中：候选池内触发买点的标的全部记入买入信号
+dragon-quant sell                             # 盘中：对已买入未卖出的信号判定是否卖出
+dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 ```
 
 ### 前置条件
@@ -135,7 +134,7 @@ dragon-quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
 dragon-quant review-account --ui-only
 ```
 
-`review-account` 与 `buy/sell` 共用 `review_account.TradingEngine`（`engine.py`），统一候选、买卖规则、整手仓位、费用、待执行信号和账户状态。回测按开盘及完整 5 分钟 K 顺序重放，不能用当天最终数据决定早盘交易。候选为**前 3 个真实交易日的全部真龙**并集（共享层过滤否决/低于 50 分），按 code 去重保留综合分更高者，不再截断前 N 只；空池不向更早日期补票，回测首日会加载区间前的候选日期。
+`review-account` 与 `buy/sell` 共用 `review_account` 策略与成交函数（`evaluate_buy`/`evaluate_sell`/`fill_price`/`fee`），统一候选、买卖规则与费用，因此后续只改 `review_account` + 回测即可同步调整 `buy/sell`。回测按开盘及完整 5 分钟 K 顺序重放，不能用当天最终数据决定早盘交易。候选为**前 3 个真实交易日的全部真龙**并集（共享层过滤否决/低于 50 分），按 code 去重保留综合分更高者，不再截断前 N 只；空池不向更早日期补票，回测首日会加载区间前的候选日期。
 
 - 开盘 MA5 承接只用上日日 K 指标与量能；突破前高改为**首根 5 分钟 K 完成后确认**，需该根换手 ≥0.5% 带量（`turn_strong_bar_turnover_min`），日 K 兜底日不触发；分歧买龙等待完整 30 分钟承接窗口，不把瞬时触板当成保证成交。
 - 多候选择优：**买点得分越高越优先，同分看五维综合分**，再按代码稳定排序（不再参考真龙 rank）。
@@ -146,22 +145,21 @@ dragon-quant review-account --ui-only
 
 `/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
 
-### `buy` / `sell` / `account` — 实盘辅助交易
+### `buy` / `sell` — 实盘辅助交易
 
 ```bash
-dragon-quant account init --capital 100000      # 新建/重置纸上账户（默认单账户）
-dragon-quant buy --account experiment --config params.json  # 独立参数实验账户
-dragon-quant buy --date 20260907 --at 10:00 --account replay # 历史事件回放
-dragon-quant sell                              # 当前时点仅处理卖出
-dragon-quant account                            # 查看现金、持仓与交割单
+dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
+dragon-quant buy                              # 实时：回放截至当前已完成5分钟K
+dragon-quant sell --date 20260908 --at 14:55  # 对已买入未卖出的信号判定卖出
 ```
 
-`buy` 调用共享引擎先处理卖出再检查买入，`sell` 调用同一引擎但不新增买入。均为单次执行，需在 09:30 开盘、之后各 5 分钟边界以及 14:55 调用，并在信号后再次取得更新报价完成纸上撮合；没有后台自动交易。漏掉的开盘买点不补做，过期报价不成交，买入待执行信号超过 5 分钟失效。实际延迟会使结果不同于历史下一根 K 开盘价。15:00–15:05可额外调用更新收盘估值和峰值，此时不成交。
+`buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护模拟账户/资金/数量/仓位**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
 
-- `--account NAME` 指定独立纸上账户；`account --account NAME` 查看。新账户可用 `--config params.json`，已有账户读取持久化参数，不允许静默改变策略配置。
-- 历史回放必须显式指定 `--date YYYYMMDD --at HH:MM`，仅用历史数据，建议使用新账户；实时运行不能指定 `--at`。
-- `live_engine_state` 保存待执行信号、已处理事件、当天买卖限制和持仓峰值，与现金、持仓、交割单在同一事务提交，避免重复调用或重启重复记账。
-- `buy/sell` 仍不接券商。数据齐全、参数和事件一致时，两条路径的信号、成交计算与账户变化一致，不代表真实市场必然成交。
+- `SignalEngine` 复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/数量/仓位/次数限制；卖出用 notional Position（qty=100）保证 `break_even_price` 与回测精确一致。
+- 历史回放必须显式指定 `--date YYYYMMDD --at HH:MM`，仅用历史数据；实时运行不指定 `--at`，回放截至当前已完成的5分钟K。
+- 信号表 `buy_sell_signals`：同一未平仓 code 幂等去重，峰值跨日写回供移动止盈/保本判定。
+- `buy/sell` 仍不接券商。数据齐全、参数和事件一致时，两条路径的买点/卖点/成交价与回测一致，不代表真实市场必然成交。
+
 
 ### `vpa` — 量价分析
 
@@ -269,7 +267,7 @@ quote = get_quote("600172")
 
 ```
 dragon_quant/
-├── cli.py                # CLI（scan/logs/data/review/review-account/buy/sell/account/vpa/storage/blacklist）
+├── cli.py                # CLI（scan/logs/data/review/review-account/buy/sell/vpa/storage/blacklist）
 ├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
@@ -282,7 +280,7 @@ dragon_quant/
 ├── utils/trading.py     # 交易日历工具
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
-├── live_trade/           # 实盘辅助交易 buy/sell/account（row_builder/trader/service，复用 review_account 策略）
+├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/trader/service，复用 review_account 策略）
 ├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
 └── models/types.py      # 数据模型
 ```
@@ -303,7 +301,7 @@ SQLite 表分为三类：
 - 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
-- 实盘辅助纸上账户表：`live_account` / `live_positions` / `live_trades`（`buy` / `sell` / `account` 命令使用，默认单账户 `default`）
+- 实盘辅助买卖信号表：`buy_sell_signals`（`buy` / `sell` 命令使用，未平仓 code 唯一）
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -316,7 +314,7 @@ SQLite 表分为三类：
 
 `review_account_*` 表用于账户级模拟交易：`runs` 保存 UI 记录名称、策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因，`events` 保存买入、卖出、持仓和空仓原因时间线。
 
-`live_*` 表用于实盘辅助交易（`buy` / `sell` / `account`）：`live_account` 存纸上账户的初始资金/可用现金/策略参数，`live_positions` 存每笔持仓（成本、最高浮盈/价、半仓标记、平仓退出字段，含 open/closed 状态），`live_trades` 存每笔 buy/sell 交割单及 `command` / `reason_code` / `reason_text` / `signal_json`。
+`buy_sell_signals` 表用于实盘辅助交易（`buy` / `sell`）：记录买入（code/name/entry_date/entry_price/买入原因与信号）与卖出（exit_date/exit_price/卖出原因/持有天数），并保存最高浮盈/价（`highest_return`/`highest_price`）与半仓标记供跨日移动止盈/保本判定；未平仓 code 由部分唯一索引 `idx_buy_sell_open` 保证幂等去重。
 
 ## 免责声明
 

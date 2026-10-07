@@ -72,25 +72,27 @@ class MarketData:
                 return bars
         return validate_bars(self._bars[key], day, until)
 
-    def try_intraday(self, code: str, day: str) -> list | None:
-        """取完整当日5分钟K；缺失/不完整则返回 None（供日K兜底），不抛错。"""
+    def try_intraday(self, code: str, day: str, until: int | None = None) -> list | None:
+        """取当日5分钟K（until 非空时只取到该时点）；缺失/不完整则返回 None（供日K兜底），不抛错。"""
         try:
-            return self.intraday(code, day)
+            return self.intraday(code, day, until)
         except DataCoverageError:
             return None
 
 
-def historical_events(day: str, candidates: list[dict], codes: set[str], data: MarketData):
+def historical_events(day: str, candidates: list[dict], codes: set[str], data: MarketData,
+                      until: int | None = None):
     """生成当日事件流。
 
-    仅当**所有**相关个股（候选 + 持仓）当日都有完整48根5分钟K时，走严格盘中
-    撮合（open→各fill→bar→late→close）；只要有任一缺失，则整日降级为日K兜底
+    仅当**所有**相关个股（候选 + 持仓）当日都有完整5分钟K时，走严格盘中撮合
+    （open→各fill→bar→late→close）；只要有任一缺失，则整日降级为日K兜底
     （开盘事件按开盘价成交，收盘事件按当日OHLC判定止损止盈），保证多月回测
-    在分时历史已过期时仍能运行。买卖决策始终复用同一 evaluate_buy/evaluate_sell。
+    在分时历史已过期时仍能运行。`until` 用于盘中（实时今日）只取到最新已完成
+    的5分钟K，从而支持部分当日回放。买卖决策始终复用同一 evaluate_buy/evaluate_sell。
     """
     for code in sorted(codes):
         data.daily(code, day)  # 校验日K/预热，缺失即抛错
-    intraday = {code: data.try_intraday(code, day) for code in sorted(codes)}
+    intraday = {code: data.try_intraday(code, day, until) for code in sorted(codes)}
     if codes and all(intraday[c] is not None for c in codes):
         yield from _intraday_events(day, candidates, sorted(codes), data, intraday)
     else:
@@ -99,6 +101,8 @@ def historical_events(day: str, candidates: list[dict], codes: set[str], data: M
 
 def _intraday_events(day, candidates, codes, data, intraday):
     histories = {code: data.daily(code, day) for code in codes}
+    # 以实际取得的5分钟K时点为准（实时今日为部分当日），而非固定48根 bar_times。
+    times = sorted({b.timestamp for b in intraday[codes[0]]}) if codes else []
     def make(ts, phase, prices=None):
         rows = {}
         for code in codes:
@@ -108,7 +112,7 @@ def _intraday_events(day, candidates, codes, data, intraday):
             rows[code] = row
         return MarketEvent(ts, phase, rows, candidates)
     yield make(at(day, "09:30"), "open")
-    for i, timestamp in enumerate(bar_times(day)):
+    for i, timestamp in enumerate(times):
         opening_ts = at(day, "09:30") if i == 0 else timestamp - 300_000
         yield make(opening_ts + 1, "fill", {c: intraday[c][i].open for c in codes})
         phase = "late" if timestamp == at(day, "14:55") else "close" if timestamp == at(day, "15:00") else "bar"

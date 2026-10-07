@@ -160,74 +160,32 @@ CREATE TABLE IF NOT EXISTS review_account_events (
 
 CREATE INDEX IF NOT EXISTS idx_review_account_events_run ON review_account_events(run_id, event_date, id);
 
-CREATE TABLE IF NOT EXISTS live_account (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    name           TEXT NOT NULL UNIQUE,
-    initial_cash   REAL NOT NULL,
-    cash           REAL NOT NULL,
-    strategy_name  TEXT,
-    strategy_params_json TEXT,
-    created_at     TEXT DEFAULT (datetime('now', 'localtime')),
-    updated_at     TEXT DEFAULT (datetime('now', 'localtime'))
-);
-
-CREATE TABLE IF NOT EXISTS live_positions (
+CREATE TABLE IF NOT EXISTS buy_sell_signals (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id         INTEGER NOT NULL REFERENCES live_account(id) ON DELETE CASCADE,
     code               TEXT NOT NULL,
     name               TEXT,
-    qty                INTEGER,
-    entry_date         TEXT,
+    source             TEXT NOT NULL DEFAULT 'v2',
+    entry_date         TEXT NOT NULL,
     entry_price        REAL,
-    cost               REAL,
     entry_reason_code  TEXT,
     entry_reason_text  TEXT,
     entry_signal_json  TEXT,
     highest_return     REAL DEFAULT 0,
     highest_price      REAL DEFAULT 0,
-    initial_qty        INTEGER,
-    initial_cost       REAL,
-    realized_pnl       REAL DEFAULT 0,
     took_profit_half   INTEGER DEFAULT 0,
-    status             TEXT DEFAULT 'open',
+    status             TEXT NOT NULL DEFAULT 'open',
     exit_date          TEXT,
     exit_price         REAL,
     exit_reason_code   TEXT,
+    exit_reason_text   TEXT,
     exit_signal_json   TEXT,
-    realized_return    REAL,
-    hold_days          INTEGER
+    hold_days          INTEGER,
+    created_at         TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at         TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_live_positions_account ON live_positions(account_id, status, entry_date);
-
-CREATE TABLE IF NOT EXISTS live_trades (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id      INTEGER NOT NULL REFERENCES live_account(id) ON DELETE CASCADE,
-    trade_date      TEXT NOT NULL,
-    command         TEXT NOT NULL,
-    code            TEXT NOT NULL,
-    name            TEXT,
-    side            TEXT NOT NULL,
-    price           REAL,
-    qty             INTEGER,
-    amount          REAL,
-    fee             REAL,
-    realized_pnl    REAL,
-    cash_after      REAL,
-    position_after  INTEGER,
-    reason_code     TEXT,
-    reason_text     TEXT,
-    signal_json     TEXT,
-    created_at      TEXT DEFAULT (datetime('now', 'localtime'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_live_trades_account ON live_trades(account_id, trade_date, id);
-
-CREATE TABLE IF NOT EXISTS live_engine_state (
-    account_id INTEGER PRIMARY KEY REFERENCES live_account(id) ON DELETE CASCADE,
-    revision INTEGER NOT NULL DEFAULT 0,
-    state_json TEXT NOT NULL
-);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_buy_sell_open ON buy_sell_signals(code) WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_buy_sell_open_by_date ON buy_sell_signals(status, entry_date, code);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
@@ -1703,151 +1661,74 @@ def query_review_account_events(run_id: int) -> list[dict]:
         conn.close()
 
 
-# ─── 实盘辅助纸上账户（buy/sell 命令） ───
+# ─── 实盘辅助买卖信号（buy/sell 命令，纯信号，不维护账户/资金/数量） ───
 
-_LIVE_POSITION_COLS = (
-    "id, account_id, code, name, qty, entry_date, entry_price, cost, "
-    "entry_reason_code, entry_reason_text, entry_signal_json, highest_return, "
-    "highest_price, initial_qty, initial_cost, realized_pnl, took_profit_half, "
-    "status, exit_date, exit_price, exit_reason_code, exit_signal_json, "
-    "realized_return, hold_days"
+_SIGNAL_COLS = (
+    "id, code, name, source, entry_date, entry_price, entry_reason_code, "
+    "entry_reason_text, entry_signal_json, highest_return, highest_price, "
+    "took_profit_half, status, exit_date, exit_price, exit_reason_code, "
+    "exit_reason_text, exit_signal_json, hold_days"
 )
 
 
-def _live_position_row_to_dict(r) -> dict:
+def _signal_row_to_dict(r) -> dict:
     return {
-        "id": r[0], "account_id": r[1], "code": r[2], "name": r[3] or "",
-        "qty": r[4], "entry_date": r[5], "entry_price": r[6], "cost": r[7],
-        "entry_reason_code": r[8] or "", "entry_reason_text": r[9] or "",
-        "entry_signal": json.loads(r[10]) if r[10] else {},
-        "highest_return": r[11] or 0.0, "highest_price": r[12] or 0.0,
-        "initial_qty": r[13], "initial_cost": r[14], "realized_pnl": r[15] or 0.0,
-        "took_profit_half": bool(r[16]), "status": r[17] or "open",
-        "exit_date": r[18], "exit_price": r[19], "exit_reason_code": r[20] or "",
-        "exit_signal": json.loads(r[21]) if r[21] else {},
-        "realized_return": r[22], "hold_days": r[23],
+        "id": r[0], "code": r[1], "name": r[2] or "", "source": r[3] or "v2",
+        "entry_date": r[4], "entry_price": r[5],
+        "entry_reason_code": r[6] or "", "entry_reason_text": r[7] or "",
+        "entry_signal": json.loads(r[8]) if r[8] else {},
+        "highest_return": r[9] or 0.0, "highest_price": r[10] or 0.0,
+        "took_profit_half": bool(r[11]), "status": r[12] or "open",
+        "exit_date": r[13], "exit_price": r[14],
+        "exit_reason_code": r[15] or "", "exit_reason_text": r[16] or "",
+        "exit_signal": json.loads(r[17]) if r[17] else {}, "hold_days": r[18],
     }
 
 
-def ensure_live_account(name: str = "default",
-                        initial_cash: float = 100_000.0,
-                        strategy_name: str = "dragon_pullback_daily",
-                        strategy_params_json: Optional[str] = None,
-                        reset: bool = False) -> dict:
-    """获取或创建实盘辅助纸上账户；reset=True 时清空重建同名账户。"""
-    with _lock:
-        conn = _connect()
-        try:
-            _ensure_schema(conn)
-            existing = conn.execute(
-                "SELECT id FROM live_account WHERE name = ?", (name,)
-            ).fetchone()
-            if existing and reset:
-                conn.execute("DELETE FROM live_account WHERE id = ?", (existing[0],))
-                existing = None
-            if not existing:
-                conn.execute(
-                    "INSERT INTO live_account(name, initial_cash, cash, strategy_name, "
-                    "strategy_params_json) VALUES (?, ?, ?, ?, ?)",
-                    (name, initial_cash, initial_cash, strategy_name, strategy_params_json),
-                )
-                conn.commit()
-        finally:
-            conn.close()
-    return get_live_account(name)
-
-
-def get_live_account(name: str = "default") -> Optional[dict]:
+def list_open_signals(before_date: Optional[str] = None, source: str = "v2") -> list[dict]:
+    """已买入未卖出的信号；before_date 非空时只取 entry_date < before_date 的持仓。"""
+    source = _normalize_source(source)
     conn = _connect()
     try:
         _ensure_schema(conn)
-        r = conn.execute(
-            "SELECT id, name, initial_cash, cash, strategy_name, strategy_params_json, "
-            "created_at, updated_at FROM live_account WHERE name = ?",
-            (name,),
-        ).fetchone()
-        if not r:
-            return None
-        return {
-            "id": r[0], "name": r[1], "initial_cash": r[2], "cash": r[3],
-            "strategy_name": r[4], "strategy_params_json": r[5],
-            "created_at": r[6], "updated_at": r[7],
-        }
+        sql = f"SELECT {_SIGNAL_COLS} FROM buy_sell_signals WHERE status = 'open' AND source = ?"
+        params: list = [source]
+        if before_date:
+            sql += " AND entry_date < ?"
+            params.append(before_date)
+        sql += " ORDER BY entry_date ASC, id ASC"
+        rows = conn.execute(sql, params).fetchall()
+        return [_signal_row_to_dict(r) for r in rows]
     finally:
         conn.close()
 
 
-def load_live_engine_state(account: dict) -> tuple[dict, int]:
-    from dataclasses import fields
-    from dragon_quant.review_account.models import AccountState, Position
-    conn = _connect()
-    try:
-        _ensure_schema(conn)
-        row = conn.execute("SELECT state_json, revision FROM live_engine_state WHERE account_id = ?",
-                           (account["id"],)).fetchone()
-        if row:
-            return json.loads(row[0]), row[1]
-        names = {f.name for f in fields(Position)}
-        positions = [Position(**{k: v for k, v in p.items() if k in names})
-                     for p in list_live_positions(account["id"])]
-        state = AccountState(account["cash"], positions)
-        trades = list_live_trades(account["id"])
-        if trades:
-            state.trade_date = trades[-1]["trade_date"]
-            state.sold_today = any(t["side"] == "SELL" and t["trade_date"] == state.trade_date for t in trades)
-            state.buys_today = sum(t["side"] == "BUY" and t["trade_date"] == state.trade_date for t in trades)
-        return state.to_dict(), 0
-    finally:
-        conn.close()
-
-
-def save_live_engine_step(account_id: int, revision: int, state: dict, result: dict, command: str):
-    from dataclasses import asdict
+def insert_signal(code: str, name: str, entry_date: str, entry_price: float,
+                  entry_reason_code: str = "", entry_reason_text: str = "",
+                  entry_signal: Optional[dict] = None, source: str = "v2") -> int:
+    """记录一条买入信号；同一 code 已存在未平仓信号时幂等返回既有 id，不重复记录。"""
+    source = _normalize_source(source)
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
             conn.execute("BEGIN IMMEDIATE")
-            old = conn.execute("SELECT revision FROM live_engine_state WHERE account_id = ?", (account_id,)).fetchone()
-            if (old[0] if old else 0) != revision:
-                raise ValueError("账户状态已被另一命令更新，请重新执行")
-            existing = {r[0]: r[1] for r in conn.execute(
-                "SELECT code, id FROM live_positions WHERE account_id = ? AND status = 'open'", (account_id,))}
-            for p in state["positions"]:
-                values = (p["qty"], p["cost"], p["highest_return"], p["highest_price"], p["realized_pnl"],
-                          int(p["took_profit_half"]))
-                if p["code"] in existing:
-                    conn.execute("UPDATE live_positions SET qty=?, cost=?, highest_return=?, highest_price=?, "
-                                 "realized_pnl=?, took_profit_half=? WHERE id=?", (*values, existing[p["code"]]))
-                else:
-                    conn.execute("INSERT INTO live_positions(account_id, code, name, qty, entry_date, entry_price, cost, "
-                        "entry_reason_code, entry_reason_text, entry_signal_json, highest_return, highest_price, "
-                        "initial_qty, initial_cost, realized_pnl, took_profit_half, status) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open')", (
-                            account_id, p["code"], p["name"], p["qty"], p["entry_date"], p["entry_price"], p["cost"],
-                            p["entry_reason_code"], p["entry_reason_text"], json.dumps(p["entry_signal"], ensure_ascii=False),
-                            p["highest_return"], p["highest_price"], p["initial_qty"], p["initial_cost"],
-                            p["realized_pnl"], int(p["took_profit_half"])))
-            for p in result["positions"]:
-                conn.execute("UPDATE live_positions SET qty=0, cost=0, status='closed', exit_date=?, exit_price=?, "
-                    "exit_reason_code=?, exit_signal_json=?, realized_return=?, hold_days=?, "
-                    "realized_pnl=initial_cost * ? / 100 WHERE account_id=? AND code=? AND status='open'", (
-                        p.exit_date, p.exit_price, p.exit_reason_code, json.dumps(p.exit_signal, ensure_ascii=False),
-                        p.realized_return, p.hold_days, p.realized_return, account_id, p.code))
-            for trade in result["trades"]:
-                t = asdict(trade)
-                conn.execute("INSERT INTO live_trades(account_id, trade_date, command, code, name, side, price, qty, "
-                    "amount, fee, realized_pnl, cash_after, position_after, reason_code, reason_text, signal_json) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-                        account_id, t["trade_date"], command, t["code"], t["name"], t["side"], t["price"], t["qty"],
-                        t["amount"], t["fee"], t["realized_pnl"], t["cash_after"], t["position_after"],
-                        t["reason_code"], t["reason_text"], json.dumps(t["signal"], ensure_ascii=False)))
-            conn.execute("UPDATE live_account SET cash=?, updated_at=datetime('now','localtime') WHERE id=?",
-                         (state["cash"], account_id))
-            conn.execute("INSERT INTO live_engine_state(account_id,revision,state_json) VALUES (?,?,?) "
-                         "ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json",
-                         (account_id, revision + 1, json.dumps(state, ensure_ascii=False)))
+            existing = conn.execute(
+                "SELECT id FROM buy_sell_signals WHERE code = ? AND status = 'open'",
+                (code,),
+            ).fetchone()
+            if existing:
+                conn.commit()
+                return int(existing[0])
+            cur = conn.execute(
+                "INSERT INTO buy_sell_signals(code, name, source, entry_date, entry_price, "
+                "entry_reason_code, entry_reason_text, entry_signal_json, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')",
+                (code, name, source, entry_date, entry_price, entry_reason_code,
+                 entry_reason_text, json.dumps(entry_signal or {}, ensure_ascii=False)),
+            )
             conn.commit()
+            return int(cur.lastrowid)
         except Exception:
             conn.rollback()
             raise
@@ -1855,148 +1736,42 @@ def save_live_engine_step(account_id: int, revision: int, state: dict, result: d
             conn.close()
 
 
-def update_live_cash(account_id: int, cash: float):
-    with _lock:
-        conn = _connect()
-        try:
-            _ensure_schema(conn)
-            conn.execute(
-                "UPDATE live_account SET cash = ?, updated_at = datetime('now', 'localtime') "
-                "WHERE id = ?",
-                (cash, account_id),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-
-def add_live_position(account_id: int, position: dict) -> int:
+def close_signal(code: str, exit_date: str, exit_price: float,
+                 exit_reason_code: str = "", exit_reason_text: str = "",
+                 exit_signal: Optional[dict] = None, hold_days: Optional[int] = None) -> bool:
+    """平掉一条未平仓信号；返回是否命中。"""
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
             cur = conn.execute(
-                "INSERT INTO live_positions(account_id, code, name, qty, entry_date, "
-                "entry_price, cost, entry_reason_code, entry_reason_text, entry_signal_json, "
-                "highest_return, highest_price, initial_qty, initial_cost, realized_pnl, "
-                "took_profit_half, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    account_id, position["code"], position.get("name", ""),
-                    position["qty"], position["entry_date"], position["entry_price"],
-                    position["cost"], position.get("entry_reason_code", ""),
-                    position.get("entry_reason_text", ""), position.get("entry_signal_json"),
-                    position.get("highest_return", 0.0), position.get("highest_price", 0.0),
-                    position.get("initial_qty", position["qty"]),
-                    position.get("initial_cost", position["cost"]),
-                    position.get("realized_pnl", 0.0),
-                    1 if position.get("took_profit_half") else 0, "open",
-                ),
+                "UPDATE buy_sell_signals SET status = 'closed', exit_date = ?, exit_price = ?, "
+                "exit_reason_code = ?, exit_reason_text = ?, exit_signal_json = ?, hold_days = ?, "
+                "updated_at = datetime('now', 'localtime') WHERE code = ? AND status = 'open'",
+                (exit_date, exit_price, exit_reason_code, exit_reason_text,
+                 json.dumps(exit_signal or {}, ensure_ascii=False), hold_days, code),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            return cur.rowcount > 0
         finally:
             conn.close()
 
 
-def update_live_position(position_id: int, fields: dict):
-    """按字段更新持仓（qty/cost/highest_*/realized_pnl/took_profit_half 等）。"""
-    if not fields:
-        return
-    allowed = {
-        "qty", "cost", "highest_return", "highest_price", "realized_pnl",
-        "took_profit_half", "status", "exit_date", "exit_price",
-        "exit_reason_code", "exit_signal_json", "realized_return", "hold_days",
-    }
-    sets = []
-    params: list = []
-    for k, v in fields.items():
-        if k not in allowed:
-            continue
-        sets.append(f"{k} = ?")
-        params.append(1 if (k == "took_profit_half" and v) else (0 if k == "took_profit_half" else v))
-    if not sets:
-        return
-    params.append(position_id)
-    with _lock:
-        conn = _connect()
-        try:
-            _ensure_schema(conn)
-            conn.execute(
-                f"UPDATE live_positions SET {', '.join(sets)} WHERE id = ?", params
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-
-def list_live_positions(account_id: int, status: Optional[str] = "open") -> list[dict]:
-    conn = _connect()
-    try:
-        _ensure_schema(conn)
-        sql = f"SELECT {_LIVE_POSITION_COLS} FROM live_positions WHERE account_id = ?"
-        params: list = [account_id]
-        if status:
-            sql += " AND status = ?"
-            params.append(status)
-        sql += " ORDER BY entry_date ASC, id ASC"
-        rows = conn.execute(sql, params).fetchall()
-        return [_live_position_row_to_dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-def add_live_trade(account_id: int, trade: dict) -> int:
+def update_signal_peaks(code: str, highest_return: float, highest_price: float) -> bool:
+    """写回未平仓信号的最新峰值（供跨日移动止盈/保本判定）。"""
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
             cur = conn.execute(
-                "INSERT INTO live_trades(account_id, trade_date, command, code, name, side, "
-                "price, qty, amount, fee, realized_pnl, cash_after, position_after, "
-                "reason_code, reason_text, signal_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    account_id, trade["trade_date"], trade.get("command", ""),
-                    trade["code"], trade.get("name", ""), trade["side"],
-                    trade.get("price"), trade.get("qty"), trade.get("amount"),
-                    trade.get("fee"), trade.get("realized_pnl"), trade.get("cash_after"),
-                    trade.get("position_after"), trade.get("reason_code", ""),
-                    trade.get("reason_text", ""), trade.get("signal_json"),
-                ),
+                "UPDATE buy_sell_signals SET highest_return = ?, highest_price = ?, "
+                "updated_at = datetime('now', 'localtime') WHERE code = ? AND status = 'open'",
+                (highest_return, highest_price, code),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            return cur.rowcount > 0
         finally:
             conn.close()
-
-
-def list_live_trades(account_id: int, limit: Optional[int] = None) -> list[dict]:
-    conn = _connect()
-    try:
-        _ensure_schema(conn)
-        sql = (
-            "SELECT trade_date, command, code, name, side, price, qty, amount, fee, "
-            "realized_pnl, cash_after, position_after, reason_code, reason_text, "
-            "signal_json, created_at FROM live_trades WHERE account_id = ? "
-            "ORDER BY trade_date ASC, id ASC"
-        )
-        params: list = [account_id]
-        if limit:
-            sql += " LIMIT ?"
-            params.append(limit)
-        rows = conn.execute(sql, params).fetchall()
-        return [
-            {
-                "trade_date": r[0], "command": r[1], "code": r[2], "name": r[3] or "",
-                "side": r[4], "price": r[5], "qty": r[6], "amount": r[7], "fee": r[8],
-                "realized_pnl": r[9], "cash_after": r[10], "position_after": r[11],
-                "reason_code": r[12] or "", "reason_text": r[13] or "",
-                "signal": json.loads(r[14]) if r[14] else {}, "created_at": r[15],
-            }
-            for r in rows
-        ]
-    finally:
-        conn.close()
 
 
 def get_scan_stocks(scan_id: str, source: str = "v2") -> list[dict]:

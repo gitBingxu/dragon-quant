@@ -115,10 +115,10 @@ dragon_quant/
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
 ├── review_account/              # 共享策略/事件引擎/成交/数据/评估（strategy/engine/execution/data/market/evaluation）
-├── live_trade/                  # 实盘辅助交易（buy/sell/account；复用 review_account 策略）
-│   ├── row_builder.py           # 实时 Quote + 历史日K → 策略消费的 row
-│   ├── trader.py                # LiveTrader.buy/sell（纸上账户）
-│   └── service.py               # run_buy/run_sell/run_account_status/init_account
+├── live_trade/                  # 实盘辅助交易（buy/sell；复用 review_account 策略，纯信号记账）
+│   ├── signal_engine.py         # SignalEngine：无账户/资金/数量/仓位限制，buy-all + 峰值跟踪
+│   ├── trader.py                # LiveTrader.buy/sell（回放当日事件流 → 信号入库）
+│   └── service.py               # run_buy/run_sell（策略装配 + 中文输出）
 ├── web_ui/                      # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer）
 └── models/types.py             # dataclass 数据模型
 ```
@@ -208,10 +208,7 @@ dragon_quant/
 | `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
-| `live_account` | 实盘辅助纸上账户 | buy/sell 命令的账户（默认单账户 `default`），存初始资金、可用现金、策略参数 |
-| `live_positions` | 实盘辅助持仓 | 每笔持仓含成本、最高浮盈/价、半仓标记、平仓退出字段（open/closed） |
-| `live_trades` | 实盘辅助交割单 | 每笔 buy/sell 含 `command` / `reason_code` / `reason_text` / `signal_json` |
-| `live_engine_state` | 共享引擎进度 | revision + state_json 保存待执行信号、完整账户状态与幂等进度，与交易同事务提交 |
+| `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、半仓、平仓原因与持有天数 |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -239,7 +236,7 @@ python -m dragon_quant review-account --from 20260501 --to 20260601
 python -m dragon_quant review-account --from 20260501 --to 20260601 --capital 200000 --ui
 python -m dragon_quant review-account --ui-only --source v2
 ```
-`review-account` 不替代 `review`。统一实现位于 `review_account/`：`market.py` 负责候选与时间/指标切片，`data.py` 校验日K和完整5分钟K，`strategy.py` 产生信号，`engine.py` 顺序推进账户，`execution.py` 计算撮合、仓位和费用。`simulator.py` 与 `live_trade/trader.py` 必须调用同一 `TradingEngine.step`，不得复制买卖/成交规则。
+`review-account` 不替代 `review`。统一实现位于 `review_account/`：`market.py` 负责候选与时间/指标切片，`data.py` 校验日K和完整5分钟K，`strategy.py` 产生信号，`engine.py` 顺序推进账户，`execution.py` 计算撮合、仓位和费用。`simulator.py` 与 `live_trade/signal_engine.py` 必须复用同一 `evaluate_buy`/`evaluate_sell`/`fill_price`/`fee`，不得复制买卖/成交规则。
 
 - 候选取之前3个真实交易日的**全部真龙**并集（`get_dragons_by_date(top_n=None)`，共享层过滤否决/低于50分），按 code 去重保留综合分更高者；不补更早有记录日期，不再截断前N只。回测额外加载区间前交易日，首日可开仓。
 - Asia/Shanghai 时序：开盘MA5承接仅用上日指标和量能；突破前高改为**首根5分钟K完成后确认**，要求首根5分钟K换手≥`turn_strong_bar_turnover_min`（默认0.5%）带量，日K兜底日不触发；分歧买龙要求连续缩量一字板后完整6根5分钟K未破昨收且企稳；不允许用未来信号倒选。
@@ -254,18 +251,17 @@ python -m dragon_quant review-account --ui-only --source v2
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
 
-### 实盘辅助交易（buy / sell / account）
+### 实盘辅助交易（buy / sell）
 ```bash
-python -m dragon_quant account init --capital 100000
-python -m dragon_quant buy --date 20260907 --at 10:00 --account replay
-python -m dragon_quant sell
-python -m dragon_quant account
+python -m dragon_quant buy --date 20260907 --at 10:00
+python -m dragon_quant sell --date 20260908 --at 14:55
 ```
-`buy/sell` 只适配行情与持久化，完全使用 `review_account` 事件引擎。`buy` 每次先处理卖出再允许买入，`sell` 只允许卖出。需在09:30、随后各5分钟边界、14:55主动重复执行，并在信号后取得下一新鲜报价撮合；不是后台自动交易，迟到不得回填过去价格。买入待执行超过5分钟失效，报价时间必须晚于决策且新鲜，分钟缺失不执行本轮状态更新。15:00–15:05可调用更新收盘峰值和估值，不成交。
-- `--account NAME` 新建独立纸上账户；`--config params.json` 用于新账户参数，已有账户读取保存的参数并拒绝静默改变。`account --account NAME` 查看。
-- 历史必须同时传 `--date YYYYMMDD --at HH:MM`，重放历史事件，绝不使用当前腾讯报价；已有账户不能回放到已处理时点之前。
-- `live_engine_state` 增量表保存 revision/完整账户状态/待执行信号/处理进度；与 `live_account`、`live_positions`、`live_trades` 同事务提交，冲突拒绝并重试，重复事件幂等。旧账户首次使用从原持仓及交割单导入状态，不重置账户。
-- 同输入/参数/账户状态下信号和账户变化一致，实时延迟与成交条件仍可能导致结果不同，不保证收益。
+`buy/sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数（`evaluate_buy`/`evaluate_sell`/`fill_price`/`fee` 等），只做信号记账、**不维护模拟账户/资金/数量/仓位**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从 `buy_sell_signals` 筛出「买入日之前且未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
+
+- `SignalEngine`（`live_trade/signal_engine.py`）复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/数量/仓位/次数限制；卖出用 notional Position（qty=100）保证 `break_even_price` 与回测精确一致。
+- 历史日期必须同时传 `--date YYYYMMDD --at HH:MM`（重放当日截至该时点的5分钟K）；实时今日回放截至当前已完成的5分钟K。绝不使用当前腾讯报价。
+- 信号表 `buy_sell_signals`：`insert_signal` 对同一未平仓 code 幂等（部分唯一索引 `idx_buy_sell_open`）；`list_open_signals(before_date=...)` 只取买入日早于目标日的持仓；峰值经 `update_signal_peaks` 跨日写回供移动止盈/保本判定。
+- 同输入/参数/信号状态下买卖决策与回测一致；实时延迟与成交条件仍可能导致结果不同，不保证收益。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

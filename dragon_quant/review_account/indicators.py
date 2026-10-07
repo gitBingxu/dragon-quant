@@ -1,13 +1,14 @@
 """日线指标计算，供账户级 review 的买卖规则使用。"""
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from dragon_quant.models.types import KBar
 
 
 def kbar_date(k: KBar) -> str:
-    return datetime.fromtimestamp(k.timestamp / 1000).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(k.timestamp / 1000, ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
 
 
 def kbar_to_row(k: KBar) -> dict:

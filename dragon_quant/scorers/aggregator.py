@@ -43,15 +43,21 @@ def evaluate(code: str, cache: DataCache, *,
                 all_sector_codes=all_sector_codes,
                 sector_name_map=sector_name_map,
             )
-        except Exception as e:  # 单维异常 → 中性兜底，不影响其他维
-            dims[dim] = ScoreResult(dim=dim, score=50.0,
-                                    weight=R.DIM_WEIGHTS[dim],
-                                    details={"error": str(e)})
+        except Exception as e:
+            dims[dim] = ScoreResult(
+                dim=dim, score=R.ABS_NEUTRAL if dim == "absorption" else 0.0,
+                weight=R.DIM_WEIGHTS[dim],
+                details={"error": str(e), "degraded": True,
+                         "fallback": True, "fallback_reason": "评分执行异常"},
+            )
 
     # ── Step 1 硬门槛 ──
     reject = None
     for dim in _HARD_DIMS:
         floor = R.DIM_FLOORS.get(dim)
+        if "error" in dims[dim].details:
+            reject = f"{dim} 评分异常: {dims[dim].details['error']}"
+            break
         if floor is not None and dims[dim].score < floor:
             reject = f"{dim}={dims[dim].score:.1f} < floor {floor:.0f}"
             break
@@ -67,8 +73,10 @@ def evaluate(code: str, cache: DataCache, *,
 
 def rank_verdicts(verdicts: list[DragonVerdict]) -> list[DragonVerdict]:
     """对通过门槛的真龙按 composite 降序赋 rank（被否决者 rank=None）。"""
+    for verdict in verdicts:
+        verdict.rank = None
     dragons = [v for v in verdicts if v.is_true_dragon]
-    dragons.sort(key=lambda v: v.composite, reverse=True)
+    dragons.sort(key=lambda v: (-v.composite, v.code))
     for i, v in enumerate(dragons, 1):
         v.rank = i
     return verdicts

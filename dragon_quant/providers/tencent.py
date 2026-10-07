@@ -65,7 +65,14 @@ def _parse_gtimg_quote(line: str) -> Optional[Quote]:
     if len(fields) < 52:
         return None
     try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        timestamp = 0
+        if len(fields[30]) == 14 and fields[30].isdigit():
+            timestamp = int(datetime.strptime(fields[30], "%Y%m%d%H%M%S").replace(
+                tzinfo=ZoneInfo("Asia/Shanghai")).timestamp() * 1000)
         return Quote(
+            timestamp=timestamp,
             code=fields[2], name=fields[1],
             price=float(fields[3]), prev_close=float(fields[4]),
             open_px=float(fields[5]),

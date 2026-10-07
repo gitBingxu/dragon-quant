@@ -1,7 +1,7 @@
 """scorers.registry —「识别真龙」五维评分体系的权重/门槛/阈值常量。
 
 全部集中于此，便于回测调参；算法文件只引用，不写死。
-依据《评分器Refactor.md》§9。
+依据《评分器Refactor.md》的各维规则。
 """
 
 # ─── 9.1 维度权重 & 门槛 ───
@@ -13,6 +13,12 @@ DIM_WEIGHTS = {
     "liquidity": 0.20,
     "absorption": 0.10,
 }
+MARKET_SYMBOL = "SH000001"
+PRICE_TOLERANCE = 0.001
+DRIVE_NEUTRAL = 40.0
+SEAL_NEUTRAL = 60.0
+SEAL_STABLE_SCORES = (100.0, 60.0, 20.0)
+
 DIM_FLOORS = {
     "drive": 40.0,
     "leadership": 40.0,
@@ -78,15 +84,15 @@ ABS_MIN_AFFECTED = 2        # 最少受影响板块数
 ABS_MAX_DRAWDOWN_RATIO = 0.3  # 目标板块窗口回撤比例上限
 ABS_MAX_TIME_DIFF_MS = 600_000  # 跳水→拉升最大时间差（10分钟）
 ABS_MAX_TRADE_DAYS = 10     # 回看交易日数
-ABS_INTENSITY_W = 0.40      # 事件三维：虹吸强度
+ABS_INTENSITY_W = 0.60      # 事件三维：虹吸强度
 ABS_BREADTH_W = 0.20        # 事件三维：广度
-ABS_SUSTAIN_W = 0.40        # 事件三维：持续性
+ABS_SUSTAIN_W = 0.20        # 事件三维：持续性
 # 强度（正向口径）：目标拉升越高 + 出逃规模(数量×均跌)越大 → 分越高
 ABS_INT_TARGET_W = 0.5      # 强度内部：目标拉升分量 子权重
 ABS_INT_FLIGHT_W = 0.5      # 强度内部：出逃规模分量 子权重
-ABS_INT_TARGET_REF = 2.0    # 目标拉升满分参考（窗口涨幅 %，≥2% 给满分）
-ABS_INT_FLIGHT_REF = 5.0    # 出逃规模满分参考（|均跌%|×出逃板块数，≥5 给满分）
-ABS_MULTI_BONUS_STEP = 5    # 每多一个事件加分
-ABS_MULTI_BONUS_CAP = 15    # 多事件 bonus 上限
+ABS_INT_TARGET_REF = 3.0
+ABS_INT_FLIGHT_REF = 10.0
+ABS_RECENCY_HALF_LIFE_DAYS = 3
+ABS_TOP_EVENTS = 3
 ABS_BUCKET_MS = 300_000     # 5 分钟 bucket
 ABS_NEUTRAL = 50.0          # 无信号/数据不足 中性分

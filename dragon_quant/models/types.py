@@ -60,6 +60,7 @@ class Quote:
     bid1_price: float = 0.0    # 买一价（gtimg f[9]）
     bid1_volume: float = 0.0   # 买一量/封单量（gtimg f[10]，单位手）
     ask1_volume: float = 0.0   # 卖一量（gtimg f[20]，单位手）
+    timestamp: int = 0
 
 
 @dataclass

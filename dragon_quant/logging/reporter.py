@@ -48,7 +48,11 @@ class ReportBuilder:
         lines.append(f"- 📊 领涨性({s('leadership'):.0f}): {self._lead(dims.get('leadership', {}))}")
         lines.append(f"- 🛡️ 抗跌性({s('anti_drop'):.0f}): {self._anti(dims.get('anti_drop', {}), primary_sector_name)}")
         lines.append(f"- 💧 流动性({s('liquidity'):.0f}): {self._liq(dims.get('liquidity', {}))}")
-        lines.append(f"- 💰 资金承接({s('absorption'):.0f}): {self._abs(dims.get('absorption', {}))}")
+        lines.append(f"- 资金承接({s('absorption'):.0f}): {self._abs(dims.get('absorption', {}))}")
+        for dim, result in dims.items():
+            details = result.get("details", {})
+            if details.get("error"):
+                lines.append(f"- {dim} 评分异常：{details['error']}")
         return "\n".join(lines)
 
     @staticmethod
@@ -77,9 +81,11 @@ class ReportBuilder:
                 f"{e.get('sector_event_time', '-')}板块先拉升{ReportBuilder._fmt_pct(e.get('sector_gain_pct', 0))}，"
                 f"{e.get('stock_follow_time', '-')}个股跟随{ReportBuilder._fmt_pct(e.get('stock_gain_pct', 0))}"
             )
-        lead_desc = "；".join(lead_parts) if lead_parts else (
+        lead_desc = lead.get("reason") or ("；".join(lead_parts) if lead_parts else (
             f"带动{lead.get('n_lead', 0)}次，被带{lead.get('n_follow', 0)}次"
-        )
+        ))
+        if early_det.get("degraded"):
+            seal += f"；数据降级：{early_det.get('reason', '封板比较样本不完整')}"
 
         return (f"封板最早{early:.0f}：{seal}；"
                 f"带动板块{det.get('s_lead', 0):.0f}：{lead_desc}；"
@@ -111,7 +117,9 @@ class ReportBuilder:
         open_str = "未知" if n_open < 0 else f"{n_open}次"
         return (f"换手{det.get('s_turnover', 0):.0f}(换手率{det.get('turnover_rate', 0):.1f}%)"
                 f"/封板{det.get('s_seal', 0):.0f}(强度{det.get('s_seal_strength', 0):.0f},"
-                f"开板{open_str})")
+                f"开板{open_str})"
+                + ("；数据降级：" + "、".join(det.get("reasons") or ["换手比较样本不足"])
+                   if det.get("degraded") else ""))
 
     @staticmethod
     def _abs(d: dict) -> str:
@@ -121,8 +129,13 @@ class ReportBuilder:
         be = det.get("best_event") or (det.get("all_events") or [{}])[0]
         fleeing = be.get("fleeing_sectors", [])
         names = ReportBuilder._fmt_fleeing_sectors(fleeing)
-        return (f"检测到{det.get('event_count', 0)}次资金承接；"
-                f"{be.get('dive_time', '时间缺失')} {names}板块跳水"
+        summary = f"检测到{det.get('event_count', 0)}次资金承接；"
+        if "raw_event_count" in det:
+            summary = (f"{det['raw_event_count']}个窗口合并为{det['event_count']}次独立承接，"
+                       f"取衰减后最强{det['selected_event_count']}次均值；"
+                       f"代表事件原始{be['score']:.2f}分，距最新样本{be['age_trade_days']}个交易日，"
+                       f"衰减系数{be['recency_weight']:.3f}，调整后{be['adjusted_score']:.2f}分；")
+        return (summary + f"{be.get('dive_time', '时间缺失')} {names}板块跳水"
                 f"(平均{ReportBuilder._fmt_pct(be.get('fleeing_avg_drop', 0))})，"
                 f"{be.get('rally_time', '时间缺失')} 目标板块拉升"
                 f"{ReportBuilder._fmt_pct(be.get('target_pct', 0))}，承接上述板块出逃资金")
@@ -159,7 +172,8 @@ class ReportBuilder:
         perf = ReportBuilder._anti_perf_desc(base_drop, stock_chg)
         return (f"{event.get('start_time', '-')}-{event.get('bottom_time', '-')} "
                 f"{label}{verb}{ReportBuilder._fmt_pct(base_drop)}，"
-                f"该股同期{ReportBuilder._fmt_pct(stock_chg)}（{perf}）")
+                f"该股同期{ReportBuilder._fmt_pct(stock_chg)}（{perf}）"
+                + (f"；{det['rebound_reason']}" if det.get("rebound_reason") else ""))
 
     @staticmethod
     def _anti_perf_desc(base_drop, stock_chg) -> str:

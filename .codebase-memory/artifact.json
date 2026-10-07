@@ -1,12 +1,12 @@
 {
     "schema_version": 2,
-    "commit": "d97f9f28fd1b287569e61a8e2acfc0ae3dafc9cd",
-    "indexed_at": "2026-10-06T10:56:03Z",
+    "commit": "76ea95eac7d8de1963fbb478fd9d63e499df2105",
+    "indexed_at": "2026-10-07T06:08:06Z",
     "project": "Users-bing-Repo-dragon-quant",
-    "nodes": 1597,
-    "edges": 7559,
-    "original_size": 7405568,
-    "compressed_size": 1467184,
-    "compression_level": 9,
+    "nodes": 1592,
+    "edges": 7486,
+    "original_size": 10289152,
+    "compressed_size": 1978854,
+    "compression_level": 3,
     "reconcile_basis": "git-clean-head"
 }

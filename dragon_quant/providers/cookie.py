@@ -4,6 +4,8 @@ Cookie 管理 — 雪球 Cookie 存取 + 无头浏览器自动获取。
 支持手动设置 & 无头浏览器自动获取。
 """
 
+import sys
+
 from dragon_quant.storage.paths import COOKIE_DIR
 
 XQ_FILE = COOKIE_DIR / "xueqiu"
@@ -48,7 +50,14 @@ def _browser_cookies(url: str, headless: bool = True) -> str:
 
     headless: True 无界面，False 显示窗口。
     """
-    from playwright.sync_api import sync_playwright
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError(
+            "未安装 playwright（自动获取 Cookie 依赖无头浏览器）。\n"
+            "  请先执行：pip install playwright && playwright install chromium\n"
+            "  或手动设置 Cookie：dragon-quant data cookie-set --cookie \"xq_a_token=...; u=...\""
+        )
     with sync_playwright() as p:
         b = p.chromium.launch(
             headless=headless,
@@ -70,7 +79,11 @@ def _browser_cookies(url: str, headless: bool = True) -> str:
 
 def fetch_xq() -> str:
     """获取雪球 Cookie — headless 无界面（首页无需验证）"""
-    c = _browser_cookies("https://xueqiu.com/", headless=True)
+    try:
+        c = _browser_cookies("https://xueqiu.com/", headless=True)
+    except RuntimeError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return ""
     if c:
         set_xq(c)
         return c

@@ -80,10 +80,10 @@ dragon-quant data cookie-status
 python3 -m dragon_quant.providers.cookie set --source xq --cookie 'xq_a_token=...; xq_is_login=1; u=...'
 
 # 自动获取（需要 playwright）
-dragon-quant data cookie-fetch          # 默认仅刷新雪球
+dragon-quant data cookie-fetch          # 刷新雪球 Cookie
 ```
 
-Cookie 文件位置：`~/Library/Application Support/dragon-quant/cookies/{xueqiu,eastmoney}`
+Cookie 文件位置：`~/Library/Application Support/dragon-quant/cookies/xueqiu`
 
 ## CLI 命令大全
 
@@ -103,7 +103,7 @@ dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cach
 
 `scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/` 的 `*_v2` 表。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
 
-### `blacklist` — 概念板块黑名单
+### `blacklist` — 板块黑名单
 
 拉取领涨/领跌板块时按子串过滤（行业板块切换后默认种子为空，按需维护）。
 
@@ -261,22 +261,23 @@ quote = get_quote("600172")
 | 雪球 | 个股日 K / 当日 1 分 K | 需要 |
 | 腾讯 | 批量实时行情 + 收盘盘口（买一封单量）| 无需 |
 
-> 东财 provider 仍保留但默认不参与扫描，可作回退。封单数据走腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
+> 封单数据走腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
 
 ## 目录结构
 
 ```
 dragon_quant/
-├── cli.py                # CLI（scan/logs/data/review/review-account/buy/sell/vpa/storage/blacklist）
+├── cli.py                # CLI 门面（解析树 + main() + 共享 helper）
+├── cli_commands.py       # 各子命令 _cmd_* 处理函数
 ├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
-├── providers/            # 数据源适配（ths/eastmoney/xueqiu/tencent/browser/cookie）
+├── providers/            # 数据源适配（ths/xueqiu/tencent/cookie）
 ├── scorers/           # 五维评分器 + registry + aggregator
 ├── vpa/                  # 量价分析（插件式因子）
 ├── cache/                # 内存+本地双缓存
 ├── logging/              # ScanLogger + ReportBuilder + query
-├── storage/              # paths / db（SQLite）/ manager
+├── storage/              # paths / db（SQLite 门面 + 领域模块）/ manager
 ├── utils/trading.py     # 交易日历工具
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）

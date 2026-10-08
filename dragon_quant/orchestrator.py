@@ -43,7 +43,7 @@ RANK_UP_COUNT = 5     # 领涨行业取前 5（候选为板块内当日涨停股
 RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
 
 # 数据源 / 接口中文名（仅用于控制台失败提示）
-PROVIDER_CN = {"ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯", "eastmoney": "东财"}
+PROVIDER_CN = {"ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯"}
 ENDPOINT_CN = {
     "sector_ranking": "获取板块排行",
     "sector_components": "获取板块内个股",
@@ -100,7 +100,7 @@ def _cache_worth_writing(data) -> bool:
     return True
 
 
-def _cached_fetch(limiter, cache, provider, endpoint, key, fetch_fn,
+def _cached_fetch(limiter, cache, provider, key, fetch_fn,
                   trade_date, *, refresh, volatile, namespace=""):
     """带交易日磁盘缓存的并发取数：命中则跳过 limiter，未命中提交任务并按需落盘。"""
     if not refresh and not volatile:
@@ -113,7 +113,7 @@ def _cached_fetch(limiter, cache, provider, endpoint, key, fetch_fn,
             cache.set_for_trade_date(key, data, trade_date, namespace)
         else:
             cache.set(key, data)  # 仅写内存供本轮使用
-    limiter.submit(provider, endpoint, task)
+    limiter.submit(provider, task)
 
 
 def _cached_fetch_sync(cache, key, fetch_fn, trade_date, *,
@@ -380,11 +380,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     tx = providers["tencent"]
 
     cache = DataCache()
-    # 东财接口强反爬：push2/push2his 串行 + 每次调用间隔 1.5~2.5s 随机延迟降低封禁风险
     # 同花顺无强反爬：低延迟即可
     limiter = RateLimiter(max_workers=workers, logger=logger,
-                          provider_delays={"eastmoney": (1.5, 2.5),
-                                           "ths": (0.3, 0.6)})
+                          provider_delays={"ths": (0.3, 0.6)})
 
     # provider 磁盘缓存命名空间：按交易日复用，避免每次命令重打满同花顺。
     #   trade_date 优先用雪球分时K确定的最近交易日，失败回退自然日。
@@ -408,7 +406,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("📊 Phase A — 板块排行")
 
-    # 概念板块黑名单（DB 可配置，叠加统计型概念前缀过滤）
+    # 板块黑名单（DB 可配置，叠加统计型概念前缀过滤）
     try:
         from dragon_quant.storage import db as _db
         blacklist = _db.get_sector_blacklist()
@@ -458,7 +456,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 提交领涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     for s in top10_up:
-        _cf("ths", "ths", f"sector:components:{s.code}",
+        _cf("ths", f"sector:components:{s.code}",
             (lambda sc=s.code: ths.get_sector_components(sc, page=1,
                                                          all_pages=True)),
             namespace=source)
@@ -484,7 +482,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print(f"   拉取 {len(unique_codes)} 只个股日K线...")
     for code in unique_codes:
-        _cf("xueqiu", "kline", f"kline:day:{code}",
+        _cf("xueqiu", f"kline:day:{code}",
             lambda c=code: xq.get_kline(c, days=30))
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
@@ -562,19 +560,19 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # T1: 板块历史5分K（虹吸回看）+ 主板块当日1分K（带动/抗跌基准）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
-        _cf("ths", "ths", f"kline:5min:sector:{s.code}",
+        _cf("ths", f"kline:5min:sector:{s.code}",
             (lambda sc=s.code: ths.get_sector_5min_kline_history(sc, days=10)),
             namespace=source)
     for s in top10_up:
-        _cf("ths", "ths", f"kline:1min:sector:{s.code}",
+        _cf("ths", f"kline:1min:sector:{s.code}",
             (lambda sc=s.code: ths.get_sector_1min_kline(sc)),
             namespace=source)
 
     # T2: 全部候选股分时K线（含 drive 封板池对比所需的同板块涨停股）
     for r in candidate_pool:
-        _cf("xueqiu", "minute_kline", f"kline:1min:{r.code}",
+        _cf("xueqiu", f"kline:1min:{r.code}",
             lambda c=r.code: xq.get_minute_kline(c))
-    _cf("xueqiu", "minute_kline", f"kline:1min:{R.MARKET_SYMBOL}",
+    _cf("xueqiu", f"kline:1min:{R.MARKET_SYMBOL}",
         lambda: xq.get_minute_kline(R.MARKET_SYMBOL))
 
     # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
@@ -591,7 +589,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 quotes[quote.code] = quote
         return [quotes[code] for code in sorted(quotes)]
 
-    _cf("tencent", "quote", "quotes:batch", fetch_quotes)
+    _cf("tencent", "quotes:batch", fetch_quotes)
 
     limiter.wait_all()
     logger.phase("D", "并发数据加载完成")

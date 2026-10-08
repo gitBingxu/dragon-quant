@@ -5,7 +5,7 @@
   logger = ScanLogger()
   logger.phase("A", "板块排行完成", count=10)
   logger.scorer("drive", "600519", score=85.0, details={...})
-  logger.api("eastmoney", "sector_ranking", ok=True, elapsed_ms=350)
+  logger.api("ths", "sector_ranking", ok=True, elapsed_ms=350)
 
 查询:
   logs = logger.query(category="scorer:drive", code="600519")

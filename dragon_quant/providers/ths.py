@@ -16,8 +16,9 @@
 """
 
 import re
-import sys
+import threading
 import time
+import urllib.error
 import urllib.request
 from typing import Optional
 
@@ -56,6 +57,32 @@ LINE_URL = D_BASE + "/v6/line/48_{inner}/30/last1000.js"
 # 6 位 code → innerCode 进程内缓存，避免每次 5 分 K 都多一次详情页请求
 _INNER_CACHE: dict[str, str] = {}
 
+# 同花顺取数失败去噪：`_fetch` 失败不再逐条刷屏，改为按类别累加，
+# 由 orchestrator 在 Phase D 结束后一次性汇总（避免单次网关抖动刷 10 行）。
+_FETCH_FAILURES: "dict[str, int]" = {}
+_FETCH_LOCK = threading.Lock()
+
+
+def _record_failure(e: Exception) -> None:
+    """把一次取数失败按类别累加（仅计数，不打印）。"""
+    if isinstance(e, urllib.error.HTTPError):
+        label = f"HTTP {e.code}"
+    else:
+        label = type(e).__name__
+    with _FETCH_LOCK:
+        _FETCH_FAILURES[label] = _FETCH_FAILURES.get(label, 0) + 1
+
+
+def drain_fetch_failures() -> dict:
+    """取出并清空累积的取数失败计数，返回 {类别: 次数}。
+
+    供 orchestrator 在扫描末尾一次性汇总（始终清空，避免跨轮扫描残留）。
+    """
+    with _FETCH_LOCK:
+        out = dict(_FETCH_FAILURES)
+        _FETCH_FAILURES.clear()
+    return out
+
 
 def _safe_float(v, default=0.0):
     try:
@@ -76,7 +103,7 @@ def _fetch(url: str, referer: str = "", gbk: bool = False) -> Optional[str]:
             raw = resp.read()
         return raw.decode(enc, errors="ignore")
     except Exception as e:
-        print(f"  ⚠️ 同花顺请求失败: {e}", file=sys.stderr)
+        _record_failure(e)
     return None
 
 

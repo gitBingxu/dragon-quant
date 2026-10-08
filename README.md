@@ -52,7 +52,7 @@ cd dragon-quant && pip install -e .
 ## 快速开始
 
 ```bash
-# 首次使用：配置雪球 Cookie（个股数据依赖；自动获取需 playwright）
+# 首次使用：配置雪球 Cookie（个股数据依赖；自动获取需 playwright，首次自动下载 chromium 内核约 150MB，走国内镜像）
 dragon-quant data cookie-fetch
 
 # 查看 Linux 风格帮助提示
@@ -76,7 +76,7 @@ dragon-quant sell                             # 盘中：对已买入未卖出�
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 ```
 
-> 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。
+> 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。自动获取（`data cookie-fetch`）首次运行会自动下载 chromium 内核（约 150MB，走国内镜像，仅一次），无需手动 `playwright install`。
 
 ## CLI 命令大全
 

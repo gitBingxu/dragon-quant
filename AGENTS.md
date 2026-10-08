@@ -62,7 +62,7 @@ python -c "from dragon_quant.providers.cookie import get_xq; print(f'雪球: {bo
 # 手动设置雪球 Cookie（推荐）
 python -m dragon_quant.providers.cookie set --cookie "xq_a_token=...; xq_is_login=1; u=..." --source xq
 
-# 自动获取（需要 playwright）
+# 自动获取（需要 playwright；首次运行自动下载 chromium 内核约 150MB，走国内镜像）
 python -m dragon_quant.providers.cookie fetch --source xq
 ```
 
@@ -280,7 +280,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 阈值/权重集中在 `scorers/registry.py`，便于回测调参。
 
 ### 必须遵守的约束
-- **运行时依赖**：`playwright` 为必选（Cookie 自动获取 + 浏览器辅助）；其余仅用 Python 3 标准库。
+- **运行时依赖**：`playwright` 为必选（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）；其余仅用 Python 3 标准库。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scorers/` 与 `*_v2` 表，不再保留旧四维评分代码。

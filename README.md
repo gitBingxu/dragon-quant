@@ -76,6 +76,8 @@ dragon-quant sell                             # 盘中：对已买入未卖出�
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 ```
 
+> 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。
+
 ## CLI 命令大全
 
 ### `scan` — 扫榜
@@ -92,7 +94,7 @@ dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cach
 | `--force` | - | 跳过交易时段拦截与 DB 缓存 |
 | `--no-cache` | - | 刷新 Provider 缓存；重新评分时与 `--force` 一起使用 |
 
-`scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/` 的 `*_v2` 表。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
+`scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到数据目录的 `*_v2` 表（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
 
 ### `blacklist` — 板块黑名单
 

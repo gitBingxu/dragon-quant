@@ -738,7 +738,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
         # 报告文本
         report_path = RESULTS_DIR / f"scan_report_{source}_{timestamp}.txt"
-        with open(report_path, "w") as f:
+        with open(report_path, "w", encoding="utf-8") as f:
             f.write(reporter.build_summary_report(display_list))
             f.write("\n\n")
             f.write(output["report_text"])

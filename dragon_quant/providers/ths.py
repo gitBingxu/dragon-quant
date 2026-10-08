@@ -3,7 +3,7 @@
 
 接口与反爬要点：
   - 行业排行榜：data.10jqka.com.cn/funds/hyzjl/field/zdf/order/desc/page/{p}/
-    curl + GBK 直取（无需 Playwright/Cookie），field=zdf 可正确按涨跌幅排序、翻页；
+    HTTP GET + GBK 直取（无需 Playwright/Cookie），field=zdf 可正确按涨跌幅排序、翻页；
     单页 DOM 非严格有序，需抓多页后本地排序。网关有 403 频控，带退避重试。
   - 行业成分股：q.10jqka.com.cn/thshy/detail/.../ 详情页 HTML 表格解析（GBK）
   - 板块分时：d.10jqka.com.cn/v6/time/48_{innerCode}/last.js（JSONP，无 Cookie）
@@ -16,9 +16,9 @@
 """
 
 import re
-import subprocess
 import sys
 import time
+import urllib.request
 from typing import Optional
 
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -34,11 +34,11 @@ UA = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-CURL_TIMEOUT = 12
+HTTP_TIMEOUT = 12
 
 # 行业板块涨跌幅排行页：field=zdf（涨跌幅）可正确按 order 排序、可翻页。
 # 注意：旧 field=tradezdf 是资金流字段，无视 order/page，永远固定返回 50 行资金流入板块。
-# curl + GBK 直取（无需 Playwright/Cookie/反爬）；单页 DOM 非严格有序，需抓多页后本地排序。
+# HTTP GET + GBK 直取（urllib，无需 Playwright/Cookie/反爬）；单页 DOM 非严格有序，需抓多页后本地排序。
 # hyzjl=行业资金流（约90个行业板块，code 为 881xxx）。
 RANKING_URL = DATA_BASE + "/funds/hyzjl/field/zdf/order/desc/page/{page}/"
 RANKING_MAX_PAGES = 3  # 行业板块约 90 个，每页 50，翻 3 页足够（末页不足自然停止）
@@ -64,23 +64,19 @@ def _safe_float(v, default=0.0):
         return default
 
 
-def _curl(url: str, referer: str = "", gbk: bool = False) -> Optional[str]:
-    """curl GET。gbk=True 时按 GBK 解码（同花顺网页页面），否则 UTF-8。"""
-    cmd = ["curl", "-s", "--max-time", str(CURL_TIMEOUT), "-A", UA]
+def _fetch(url: str, referer: str = "", gbk: bool = False) -> Optional[str]:
+    """HTTP GET（urllib 标准库，跨平台无需外部 curl）。gbk=True 按 GBK 解码（同花顺网页），否则 UTF-8。"""
+    headers = {"User-Agent": UA}
     if referer:
-        cmd += ["-H", f"Referer: {referer}"]
-    cmd.append(url)
+        headers["Referer"] = referer
+    req = urllib.request.Request(url, headers=headers)
     try:
         enc = "gbk" if gbk else "utf-8"
-        result = subprocess.run(
-            cmd, capture_output=True, timeout=CURL_TIMEOUT + 5,
-        )
-        if result.returncode == 0 and result.stdout:
-            return result.stdout.decode(enc, errors="ignore")
-    except FileNotFoundError:
-        print("  ⚠️ curl 不可用", file=sys.stderr)
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            raw = resp.read()
+        return raw.decode(enc, errors="ignore")
     except Exception as e:
-        print(f"  ⚠️ 同花顺 curl 异常: {e}", file=sys.stderr)
+        print(f"  ⚠️ 同花顺请求失败: {e}", file=sys.stderr)
     return None
 
 
@@ -258,12 +254,12 @@ class THSProvider(StockProvider):
     def name(self) -> str:
         return "ths"
 
-    # ─── 行业板块排行（curl field=zdf 排行页，多页+本地排序）───
+    # ─── 行业板块排行（HTTP GET field=zdf 排行页，多页+本地排序）───
 
     def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
         """行业板块涨跌幅排行。asc=False 涨幅榜 / asc=True 跌幅榜。
 
-        curl 抓取 field=zdf 排行页多页（GBK，无需 Playwright/Cookie），合并去重后
+        HTTP GET 抓取 field=zdf 排行页多页（GBK，无需 Playwright/Cookie），合并去重后
         本地按涨跌幅排序（单页 DOM 非严格有序，必须本地 re-sort）。
         同花顺数据网关有频控（403），单页带退避重试 + 页间小延迟降低触发概率。
         """
@@ -272,7 +268,7 @@ class THSProvider(StockProvider):
         for p in range(1, RANKING_MAX_PAGES + 1):
             part = None
             for attempt in range(3):  # 退避重试：应对 403 频控
-                html = _curl(RANKING_URL.format(page=p),
+                html = _fetch(RANKING_URL.format(page=p),
                              referer=f"{DATA_BASE}/", gbk=True)
                 part = self._parse_ranking_html(html) if html else None
                 if part:
@@ -336,7 +332,7 @@ class THSProvider(StockProvider):
         result: list[StockInfo] = []
 
         # 第 1 页：详情页完整 HTML
-        html = _curl(DETAIL_URL.format(code=sector_code), gbk=True)
+        html = _fetch(DETAIL_URL.format(code=sector_code), gbk=True)
         if html:
             result.extend(_parse_components_html(html, sector_code))
 
@@ -344,7 +340,7 @@ class THSProvider(StockProvider):
         if all_pages and result:
             for p in range(2, 6):
                 url = PAGE_URL.format(page=p, code=sector_code)
-                ph = _curl(url, referer=DETAIL_URL.format(code=sector_code), gbk=True)
+                ph = _fetch(url, referer=DETAIL_URL.format(code=sector_code), gbk=True)
                 if not ph:
                     break
                 part = _parse_components_html(ph, sector_code)
@@ -375,7 +371,7 @@ class THSProvider(StockProvider):
             _INNER_CACHE[sector_code] = sector_code
             return sector_code
 
-        html = _curl(DETAIL_URL.format(code=sector_code), gbk=True)
+        html = _fetch(DETAIL_URL.format(code=sector_code), gbk=True)
         inner = ""
         if html:
             m = re.search(r'id=["\']clid["\']\s+value=["\'](\d+)["\']', html)
@@ -395,7 +391,7 @@ class THSProvider(StockProvider):
                                  elapsed_ms=(time.time() - t0) * 1000,
                                  error="innerCode 解析失败")
             return []
-        raw = _curl(TIME_URL.format(inner=inner), referer=f"{Q_BASE}/")
+        raw = _fetch(TIME_URL.format(inner=inner), referer=f"{Q_BASE}/")
         data = _parse_jsonp(raw) if raw else None
         elapsed = (time.time() - t0) * 1000
         if not data:
@@ -422,7 +418,7 @@ class THSProvider(StockProvider):
                                  elapsed_ms=(time.time() - t0) * 1000,
                                  error="innerCode 解析失败")
             return []
-        raw = _curl(TIME_URL.format(inner=inner), referer=f"{Q_BASE}/")
+        raw = _fetch(TIME_URL.format(inner=inner), referer=f"{Q_BASE}/")
         data = _parse_jsonp(raw) if raw else None
         elapsed = (time.time() - t0) * 1000
         if not data:
@@ -454,7 +450,7 @@ class THSProvider(StockProvider):
                                  elapsed_ms=(time.time() - t0) * 1000,
                                  error="innerCode 解析失败")
             return []
-        raw = _curl(LINE_URL.format(inner=inner), referer=f"{Q_BASE}/")
+        raw = _fetch(LINE_URL.format(inner=inner), referer=f"{Q_BASE}/")
         data = _parse_jsonp(raw) if raw else None
         elapsed = (time.time() - t0) * 1000
         if not data:

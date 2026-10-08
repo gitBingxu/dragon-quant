@@ -175,7 +175,7 @@ class ScanLogger:
     def dump_jsonl(self, path: Path):
         """导出为 JSONL 文件"""
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             for record in self.to_dicts():
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

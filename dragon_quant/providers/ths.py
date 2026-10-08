@@ -386,7 +386,7 @@ class THSProvider(StockProvider):
         return inner
 
     def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
-        """概念板块 5 分钟 K 线（同花顺 1 分钟分时聚合而来）。"""
+        """板块 5 分钟 K 线（同花顺 1 分钟分时聚合而来）。"""
         t0 = time.time()
         inner = self._get_inner_code(sector_code)
         if not inner:
@@ -413,7 +413,7 @@ class THSProvider(StockProvider):
         return kbars[-bars:] if bars else kbars
 
     def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
-        """概念板块当日 1 分钟分时 K 线（原始 1 分，不聚合）。"""
+        """板块当日 1 分钟分时 K 线（原始 1 分，不聚合）。"""
         t0 = time.time()
         inner = self._get_inner_code(sector_code)
         if not inner:
@@ -441,7 +441,7 @@ class THSProvider(StockProvider):
 
     def get_sector_5min_kline_history(self, sector_code: str,
                                       days: int = 10) -> list[KBar]:
-        """概念板块近 days 个交易日的 5 分钟历史 K 线（真实 OHLC）。
+        """板块近 days 个交易日的 5 分钟历史 K 线（真实 OHLC）。
 
         同花顺 /v6/line/48_{inner}/30/last1000.js（周期码30=5分），_parse_jsonp
         后节点即顶层 dict，data 行 YYYYMMDDHHMM,开,高,低,收,量,额,... 直接 OHLC。

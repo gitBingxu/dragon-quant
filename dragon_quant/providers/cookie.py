@@ -4,6 +4,8 @@ Cookie 管理 — 雪球 Cookie 存取 + 无头浏览器自动获取。
 支持手动设置 & 无头浏览器自动获取。
 """
 
+import os
+import subprocess
 import sys
 
 from dragon_quant.storage.paths import COOKIE_DIR
@@ -44,6 +46,40 @@ def get_xq() -> str:
 # 隐藏自动化特征（降低被风控触发验证的概率）
 _STEALTH_JS = "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
 
+# 国内镜像，加速 chromium 下载（阿里 npmmirror）
+_PLAYWRIGHT_MIRROR = "https://npmmirror.com/mirrors/playwright/"
+
+
+def _launch_chromium(p, headless: bool):
+    """启动 chromium；内核缺失/版本不匹配时自动下载后重试一次。"""
+    args = ["--disable-blink-features=AutomationControlled"]
+    try:
+        return p.chromium.launch(headless=headless, args=args)
+    except Exception as e:
+        msg = str(e)
+        if "Executable doesn't exist" not in msg and "playwright install" not in msg:
+            raise  # 非内核缺失问题，原样抛出
+        print("🔧 首次使用，正在下载 Chromium 内核（约 150MB，仅此一次）…", file=sys.stderr)
+        env = dict(os.environ)
+        env.setdefault("PLAYWRIGHT_DOWNLOAD_HOST", _PLAYWRIGHT_MIRROR)
+        r = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            env=env,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(
+                "Chromium 内核自动下载失败。\n"
+                "  请手动执行：playwright install chromium\n"
+                "  国内网络先设镜像：PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/ playwright install chromium"
+            )
+        try:
+            return p.chromium.launch(headless=headless, args=args)
+        except Exception as e2:
+            raise RuntimeError(
+                f"Chromium 启动失败：{e2}\n"
+                "  请确认已正确安装：playwright install chromium"
+            )
+
 
 def _browser_cookies(url: str, headless: bool = True) -> str:
     """打开页面并提取 Cookie。
@@ -59,10 +95,7 @@ def _browser_cookies(url: str, headless: bool = True) -> str:
             "  或手动设置 Cookie：dragon-quant data cookie-set --cookie \"xq_a_token=...; u=...\""
         )
     with sync_playwright() as p:
-        b = p.chromium.launch(
-            headless=headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        b = _launch_chromium(p, headless)
         ctx = b.new_context(
             user_agent=UA,
             locale="zh-CN", timezone_id="Asia/Shanghai")

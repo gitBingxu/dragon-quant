@@ -205,7 +205,7 @@ class DataCache:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         try:
             safe = _to_json_safe(data)
-            with open(self._cache_dir / f"{key}.json", "w") as f:
+            with open(self._cache_dir / f"{key}.json", "w", encoding="utf-8") as f:
                 json.dump({"data": safe, "ts": time.time()}, f, ensure_ascii=False)
         except Exception as e:
             print(f"  ⚠️ 缓存持久化失败 {key}: {e}", file=sys.stderr)
@@ -218,7 +218,7 @@ class DataCache:
         if not p.exists():
             return None
         try:
-            with open(p) as f:
+            with open(p, encoding="utf-8") as f:
                 blob = json.load(f)
             age = time.time() - blob.get("ts", 0)
             if age > max_age:
@@ -259,7 +259,7 @@ class DataCache:
             p.parent.mkdir(parents=True, exist_ok=True)
             safe = _to_json_safe(data)
             tmp = p.with_name(f"{p.stem}.{uuid.uuid4().hex}.tmp")
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"data": safe, "ts": time.time()}, f, ensure_ascii=False)
             os.replace(tmp, p)
         except Exception as e:
@@ -276,7 +276,7 @@ class DataCache:
         if p is None or not p.exists():
             return None
         try:
-            with open(p) as f:
+            with open(p, encoding="utf-8") as f:
                 blob = json.load(f)
             restored = _deserialize(key, blob.get("data"))
         except Exception:

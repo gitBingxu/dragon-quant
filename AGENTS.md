@@ -53,7 +53,7 @@ python -m dragon_quant review --ui-only
 
 ### 前置条件
 
-板块数据用**同花顺**，**无需 Cookie**（curl + GBK 直取，无 Playwright/反爬）。个股数据依赖雪球，需配雪球 Cookie：
+板块数据用**同花顺**，**无需 Cookie**（HTTP GET + GBK 直取，无 Playwright/反爬）。个股数据依赖雪球，需配雪球 Cookie：
 
 ```bash
 # 查看状态
@@ -66,8 +66,9 @@ python -m dragon_quant.providers.cookie set --cookie "xq_a_token=...; xq_is_logi
 python -m dragon_quant.providers.cookie fetch --source xq
 ```
 
-Cookie 文件位置：
-- 雪球：`~/Library/Application Support/dragon-quant/cookies/xueqiu`
+Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
+- macOS：`~/Library/Application Support/dragon-quant/cookies/xueqiu`
+- Windows：`%APPDATA%\dragon-quant\cookies\xueqiu`
 
 ---
 
@@ -84,7 +85,7 @@ dragon_quant/
 │
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC + 板块 K 线方法
-│   ├── ths.py                   # 同花顺 — 行业排行(curl)/成分股(HTML)/板块1分K/历史5分K
+│   ├── ths.py                   # 同花顺 — 行业排行(HTTP)/成分股(HTML)/板块1分K/历史5分K
 │   ├── xueqiu.py                # 雪球 — 个股日K/分时，需 Cookie
 │   ├── tencent.py               # 腾讯 — 零认证，批量行情 + 收盘盘口(bid1)
 │   └── cookie.py                # Cookie 管理 + CLI
@@ -171,7 +172,7 @@ dragon_quant/
 ## 反爬要点
 
 ### 同花顺（板块主数据源，无需 Cookie）
-- **行业排行**：`data.10jqka.com.cn/funds/hyzjl/field/zdf/order/desc/page/{p}/`，curl + GBK 直取。
+- **行业排行**：`data.10jqka.com.cn/funds/hyzjl/field/zdf/order/desc/page/{p}/`，HTTP GET + GBK 直取。
   - **铁律**：字段必须用 `zdf`（涨跌幅）。旧 `tradezdf` 是资金流字段，**无视 order/page**，永远返回固定 50 行资金流入板块（曾导致领跌榜全是正值的 bug）。
   - 单页 DOM **非严格有序**，必须抓多页后本地按 pct 排序。网关有 **403 频控**，已加退避重试 + 页间延迟。
 - **成分股**：`q.10jqka.com.cn/thshy/detail/code/{881xxx}/`（GBK HTML 表格，列 td[1]=code/td[2]=name/td[4]=涨跌幅），翻页走非 ajax `/thshy/detail/order/desc/page/{p}/code/{code}/`。
@@ -303,7 +304,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### ✅ 已完成
 - 五维「识别真龙」评分器 `scorers/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
-- 3 个 Provider（同花顺/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 curl+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
+- 3 个 Provider（同花顺/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 HTTP GET+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）
 - DB 板块黑名单表 + CLI `blacklist` 管理
 - v2 物理分表（`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`）+ `review --source v1` 历史兼容 / Web UI source 切换

@@ -25,6 +25,7 @@ from dragon_quant.models.types import Candidate, StockInfo
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.rate_limit import RateLimiter
 from dragon_quant.providers import create_providers
+from dragon_quant.providers.ths import drain_fetch_failures
 from dragon_quant.logging.logger import ScanLogger
 from dragon_quant.logging.reporter import ReportBuilder
 from dragon_quant.storage.paths import RESULTS_DIR
@@ -595,6 +596,14 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     logger.phase("D", "并发数据加载完成")
     prev_seen = fail_seen
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
+
+    ths_fails = drain_fetch_failures()
+    if verbose and ths_fails:
+        total = sum(ths_fails.values())
+        detail = "、".join(f"{k}×{v}" for k, v in sorted(ths_fails.items()))
+        print(f"   ⚠️ 同花顺取数失败 {total} 次（{detail}），相关维度已降级中性分",
+              file=sys.stderr)
+
     if verbose:
         if fail_seen == prev_seen:
             print(f"   ✅ 全部加载完成")

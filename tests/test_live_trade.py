@@ -1,18 +1,20 @@
 """tests for dragon_quant.live_trade — 纯信号 buy/sell 命令（复用 review_account 策略与成交）。"""
 import copy
+import datetime
 import io
 import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from dragon_quant.live_trade.service import _print_buy
+from dragon_quant.live_trade.service import _make_config, _print_buy, _print_sell, run_buy, run_sell
 from dragon_quant.live_trade.signal_engine import SignalEngine
+from dragon_quant.live_trade.trader import LiveTrader
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
-from dragon_quant.review_account.market import at
+from dragon_quant.review_account.market import SHANGHAI, at
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
 from dragon_quant.storage import db
 from tests.test_review_account import CAND, DAY, FakeData, position, row
@@ -107,6 +109,96 @@ class TestPrintBuy(unittest.TestCase):
         self.assertIn("候选未触发买点（2 只）", out)
         self.assertEqual(out.count("（600001）"), 1)
         self.assertEqual(out.count("（600002）"), 1)
+
+
+class TestPrintSell(unittest.TestCase):
+    """sell 命令输出格式化（卖出 + 继续持有）。"""
+
+    def test_formats_sell_and_held(self):
+        result = {
+            "sells": [{"code": "600001", "name": "样本", "exit_price": 9.5,
+                       "hold_days": 1, "reason_text": "首日止损"}],
+            "held": [{"code": "600002", "name": "另一只", "highest_return": 8.5}],
+        }
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_sell(DAY, result)
+        out = buf.getvalue()
+        self.assertIn("卖出 样本（600001）@9.50", out)
+        self.assertIn("持有 1 天", out)
+        self.assertIn("继续持有 另一只（600002）", out)
+        self.assertIn("+8.5%", out)
+
+
+class TestLiveTraderRun(unittest.TestCase):
+    """LiveTrader._run 的日期/时段校验（编排层入口，此前零覆盖）。"""
+
+    def _fake_now(self, hour, minute):
+        fake = MagicMock()
+        fake.strptime = datetime.datetime.strptime
+        fake.now.return_value = datetime.datetime(2026, 10, 9, hour, minute, tzinfo=SHANGHAI)
+        return fake
+
+    @staticmethod
+    def _trader():
+        return LiveTrader(StrategyConfig(), source="v2",
+                          data=FakeData(days=["2026-09-04", "2026-09-07",
+                                              "2026-09-08", "2026-10-09"]))
+
+    def test_historical_requires_at(self):
+        with self.assertRaises(ValueError):
+            self._trader().buy(DAY)
+
+    def test_rejects_non_trade_day(self):
+        with self.assertRaises(ValueError):
+            self._trader().buy("2026-09-06", as_of="10:00")
+
+    def test_before_open_rejected(self):
+        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(9, 0)), \
+                self.assertRaises(ValueError):
+            self._trader().buy("2026-10-09")
+
+    def test_noon_break_rejected(self):
+        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(12, 0)), \
+                self.assertRaises(ValueError):
+            self._trader().buy("2026-10-09")
+
+    def test_after_close_rejected(self):
+        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(15, 30)), \
+                self.assertRaises(ValueError):
+            self._trader().buy("2026-10-09")
+
+
+class TestServiceRun(unittest.TestCase):
+    """service 层 run_buy/run_sell/_make_config 的装配与打印接线。"""
+
+    def test_make_config_merges_strategy_params(self):
+        cfg = _make_config("v2", {"min_score": 60})
+        self.assertEqual(cfg.source, "v2")
+        self.assertEqual(cfg.min_score, 60)
+        self.assertEqual(_make_config("v2", None).min_score, 50.0)
+
+    def test_run_buy_wires_trader_and_print(self):
+        result = {"buys": [], "details": [], "reason_text": "候选池暂无触发买点的标的"}
+        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+            Trader.return_value.buy.return_value = result
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                out = run_buy(DAY, source="v2", as_of="10:00")
+        self.assertIs(out, result)
+        self.assertIn("买入建议", buf.getvalue())
+        Trader.return_value.buy.assert_called_once_with(DAY, "10:00")
+
+    def test_run_sell_wires_trader_and_print(self):
+        result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号"}
+        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+            Trader.return_value.sell.return_value = result
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                out = run_sell(DAY, source="v2", as_of="10:00")
+        self.assertIs(out, result)
+        self.assertIn("卖出建议", buf.getvalue())
+        Trader.return_value.sell.assert_called_once_with(DAY, "10:00")
 
 
 class TestSignalStorage(unittest.TestCase):

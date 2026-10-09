@@ -217,7 +217,7 @@ class TestScanScoringIntegration(unittest.TestCase):
         self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11) for c in codes]
         self.stack.enter_context(patch.object(orch, "create_providers", return_value={"ths": self.ths, "xueqiu": self.xq, "tencent": self.tx}))
         limiter = Mock()
-        limiter.submit.side_effect = lambda provider, endpoint, fn: fn()
+        limiter.submit.side_effect = lambda provider, fn: fn()
         self.stack.enter_context(patch.object(orch, "RateLimiter", return_value=limiter))
         self.pass_codes = {"600002"}
         self.real_score_one = orch._score_one

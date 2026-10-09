@@ -14,7 +14,7 @@
 
 > 为兼容历史数据，SQLite 物理表继续沿用 `*_v2`（如 `dragons_v2` / `scans_v2`），`scan_id` 继续使用 `v2_YYYYMMDD_topN`。`scan_v2` 命令保留为隐藏兼容别名，行为等同 `scan`；旧 `*_v1` 表不再由主流程写入，仅可通过显式 `--source v1` 查询历史记录。
 
-数据源：同花顺（板块数据）+ 雪球（个股 K 线/分时）+ 腾讯（批量行情/收盘盘口），不依赖任何付费行情接口。东财 provider 仍保留但默认不参与扫描。
+数据源：同花顺（板块数据）+ 雪球（个股 K 线/分时）+ 腾讯（批量行情/收盘盘口），不依赖任何付费行情接口。
 
 > **板块口径已切换为「行业板块」**（同花顺 `thshy`/`hyzjl`，约 90 个真实行业，code 为 881xxx），不再用概念板块（`gn`/`gnzjl`）。
 
@@ -36,7 +36,7 @@ python -m dragon_quant scan --top 25 --candidates 5 --workers 2
 # 强制执行（跳过交易时段拦截 + DB 缓存）
 python -m dragon_quant scan --force
 
-# 概念板块黑名单管理（拉取领涨/领跌板块时过滤）
+# 板块黑名单管理（拉取领涨/领跌板块时过滤）
 python -m dragon_quant blacklist list
 python -m dragon_quant blacklist add "次新股"
 python -m dragon_quant blacklist remove "次新股"
@@ -53,7 +53,7 @@ python -m dragon_quant review --ui-only
 
 ### 前置条件
 
-板块数据用**同花顺**，**无需 Cookie**（curl + GBK 直取，无 Playwright/反爬）。个股数据依赖雪球，需配雪球 Cookie：
+板块数据用**同花顺**，**无需 Cookie**（HTTP GET + GBK 直取，无 Playwright/反爬）。个股数据依赖雪球，需配雪球 Cookie：
 
 ```bash
 # 查看状态
@@ -62,13 +62,13 @@ python -c "from dragon_quant.providers.cookie import get_xq; print(f'雪球: {bo
 # 手动设置雪球 Cookie（推荐）
 python -m dragon_quant.providers.cookie set --cookie "xq_a_token=...; xq_is_login=1; u=..." --source xq
 
-# 自动获取（需要 playwright）
+# 自动获取（需要 playwright；首次运行自动下载 chromium 内核约 150MB，走国内镜像）
 python -m dragon_quant.providers.cookie fetch --source xq
 ```
 
-Cookie 文件位置：
-- 雪球：`~/Library/Application Support/dragon-quant/cookies/xueqiu`
-- 东财（保留备用）：`~/Library/Application Support/dragon-quant/cookies/eastmoney`
+Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
+- macOS：`~/Library/Application Support/dragon-quant/cookies/xueqiu`
+- Windows：`%APPDATA%\dragon-quant\cookies\xueqiu`
 
 ---
 
@@ -77,18 +77,17 @@ Cookie 文件位置：
 ```
 dragon_quant/
 ├── __init__.py / __main__.py    # 入口
-├── cli.py                       # argparse CLI（scan/logs/data/review/vpa/storage/blacklist；scan_v2 为隐藏兼容别名）
+├── cli.py                       # argparse CLI 门面（解析树 + main() + 共享 helper；scan_v2 为隐藏兼容别名）
+├── cli_commands.py              # 各子命令 `_cmd_*` 处理函数（经转发包装引用 cli 的 patch 目标）
 ├── orchestrator.py              # 编排主流程 (Phase A→F)，固定五维评分
 ├── data.py                      # 原子数据查询 API
 ├── rate_limit.py                # 分组并发调度器
 │
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC + 板块 K 线方法
-│   ├── ths.py                   # 同花顺 — 行业排行(curl)/成分股(HTML)/板块1分K/历史5分K
-│   ├── eastmoney.py             # 东财 — 保留，默认不参与扫描
+│   ├── ths.py                   # 同花顺 — 行业排行(HTTP)/成分股(HTML)/板块1分K/历史5分K
 │   ├── xueqiu.py                # 雪球 — 个股日K/分时，需 Cookie
 │   ├── tencent.py               # 腾讯 — 零认证，批量行情 + 收盘盘口(bid1)
-│   ├── browser.py               # Playwright 浏览器会话（Cookie 获取/页面渲染）
 │   └── cookie.py                # Cookie 管理 + CLI
 │
 ├── scorers/                  # 五维「识别真龙」评分器
@@ -111,7 +110,10 @@ dragon_quant/
 │   └── reporter.py              # ReportBuilder（五维报告）
 ├── storage/                     # 统一持久化
 │   ├── paths.py / manager.py
-│   └── db.py                    # SQLite（主流程读写 *_v2，兼容查询 *_v1）
+│   ├── db.py                    # SQLite 门面 + 基础设施（_connect/_ensure_schema/_tables/init_db）
+│   ├── _base.py                 # 转发包装，令 `db._connect` 的 patch 传递到领域模块
+│   ├── blacklist.py / scans.py / dragons.py / logs.py
+│   └── review_account.py / signals.py
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
 ├── review_account/              # 共享策略/事件引擎/成交/数据/评估（strategy/engine/execution/data/market/evaluation）
@@ -170,7 +172,7 @@ dragon_quant/
 ## 反爬要点
 
 ### 同花顺（板块主数据源，无需 Cookie）
-- **行业排行**：`data.10jqka.com.cn/funds/hyzjl/field/zdf/order/desc/page/{p}/`，curl + GBK 直取。
+- **行业排行**：`data.10jqka.com.cn/funds/hyzjl/field/zdf/order/desc/page/{p}/`，HTTP GET + GBK 直取。
   - **铁律**：字段必须用 `zdf`（涨跌幅）。旧 `tradezdf` 是资金流字段，**无视 order/page**，永远返回固定 50 行资金流入板块（曾导致领跌榜全是正值的 bug）。
   - 单页 DOM **非严格有序**，必须抓多页后本地按 pct 排序。网关有 **403 频控**，已加退避重试 + 页间延迟。
 - **成分股**：`q.10jqka.com.cn/thshy/detail/code/{881xxx}/`（GBK HTML 表格，列 td[1]=code/td[2]=name/td[4]=涨跌幅），翻页走非 ajax `/thshy/detail/order/desc/page/{p}/code/{code}/`。
@@ -185,10 +187,7 @@ dragon_quant/
 ### 腾讯（零认证）
 - `qt.gtimg.cn/q=` 批量行情（GBK）。封单量取 `f[10]`（买一量，手），与成交量 `f[36]`（手）同源同单位。
 
-### 东财（保留备用，默认不参与扫描）
-- `curl` + DoH 多 CDN 节点轮询，全节点失败 fail-fast。依赖本地 Cookie（push2/push2his 分域）。
-
-当前 Chrome UA：同花顺 120 / 雪球·腾讯 147 / 东财 148。大面积失效时更新版本号即可。
+当前 Chrome UA：同花顺 120 / 雪球·腾讯 147。大面积失效时更新版本号即可。
 
 ---
 
@@ -202,7 +201,7 @@ dragon_quant/
 | `scan_logs_v2` | 结构化日志 | `logs` 默认查询 v2 |
 | `*_v1` | 历史旧表 | 不再由主流程写入，仅显式 `--source v1` 查询 |
 | `vpa_analysis` | 量价分析 | 独立表，不复用 dragons |
-| `sector_blacklist` | 概念板块黑名单 | 行业切换后默认种子为空 |
+| `sector_blacklist` | 板块黑名单 | 行业切换后默认种子为空 |
 | `review_account_runs` | 账户级 review 批次 | 保存 UI 记录名称、策略参数、区间、初始资金、最终权益、收益率、最大回撤 |
 | `review_account_snapshots` | 账户每日快照 | 保存现金、市值、总权益、收益曲线、当前持仓 |
 | `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
@@ -281,11 +280,11 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 阈值/权重集中在 `scorers/registry.py`，便于回测调参。
 
 ### 必须遵守的约束
-- **运行时依赖**：`playwright` 为必选（Cookie 自动获取 + 浏览器辅助）；其余仅用 Python 3 标准库。
+- **运行时依赖**：`playwright` 为必选（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）；其余仅用 Python 3 标准库。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scorers/` 与 `*_v2` 表，不再保留旧四维评分代码。
-- **provider 接口兼容**：`StockProvider` 新增板块 K 线方法用默认 `raise NotImplementedError`（非 `@abstractmethod`），否则 `create_providers()` 一次实例化全部 4 个 provider 时会崩。
+- **provider 接口兼容**：`StockProvider` 新增板块 K 线方法用默认 `raise NotImplementedError`（非 `@abstractmethod`），否则 `create_providers()` 一次实例化全部 3 个 provider 时会崩。
 
 ### AI Agent 协作规范
 > **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。** 纯查询类操作（读文件、查数据库、搜索代码）不受此限。
@@ -305,16 +304,15 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### ✅ 已完成
 - 五维「识别真龙」评分器 `scorers/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
-- 4 个 Provider（同花顺/东财/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 curl+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
+- 3 个 Provider（同花顺/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 HTTP GET+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）
-- DB 概念板块黑名单表 + CLI `blacklist` 管理
+- DB 板块黑名单表 + CLI `blacklist` 管理
 - v2 物理分表（`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`）+ `review --source v1` 历史兼容 / Web UI source 切换
 - 量价分析 `vpa/`、结构化日志 `logging/`、统一持久化 `storage/`、交易日历 `utils/trading.py`、龙头回测 `review.py`、Web UI
 - 全量单测覆盖 `tests/test_scorers.py`、`tests/test_storage.py` 等核心路径
 
 ### ⚠️ 待完成/观察
 - 同花顺数据网关 403 频控：高频访问会临时封 IP（已加退避重试，正常每日一两次扫描不触发）
-- 东财历史 K 线 CDN 节点稳定性（保留备用链路）
 
 ### 📝 已知修复
 - 同花顺排行字段 `tradezdf`→`zdf`，修复领跌榜全为正值的 bug

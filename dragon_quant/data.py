@@ -1,7 +1,7 @@
 """
 原子数据查询 API — 暴露底层 Provider 的原子能力
 
-将雪球/东财/腾讯等数据源的查询接口作为顶层函数暴露，
+将雪球/腾讯等数据源的查询接口作为顶层函数暴露，
 Agent 可以直接调用获取个股K线、实时行情、板块数据等。
 
 用法（Python API）:
@@ -16,7 +16,7 @@ Agent 可以直接调用获取个股K线、实时行情、板块数据等。
   sectors = get_sector_ranking(asc=True)  # 跌幅榜
 
   # 板块成分股
-  stocks = get_sector_components("301558")
+  stocks = get_sector_components("881167")
 
   # 个股日K线
   kline = get_kline("600172", source="xueqiu", days=20)
@@ -36,13 +36,13 @@ Agent 可以直接调用获取个股K线、实时行情、板块数据等。
 CLI 用法:
   python -m dragon_quant data sector
   python -m dragon_quant data sector --asc
-  python -m dragon_quant data components --sector 301558
+  python -m dragon_quant data components --sector 881167
   python -m dragon_quant data kline --code 600172 [--source xueqiu] [--days 20]
   python -m dragon_quant data minute --code 600172
   python -m dragon_quant data quote --code 600172
   python -m dragon_quant data batch-quote --codes 600172,000001,002409
   python -m dragon_quant data cookie-status
-  python -m dragon_quant data cookie-fetch [--source xueqiu]
+  python -m dragon_quant data cookie-fetch
 """
 
 import json
@@ -69,7 +69,7 @@ def _get_providers() -> dict:
 # ═══ 板块相关 ═══
 
 def get_sector_ranking(asc: bool = False) -> list[SectorPerformance]:
-    """获取概念板块涨跌幅排行榜（同花顺）
+    """获取行业板块涨跌幅排行榜（同花顺）
 
     Args:
         asc: False=涨幅榜, True=跌幅榜
@@ -84,10 +84,10 @@ def get_sector_ranking(asc: bool = False) -> list[SectorPerformance]:
 def get_sector_components(sector_code: str, page: int = 1,
                           all_pages: bool = False,
                           page_size: int = 50) -> list[StockInfo]:
-    """获取概念板块成分股列表（同花顺，按涨跌幅降序）
+    """获取行业板块成分股列表（同花顺，按涨跌幅降序）
 
     Args:
-        sector_code: 同花顺概念板块 6 位代码，如 "301558"
+        sector_code: 同花顺行业板块 6 位代码，如 "881167"
         page: 页码（默认第一页）
         all_pages: 是否自动拉取全量分页
         page_size: 每页大小
@@ -105,10 +105,10 @@ def get_sector_components(sector_code: str, page: int = 1,
 
 
 def get_sector_5min_kline(sector_code: str, bars: int = 100) -> list[KBar]:
-    """获取概念板块 5 分钟 K 线（同花顺，1 分钟分时聚合）
+    """获取行业板块 5 分钟 K 线（同花顺，1 分钟分时聚合）
 
     Args:
-        sector_code: 同花顺概念板块 6 位代码，如 "301558"
+        sector_code: 同花顺行业板块 6 位代码，如 "881167"
         bars: K 线根数（默认 100）
     """
     providers = _get_providers()
@@ -184,21 +184,16 @@ def batch_get_quotes(codes: list[str], source: str = "tencent") -> list[Quote]:
 def cookie_status() -> dict:
     """查看当前 Cookie 状态
 
-    返回每个数据源的 Cookie 是否存在及长度。
-    如果返回空字符串，说明该数据源的 Cookie 缺失或过期，需要刷新。
+    返回雪球 Cookie 是否存在及长度。
+    如果返回空字符串，说明 Cookie 缺失或过期，需要刷新。
 
     Returns:
-        {
-            "eastmoney": {"ok": True, "length": 1234},
-            "xueqiu": {"ok": False, "length": 0},
-        }
+        {"xueqiu": {"ok": False, "length": 0}}
     """
-    from dragon_quant.providers.cookie import get_em, get_xq
+    from dragon_quant.providers.cookie import get_xq
 
-    em = get_em()
     xq = get_xq()
     return {
-        "eastmoney": {"ok": bool(em), "length": len(em)},
         "xueqiu": {"ok": bool(xq), "length": len(xq)},
     }
 
@@ -209,23 +204,13 @@ def fetch_cookies(source: str = "all") -> dict:
     Cookie 过期会导致 API 返回 400 / 401 / 空数据。
     遇到接口异常时，优先尝试此方法刷新 Cookie，然后重试业务请求。
 
-    注意：默认（source="all"）只刷新雪球，不再刷新东财
-    （主流程已改用同花顺，同花顺无需 Cookie）。如需东财 Cookie，
-    显式传入 source="eastmoney"。
-
     Args:
-        source: "all" 刷新雪球（默认）, "eastmoney" 刷新东财, "xueqiu" 刷新雪球
+        source: "all" 或 "xueqiu"，均刷新雪球
     Returns:
-        {
-            "eastmoney": {"ok": True, "length": 1234},
-            "xueqiu": {"ok": True, "length": 567},
-        }
+        {"xueqiu": {"ok": True, "length": 567}}
     """
-    from dragon_quant.providers.cookie import fetch_em, fetch_em_his, fetch_xq, get_em, get_xq
+    from dragon_quant.providers.cookie import fetch_xq
 
-    if source == "eastmoney":
-        fetch_em()      # push2 域（板块排行 / 成分股）
-        fetch_em_his()  # push2his 域（板块5分K）
     if source in ("all", "xueqiu"):
         fetch_xq()
 

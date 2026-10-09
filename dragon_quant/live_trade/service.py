@@ -40,7 +40,16 @@ def _print_buy(trade_date: str, result: dict):
         print(f"     {b['reason_text']}")
     if not result.get("buys"):
         print(f"  {result.get('reason_text', '')}")
-    rejected = [d for d in result.get("details", []) if not d.get("passed")]
+    rejected = []
+    seen = set()
+    for d in result.get("details", []):
+        if d.get("passed"):
+            continue
+        code = d.get("code")
+        if code in seen:
+            continue
+        seen.add(code)
+        rejected.append(d)
     if rejected:
         print(f"  候选未触发买点（{len(rejected)} 只）：")
         for d in rejected:

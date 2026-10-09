@@ -21,15 +21,15 @@ class TestRateLimiter(unittest.TestCase):
                 order.append(name)
             return name
 
-        limiter.submit("xueqiu", "kline", task, "A")
-        limiter.submit("xueqiu", "kline", task, "B")
-        limiter.submit("xueqiu", "kline", task, "C")
+        limiter.submit("xueqiu", task, "A")
+        limiter.submit("xueqiu", task, "B")
+        limiter.submit("xueqiu", task, "C")
         results = limiter.wait_all(timeout=5)
 
         self.assertEqual(results, ["A", "B", "C"])
 
-    def test_same_provider_diff_endpoint_serialized(self):
-        """同 provider 不同 endpoint 的任务也必须串行执行"""
+    def test_same_provider_serialized(self):
+        """同 provider 的多个任务也必须串行执行"""
         limiter = RateLimiter(max_workers=4)
         order = []
         lock = threading.Lock()
@@ -40,9 +40,9 @@ class TestRateLimiter(unittest.TestCase):
                 order.append(name)
             return name
 
-        limiter.submit("xueqiu", "kline", task, "A", delay=0.05)
-        limiter.submit("xueqiu", "minute_kline", task, "B", delay=0.05)
-        limiter.submit("xueqiu", "quote", task, "C", delay=0.05)
+        limiter.submit("xueqiu", task, "A", delay=0.05)
+        limiter.submit("xueqiu", task, "B", delay=0.05)
+        limiter.submit("xueqiu", task, "C", delay=0.05)
         results = limiter.wait_all(timeout=5)
 
         self.assertEqual(results, ["A", "B", "C"])
@@ -65,12 +65,12 @@ class TestRateLimiter(unittest.TestCase):
                 running_count.remove(name)
             return name
 
-        limiter.submit("xueqiu", "kline", task, "XQ")
-        limiter.submit("eastmoney", "components", task, "EM")
+        limiter.submit("xueqiu", task, "XQ")
+        limiter.submit("ths", task, "THS")
         limiter.wait_all(timeout=5)
 
         self.assertIn("XQ", started)
-        self.assertIn("EM", started)
+        self.assertIn("THS", started)
 
     def test_exception_propagation(self):
         limiter = RateLimiter(max_workers=2)
@@ -78,7 +78,7 @@ class TestRateLimiter(unittest.TestCase):
         def bad_task():
             raise ValueError("test error")
 
-        limiter.submit("test", "fail", bad_task)
+        limiter.submit("test", bad_task)
         results = limiter.wait_all(timeout=5)
 
         self.assertIsNone(results[0])
@@ -88,7 +88,7 @@ class TestRateLimiter(unittest.TestCase):
 
         results = []
         for i in range(5):
-            limiter.submit("p", "e", lambda x=i: x * 2)
+            limiter.submit("p", lambda x=i: x * 2)
         results = limiter.wait_all(timeout=5)
 
         self.assertEqual(len(results), 5)
@@ -97,7 +97,7 @@ class TestRateLimiter(unittest.TestCase):
 
     def test_shutdown(self):
         limiter = RateLimiter(max_workers=2)
-        limiter.submit("p", "e", lambda: 42)
+        limiter.submit("p", lambda: 42)
         limiter.wait_all()
         limiter.shutdown()
         # No exception means success

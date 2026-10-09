@@ -1,11 +1,14 @@
 """tests for dragon_quant.live_trade — 纯信号 buy/sell 命令（复用 review_account 策略与成交）。"""
 import copy
+import io
 import sqlite3
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from dragon_quant.live_trade.service import _print_buy
 from dragon_quant.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
@@ -85,6 +88,25 @@ class TestSignalEngine(unittest.TestCase):
         event = MarketEvent(at(DAY, "09:30"), "open", {CAND["code"]: row()}, [CAND])
         engine.step(event)
         self.assertEqual(engine.step(event)["reason_code"], "already_processed")
+
+
+class TestPrintBuy(unittest.TestCase):
+    """buy 命令输出按 code 去重：未触发候选只列一次。"""
+
+    def test_dedupes_rejected_candidates_by_code(self):
+        details = [
+            {"code": "600001", "name": "a", "passed": False, "reason_text": "r1"},
+            {"code": "600002", "name": "b", "passed": False, "reason_text": "r2"},
+            {"code": "600001", "name": "a", "passed": False, "reason_text": "r3"},
+        ]
+        result = {"buys": [], "details": details, "reason_text": "候选池暂无触发买点的标的"}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_buy(DAY, result)
+        out = buf.getvalue()
+        self.assertIn("候选未触发买点（2 只）", out)
+        self.assertEqual(out.count("（600001）"), 1)
+        self.assertEqual(out.count("（600002）"), 1)
 
 
 class TestSignalStorage(unittest.TestCase):

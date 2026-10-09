@@ -144,23 +144,23 @@ class TestInnerCode(unittest.TestCase):
     def tearDown(self):
         _INNER_CACHE.clear()
 
-    @patch("dragon_quant.providers.ths._curl")
-    def test_industry_code_uses_self_without_request(self, mock_curl):
+    @patch("dragon_quant.providers.ths._fetch")
+    def test_industry_code_uses_self_without_request(self, mock_fetch):
         p = THSProvider()
         self.assertEqual(p._get_inner_code("881140"), "881140")
-        mock_curl.assert_not_called()
+        mock_fetch.assert_not_called()
         self.assertEqual(_INNER_CACHE["881140"], "881140")
 
-    @patch("dragon_quant.providers.ths._curl")
-    def test_extract_and_cache(self, mock_curl):
-        mock_curl.return_value = "<input id='clid' value='885611'>"
+    @patch("dragon_quant.providers.ths._fetch")
+    def test_extract_and_cache(self, mock_fetch):
+        mock_fetch.return_value = "<input id='clid' value='885611'>"
         p = THSProvider()
         self.assertEqual(p._get_inner_code("301558"), "885611")
         # 第二次走缓存，不再请求
         self.assertEqual(p._get_inner_code("301558"), "885611")
-        self.assertEqual(mock_curl.call_count, 1)
+        self.assertEqual(mock_fetch.call_count, 1)
 
-    @patch("dragon_quant.providers.ths._curl", return_value="<html>no clid</html>")
+    @patch("dragon_quant.providers.ths._fetch", return_value="<html>no clid</html>")
     def test_missing(self, _mock):
         self.assertEqual(THSProvider()._get_inner_code("999999"), "")
 

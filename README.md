@@ -4,15 +4,24 @@
 
 基于同花顺、雪球、腾讯三大公开数据源，对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
 
-> ⚠️ **免责声明**：本工具仅供学习交流，不提供任何个股买卖建议，开发者不承担任何个股买卖亏损。
-
 当前主流程使用**五维「识别真龙」评分体系**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，采用**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。完整规则见 [评分规范](dragon_quant/scorers/评分器Refactor.md)。
 
-> 为兼容历史数据，SQLite 物理表继续沿用 `*_v2`（如 `dragons_v2` / `scans_v2`），`scan_v2` 命令保留为隐藏兼容别名，行为等同 `scan`。旧 `*_v1` 表不再由主流程写入，仅可通过显式 `--source v1` 查询历史记录。
+## 目录
 
-> 板块口径采用同花顺**行业板块**（`thshy`/`hyzjl`，约 90 个真实行业，code 为 881xxx）。
+- [龙头回测成绩单（历史样本）](#龙头回测成绩单历史样本)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [CLI 命令大全](#cli-命令大全)
+- [Programmatic API](#programmatic-api)
+- [评分体系](#评分体系)
+- [数据源](#数据源)
+- [目录结构](#目录结构)
+- [设计原则](#设计原则)
+- [持久化](#持久化)
+- [免责声明](#免责声明)
+- [License](#license)
 
-## 📊 龙头回测成绩单（历史样本）
+## 龙头回测成绩单（历史样本）
 
 > 入选后第一个非一字板日以最低价买入；最大收益按收益观察窗口统计，最大回撤按「买入日至最大收益出现日」窗口统计。
 
@@ -33,17 +42,19 @@
 
 ```bash
 pip install dragon-quant
+
 # 或从源码
 git clone https://github.com/gitBingxu/dragon-quant.git
 cd dragon-quant && pip install -e .
 
-# Playwright（雪球 Cookie 自动获取所需）
-playwright install chromium
 ```
 
 ## 快速开始
 
 ```bash
+# 首次使用：配置雪球 Cookie（个股数据依赖；自动获取需 playwright，首次自动下载 chromium 内核约 150MB，走国内镜像）
+dragon-quant data cookie-fetch
+
 # 查看 Linux 风格帮助提示
 dragon-quant -h
 dragon-quant scan -h
@@ -51,16 +62,13 @@ dragon-quant scan -h
 # 五维「识别真龙」扫榜 — 找 top5 龙头
 dragon-quant scan --top 5
 
-# 强制执行（跳过交易时段拦截 + DB 缓存）
-dragon-quant scan --force
+# 账户级模拟交易回测（按真实账户逐日推进，可 --ui 打开 /account 面板）
+dragon-quant review-account --ui-only
 
 # 龙头回测 + Web UI
 dragon-quant review --ui
 # 查看龙头回测面板（默认读取 dragons_v2）
 dragon-quant review --ui-only
-
-# 账户级模拟交易回测（按真实账户逐日推进，可 --ui 打开 /account 面板）
-dragon-quant review-account --ui-only
 
 # 实盘辅助交易（复用 review-account 策略，纯信号记账，不维护模拟账户）
 dragon-quant buy                              # 盘中：候选池内触发买点的标的全部记入买入信号
@@ -68,22 +76,7 @@ dragon-quant sell                             # 盘中：对已买入未卖出�
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 ```
 
-### 前置条件
-
-板块数据用**同花顺**，**无需 Cookie**（curl + GBK 直取）。个股数据依赖雪球 Cookie：
-
-```bash
-# 查看状态
-dragon-quant data cookie-status
-
-# 手动设置雪球 Cookie（推荐）
-python3 -m dragon_quant.providers.cookie set --source xq --cookie 'xq_a_token=...; xq_is_login=1; u=...'
-
-# 自动获取（需要 playwright）
-dragon-quant data cookie-fetch          # 默认仅刷新雪球
-```
-
-Cookie 文件位置：`~/Library/Application Support/dragon-quant/cookies/{xueqiu,eastmoney}`
+> 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。自动获取（`data cookie-fetch`）首次运行会自动下载 chromium 内核（约 150MB，走国内镜像，仅一次），无需手动 `playwright install`。
 
 ## CLI 命令大全
 
@@ -101,9 +94,9 @@ dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cach
 | `--force` | - | 跳过交易时段拦截与 DB 缓存 |
 | `--no-cache` | - | 刷新 Provider 缓存；重新评分时与 `--force` 一起使用 |
 
-`scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到 `~/Library/Application Support/dragon-quant/` 的 `*_v2` 表。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
+`scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到数据目录的 `*_v2` 表（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
 
-### `blacklist` — 概念板块黑名单
+### `blacklist` — 板块黑名单
 
 拉取领涨/领跌板块时按子串过滤（行业板块切换后默认种子为空，按需维护）。
 
@@ -261,22 +254,23 @@ quote = get_quote("600172")
 | 雪球 | 个股日 K / 当日 1 分 K | 需要 |
 | 腾讯 | 批量实时行情 + 收盘盘口（买一封单量）| 无需 |
 
-> 东财 provider 仍保留但默认不参与扫描，可作回退。封单数据走腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
+> 封单数据走腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
 
 ## 目录结构
 
 ```
 dragon_quant/
-├── cli.py                # CLI（scan/logs/data/review/review-account/buy/sell/vpa/storage/blacklist）
+├── cli.py                # CLI 门面（解析树 + main() + 共享 helper）
+├── cli_commands.py       # 各子命令 _cmd_* 处理函数
 ├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
-├── providers/            # 数据源适配（ths/eastmoney/xueqiu/tencent/browser/cookie）
+├── providers/            # 数据源适配（ths/xueqiu/tencent/cookie）
 ├── scorers/           # 五维评分器 + registry + aggregator
 ├── vpa/                  # 量价分析（插件式因子）
 ├── cache/                # 内存+本地双缓存
 ├── logging/              # ScanLogger + ReportBuilder + query
-├── storage/              # paths / db（SQLite）/ manager
+├── storage/              # paths / db（SQLite 门面 + 领域模块）/ manager
 ├── utils/trading.py     # 交易日历工具
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）

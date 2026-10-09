@@ -5,7 +5,7 @@
   logger = ScanLogger()
   logger.phase("A", "板块排行完成", count=10)
   logger.scorer("drive", "600519", score=85.0, details={...})
-  logger.api("eastmoney", "sector_ranking", ok=True, elapsed_ms=350)
+  logger.api("ths", "sector_ranking", ok=True, elapsed_ms=350)
 
 查询:
   logs = logger.query(category="scorer:drive", code="600519")
@@ -175,7 +175,7 @@ class ScanLogger:
     def dump_jsonl(self, path: Path):
         """导出为 JSONL 文件"""
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             for record in self.to_dicts():
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

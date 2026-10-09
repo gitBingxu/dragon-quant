@@ -45,8 +45,7 @@ class _SerialQueue:
 
     def submit(self, fn: Callable, *args, **kwargs) -> Future:
         future: Future = Future()
-        ep = kwargs.pop("_endpoint", "")
-        self._queue.put((fn, args, kwargs, future, ep))
+        self._queue.put((fn, args, kwargs, future))
         self._maybe_consume()
         return future
 
@@ -62,7 +61,7 @@ class _SerialQueue:
     def _consume_loop(self):
         while True:
             try:
-                fn, args, kwargs, future, endpoint = self._queue.get_nowait()
+                fn, args, kwargs, future = self._queue.get_nowait()
             except queue.Empty:
                 with self._lock:
                     self._running = False
@@ -84,8 +83,8 @@ class RateLimiter:
 
     用法:
         limiter = RateLimiter(max_workers=8)
-        limiter.submit("eastmoney", "components", fn, arg1, arg2)
-        limiter.submit("xueqiu", "kline", fn2, arg1)  # 同时执行
+        limiter.submit("ths", fn, arg1, arg2)
+        limiter.submit("xueqiu", fn2, arg1)  # 同时执行
         limiter.wait_all()
     """
 
@@ -97,21 +96,21 @@ class RateLimiter:
         self._futures: list[Future] = []
         self._logger = logger
         self._delay = delay
-        # 按 provider 覆盖延迟规格，如东财用 (0.6, 1.0) 随机区间降低封禁风险
+        # 按 provider 覆盖延迟规格，如 ths 用 (0.3, 0.6) 随机区间降低封禁风险
         self._provider_delays = provider_delays or {}
 
-    def _key(self, provider: str, endpoint: str) -> str:
+    def _key(self, provider: str) -> str:
         return provider
 
-    def submit(self, provider: str, endpoint: str, fn: Callable, *args, **kwargs) -> Future:
+    def submit(self, provider: str, fn: Callable, *args, **kwargs) -> Future:
         """提交一个带分组的任务"""
-        k = self._key(provider, endpoint)
+        k = self._key(provider)
         with self._lock:
             if k not in self._queues:
                 delay = self._provider_delays.get(provider, self._delay)
                 self._queues[k] = _SerialQueue(self._executor, key=k, logger=self._logger, delay=delay)
             q = self._queues[k]
-        future = q.submit(fn, *args, _endpoint=endpoint, **kwargs)
+        future = q.submit(fn, *args, **kwargs)
         self._futures.append(future)
         return future
 

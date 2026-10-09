@@ -53,11 +53,11 @@ class TestScanLogger(unittest.TestCase):
     def test_api_stats(self):
         self.logger.api("xueqiu", "kline", ok=True, elapsed_ms=100)
         self.logger.api("xueqiu", "kline", ok=True, elapsed_ms=200)
-        self.logger.api("eastmoney", "ranking", ok=False, elapsed_ms=500, error="403")
+        self.logger.api("ths", "ranking", ok=False, elapsed_ms=500, error="403")
         stats = self.logger.api_stats()
         self.assertIn("by_provider", stats)
         self.assertIn("xueqiu", stats["by_provider"])
-        self.assertIn("eastmoney", stats["by_provider"])
+        self.assertIn("ths", stats["by_provider"])
 
     def test_query_filter_by_code(self):
         self.logger.scorer("drive", "600519", score=80)

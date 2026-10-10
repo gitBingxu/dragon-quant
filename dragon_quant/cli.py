@@ -7,6 +7,7 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant logs {tail,query,clear,list} [options]
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
   dragon-quant review [--date DATE] [--top N] [--force]
+  dragon-quant dragons [--date DATE] [--true-only]
   dragon-quant storage {status,size,clear} [options]
 """
 
@@ -56,9 +57,12 @@ def _parser(*args, **kwargs):
 
 
 def _normalize_cli_date(d: str) -> str:
-    """CLI 日期支持 YYYYMMDD / YYYY-MM-DD。"""
+    """CLI 日期支持 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD，统一转为 YYYY-MM-DD。"""
+    d = d.strip()
     if len(d) == 8 and d.isdigit():
         return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+    if len(d) == 10 and d[4] == "/" and d[7] == "/":
+        return f"{d[:4]}-{d[5:7]}-{d[8:10]}"
     return d
 
 
@@ -317,6 +321,23 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 
     acct_p.add_argument("--config", help="共享策略参数 JSON 文件")
 
+    # dragons 子命令（导出扫描物化的龙头，JSON）
+    dragons_p = sub.add_parser(
+        "dragons",
+        help="导出扫描出的龙头（JSON）",
+        usage="dragon-quant dragons [--date YYYYMMDD] [--true-only]",
+        description="导出某交易日扫描物化的龙头股列表（JSON）。默认取最新有数据的交易日。",
+        epilog="""Examples:
+  dragon-quant dragons
+  dragon-quant dragons --date 20260519
+  dragon-quant dragons --date 20260519 --true-only
+""",
+    )
+    dragons_p.add_argument("--date", default=None,
+                           help="交易日，支持 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD（默认最新有龙头数据的交易日）")
+    dragons_p.add_argument("--true-only", action="store_true",
+                           help="只输出真龙 (is_true_dragon=1)")
+
     # buy 子命令
     buy_p = sub.add_parser(
         "buy",
@@ -413,6 +434,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_review(args)
     elif args.command == "review-account":
         _cmd_review_account(args)
+    elif args.command == "dragons":
+        _cmd_dragons(args)
     elif args.command == "buy":
         _cmd_buy(args)
     elif args.command == "sell":
@@ -437,6 +460,7 @@ from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循�
     _cmd_storage,
     _cmd_review,
     _cmd_review_account,
+    _cmd_dragons,
     _cmd_buy,
     _cmd_sell,
     _cmd_vpa,

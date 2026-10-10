@@ -114,7 +114,8 @@ def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str], source:
             placeholders = ",".join(["?"] * len(keep_codes))
             params = [trade_date] + sorted(keep_codes)
             cur = conn.execute(
-                f"DELETE FROM {t['dragons']} WHERE trade_date = ? AND review_status = 'pending' AND code NOT IN ({placeholders})",
+                f"DELETE FROM {t['dragons']} WHERE trade_date = ? "
+                f"AND review_status = 'pending' AND code NOT IN ({placeholders})",
                 params,
             )
             conn.commit()
@@ -164,13 +165,13 @@ def rebuild_dragons_for_date(
         r1 = c.get("rank") if c.get("rank") is not None else 9999
         r0 = cur.get("rank") if cur.get("rank") is not None else 9999
         if r1 != r0:
-            if r1 < r0:
+            if r1 < r0:  # type: ignore[operator]
                 best_by_code[code] = c
             continue
         s1 = c.get("composite_score") if c.get("composite_score") is not None else 0
         s0 = cur.get("composite_score") if cur.get("composite_score") is not None else 0
         if s1 != s0:
-            if s1 > s0:
+            if s1 > s0:  # type: ignore[operator]
                 best_by_code[code] = c
             continue
         if (c.get("scan_created_at") or "") > (cur.get("scan_created_at") or ""):
@@ -568,7 +569,7 @@ def _version_in_range(version: str,
     return True
 
 
-def query_dragons(filters: dict = None,
+def query_dragons(filters: Optional[dict] = None,
                   sort_by: str = "composite_score",
                   sort_dir: str = "desc",
                   source: str = "v2") -> list[dict]:
@@ -705,7 +706,8 @@ def get_review_summary(source: str = "v2") -> dict:
         ).fetchone()[0]
 
         avg_row = conn.execute(
-            f"SELECT AVG(max_return_5d) FROM {t['dragons']} WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
+            f"SELECT AVG(max_return_5d) FROM {t['dragons']} "
+            f"WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
         ).fetchone()
 
         win_row = conn.execute(

@@ -202,11 +202,12 @@ class ReportBuilder:
         """五维全量排名表。"""
         summary = self.logger.summary()
         lines = [
-            f"🐉 龙头战法扫描报告（v2 五维识别真龙）",
+            "🐉 龙头战法扫描报告（v2 五维识别真龙）",
             f"{'═'*72}",
             f"耗时: {summary['elapsed_s']}s | 日志: {summary['total_entries']}条 | 错误: {summary['error_count']}个",
             "",
-            f"{'排名':4s} {'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙",
+            f"{'排名':4s} {'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  "
+            f"{'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙",
             "-" * 90,
         ]
         for i, r in enumerate(ranking[:10]):

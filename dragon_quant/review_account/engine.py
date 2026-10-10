@@ -1,6 +1,10 @@
-from dragon_quant.review_account.execution import buy_quantity, daily_fallback_sell_price, fee, fill_price, sell_quantity
+from dragon_quant.review_account.execution import (
+    buy_quantity, daily_fallback_sell_price, fee, fill_price, sell_quantity,
+)
 from dragon_quant.review_account.market import at, event_date
-from dragon_quant.review_account.models import AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade
+from dragon_quant.review_account.models import (
+    AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade,
+)
 from dragon_quant.review_account.strategy import evaluate_buy, evaluate_sell, explain_buy_candidate
 
 
@@ -59,7 +63,9 @@ class TradingEngine:
                     continue
                 state.evaluated[key] = observation
                 hold_days = sum(p.entry_date < r["date"] < day for r in row["hist_rows"]) + (day > p.entry_date)
-                if event.phase != "close" and not any(o["stock_code"] == p.code and o["side"] == "SELL" for o in state.pending):
+                if event.phase != "close" and not any(
+                        o["stock_code"] == p.code and o["side"] == "SELL"
+                        for o in state.pending):
                     sell_row = row
                     if row["bar_timestamp"] <= entry_ts:
                         sell_row = {**row, "bar_low": row["bar_close"], "bar_high": row["bar_close"]}
@@ -72,7 +78,8 @@ class TradingEngine:
                                      else row["bar_close"])
                     p.highest_price = max(p.highest_price, observed_high)
                     p.highest_return = max(p.highest_return, (p.highest_price / p.entry_price - 1) * 100)
-            if (event.phase != "close" and event.allow_buy and not state.sold_today and state.buys_today < cfg.max_daily_buys
+            if (event.phase != "close" and event.allow_buy
+                    and not state.sold_today and state.buys_today < cfg.max_daily_buys
                     and len(state.positions) < cfg.max_positions
                     and not any(o["side"] == "BUY" for o in state.pending)):
                 signals = []
@@ -93,7 +100,7 @@ class TradingEngine:
                                                    row.get("hist_rows") if row else None,
                                                    row.get("intraday_bars") if row else None)
                     result["details"].append(detail)
-                    if detail["passed"]:
+                    if detail["passed"] and row is not None:
                         sig = evaluate_buy(cand, row, cfg, row["prev_row"], row["hist_rows"], row["intraday_bars"])
                         signals.append((sig, cand))
                 # 择优：买点得分越高越优先，同分看五维综合分，再按代码稳定排序。

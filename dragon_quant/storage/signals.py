@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from dragon_quant.storage._base import _connect, _ensure_schema, _lock, _normalize_source, _tables
+from dragon_quant.storage._base import _connect, _ensure_schema, _lock, _normalize_source
 
 
 _SIGNAL_COLS = (
@@ -71,7 +71,7 @@ def insert_signal(code: str, name: str, entry_date: str, entry_price: float,
                  entry_reason_text, json.dumps(entry_signal or {}, ensure_ascii=False)),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            return int(cur.lastrowid or 0)
         except Exception:
             conn.rollback()
             raise

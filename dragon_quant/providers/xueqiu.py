@@ -3,7 +3,9 @@
 需完整 Cookie（含 xq_a_token, xq_r_token, xq_is_login 等）
 """
 
-import json, sys, time
+import json
+import sys
+import time
 import urllib.request
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -20,7 +22,8 @@ HEADERS = {
     "Origin": "https://xueqiu.com",
     "Pragma": "no-cache",
     "Priority": "u=1, i",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
     "sec-ch-ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"macOS"',
@@ -115,7 +118,8 @@ class XueqiuProvider(StockProvider):
         now_ms = int(time.time() * 1000)
         lookback_days = max(days * 2, 100)
         begin = now_ms - lookback_days * 86400 * 1000
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type={fq_type}&count={max(days * 4, 300)}&indicator=kline&begin={begin}"
+        path = (f"/v5/stock/chart/kline.json?symbol={symbol}&period=day&type={fq_type}"
+                f"&count={max(days * 4, 300)}&indicator=kline&begin={begin}")
         data = _fetch(path, logger=self._logger, endpoint="kline")
         if not data:
             return []
@@ -128,7 +132,8 @@ class XueqiuProvider(StockProvider):
         symbol = _symbol(code)
         now_ms = int(time.time() * 1000)
         begin = now_ms - 3 * 86400 * 1000
-        path = f"/v5/stock/chart/kline.json?symbol={symbol}&period=5m&type=after&count={max(bars * 4, 500)}&indicator=kline&begin={begin}"
+        path = (f"/v5/stock/chart/kline.json?symbol={symbol}&period=5m&type=after"
+                f"&count={max(bars * 4, 500)}&indicator=kline&begin={begin}")
         data = _fetch(path, logger=self._logger, endpoint="5min_kline")
         if not data:
             return []

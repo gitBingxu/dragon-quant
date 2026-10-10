@@ -57,7 +57,8 @@ def factor(klines: list[KBar], ctx: dict) -> FactorResult:
     evidence = [
         f"近{lookback}日区间累计涨幅 {run_pct:.1f}%（阈值 {high_run_pct:.0f}%）→ 判定为{zone_label}",
         f"高位看成交额、低位看成交量；当前以「{key_metric}」为验证标准",
-        f"价格新高: {'是' if price_new_high else '否'}｜成交量新高: {'是' if vol_new_high else '否'}｜成交额新高: {'是' if amount_new_high else '否'}",
+        f"价格新高: {'是' if price_new_high else '否'}｜成交量新高: {'是' if vol_new_high else '否'}"
+        f"｜成交额新高: {'是' if amount_new_high else '否'}",
     ]
 
     if not price_new_high:

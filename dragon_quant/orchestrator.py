@@ -25,6 +25,7 @@ from dragon_quant.models.types import Candidate, StockInfo
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.rate_limit import RateLimiter
 from dragon_quant.providers import create_providers
+from dragon_quant.providers.tdx import is_available as _tdx_available
 from dragon_quant.providers.ths import drain_fetch_failures
 from dragon_quant.logging.logger import ScanLogger
 from dragon_quant.logging.reporter import ReportBuilder
@@ -44,7 +45,7 @@ RANK_UP_COUNT = 5     # 领涨行业取前 5（候选为板块内当日涨停股
 RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
 
 # 数据源 / 接口中文名（仅用于控制台失败提示）
-PROVIDER_CN = {"ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯"}
+PROVIDER_CN = {"tdx": "通达信", "ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯"}
 ENDPOINT_CN = {
     "sector_ranking": "获取板块排行",
     "sector_components": "获取板块内个股",
@@ -65,6 +66,8 @@ def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
     """
     fails = logger.query(category="api", level="error")
     new = fails[seen_count:]
+    # 已成功回退的 endpoint（主链路失败但老链路兜底成功）→ 归因为「已回退」而非真失败
+    rescued = {e.category.split(":")[-1] for e in logger.query(category="fallback")}
     if verbose and new:
         agg: dict = {}
         for e in new:
@@ -81,13 +84,16 @@ def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
         for (provider, endpoint), g in agg.items():
             pcn = PROVIDER_CN.get(provider, provider)
             ecn = ENDPOINT_CN.get(endpoint, endpoint)
+            is_rescued = provider == "tdx" and endpoint in rescued
             codes = ""
             if g["codes"]:
                 shown = ", ".join(g["codes"][:5])
                 more = "…" if len(g["codes"]) > 5 else ""
                 codes = f"（{shown}{more}）"
             reason = f"：{g['error']}" if g["error"] else ""
-            print(f"   ❌ {pcn}·{ecn} 失败 {g['count']} 次{codes}{reason}",
+            icon = "⚠️" if is_rescued else "❌"
+            suffix = "（已回退老链路）" if is_rescued else ""
+            print(f"   {icon} {pcn}·{ecn} 失败 {g['count']} 次{suffix}{codes}{reason}",
                   file=sys.stderr)
     return len(fails)
 
@@ -99,6 +105,21 @@ def _cache_worth_writing(data) -> bool:
     if isinstance(data, list):
         return len(data) > 0
     return True
+
+
+def _try_primary(primary_fn, fallback_fn, endpoint, fallback_name="", logger=None):
+    """首选主链路(tdx)，失败/空结果回退老链路。回退成功记 fallback 事件供失败归因。"""
+    try:
+        data = primary_fn()
+        if data:
+            return data
+    except Exception:
+        pass
+    data = fallback_fn()
+    if logger and data and endpoint:
+        logger.warn(f"fallback:{endpoint}",
+                    f"{endpoint} 主链路(tdx)失败，已回退 {fallback_name}".strip())
+    return data
 
 
 def _cached_fetch(limiter, cache, provider, key, fetch_fn,
@@ -231,7 +252,8 @@ def _print_cached_output(output_data: dict, top_n: int):
     print(f"\n{'═'*56}")
     print(f"🐉 龙头战法扫描完成 (缓存读取) - {output_data.get('timestamp', '?')}")
     print(f"{'═'*56}")
-    print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙")
+    print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  "
+          f"{'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙")
     print("-" * 64)
     display_list = [r for r in output_data.get("ranking", [])
                     if r.get("is_true_dragon")][:top_n]
@@ -248,7 +270,7 @@ def _print_cached_output(output_data: dict, top_n: int):
               f"{dims.get('liquidity', {}).get('score', 0):6.1f}  "
               f"{dims.get('absorption', {}).get('score', 0):6.1f}   {mark}")
     print(f"\n{'═'*56}")
-    print(f"📋 完整详细报告 (来自缓存)")
+    print("📋 完整详细报告 (来自缓存)")
     print(f"{'═'*56}")
     print("\n\n".join(r.get("report_text", "") for r in display_list))
     print()
@@ -376,6 +398,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     logger = ScanLogger()
 
     providers = create_providers(logger=logger)
+    tdx = providers["tdx"]
     ths = providers["ths"]
     xq = providers["xueqiu"]
     tx = providers["tencent"]
@@ -397,6 +420,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     _cf_sync = functools.partial(_cached_fetch_sync, cache,
                                  trade_date=trade_date,
                                  refresh=refresh_provider_cache, volatile=volatile)
+    # 仅当 easy_tdx 可用时才记录回退事件，避免未安装时每个 fetch 都刷一条日志
+    _try = functools.partial(_try_primary,
+                             logger=logger if _tdx_available() else None)
 
     # 失败接口提示游标（每个 phase 后增量打印新出现的 api 失败）
     fail_seen = 0
@@ -426,8 +452,19 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # 一次抓取全部行业排行（provider 内已多页+本地排序），本地切涨幅/跌幅榜。
     # 缓存原始榜，黑名单过滤仍在内存做，
     # 保证黑名单改动即时生效。
-    ranking_raw = _cf_sync("sector:ranking",
-                           lambda: ths.get_sector_ranking(asc=False)) or []
+    # 板块链锚点：首选 tdx 行业板块，失败/空回退 ths。整轮板块链随 source 一致（§4.1）。
+    # 缓存按 source 命名空间隔离，避免上一轮 ths 榜命中导致 tdx 形同虚设（§7.2）。
+    sector_source = "tdx"
+    ranking_raw = _cf_sync(f"sector:ranking:{sector_source}",
+                           lambda: tdx.get_sector_ranking(asc=False)) or []
+    if not ranking_raw:
+        sector_source = "ths"
+        ranking_raw = _cf_sync(f"sector:ranking:{sector_source}",
+                               lambda: ths.get_sector_ranking(asc=False)) or []
+        if logger and _tdx_available() and ranking_raw:
+            logger.warn("fallback:sector_ranking",
+                        "sector_ranking 主链路(tdx)失败，已回退 同花顺")
+    sector_provider = tdx if sector_source == "tdx" else ths
     ranking_all = [s for s in ranking_raw if _sector_ok(s)]
     top10_up = ranking_all[:rank_up_count]
     top10_down = sorted(ranking_all, key=lambda s: s.pct)[:RANK_DOWN_COUNT]
@@ -457,9 +494,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 提交领涨板块成分股请求（过 RateLimiter 防 burst 反爬）
     for s in top10_up:
-        _cf("ths", f"sector:components:{s.code}",
-            (lambda sc=s.code: ths.get_sector_components(sc, page=1,
-                                                         all_pages=True)),
+        _cf(sector_source, f"sector:components:{s.code}",
+            (lambda sc=s.code: sector_provider.get_sector_components(sc, page=1,
+                                                                     all_pages=True)),
             namespace=source)
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
@@ -484,7 +521,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         print(f"   拉取 {len(unique_codes)} 只个股日K线...")
     for code in unique_codes:
         _cf("xueqiu", f"kline:day:{code}",
-            lambda c=code: xq.get_kline(c, days=30))
+            lambda c=code: _try(lambda: tdx.get_kline(c, days=30),
+                                lambda: xq.get_kline(c, days=30),
+                                "kline", "雪球"))
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
@@ -510,7 +549,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 )
 
     candidate_pool = list(all_candidates.values())
-    logger.phase("B", f"候选股筛选", count=len(candidate_pool))
+    logger.phase("B", "候选股筛选", count=len(candidate_pool))
     if verbose:
         print(f"   候选池: {len(candidate_pool)} 只（去重），按板块明细:")
         for s in top10_up:
@@ -543,7 +582,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # 排序（连板优先）后对候选池全部个股评分，不再截断
     candidate_pool.sort(key=lambda c: (c.board_count, len(c.concepts)), reverse=True)
     ranking = candidate_pool
-    logger.phase("C", f"评分候选池", total=len(ranking))
+    logger.phase("C", "评分候选池", total=len(ranking))
 
     if verbose:
         print(f"   评分候选池: {len(ranking)} 只")
@@ -561,20 +600,24 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # T1: 板块历史5分K（虹吸回看）+ 主板块当日1分K（带动/抗跌基准）
     all_sectors = top10_up + top10_down
     for s in all_sectors:
-        _cf("ths", f"kline:5min:sector:{s.code}",
-            (lambda sc=s.code: ths.get_sector_5min_kline_history(sc, days=10)),
+        _cf(sector_source, f"kline:5min:sector:{s.code}",
+            (lambda sc=s.code: sector_provider.get_sector_5min_kline_history(sc, days=10)),
             namespace=source)
     for s in top10_up:
-        _cf("ths", f"kline:1min:sector:{s.code}",
-            (lambda sc=s.code: ths.get_sector_1min_kline(sc)),
+        _cf(sector_source, f"kline:1min:sector:{s.code}",
+            (lambda sc=s.code: sector_provider.get_sector_1min_kline(sc)),
             namespace=source)
 
     # T2: 全部候选股分时K线（含 drive 封板池对比所需的同板块涨停股）
     for r in candidate_pool:
         _cf("xueqiu", f"kline:1min:{r.code}",
-            lambda c=r.code: xq.get_minute_kline(c))
+            lambda c=r.code: _try(lambda: tdx.get_minute_kline(c),
+                                  lambda: xq.get_minute_kline(c),
+                                  "minute_kline", "雪球"))
     _cf("xueqiu", f"kline:1min:{R.MARKET_SYMBOL}",
-        lambda: xq.get_minute_kline(R.MARKET_SYMBOL))
+        lambda: _try(lambda: tdx.get_minute_kline(R.MARKET_SYMBOL),
+                     lambda: xq.get_minute_kline(R.MARKET_SYMBOL),
+                     "minute_kline", "雪球"))
 
     # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
     all_codes = set()
@@ -584,11 +627,15 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     all_codes_list = sorted(all_codes)
 
     def fetch_quotes():
-        quotes = {}
-        for start in range(0, len(all_codes_list), 200):
-            for quote in tx.batch_get_quotes(all_codes_list[start:start + 200]):
-                quotes[quote.code] = quote
-        return [quotes[code] for code in sorted(quotes)]
+        def _tx_quotes():
+            quotes = {}
+            for start in range(0, len(all_codes_list), 200):
+                for quote in tx.batch_get_quotes(all_codes_list[start:start + 200]):
+                    quotes[quote.code] = quote
+            return [quotes[code] for code in sorted(quotes)]
+        # tdx 内部按 80 只/次分片
+        return _try(lambda: tdx.batch_get_quotes(all_codes_list),
+                    _tx_quotes, "batch_quotes", "腾讯")
 
     _cf("tencent", "quotes:batch", fetch_quotes)
 
@@ -606,9 +653,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     if verbose:
         if fail_seen == prev_seen:
-            print(f"   ✅ 全部加载完成")
+            print("   ✅ 全部加载完成")
         else:
-            print(f"   ⚠️ 数据加载完成（部分接口失败，详见上方）")
+            print("   ⚠️ 数据加载完成（部分接口失败，详见上方）")
 
     # ────────────────────────────────────────────
     # Phase E: 主进程打分 — 对候选池全部个股
@@ -655,7 +702,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # Phase F: 输出与持久化
     # ────────────────────────────────────────────
     elapsed = time.time() - t_start
-    logger.phase("F", f"扫描完成", elapsed_s=round(elapsed, 1))
+    logger.phase("F", "扫描完成", elapsed_s=round(elapsed, 1))
 
     output = {
         "timestamp": time.strftime("%Y%m%d_%H%M%S"),
@@ -710,7 +757,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             print(f"\n{'═'*56}")
             print(f"🐉 龙头战法扫描完成 ({elapsed:.0f}s)")
             print(f"{'═'*56}")
-            print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  {'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙")
+            print(f"\n{'代码':8s} {'名称':8s} {'综合':>6s}  {'带动':>6s}  "
+                  f"{'领涨':>6s}  {'抗跌':>6s}  {'流动':>6s}  {'承接':>6s}  真龙")
             print("-" * 64)
             for r in display_list:
                 dims = r.get("dimensions", {})
@@ -724,7 +772,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                       f"{dims.get('absorption', {}).get('score', 0):6.1f}   {mark}")
 
             print(f"\n{'═'*56}")
-            print(f"📋 完整详细报告")
+            print("📋 完整详细报告")
             print(f"{'═'*56}")
             for i, r in enumerate(display_list):
                 print(report_parts[i])

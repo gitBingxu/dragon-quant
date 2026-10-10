@@ -3,7 +3,9 @@
 无需 Cookie，零认证
 """
 
-import json, sys, time
+import json
+import sys
+import time
 import urllib.request
 from typing import Optional
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
@@ -17,7 +19,8 @@ TENCENT_HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Connection": "keep-alive",
     "Referer": "https://finance.qq.com/",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"),
     "sec-ch-ua": '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"macOS"',
@@ -151,7 +154,7 @@ class TencentProvider(StockProvider):
         url = f"{MINUTE}?code={prefix}{code}"
         try:
             headers = dict(TENCENT_HEADERS)
-            headers["Referer"] = f"https://finance.qq.com/"
+            headers["Referer"] = "https://finance.qq.com/"
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -192,9 +195,10 @@ class TencentProvider(StockProvider):
                 continue
             # 用分钟时间做合成
             start_min = chunk[0][0]
-            end_min = chunk[-1][0]
             base_date = "2026-01-01"  # 占位，后面会覆盖
-            ts = int(time.mktime(time.strptime(f"{base_date} {start_min // 60:02d}:{start_min % 60:02d}", "%Y-%m-%d %H:%M"))) * 1000
+            ts = int(time.mktime(time.strptime(
+                f"{base_date} {start_min // 60:02d}:{start_min % 60:02d}",
+                "%Y-%m-%d %H:%M"))) * 1000
 
             opens = [c[1] for c in chunk]
             high = max(c[1] for c in chunk)

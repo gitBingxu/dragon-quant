@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from dragon_quant.cache.data_cache import DataCache
-from dragon_quant.models.types import Candidate, KBar, Quote, ScoreResult, StockInfo
+from dragon_quant.models.types import Candidate, KBar, ScoreResult, StockInfo
 from dragon_quant.scorers import registry as R
 from dragon_quant.scorers.base import (
     CHINA_TZ, at_limit, clip, common_minute_axis, continuous_ranges, gain_curve,
@@ -143,10 +143,11 @@ def _lead_sector(stock: list[KBar], sector: list[KBar], limit_up=0):
             if delta == 0:
                 continue
             base = max(0, t - 1)
-            if sb[base] is None:
+            sb_base = sb[base]
+            if sb_base is None:
                 continue
             pre = [v for v in sb[max(0, base - L):base] if v is not None]
-            no_frontrun = not pre or sb[base] - min(pre) < follow_th
+            no_frontrun = not pre or sb_base - min(pre) < follow_th
             event = {
                 "event_time": _fmt_minute_bucket(times[t]),
                 "trigger_time": _fmt_minute_bucket(times[pulse["trigger"]]),
@@ -157,7 +158,7 @@ def _lead_sector(stock: list[KBar], sector: list[KBar], limit_up=0):
                 "sector_gain_pct": round(peer["gain"] * 100, 2),
             }
             after = [v for v in sb[t:min(len(sb), t + L + 1)] if v is not None]
-            if delta > 0 and no_frontrun and after and max(after) - sb[base] + EPS >= follow_th:
+            if delta > 0 and no_frontrun and after and max(after) - sb_base + EPS >= follow_th:
                 lead_events.append(event)
             elif delta < 0:
                 follow_events.append(event)

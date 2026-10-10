@@ -52,8 +52,10 @@ def factor(klines: list[KBar], ctx: dict) -> FactorResult:
     }
 
     evidence = [
-        f"近{window}日趋势方向: {'上升' if trend_up else '下降/横盘'}（首{bars[0].close:.2f} → 末{bars[-1].close:.2f}）",
-        f"涨日 {len(up_vols)} 天均量 {up_avg/1e4:.0f}万 vs 跌日 {len(down_vols)} 天均量 {down_avg/1e4:.0f}万 → 涨跌量比 {ratio:.2f}（阈值 {up_ratio_th}）",
+        f"近{window}日趋势方向: {'上升' if trend_up else '下降/横盘'}"
+        f"（首{bars[0].close:.2f} → 末{bars[-1].close:.2f}）",
+        f"涨日 {len(up_vols)} 天均量 {up_avg/1e4:.0f}万 vs 跌日 "
+        f"{len(down_vols)} 天均量 {down_avg/1e4:.0f}万 → 涨跌量比 {ratio:.2f}（阈值 {up_ratio_th}）",
         f"最新量能 vs {vol_window}日均量 = {recent_vs_ma:.2f}x",
     ]
 

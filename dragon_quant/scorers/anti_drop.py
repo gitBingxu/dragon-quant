@@ -68,7 +68,7 @@ def _antidrop_vs(base: list[KBar], stock: list[KBar]) -> tuple[float, dict]:
     for a, b in segs:
         gx_a, gx_b = g_x[a], g_x[b]
         gs_a, gs_b = g_s[a], g_s[b]
-        if None in (gx_a, gx_b, gs_a, gs_b):
+        if gx_a is None or gx_b is None or gs_a is None or gs_b is None:
             continue
         d_x = gx_a - gx_b  # >0
         if d_x <= EPS:
@@ -90,8 +90,10 @@ def _antidrop_vs(base: list[KBar], stock: list[KBar]) -> tuple[float, dict]:
     s_hold = (hold_num / hold_den) if hold_den > 0 else R.ANTIDROP_NEUTRAL
 
     # ── 率先起飞：取最深跳水段的底部 b，看个股领先见底 + 反弹更猛 ──
-    deepest = max(segs, key=lambda ab: (g_x[ab[0]] - g_x[ab[1]])
-                  if None not in (g_x[ab[0]], g_x[ab[1]]) else -1)
+    def _depth(ab):
+        ga, gb = g_x[ab[0]], g_x[ab[1]]
+        return (ga - gb) if ga is not None and gb is not None else -1
+    deepest = max(segs, key=_depth)
     start, end = next((a, b) for a, b in sessions if a <= deepest[1] < b)
     s_rebound, rebound_reason = _rebound_result(g_x[start:end], g_s[start:end], deepest[1] - start)
     deepest_event = None
@@ -119,9 +121,11 @@ def _dip_segments(g_x: list[Optional[float]]) -> list[tuple[int, int]]:
     n = len(g_x)
     falling = [False] * n
     for t in range(w, n):
-        if g_x[t] is None or g_x[t - w] is None:
+        gxt = g_x[t]
+        gxtw = g_x[t - w]
+        if gxt is None or gxtw is None:
             continue
-        if (g_x[t] - g_x[t - w]) < th:
+        if (gxt - gxtw) < th:
             for k in range(t - w, t + 1):
                 falling[k] = True
     segs: list[tuple[int, int]] = []
@@ -135,10 +139,11 @@ def _dip_segments(g_x: list[Optional[float]]) -> list[tuple[int, int]]:
             lo_idx = i
             lo_val = None
             for k in range(i, j + 1):
-                if g_x[k] is None:
+                gk = g_x[k]
+                if gk is None:
                     continue
-                if lo_val is None or g_x[k] < lo_val:
-                    lo_val = g_x[k]
+                if lo_val is None or gk < lo_val:
+                    lo_val = gk
                     lo_idx = k
             segs.append((i, lo_idx))
             i = j + 1

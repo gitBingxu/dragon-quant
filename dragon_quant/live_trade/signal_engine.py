@@ -76,7 +76,9 @@ class SignalEngine:
                     continue
                 self.evaluated[key] = observation
                 hold_days = sum(p.entry_date < r["date"] < day for r in row["hist_rows"]) + (day > p.entry_date)
-                if event.phase != "close" and not any(o["stock_code"] == p.code and o["side"] == "SELL" for o in self.pending):
+                if event.phase != "close" and not any(
+                        o["stock_code"] == p.code and o["side"] == "SELL"
+                        for o in self.pending):
                     sell_row = row
                     if row["bar_timestamp"] <= entry_ts:
                         sell_row = {**row, "bar_low": row["bar_close"], "bar_high": row["bar_close"]}
@@ -109,7 +111,7 @@ class SignalEngine:
                                                row.get("hist_rows") if row else None,
                                                row.get("intraday_bars") if row else None)
                 result["details"].append(detail)
-                if detail["passed"]:
+                if detail["passed"] and row is not None:
                     sig = evaluate_buy(cand, row, cfg, row["prev_row"], row["hist_rows"], row["intraday_bars"])
                     signals.append((sig, cand))
             signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))

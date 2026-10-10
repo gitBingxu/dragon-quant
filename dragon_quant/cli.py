@@ -13,9 +13,10 @@ CLI 入口 — dragon-quant 命令行工具
 import argparse
 import json
 import sys
-from typing import Optional
+from typing import Any, Optional
 
-from dragon_quant.orchestrator import scan as orchestrate_scan
+from dragon_quant.orchestrator import scan as orchestrate_scan  # noqa: F401 — 经 cli 模块转发
+
 
 
 class DragonHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -71,7 +72,6 @@ def _resolve_trade_date(raw: Optional[str]) -> str:
 
 
 def _strategy_params(path):
-    import json
     from dragon_quant.review_account.models import StrategyConfig
     if not path:
         return None
@@ -94,7 +94,7 @@ def _kbar_to_dict(kbar) -> dict:
     return d
 
 
-def _to_dict(obj) -> dict:
+def _to_dict(obj) -> Any:
     """dataclass → dict"""
     if hasattr(obj, '__dataclass_fields__'):
         return {f.name: _to_dict(getattr(obj, f.name)) for f in obj.__dataclass_fields__.values()}
@@ -167,7 +167,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     logs_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                         help="日志来源体系 (默认 v2；v1 仅用于历史记录查询)")
     logs_subs = logs_p.add_subparsers(dest="logs_action")
-    logs_subs.title = "Actions"
+    logs_subs.title = "Actions"  # type: ignore[assignment]
     logs_subs.metavar = "<action>"
 
     tail_p = logs_subs.add_parser("tail", help="查看最新日志", usage="dragon-quant logs tail [options]")
@@ -201,7 +201,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 """,
     )
     data_subs = data_p.add_subparsers(dest="data_action")
-    data_subs.title = "Actions"
+    data_subs.title = "Actions"  # type: ignore[assignment]
     data_subs.metavar = "<action>"
 
     sector_p = data_subs.add_parser("sector", help="板块排行榜", usage="dragon-quant data sector [options]")
@@ -256,7 +256,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 """,
     )
     bl_subs = bl_p.add_subparsers(dest="blacklist_action")
-    bl_subs.title = "Actions"
+    bl_subs.title = "Actions"  # type: ignore[assignment]
     bl_subs.metavar = "<action>"
     bl_subs.add_parser("list", help="列出黑名单", usage="dragon-quant blacklist list")
     bl_add_p = bl_subs.add_parser("add", help="新增黑名单板块",
@@ -382,7 +382,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 """,
     )
     st_subs = st_p.add_subparsers(dest="storage_action")
-    st_subs.title = "Actions"
+    st_subs.title = "Actions"  # type: ignore[assignment]
     st_subs.metavar = "<action>"
 
     st_subs.add_parser("status", help="查看存储状态", usage="dragon-quant storage status")
@@ -430,7 +430,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 # 放在文件底部：此时本模块 helper 已定义完毕；cli_commands 经 `from dragon_quant
 # import cli as _cli` 引用到的是已部分初始化的本模块，转发包装在调用时才解析，
 # 因此对 `cli.orchestrate_scan` / `cli._strategy_params` 的 patch 依然生效。
-from dragon_quant.cli_commands import (
+from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循环引用
     _cmd_scan,
     _cmd_logs,
     _cmd_data,

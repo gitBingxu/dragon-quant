@@ -144,8 +144,7 @@ def _cmd_logs(args):
 def _cmd_data(args):
     """数据查询命令"""
     from dragon_quant.data import (
-        get_sector_ranking, get_sector_components, get_sector_5min_kline,
-        get_kline, get_minute_kline, get_quote, batch_get_quotes,
+        get_sector_ranking, get_sector_components, get_kline, get_minute_kline, get_quote, batch_get_quotes,
     )
 
     if args.data_action == "sector":
@@ -260,7 +259,7 @@ def _cmd_review_account(args):
         return
 
     from dragon_quant.review_account import run_review_account
-    options = {"strategy_params": _strategy_params(args.config)} if args.config else {}
+    options: dict = {"strategy_params": _strategy_params(args.config)} if args.config else {}
     run_review_account(
         date_from=_normalize_cli_date(args.date_from),
         date_to=_normalize_cli_date(args.date_to),
@@ -268,7 +267,7 @@ def _cmd_review_account(args):
         source=args.source,
         strategy_name=args.strategy,
         verbose=True,
-        **options,
+        **(options or {}),
     )
 
     if args.ui:

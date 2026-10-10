@@ -13,7 +13,9 @@
   report = logger.report_context("600519")  # 聚合该股全部日志
 """
 
-import time, json, threading
+import time
+import json
+import threading
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field

@@ -173,7 +173,6 @@ class DataCache:
                 p.unlink()
 
     def clear_expired(self):
-        now = time.time()
         with self._lock:
             expired = [k for k, v in self._mem.items() if v.expired]
             for k in expired:

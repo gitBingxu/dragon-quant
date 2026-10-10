@@ -48,7 +48,8 @@ def factor(klines: list[KBar], ctx: dict) -> FactorResult:
     }
 
     evidence = [
-        f"近{box_window}日前高(收盘) {prior_high:.2f}，最新收盘 {last.close:.2f} → {'已突破' if breakout else '未突破'}",
+        f"近{box_window}日前高(收盘) {prior_high:.2f}，最新收盘 {last.close:.2f} "
+        f"→ {'已突破' if breakout else '未突破'}",
         f"突破日量能 vs {vol_window}日均量 = {vol_ratio:.2f}x（放量阈值 {vol_mult}x）",
     ]
 

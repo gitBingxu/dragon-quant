@@ -34,6 +34,7 @@ name = "gitBingxu"
 
 [project.urls]
 repository = "https://github.com/gitBingxu/dragon-quant"
+Changelog = "https://github.com/gitBingxu/dragon-quant/releases"
 
 [project.scripts]
 dragon-quant = "dragon_quant.cli:main"

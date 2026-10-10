@@ -144,8 +144,7 @@ def _cmd_logs(args):
 def _cmd_data(args):
     """数据查询命令"""
     from dragon_quant.data import (
-        get_sector_ranking, get_sector_components, get_sector_5min_kline,
-        get_kline, get_minute_kline, get_quote, batch_get_quotes,
+        get_sector_ranking, get_sector_components, get_kline, get_minute_kline, get_quote, batch_get_quotes,
     )
 
     if args.data_action == "sector":
@@ -260,7 +259,7 @@ def _cmd_review_account(args):
         return
 
     from dragon_quant.review_account import run_review_account
-    options = {"strategy_params": _strategy_params(args.config)} if args.config else {}
+    options: dict = {"strategy_params": _strategy_params(args.config)} if args.config else {}
     run_review_account(
         date_from=_normalize_cli_date(args.date_from),
         date_to=_normalize_cli_date(args.date_to),
@@ -268,7 +267,7 @@ def _cmd_review_account(args):
         source=args.source,
         strategy_name=args.strategy,
         verbose=True,
-        **options,
+        **(options or {}),
     )
 
     if args.ui:
@@ -284,6 +283,38 @@ def _cmd_review_account_ui(args):
         default_source=getattr(args, "source", "v2"),
         default_page="account",
     )
+
+
+def _cmd_dragons(args):
+    """导出扫描物化的龙头股列表（JSON，固定读取 dragons_v2）。"""
+    from dragon_quant.storage import db
+
+    source = "v2"
+    if args.date:
+        trade_date = _normalize_cli_date(args.date)
+    else:
+        dates = db.list_dragon_trade_dates(source=source)
+        if not dates:
+            print(json.dumps({"error": f"无 {source} 龙头记录"},
+                             ensure_ascii=False, indent=2))
+            sys.exit(1)
+        trade_date = dates[-1]
+
+    dragons = db.get_dragons(trade_date, source=source)
+    if args.true_only:
+        dragons = [d for d in dragons if d.get("is_true_dragon") is True]
+
+    if not dragons:
+        print(json.dumps({"error": f"未找到 {trade_date} 的 {source} 龙头记录"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    print(json.dumps({
+        "trade_date": trade_date,
+        "source": source,
+        "count": len(dragons),
+        "dragons": dragons,
+    }, ensure_ascii=False, indent=2))
 
 
 def _cmd_buy(args):

@@ -4,10 +4,10 @@ StorageManager — 统一持久化数据管理
 支持查看 / 清理 / 磁盘占用统计。
 """
 
-import os
 import shutil
 import time
 from pathlib import Path
+from typing import Optional
 
 from dragon_quant.storage.paths import (
     DATA_DIR, COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR,
@@ -42,7 +42,7 @@ def _fmt_size(b: int) -> str:
     return f"{b / (1024 * 1024):.1f}M"
 
 
-def _clear_dir(path: Path, days: int = None):
+def _clear_dir(path: Path, days: Optional[int] = None):
     if not path.exists():
         return 0
 
@@ -91,10 +91,10 @@ class StorageManager:
     def clear_cache(self) -> int:
         return _clear_dir(CACHE_DIR)
 
-    def clear_results(self, days: int = None) -> int:
+    def clear_results(self, days: Optional[int] = None) -> int:
         return _clear_dir(RESULTS_DIR, days=days)
 
-    def clear_logs(self, days: int = None) -> int:
+    def clear_logs(self, days: Optional[int] = None) -> int:
         removed = _clear_dir(LOG_DIR, days=days)
         try:
             from dragon_quant.storage import db

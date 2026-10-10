@@ -233,5 +233,78 @@ class TestCliSourceArgs(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), f"dragon-quant {__version__}")
 
 
+class TestCliDragons(unittest.TestCase):
+
+    def test_dragons_help(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "dragons", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+
+        output = buf.getvalue()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("Usage: dragon-quant dragons [--date YYYYMMDD] [--true-only]", output)
+        self.assertIn("--true-only", output)
+        self.assertNotIn("--source", output)
+
+    def test_dragons_default_uses_latest_date(self):
+        dragon = {
+            "code": "600172", "name": "黄河旋风", "rank": 1,
+            "composite_score": 92.5, "is_true_dragon": True,
+            "concepts": ["超硬材料"], "report_text": "x",
+        }
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "dragons"]), \
+             patch("dragon_quant.storage.db.list_dragon_trade_dates",
+                   return_value=["2026-05-18", "2026-05-19"]) as mock_dates, \
+             patch("dragon_quant.storage.db.get_dragons", return_value=[dragon]) as mock_get, \
+             redirect_stdout(buf):
+            cli.main()
+
+        mock_dates.assert_called_once_with(source="v2")
+        mock_get.assert_called_once_with("2026-05-19", source="v2")
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["trade_date"], "2026-05-19")
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["dragons"][0]["code"], "600172")
+
+    def test_dragons_true_only_filters(self):
+        true_d = {"code": "600172", "name": "A", "is_true_dragon": True, "report_text": ""}
+        false_d = {"code": "000001", "name": "B", "is_true_dragon": False, "report_text": ""}
+        none_d = {"code": "600519", "name": "C", "is_true_dragon": None, "report_text": ""}
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "dragons", "--date", "20260519", "--true-only"]), \
+             patch("dragon_quant.storage.db.get_dragons",
+                   return_value=[true_d, false_d, none_d]) as mock_get, \
+             redirect_stdout(buf):
+            cli.main()
+
+        mock_get.assert_called_once_with("2026-05-19", source="v2")
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["dragons"][0]["code"], "600172")
+
+    def test_dragons_date_supports_slash_format(self):
+        dragon = {"code": "600172", "name": "A", "is_true_dragon": True, "report_text": ""}
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "dragons", "--date", "2026/05/19"]), \
+             patch("dragon_quant.storage.db.get_dragons", return_value=[dragon]) as mock_get, \
+             redirect_stdout(buf):
+            cli.main()
+
+        mock_get.assert_called_once_with("2026-05-19", source="v2")
+
+    def test_dragons_no_data_exits_nonzero(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "dragons"]), \
+             patch("dragon_quant.storage.db.list_dragon_trade_dates", return_value=[]), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("error", json.loads(buf.getvalue()))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -64,7 +64,9 @@ def validate_bars(bars: list[KBar], day: str, until: int | None = None) -> list[
     if [b.timestamp for b in selected] != expected:
         actual = {b.timestamp for b in selected}
         missing = [datetime.fromtimestamp(t / 1000, SHANGHAI).strftime("%H:%M") for t in expected if t not in actual]
-        raise DataCoverageError(f"{day} 5分钟K不完整或时间戳不匹配: 需要{len(expected)}根，得到{len(selected)}根；缺失{','.join(missing)}")
+        raise DataCoverageError(
+            f"{day} 5分钟K不完整或时间戳不匹配: 需要{len(expected)}根，"
+            f"得到{len(selected)}根；缺失{','.join(missing)}")
     for b in selected:
         if not (all(math.isfinite(v) for v in (b.open, b.high, b.low, b.close, b.volume, b.amount))
                 and 0 < b.low <= min(b.open, b.close) <= max(b.open, b.close) <= b.high
@@ -106,7 +108,8 @@ def build_row(history: list[KBar], day: str, opening: float, bars: list[KBar],
         "prev_row": prev, "hist_rows": rows, "intraday_bars": known,
         "limit_up": limit_up or round(prev["close"] * 1.1, 2),
         "limit_down": limit_down or round(prev["close"] * .9, 2),
-        "execution_price": execution_price, "execution_timestamp": timestamp, "bar_high": current.high if current else opening,
+        "execution_price": execution_price, "execution_timestamp": timestamp,
+        "bar_high": current.high if current else opening,
         "bar_low": current.low if current else opening,
         "bar_close": close, "bar_timestamp": current.timestamp if current else at(day, "09:30"),
         "previous_ma5": rows[-2].get("ma5"), "observed_at": timestamp,

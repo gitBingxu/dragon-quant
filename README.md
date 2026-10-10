@@ -2,7 +2,7 @@
 
 **龙头战法量化筛选系统** — A 股涨停板龙头识别工具
 
-基于同花顺、雪球、腾讯三大公开数据源，对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
+基于通达信 TDX（首选）+ 同花顺、雪球、腾讯三大公开数据源，对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
 
 当前主流程使用**五维「识别真龙」评分体系**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，采用**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。完整规则见 [评分规范](dragon_quant/scorers/评分器Refactor.md)。
 
@@ -105,6 +105,21 @@ dragon-quant blacklist list
 dragon-quant blacklist add "次新股"
 dragon-quant blacklist remove "次新股"
 ```
+
+### `dragons` — 导出龙头（JSON）
+
+```bash
+dragon-quant dragons                             # 最新有龙头数据的交易日，全部龙头
+dragon-quant dragons --date 20260519             # 指定交易日
+dragon-quant dragons --date 20260519 --true-only # 只输出真龙 (is_true_dragon=1)
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--date` | 最新有数据的交易日 | 指定交易日（`YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`） |
+| `--true-only` | - | 仅保留 `is_true_dragon=1` 的记录，默认不区分 |
+
+固定读取 `dragons_v2`（扫描物化的入选龙头）并以 JSON 输出：外层含 `trade_date` / `source` / `count`，`dragons` 为龙头明细数组。`--date` 缺省时取**最新有龙头数据的交易日**（非「今天」）。无数据时输出 `{"error": ...}` 并以非零码退出，便于脚本判断。
 
 ### `review` — 龙头回测
 
@@ -250,11 +265,12 @@ quote = get_quote("600172")
 
 | 数据源 | 用途 | Cookie |
 |---|---|---|
-| 同花顺 | 行业板块排行 / 成分股 / 板块当日1分K / 历史5分K | 无需 |
-| 雪球 | 个股日 K / 当日 1 分 K | 需要 |
-| 腾讯 | 批量实时行情 + 收盘盘口（买一封单量）| 无需 |
+| 通达信 TDX（首选）| 板块排行 / 成分股 / K线 / 分时 / 五档行情 | 无需 |
+| 同花顺（回退）| 行业板块排行 / 成分股 / 板块当日1分K / 历史5分K | 无需 |
+| 雪球（回退）| 个股日 K / 当日 1 分 K | 需要 |
+| 腾讯（回退）| 批量实时行情 + 收盘盘口（买一封单量）| 无需 |
 
-> 封单数据走腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
+> 封单数据首选 TDX 五档盘口，回退腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
 
 ## 目录结构
 
@@ -265,7 +281,7 @@ dragon_quant/
 ├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
-├── providers/            # 数据源适配（ths/xueqiu/tencent/cookie）
+├── providers/            # 数据源适配（tdx/ths/xueqiu/tencent/cookie）
 ├── scorers/           # 五维评分器 + registry + aggregator
 ├── vpa/                  # 量价分析（插件式因子）
 ├── cache/                # 内存+本地双缓存

@@ -261,9 +261,12 @@ def _parse_line_5min(line_data: str) -> list[KBar]:
             ts = int(time.mktime(time.strptime(tstr, "%Y%m%d%H%M"))) * 1000
         except ValueError:
             continue
-        o = _safe_float(parts[1]); h = _safe_float(parts[2])
-        lo = _safe_float(parts[3]); c = _safe_float(parts[4])
-        vol = _safe_float(parts[5]); amt = _safe_float(parts[6])
+        o = _safe_float(parts[1])
+        h = _safe_float(parts[2])
+        lo = _safe_float(parts[3])
+        c = _safe_float(parts[4])
+        vol = _safe_float(parts[5])
+        amt = _safe_float(parts[6])
         chg = (c - prev_close) if prev_close else 0.0
         pct = (chg / prev_close * 100.0) if prev_close else 0.0
         bars.append(KBar(

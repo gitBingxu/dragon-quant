@@ -25,7 +25,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     if all_sector_codes is None:
         all_sector_codes = cache.get("__meta__:sector_codes") or []
     other_map = {}
-    for sector in set(all_sector_codes) - {primary_sector}:
+    for sector in set(all_sector_codes or []) - {primary_sector}:
         bars = cache.get(f"kline:5min:sector:{sector}") or []
         if len(bars) >= R.ABS_WINDOW:
             other_map[sector] = bars
@@ -173,7 +173,7 @@ def _wret(kl: list[KBar], start: int, end: int) -> float:
 def _wret_opt(kl: list[Optional[KBar]], start: int, end: int) -> Optional[float]:
     if start < 0 or end >= len(kl) or start > end or not _continuous(kl[start:end + 1]):
         return None
-    return _wret(kl, start, end)
+    return _wret(kl, start, end)  # type: ignore[arg-type] — _continuous 已保证区间内无 None
 
 
 def _align(target, other_map):

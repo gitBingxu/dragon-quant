@@ -1,0 +1,18 @@
+{
+  "include": ["dragon_quant"],
+  "exclude": ["**/__pycache__", "web_ui"],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic",
+  "reportUnknownMemberType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownLambdaType": false,
+  "reportMissingTypeStubs": false,
+  "reportMissingImports": false,
+  "reportUnusedImport": false,
+  "reportUnusedVariable": false,
+  "reportUnusedCallResult": false,
+  "reportPrivateUsage": false,
+  "reportUnnecessaryTypeIgnoreComment": false
+}

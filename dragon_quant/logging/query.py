@@ -21,12 +21,12 @@
 
 CLI 用法:
   python -m dragon_quant logs tail [-n 20]
-  python -m dragon_quant logs query [--date 20260513] [--category scorer:drive] [--level error] [--code 600172] [--tail 50]
+  python -m dragon_quant logs query [--date 20260513] [--category scorer:drive]
+                                    [--level error] [--code 600172] [--tail 50]
   python -m dragon_quant logs clear [--days 7]
   python -m dragon_quant logs list
 """
 
-import json
 import time
 from typing import Optional
 

@@ -33,7 +33,8 @@ def _data_dir():
 # ─── 读写 ───
 
 def set_xq(c: str):
-    _ensure(); XQ_FILE.write_text(c.strip())
+    _ensure()
+    XQ_FILE.write_text(c.strip())
     print(f"✅ 雪球 Cookie -> {XQ_FILE}")
 
 
@@ -70,7 +71,8 @@ def _launch_chromium(p, headless: bool):
             raise RuntimeError(
                 "Chromium 内核自动下载失败。\n"
                 "  请手动执行：playwright install chromium\n"
-                "  国内网络先设镜像：PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/ playwright install chromium"
+                "  国内网络先设镜像：PLAYWRIGHT_DOWNLOAD_HOST="
+                "https://npmmirror.com/mirrors/playwright/ playwright install chromium"
             )
         try:
             return p.chromium.launch(headless=headless, args=args)
@@ -107,7 +109,7 @@ def _browser_cookies(url: str, headless: bool = True) -> str:
         b.close()
     if not raw:
         return ""
-    return "; ".join(f"{c['name']}={c['value']}" for c in raw)
+    return "; ".join(f"{c['name']}={c['value']}" for c in raw)  # type: ignore[index]
 
 
 def fetch_xq() -> str:

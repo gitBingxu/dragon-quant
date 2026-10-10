@@ -8,7 +8,7 @@ from dragon_quant.storage._base import _connect, _ensure_schema, _lock, _normali
 
 def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
               top_n: int, candidates_n: int, workers: int,
-              stocks: list[dict], raw_output: str = None,
+              stocks: list[dict], raw_output: Optional[str] = None,
               source: str = "v2"):
     with _lock:
         conn = _connect()
@@ -18,7 +18,8 @@ def save_scan(scan_id: str, scan_date: str, elapsed_s: float,
             t = _tables(source)
 
             conn.execute(
-                f"INSERT OR REPLACE INTO {t['scans']}(id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output, source) "
+                f"INSERT OR REPLACE INTO {t['scans']}("
+                f"id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output, source) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (scan_id, scan_date, elapsed_s, top_n, candidates_n, workers, raw_output, source),
             )

@@ -48,7 +48,8 @@ class AccountSimulator:
             if not day_trades:
                 self.events.append(TimelineEvent(day, "HOLD" if self.state.positions else "IDLE",
                     "继续持有" if self.state.positions else "空仓", "未出现可成交的新信号", "no_execution",
-                    cash=self.state.cash, total_equity=snapshot.total_equity, signal={"details": list(details.values())}))
+                    cash=self.state.cash, total_equity=snapshot.total_equity,
+                    signal={"details": list(details.values())}))
             for event in self.events:
                 if event.event_date == day:
                     event.total_equity = snapshot.total_equity

@@ -5,7 +5,7 @@ from datetime import datetime
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.providers.xueqiu import XueqiuProvider
 from dragon_quant.review_account.market import (
-    SHANGHAI, DataCoverageError, at, bar_times, build_daily_row, build_row, event_date, validate_bars,
+    SHANGHAI, DataCoverageError, at, build_daily_row, build_row, event_date, validate_bars,
 )
 from dragon_quant.review_account.models import MarketEvent
 
@@ -54,7 +54,8 @@ class MarketData:
         cache_key = f"kline:5min:{code}:normal"
         key = (code, day)
         now = datetime.now(SHANGHAI)
-        closed = day < now.strftime("%Y-%m-%d") or (day == now.strftime("%Y-%m-%d") and now.strftime("%H:%M") >= "15:05")
+        closed = (day < now.strftime("%Y-%m-%d")
+                  or (day == now.strftime("%Y-%m-%d") and now.strftime("%H:%M") >= "15:05"))
         if key not in self._bars or not closed:
             bars = self.cache.load_for_trade_date(cache_key, day, namespace="account") if closed else None
             if bars is None and not self.offline:

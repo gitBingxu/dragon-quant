@@ -14,7 +14,7 @@
 
 > 为兼容历史数据，SQLite 物理表继续沿用 `*_v2`（如 `dragons_v2` / `scans_v2`），`scan_id` 继续使用 `v2_YYYYMMDD_topN`。`scan_v2` 命令保留为隐藏兼容别名，行为等同 `scan`；旧 `*_v1` 表不再由主流程写入，仅可通过显式 `--source v1` 查询历史记录。
 
-数据源：同花顺（板块数据）+ 雪球（个股 K 线/分时）+ 腾讯（批量行情/收盘盘口），不依赖任何付费行情接口。
+数据源：**通达信 TDX（首选，`tmdx` 包，无 Cookie 无反爬）+ 同花顺（板块，回退）+ 雪球（个股 K 线/分时，回退）+ 腾讯（批量行情/收盘盘口，回退）**，不依赖任何付费行情接口。tdx 链路失败时自动回退老链路。
 
 > **板块口径已切换为「行业板块」**（同花顺 `thshy`/`hyzjl`，约 90 个真实行业，code 为 881xxx），不再用概念板块（`gn`/`gnzjl`）。
 
@@ -49,6 +49,10 @@ python -m dragon_quant storage clear --all   # 清理全部
 # 回测 / 查看 UI（默认读取 dragons_v2）
 python -m dragon_quant review --date 20260519
 python -m dragon_quant review --ui-only
+
+# 导出扫描物化的龙头（JSON，默认最新有数据的交易日）
+python -m dragon_quant dragons
+python -m dragon_quant dragons --date 20260519 --true-only
 ```
 
 ### 前置条件
@@ -85,9 +89,10 @@ dragon_quant/
 │
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC + 板块 K 线方法
-│   ├── ths.py                   # 同花顺 — 行业排行(HTTP)/成分股(HTML)/板块1分K/历史5分K
-│   ├── xueqiu.py                # 雪球 — 个股日K/分时，需 Cookie
-│   ├── tencent.py               # 腾讯 — 零认证，批量行情 + 收盘盘口(bid1)
+│   ├── tdx.py                   # 通达信 TDX（首选）— 板块/成分股/K线/分时/五档行情，无 Cookie 无反爬
+│   ├── ths.py                   # 同花顺（回退）— 行业排行(HTTP)/成分股(HTML)/板块1分K/历史5分K
+│   ├── xueqiu.py                # 雪球（回退）— 个股日K/分时，需 Cookie
+│   ├── tencent.py               # 腾讯（回退）— 零认证，批量行情 + 收盘盘口(bid1)
 │   └── cookie.py                # Cookie 管理 + CLI
 │
 ├── scorers/                  # 五维「识别真龙」评分器
@@ -280,11 +285,11 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 阈值/权重集中在 `scorers/registry.py`，便于回测调参。
 
 ### 必须遵守的约束
-- **运行时依赖**：`playwright` 为必选（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）；其余仅用 Python 3 标准库。
+- **运行时依赖**：`playwright`（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）与 `tmdx`（通达信 TDX 首选数据链路，要求 Python≥3.10）均为必选；其余仅用 Python 3 标准库。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scorers/` 与 `*_v2` 表，不再保留旧四维评分代码。
-- **provider 接口兼容**：`StockProvider` 新增板块 K 线方法用默认 `raise NotImplementedError`（非 `@abstractmethod`），否则 `create_providers()` 一次实例化全部 3 个 provider 时会崩。
+- **provider 接口兼容**：`StockProvider` 新增板块 K 线方法用默认 `raise NotImplementedError`（非 `@abstractmethod`），否则 `create_providers()` 一次实例化全部 4 个 provider 时会崩。
 
 ### AI Agent 协作规范
 > **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。** 纯查询类操作（读文件、查数据库、搜索代码）不受此限。
@@ -309,6 +314,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - DB 板块黑名单表 + CLI `blacklist` 管理
 - v2 物理分表（`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`）+ `review --source v1` 历史兼容 / Web UI source 切换
 - 量价分析 `vpa/`、结构化日志 `logging/`、统一持久化 `storage/`、交易日历 `utils/trading.py`、龙头回测 `review.py`、Web UI
+- CLI `dragons` 命令：导出某交易日扫描物化的龙头 JSON（`--date` 默认最新有数据交易日，`--true-only` 仅真龙）
 - 全量单测覆盖 `tests/test_scorers.py`、`tests/test_storage.py` 等核心路径
 
 ### ⚠️ 待完成/观察

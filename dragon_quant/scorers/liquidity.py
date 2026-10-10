@@ -42,7 +42,7 @@ def score(code: str, cache: DataCache, primary_sector: str = "",
     # ── 封板质量 ──
     is_limit_up = bool(q and q.pct >= R.LIMIT_UP_PCT and at_limit(q.price, q.limit_up))
     reasons = []
-    if is_limit_up and at_limit(q.bid1_price, q.limit_up) and q.bid1_volume > 0 and q.volume > 0:
+    if q is not None and is_limit_up and at_limit(q.bid1_price, q.limit_up) and q.bid1_volume > 0 and q.volume > 0:
         strength = q.bid1_volume / q.volume
         s_seal_strength = clip(strength / R.SEAL_STRENGTH_REF * 100.0)
     elif is_limit_up:

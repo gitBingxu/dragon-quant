@@ -208,6 +208,12 @@ class TestScanScoringIntegration(unittest.TestCase):
         self.stack.enter_context(patch.object(orch, "_get_trade_date", return_value="2026-09-11"))
         self.stack.enter_context(patch("dragon_quant.utils.trading.build_trade_calendar", return_value={"2026-09-11"}))
         self.ths, self.xq, self.tx = Mock(), Mock(), Mock()
+        # tdx 主链路：mock 返回空，让板块链锚点/个股链全部回退到老链路
+        self.tdx = Mock()
+        self.tdx.get_sector_ranking.return_value = []
+        self.tdx.get_kline.return_value = []
+        self.tdx.get_minute_kline.return_value = []
+        self.tdx.batch_get_quotes.return_value = []
         self.ths.get_sector_ranking.return_value = [SectorPerformance("881001", "S", 2, 2)]
         self.ths.get_sector_components.return_value = [StockInfo("600001", "Rejected", pct=10), StockInfo("600002", "Passed", pct=10)]
         self.ths.get_sector_5min_kline_history.return_value = []
@@ -215,7 +221,7 @@ class TestScanScoringIntegration(unittest.TestCase):
         self.xq.get_kline.return_value = _min_bars(10, [0, 1, 2, 3, 4, 10])
         self.xq.get_minute_kline.return_value = _min_bars(10, [0, 10])
         self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11) for c in codes]
-        self.stack.enter_context(patch.object(orch, "create_providers", return_value={"ths": self.ths, "xueqiu": self.xq, "tencent": self.tx}))
+        self.stack.enter_context(patch.object(orch, "create_providers", return_value={"tdx": self.tdx, "ths": self.ths, "xueqiu": self.xq, "tencent": self.tx}))
         limiter = Mock()
         limiter.submit.side_effect = lambda provider, fn: fn()
         self.stack.enter_context(patch.object(orch, "RateLimiter", return_value=limiter))

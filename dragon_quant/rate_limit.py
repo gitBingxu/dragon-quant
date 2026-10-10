@@ -17,7 +17,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional, Union
 
 # delay 可以是固定秒数，也可以是 (min, max) 随机区间
-DelaySpec = Union[float, tuple]
+DelaySpec = Union[float, tuple[float, float]]
 
 
 def _resolve_delay(delay: DelaySpec) -> float:

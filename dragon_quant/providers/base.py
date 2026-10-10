@@ -72,3 +72,19 @@ class StockProvider(ABC):
     def get_quote(self, code: str) -> Optional[Quote]:
         """获取个股实时行情"""
         ...
+
+    # ─── 个股可选方法（普通方法，默认未实现；部分 provider 覆写）───
+
+    def get_minute_kline(self, code: str) -> list[KBar]:
+        """获取当日 1 分钟分时 K 线（真实 OHLC）"""
+        raise NotImplementedError(f"{self.name} 不提供个股 1 分 K")
+
+    def get_5min_kline_for(self, code: str, target_ts: int,
+                           bars_before: int = 48, bars_after: int = 96,
+                           fq_type: str = "after") -> list[KBar]:
+        """获取指定日期附近的 5 分钟 K 线（复盘用）"""
+        raise NotImplementedError(f"{self.name} 不提供指定日 5 分 K")
+
+    def batch_get_quotes(self, codes: list[str]) -> list[Quote]:
+        """批量获取实时行情快照"""
+        raise NotImplementedError(f"{self.name} 不提供批量行情")

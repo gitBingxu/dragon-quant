@@ -31,8 +31,9 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
     phase = row["phase"]
     if phase == "bar":
         # 突破前高需首根5分钟K带量确认；否则交给分歧买龙。
-        if len(intraday_bars or []) == 1:
-            strong = _turn_strong_signal(candidate, row, cfg, prev_row, intraday_bars[0])
+        ib = intraday_bars or []
+        if len(ib) == 1:
+            strong = _turn_strong_signal(candidate, row, cfg, prev_row, ib[0])
             if strong:
                 return strong
         return evaluate_divergence_buy(candidate, row, cfg, hist_rows, intraday_bars, prev_row)
@@ -169,18 +170,21 @@ def _no_pattern_reason(candidate: dict, row: dict, cfg: StrategyConfig,
         else:
             parts.append("未满足开盘贴近MA5回踩承接")
     # 买点C：首根5分钟带量突破前高
-    if phase == "bar" and len(intraday_bars or []) == 1:
-        bar_turnover = getattr(intraday_bars[0], "turnover", 0) or 0
+    ib = intraday_bars or []
+    if phase == "bar" and len(ib) == 1:
+        bar_turnover = getattr(ib[0], "turnover", 0) or 0
         if prev_high and opening <= prev_high:
             parts.append(f"开盘{opening:.2f} 未突破上日高点{prev_high:.2f}")
         elif gap is not None and not (0 <= gap <= min(5.5, cfg.max_open_gap)):
             parts.append(f"开盘涨幅{gap:+.1f}% 不在[0, {min(5.5, cfg.max_open_gap):.1f}%]（弱转强买点）")
         elif not (cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max):
-            parts.append(f"上日换手{turnover:.1f}% 不在弱转强区间[{cfg.strong_turnover_min:.0f}%, {cfg.strong_turnover_max:.0f}%]")
+            parts.append(f"上日换手{turnover:.1f}% 不在弱转强区间"
+                         f"[{cfg.strong_turnover_min:.0f}%, {cfg.strong_turnover_max:.0f}%]")
         elif amount < 500_000_000:
             parts.append(f"上日成交额{amount / 1e8:.2f}亿 < 弱转强要求5亿")
         elif bar_turnover < cfg.turn_strong_bar_turnover_min:
-            parts.append(f"首根5分钟K换手{bar_turnover:.2f}% < {cfg.turn_strong_bar_turnover_min:.1f}%（突破无量，不认可）")
+            parts.append(f"首根5分钟K换手{bar_turnover:.2f}% "
+                         f"< {cfg.turn_strong_bar_turnover_min:.1f}%（突破无量，不认可）")
         else:
             parts.append("未满足首根5分钟带量突破前高")
     # 买点A：分歧买龙
@@ -253,7 +257,8 @@ def evaluate_sell(position: Position, row: dict, hold_days: int,
     weak = _weak_close_break(row, cfg)
     below_ma = close < row["ma5"]
     if weak or below_ma:
-        code = "next_day_close_below_open" if hold_days == 1 and weak else "close_below_open_stop" if weak else "break_intraday_ma_stop"
+        code = ("next_day_close_below_open" if hold_days == 1 and weak
+                else "close_below_open_stop" if weak else "break_intraday_ma_stop")
         return [_sell(code, "14:55已知数据转弱，清仓", row)]
     if (hold_days == 1 and cfg.next_day_half_enabled and not position.took_profit_half
             and close >= row["limit_up"] * .999):

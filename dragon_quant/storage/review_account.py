@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from dragon_quant.storage._base import _connect, _ensure_schema, _lock, _normalize_source, _tables
+from dragon_quant.storage._base import _connect, _ensure_schema, _lock, _normalize_source
 
 
 def create_review_account_run(source: str,
@@ -33,7 +33,7 @@ def create_review_account_run(source: str,
                  initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            return int(cur.lastrowid or 0)
         finally:
             conn.close()
 
@@ -60,7 +60,8 @@ def save_review_account_results(run_id: int,
                         s.get("total_equity"), s.get("daily_return"), s.get("cumulative_return"),
                         s.get("drawdown"), s.get("position_code"), s.get("position_name"),
                         s.get("position_qty"), s.get("position_cost"),
-                        s.get("position_market_price"), s.get("position_unrealized_return"), s.get("positions_json", "[]"),
+                        s.get("position_market_price"), s.get("position_unrealized_return"),
+                        s.get("positions_json", "[]"),
                     )
                     for s in snapshots
                 ],

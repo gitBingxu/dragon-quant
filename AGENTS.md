@@ -49,6 +49,10 @@ python -m dragon_quant storage clear --all   # 清理全部
 # 回测 / 查看 UI（默认读取 dragons_v2）
 python -m dragon_quant review --date 20260519
 python -m dragon_quant review --ui-only
+
+# 导出扫描物化的龙头（JSON，默认最新有数据的交易日）
+python -m dragon_quant dragons
+python -m dragon_quant dragons --date 20260519 --true-only
 ```
 
 ### 前置条件
@@ -310,6 +314,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - DB 板块黑名单表 + CLI `blacklist` 管理
 - v2 物理分表（`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`）+ `review --source v1` 历史兼容 / Web UI source 切换
 - 量价分析 `vpa/`、结构化日志 `logging/`、统一持久化 `storage/`、交易日历 `utils/trading.py`、龙头回测 `review.py`、Web UI
+- CLI `dragons` 命令：导出某交易日扫描物化的龙头 JSON（`--date` 默认最新有数据交易日，`--true-only` 仅真龙）
 - 全量单测覆盖 `tests/test_scorers.py`、`tests/test_storage.py` 等核心路径
 
 ### ⚠️ 待完成/观察

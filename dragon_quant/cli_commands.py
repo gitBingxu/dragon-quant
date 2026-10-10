@@ -285,6 +285,38 @@ def _cmd_review_account_ui(args):
     )
 
 
+def _cmd_dragons(args):
+    """导出扫描物化的龙头股列表（JSON，固定读取 dragons_v2）。"""
+    from dragon_quant.storage import db
+
+    source = "v2"
+    if args.date:
+        trade_date = _normalize_cli_date(args.date)
+    else:
+        dates = db.list_dragon_trade_dates(source=source)
+        if not dates:
+            print(json.dumps({"error": f"无 {source} 龙头记录"},
+                             ensure_ascii=False, indent=2))
+            sys.exit(1)
+        trade_date = dates[-1]
+
+    dragons = db.get_dragons(trade_date, source=source)
+    if args.true_only:
+        dragons = [d for d in dragons if d.get("is_true_dragon") is True]
+
+    if not dragons:
+        print(json.dumps({"error": f"未找到 {trade_date} 的 {source} 龙头记录"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    print(json.dumps({
+        "trade_date": trade_date,
+        "source": source,
+        "count": len(dragons),
+        "dragons": dragons,
+    }, ensure_ascii=False, indent=2))
+
+
 def _cmd_buy(args):
     """执行当前时点的买入信号（纯信号记账，非模拟账户）。"""
     from dragon_quant.live_trade import run_buy

@@ -106,6 +106,21 @@ dragon-quant blacklist add "次新股"
 dragon-quant blacklist remove "次新股"
 ```
 
+### `dragons` — 导出龙头（JSON）
+
+```bash
+dragon-quant dragons                             # 最新有龙头数据的交易日，全部龙头
+dragon-quant dragons --date 20260519             # 指定交易日
+dragon-quant dragons --date 20260519 --true-only # 只输出真龙 (is_true_dragon=1)
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--date` | 最新有数据的交易日 | 指定交易日（`YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`） |
+| `--true-only` | - | 仅保留 `is_true_dragon=1` 的记录，默认不区分 |
+
+固定读取 `dragons_v2`（扫描物化的入选龙头）并以 JSON 输出：外层含 `trade_date` / `source` / `count`，`dragons` 为龙头明细数组。`--date` 缺省时取**最新有龙头数据的交易日**（非「今天」）。无数据时输出 `{"error": ...}` 并以非零码退出，便于脚本判断。
+
 ### `review` — 龙头回测
 
 ```bash

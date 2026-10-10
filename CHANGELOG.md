@@ -12,6 +12,22 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-10
+
+版本依据：`v0.6.0` → `159d81c`。
+
+### Added
+- 新增通达信 TDX 首选数据链路：`TdxProvider` 基于 `tmdx` 包（通达信 TCP 协议），无 Cookie、无反爬，覆盖板块排行、成分股、K 线、分时与五档行情；主链路失败自动回退老链路（板块链「链级一致」，个股链「endpoint 级」）。
+- `tmdx` 设为必装依赖（Python ≥3.10）；指数映射 `SH000001` → TDX `999999`，`000001` 仍为平安银行。
+- 新增 `dragons` 命令：从 `dragons_v2` 导出某交易日扫描物化的龙头 JSON，支持 `--date`（`YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`，默认最新有数据交易日）与 `--true-only`（仅真龙）；无数据输出 `error` 并以非零码退出。
+
+### Changed
+- 接入 pyright + ruff 工具链（类型检查 0 错误、ruff E/F 0 错误），全仓类型收窄与死代码清理。
+- 发布流程：`publish.sh` 新增第 7 步，自动从 `CHANGELOG.md` 提取当前版本段并创建 GitHub Release。
+
+### Docs
+- `CHANGELOG.md` 补全 0.5.2 / 0.5.3 条目；`pyproject.toml` 增加 `Changelog` 链接指向 GitHub Releases。
+
 ## [0.5.3] - 2026-10-09
 
 版本依据：`v0.5.3` → `2413d9d`。

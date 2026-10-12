@@ -12,6 +12,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `tmdx` 从必装依赖改为可选依赖（`pip install dragon-quant[tdx]`，仅 Python≥3.10 可用），`requires-python` 由 `>=3.10` 放宽回 `>=3.9`：代码本身在缺失 `tmdx` 时已优雅回退老链路，硬性捆绑会阻断 Python 3.9 环境安装 v0.6.0。
+
 ## [0.6.0] - 2026-10-10
 
 版本依据：`v0.6.0` → `159d81c`。

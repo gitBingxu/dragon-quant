@@ -2,8 +2,9 @@
 通达信 TDX Provider — 首选数据链路（tmdx / easy_tdx，TCP 协议，无 Cookie 无反爬）
 
 设计要点（见 providers/TDX_PROVIDER_技术方案.md）：
-  - 惰性依赖：easy_tdx（tmdx 包）是必装依赖，但导入放在首次调用（避免 import 开销，
-    并在缺失时优雅降级返回空/None，由 orchestrator 回退到老链路兜底）。
+  - 惰性依赖：easy_tdx（tmdx 包）是可选依赖（`pip install dragon-quant[tdx]`，仅
+    Python ≥3.10 可用），导入放在首次调用（避免 import 开销，并在缺失时优雅降级
+    返回空/None，由 orchestrator 回退到老链路兜底）。
   - 连接模型：单个共享 ``MacClient``（MAC 拓展行情，含板块/复权K线/换手市值PE），
     内部 ``threading.Lock`` 串行化所有调用。注意 ``MacClient._reconnect()`` 会整体
     替换 ``self._conn``，因此「同一时刻仅一个线程调用」是正确性要求——本 provider

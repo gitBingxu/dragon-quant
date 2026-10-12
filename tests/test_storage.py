@@ -577,3 +577,50 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             db.save_dragons(D, [{"code": "A", "rank": 1}], source="v1")
             rows = db.get_dragons(D, source="v1")
             self.assertIsNone(rows[0]["is_true_dragon"])
+
+
+class TestAuctionSnapshots(unittest.TestCase):
+    """auction_snapshots 持久化 roundtrip + UPSERT 幂等。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+        self._conn = sqlite3.connect(self._db_path)
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+
+    def tearDown(self):
+        self._conn.close()
+        self._tmpdir.cleanup()
+
+    def test_save_and_get_roundtrip(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            items = [{"time": "09:15:00", "price": 10.0, "matched": 100, "unmatched": 50}]
+            db.save_auction_snapshot("2026-10-12", "600172", "黄河旋风", items)
+            snap = db.get_auction_snapshot("2026-10-12", "600172")
+            all_snaps = db.list_auction_snapshots("2026-10-12")
+
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["code"], "600172")
+        self.assertEqual(snap["name"], "黄河旋风")
+        self.assertEqual(snap["items"], items)
+        self.assertEqual(len(all_snaps), 1)
+
+    def test_upsert_overwrites_same_day_code(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.save_auction_snapshot("2026-10-12", "600172", "旧名",
+                                     [{"time": "09:15:00", "price": 1.0, "matched": 1, "unmatched": 1}])
+            db.save_auction_snapshot("2026-10-12", "600172", "黄河旋风",
+                                     [{"time": "09:25:00", "price": 2.0, "matched": 2, "unmatched": 2}])
+            snap = db.get_auction_snapshot("2026-10-12", "600172")
+            all_snaps = db.list_auction_snapshots("2026-10-12")
+
+        self.assertEqual(len(all_snaps), 1)
+        self.assertEqual(snap["name"], "黄河旋风")
+        self.assertEqual(snap["items"][0]["price"], 2.0)

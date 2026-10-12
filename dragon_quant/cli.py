@@ -354,6 +354,20 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     prep_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                         help="候选数据来源体系 (默认 v2)")
 
+    # auction 子命令（采集最近 N 日龙头的当日集合竞价盘口并落库）
+    auction_p = sub.add_parser(
+        "auction",
+        help="采集最近 N 日龙头的当日集合竞价盘口（TDX）",
+        usage="dragon-quant auction [--days 3]",
+        description="从 dragons_v2 取最近 N 个交易日的龙头并集，拉取当日集合竞价盘口并落库到 auction_snapshots。",
+        epilog="""Examples:
+  dragon-quant auction
+  dragon-quant auction --days 3
+""",
+    )
+    auction_p.add_argument("--days", type=int, default=3,
+                           help="取最近 N 个有龙头数据的交易日（默认 3）")
+
     # buy 子命令
     buy_p = sub.add_parser(
         "buy",
@@ -454,6 +468,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_dragons(args)
     elif args.command == "prep":
         _cmd_prep(args)
+    elif args.command == "auction":
+        _cmd_auction(args)
     elif args.command == "buy":
         _cmd_buy(args)
     elif args.command == "sell":
@@ -480,6 +496,7 @@ from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循�
     _cmd_review_account,
     _cmd_dragons,
     _cmd_prep,
+    _cmd_auction,
     _cmd_buy,
     _cmd_sell,
     _cmd_vpa,

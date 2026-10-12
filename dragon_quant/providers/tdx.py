@@ -316,6 +316,67 @@ class TdxProvider(StockProvider):
                                  elapsed_ms=elapsed, error=str(e))
             return []
 
+    def get_fg_board_members(self, board_name: str) -> list[dict]:
+        """取通达信 FG(风格)统计板块成分（如「昨日涨停」「昨日跌停」「最近多板」）。
+
+        返回原始成员 dict（含完整行情字段），供盘后复盘的情绪温度/主线识别使用。
+        board_name 需与通达信板块名精确匹配；未找到或失败返回空列表。
+        """
+        t0 = time.time()
+        try:
+            et = _import_easytdx()
+            if et is None:
+                return []
+            client = self._get_client()
+            if client is None:
+                return []
+            with self._lock:
+                boards = client.get_board_list(
+                    board_type=et.BoardType.FG, count=10000,
+                    sort_column=et.BoardSortColumn.CHANGE_PCT,
+                )
+                target = board_name.strip()
+                code = None
+                for r in boards.to_dict("records"):
+                    if str(r.get("name", "")).strip() == target:
+                        code = str(r.get("code", "")).strip()
+                        break
+                if not code:
+                    return []
+                df = client.get_board_members(
+                    board_symbol=code,
+                    sort_type=et.SortType.CHANGE_PCT,
+                    sort_order=et.SortOrder.DESC,
+                )
+            out = []
+            for r in (df.to_dict("records") if not df.empty else []):
+                out.append({
+                    "code": str(r.get("code", "")),
+                    "name": str(r.get("name", "")),
+                    "close": _f(r.get("close")),
+                    "pre_close": _f(r.get("pre_close")),
+                    "open": _f(r.get("open")),
+                    "high": _f(r.get("high")),
+                    "low": _f(r.get("low")),
+                    "turnover": _f(r.get("turnover")),
+                    "amount": _f(r.get("amount")),
+                    "market_cap": _f(r.get("total_market_cap_ab")),
+                    "main_net_amount": _f(r.get("main_net_amount")),
+                    "buy_price_limit": _f(r.get("buy_price_limit")),
+                    "sell_price_limit": _f(r.get("sell_price_limit")),
+                })
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "fg_board_members", ok=bool(out),
+                                 elapsed_ms=elapsed, note=f"{board_name} n={len(out)}")
+            return out
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "fg_board_members", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            return []
+
     def _index_kline(self, sector_code: str, period, count: int) -> list[KBar]:
         """板块指数 K 线（无复权；分钟线 vol 为 NaN→0，不影响价格曲线类评分）。"""
         et = _import_easytdx()

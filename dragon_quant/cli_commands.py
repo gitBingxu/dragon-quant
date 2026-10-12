@@ -317,6 +317,26 @@ def _cmd_dragons(args):
     }, ensure_ascii=False, indent=2))
 
 
+def _cmd_prep(args):
+    """盘后复盘：识别主线+情绪温度，产出候选池快照并落库。"""
+    from dragon_quant.review_account.prep import run_prep
+    from dragon_quant.storage import db
+
+    source = args.source
+    if args.date:
+        trade_date = _normalize_cli_date(args.date)
+    else:
+        dates = db.list_dragon_trade_dates(source=source)
+        if not dates:
+            print(json.dumps({"error": f"无 {source} 龙头记录，无法确定复盘日"},
+                             ensure_ascii=False, indent=2))
+            sys.exit(1)
+        trade_date = dates[-1]
+
+    result = run_prep(trade_date, source=source)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def _cmd_buy(args):
     """执行当前时点的买入信号（纯信号记账，非模拟账户）。"""
     from dragon_quant.live_trade import run_buy

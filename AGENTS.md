@@ -53,6 +53,10 @@ python -m dragon_quant review --ui-only
 # 导出扫描物化的龙头（JSON，默认最新有数据的交易日）
 python -m dragon_quant dragons
 python -m dragon_quant dragons --date 20260519 --true-only
+
+# 盘后复盘：识别主线+情绪温度(建议仓位)，产出候选池快照（review-account 消费）
+python -m dragon_quant prep
+python -m dragon_quant prep --date 20260519
 ```
 
 ### 前置条件
@@ -117,11 +121,11 @@ dragon_quant/
 │   ├── paths.py / manager.py
 │   ├── db.py                    # SQLite 门面 + 基础设施（_connect/_ensure_schema/_tables/init_db）
 │   ├── _base.py                 # 转发包装，令 `db._connect` 的 patch 传递到领域模块
-│   ├── blacklist.py / scans.py / dragons.py / logs.py
+│   ├── blacklist.py / scans.py / dragons.py / prep.py / logs.py
 │   └── review_account.py / signals.py
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
-├── review_account/              # 共享策略/事件引擎/成交/数据/评估（strategy/engine/execution/data/market/evaluation）
+├── review_account/              # 共享策略/事件引擎/成交/数据/评估/盘后复盘（strategy/engine/execution/data/market/prep/evaluation）
 ├── live_trade/                  # 实盘辅助交易（buy/sell；复用 review_account 策略，纯信号记账）
 │   ├── signal_engine.py         # SignalEngine：无账户/资金/数量/仓位限制，buy-all + 峰值跟踪
 │   ├── trader.py                # LiveTrader.buy/sell（回放当日事件流 → 信号入库）
@@ -213,6 +217,7 @@ dragon_quant/
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 | `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、半仓、平仓原因与持有天数 |
+| `prep_snapshots` | 盘后复盘快照 | `prep` 命令产出；单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池），`UNIQUE(trade_date, source)`；加字段=加 JSON key，无需改表。sentiment 为盘后时点数据，补跑历史时近似 |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -242,7 +247,7 @@ python -m dragon_quant review-account --ui-only --source v2
 ```
 `review-account` 不替代 `review`。统一实现位于 `review_account/`：`market.py` 负责候选与时间/指标切片，`data.py` 校验日K和完整5分钟K，`strategy.py` 产生信号，`engine.py` 顺序推进账户，`execution.py` 计算撮合、仓位和费用。`simulator.py` 与 `live_trade/signal_engine.py` 必须复用同一 `evaluate_buy`/`evaluate_sell`/`fill_price`/`fee`，不得复制买卖/成交规则。
 
-- 候选取之前3个真实交易日的**全部真龙**并集（`get_dragons_by_date(top_n=None)`，共享层过滤否决/低于50分），按 code 去重保留综合分更高者；不补更早有记录日期，不再截断前N只。回测额外加载区间前交易日，首日可开仓。
+- 候选池优先读**盘后复盘快照**（`prep_snapshots`，`prep` 命令产出：主线龙头 + 最高标 + 晋级者 + 情绪温度/建议仓位）；快照缺失/空/读取异常时回退旧逻辑——取之前3个真实交易日的**全部真龙**并集（`get_dragons_by_date(top_n=None)`，共享层过滤否决/低于50分），按 code 去重保留综合分更高者。回测额外加载区间前交易日，首日可开仓。快照消费仅对 `source=="v2"` 生效。
 - Asia/Shanghai 时序：开盘MA5承接仅用上日指标和量能；突破前高改为**首根5分钟K完成后确认**，要求首根5分钟K换手≥`turn_strong_bar_turnover_min`（默认0.5%）带量，日K兜底日不触发；分歧买龙要求连续缩量一字板后完整6根5分钟K未破昨收且企稳；不允许用未来信号倒选。
 - 择优：**买点得分(priority)降序 → 五维综合分降序 → 代码**，不再参考真龙 rank。
 - 信号待下一可执行事件成交，实时需更晚的新鲜报价；封死涨跌停不假定成交，跳空不能补填止损或成本线。T+1不卖当日仓，但跟踪买入后峰值；同一根K的高点不能反向激活该根K内的保护。
@@ -293,6 +298,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### AI Agent 协作规范
 > **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。** 纯查询类操作（读文件、查数据库、搜索代码）不受此限。
+> **技术方案必须配图**：涉及架构、事件流、数据流、状态机或多模块交互时，用 **Mermaid** 代码块（`flowchart`/`sequenceDiagram`/`stateDiagram` 等）画出架构图/流程图，随方案一并输出并写入文档。不用 ASCII 图。
 
 ### Cookie 失效处理
 板块数据用同花顺（无需 Cookie）。个股依赖雪球 Cookie（有效期几天到数周），返回空/403 先查雪球 Cookie 状态。

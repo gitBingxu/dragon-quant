@@ -16,6 +16,7 @@ from dragon_quant.providers.tdx import (
     TdxProvider,
     _market_of,
     _resolve,
+    _to_auction_items,
     _to_kbars,
     _to_quote,
     _to_sector,
@@ -95,6 +96,25 @@ class TestToQuote(unittest.TestCase):
         self.assertIsNone(_to_quote({"close": float("nan")}))
 
 
+class TestToAuctionItems(unittest.TestCase):
+    def test_auction_items(self):
+        from datetime import time as dtime
+        records = [
+            {"time": dtime(9, 15, 0), "price": 10.0, "matched": 100, "unmatched": 50},
+            {"time": dtime(9, 25, 0), "price": 10.5, "matched": 200, "unmatched": -30},
+        ]
+        items = _to_auction_items(records)
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["time"], "09:15:00")
+        self.assertEqual(items[0]["price"], 10.0)
+        self.assertEqual(items[0]["matched"], 100)
+        self.assertEqual(items[0]["unmatched"], 50)
+        self.assertEqual(items[1]["unmatched"], -30)
+
+    def test_empty_records(self):
+        self.assertEqual(_to_auction_items([]), [])
+
+
 class TestSectorAndStock(unittest.TestCase):
     def test_to_sector(self):
         s = _to_sector({"code": "881376", "name": "数字媒体",
@@ -144,6 +164,7 @@ class TestTdxProviderDegrade(unittest.TestCase):
             self.assertEqual(p.get_sector_1min_kline("881101"), [])
             self.assertEqual(p.get_sector_5min_kline_history("881101"), [])
             self.assertEqual(p.batch_get_quotes(["600000", "000001"]), [])
+            self.assertEqual(p.get_auction("600000"), [])
             self.assertIsNone(p.get_quote("600000"))
 
 

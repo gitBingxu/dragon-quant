@@ -14,6 +14,8 @@
 
 > 为兼容历史数据，SQLite 物理表继续沿用 `*_v2`（如 `dragons_v2` / `scans_v2`），`scan_id` 继续使用 `v2_YYYYMMDD_topN`。`scan_v2` 命令保留为隐藏兼容别名，行为等同 `scan`；旧 `*_v1` 表不再由主流程写入，仅可通过显式 `--source v1` 查询历史记录。
 
+> **v1 已废弃**：所有龙头/扫描/候选池相关逻辑只读 `dragons_v2`。`--source v1` 仅保留用于查询历史数据，**不再新增任何 v1 写入、分支或功能**；新命令（如 `auction`）一律固定 `source="v2"`。
+
 数据源：**通达信 TDX（首选，`tmdx` 包，无 Cookie 无反爬）+ 同花顺（板块，回退）+ 雪球（个股 K 线/分时，回退）+ 腾讯（批量行情/收盘盘口，回退）**，不依赖任何付费行情接口。tdx 链路失败时自动回退老链路。
 
 > **板块口径已切换为「行业板块」**（同花顺 `thshy`/`hyzjl`，约 90 个真实行业，code 为 881xxx），不再用概念板块（`gn`/`gnzjl`）。
@@ -57,6 +59,9 @@ python -m dragon_quant dragons --date 20260519 --true-only
 # 盘后复盘：识别主线+情绪温度(建议仓位)，产出候选池快照（review-account 消费）
 python -m dragon_quant prep
 python -m dragon_quant prep --date 20260519
+
+# 采集最近 3 日龙头的当日集合竞价盘口（TDX，落库 auction_snapshots）
+python -m dragon_quant auction
 ```
 
 ### 前置条件
@@ -121,7 +126,7 @@ dragon_quant/
 │   ├── paths.py / manager.py
 │   ├── db.py                    # SQLite 门面 + 基础设施（_connect/_ensure_schema/_tables/init_db）
 │   ├── _base.py                 # 转发包装，令 `db._connect` 的 patch 传递到领域模块
-│   ├── blacklist.py / scans.py / dragons.py / prep.py / logs.py
+│   ├── blacklist.py / scans.py / dragons.py / prep.py / auction.py / logs.py
 │   └── review_account.py / signals.py
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
@@ -218,6 +223,7 @@ dragon_quant/
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 | `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、半仓、平仓原因与持有天数 |
 | `prep_snapshots` | 盘后复盘快照 | `prep` 命令产出；单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池），`UNIQUE(trade_date, source)`；加字段=加 JSON key，无需改表。sentiment 为盘后时点数据，补跑历史时近似 |
+| `auction_snapshots` | 集合竞价盘口快照 | `auction` 命令产出；单列 `items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。

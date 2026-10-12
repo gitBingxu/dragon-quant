@@ -131,6 +131,15 @@ dragon-quant prep --source v2                 # 候选数据来源体系（默�
 
 盘后执行复盘：识别主线与情绪温度（涨跌停家数 → 建议仓位），产出候选池快照并落库到 `prep_snapshots`（单列 `result_json` 存完整结果，字段可扩展）。`review-account` / `buy` / `sell` 运行期优先消费该快照作为候选池，快照缺失/空/异常时回退到「前 3 日真龙并集」旧逻辑。输出为格式化 JSON（`sentiment` / `main_boards` / `candidates`）。
 
+### `auction` — 采集集合竞价盘口
+
+```bash
+dragon-quant auction              # 最近 3 个交易日的龙头并集
+dragon-quant auction --days 3     # 指定回溯交易日数
+```
+
+从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `auction_snapshots`（键 `trade_date+code`，同日重复采集幂等覆盖）。输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）。适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史，供集合竞价买点策略消费。
+
 ### `review` — 龙头回测
 
 ```bash
@@ -323,6 +332,7 @@ SQLite 表分为三类：
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
 - 实盘辅助买卖信号表：`buy_sell_signals`（`buy` / `sell` 命令使用，未平仓 code 唯一）
 - 盘后复盘快照表：`prep_snapshots`（`prep` 命令使用，单列 `result_json` 存完整复盘结果）
+- 集合竞价盘口快照表：`auction_snapshots`（`auction` 命令使用，单列 `items_json` 存当日竞价盘口明细）
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -338,6 +348,8 @@ SQLite 表分为三类：
 `buy_sell_signals` 表用于实盘辅助交易（`buy` / `sell`）：记录买入（code/name/entry_date/entry_price/买入原因与信号）与卖出（exit_date/exit_price/卖出原因/持有天数），并保存最高浮盈/价（`highest_return`/`highest_price`）与半仓标记供跨日移动止盈/保本判定；未平仓 code 由部分唯一索引 `idx_buy_sell_open` 保证幂等去重。
 
 `prep_snapshots` 表用于盘后复盘（`prep` 命令）：单列 `result_json` 存完整复盘结果 JSON（`sentiment` 情绪温度与建议仓位、`main_boards` 主线板块、`candidates` 候选池），`trade_date` 唯一；后续新增字段直接加 JSON key，无需改表。
+
+`auction_snapshots` 表用于集合竞价盘口（`auction` 命令）：单列 `items_json` 存当日竞价盘口明细数组（`time`/`price`/`matched`/`unmatched`），`UNIQUE(trade_date, code)` 幂等覆盖；`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日竞价数据，故该表只通过逐日采集积累历史，无法事后回补。
 
 ## 免责声明
 

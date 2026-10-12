@@ -337,6 +337,56 @@ def _cmd_prep(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def _cmd_auction(args):
+    """采集最近 N 日龙头的当日集合竞价盘口并落库（auction_snapshots）。"""
+    from dragon_quant.storage import db
+    from dragon_quant.data import get_auction
+
+    source = "v2"
+    dates = db.list_dragon_trade_dates(source=source)
+    if not dates:
+        print(json.dumps({"error": f"无 {source} 龙头记录，无法确定候选"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    recent_dates = dates[-args.days:]
+    # 最近 N 日龙头并集，按 code 去重（保留最近出现的非空 name）
+    by_code: dict = {}
+    for d in recent_dates:
+        for dr in db.get_dragons(d, source=source):
+            code = dr.get("code")
+            if not code:
+                continue
+            name = dr.get("name") or ""
+            if code not in by_code or name:
+                by_code[code] = name
+
+    if not by_code:
+        print(json.dumps({"error": "最近 N 日无龙头，无需采集"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
+    saved, empty = [], []
+    for code in sorted(by_code):
+        items = get_auction(code)
+        if items:
+            db.save_auction_snapshot(trade_date, code, by_code[code], items)
+            saved.append({"code": code, "name": by_code[code], "n": len(items)})
+        else:
+            empty.append(code)
+
+    print(json.dumps({
+        "trade_date": trade_date,
+        "source": source,
+        "lookback_dates": recent_dates,
+        "candidate_codes": len(by_code),
+        "saved_count": len(saved),
+        "saved": saved,
+        "empty": empty,
+    }, ensure_ascii=False, indent=2))
+
+
 def _cmd_buy(args):
     """执行当前时点的买入信号（纯信号记账，非模拟账户）。"""
     from dragon_quant.live_trade import run_buy

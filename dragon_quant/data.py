@@ -178,6 +178,19 @@ def batch_get_quotes(codes: list[str], source: str = "tencent") -> list[Quote]:
     return [p.get_quote(c) for c in codes]
 
 
+def get_auction(code: str) -> list[dict]:
+    """获取个股当日集合竞价盘口（TDX，仅当日 9:25 后可用，无历史回看）。
+
+    Args:
+        code: 股票代码，如 "600172"
+    Returns:
+        list[dict]，每项含 time/price/matched/unmatched；失败或非交易时段返回空列表。
+    """
+    providers = _get_providers()
+    tdx = providers["tdx"]
+    return tdx.get_auction(code)
+
+
 # ═══ Cookie 管理 ═══
 
 def cookie_status() -> dict:

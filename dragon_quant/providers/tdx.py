@@ -212,6 +212,25 @@ def _to_stockinfo(r: dict, sector_code: str) -> StockInfo:
         pct=pct, price=close,
     )
 
+
+def _to_auction_items(records: list[dict]) -> list[dict]:
+    """MAC get_auction DataFrame(records) → list[{'time','price','matched','unmatched'}]。
+
+    records 键：time(datetime.time) / price / matched / unmatched。time 统一序列化为
+    "HH:MM:SS" 字符串，便于 JSON 落库。
+    """
+    items: list[dict] = []
+    for r in records:
+        t = r.get("time")
+        ts = t.strftime("%H:%M:%S") if hasattr(t, "strftime") else str(t or "")
+        items.append({
+            "time": ts,
+            "price": _f(r.get("price")),
+            "matched": int(_f(r.get("matched"))),
+            "unmatched": int(_f(r.get("unmatched"))),
+        })
+    return items
+
 # ─── Provider ──────────────────────────────────────────────────────────────
 
 
@@ -578,5 +597,36 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "batch_quotes", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            return []
+
+    # ─── 集合竞价 ───
+
+    def get_auction(self, code: str) -> list[dict]:
+        """个股当日集合竞价盘口（仅当日 9:25 后可用，盘后仍可拉取，无历史回看）。
+
+        返回 [{'time','price','matched','unmatched'}, ...]；非交易时段/失败返回 []。
+        """
+        t0 = time.time()
+        try:
+            et = _import_easytdx()
+            if et is None:
+                return []
+            client = self._get_client()
+            if client is None:
+                return []
+            market, c = _resolve(code)
+            with self._lock:
+                df = client.get_auction(market=market, code=c)
+            items = _to_auction_items(df.to_dict("records")) if not df.empty else []
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "auction", ok=bool(items),
+                                 elapsed_ms=elapsed, note=f"{code} n={len(items)}")
+            return items
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "auction", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []

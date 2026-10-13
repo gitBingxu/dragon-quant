@@ -180,11 +180,11 @@ tmdx 返回 pandas DataFrame（或 dataclass 模型），需转换为仓库 `KBa
 | `dragon_quant/providers/__init__.py` | `create_providers()` 注册 `tdx` |
 | `dragon_quant/orchestrator.py` | ① 引入 `tdx` 实例；② 新增 `_try_primary_fallback` 辅助；③ Phase A 板块链锚点判源；④ Phase B/D 取数处接 fallback；⑤ `PROVIDER_CN` 增 `tdx: 通达信`；⑥ `_report_api_failures` 区分「已回退/真失败」（§4.6） |
 | `dragon_quant/data.py`（可选） | `get_*` 系列 `source="tdx"` 支持（供 CLI 单查验证） |
-| `pyproject.toml` | `dependencies` 增 `tmdx>=3.0` |
+| `pyproject.toml` | `dependencies` 增 `tmdx>=3.0; python_version >= '3.10'`（条件默认依赖） |
 
 ### 6.3 依赖影响
 
-- tmdx 依赖 `pandas>=2.0` / `click` / `tzdata`，并 **要求 Python >=3.10**（仓库当前声明 `>=3.8`）。需把 `requires-python` 提到 `>=3.10`，或把 tmdx 设为 optional extra 以保留 3.8 兼容（推荐后者，见 §7.5）。
+- tmdx 依赖 `pandas>=2.0` / `click` / `tzdata`，并 **要求 Python >=3.10**。最终决策：`requires-python` 保持 `>=3.9`，tmdx 用环境标记 `python_version >= '3.10'` 作为**条件默认依赖**（≥3.10 自动安装、<3.10 跳过且不报错），缺失时 scan 回退老链路并在控制台提示升级（见 §7.5）。
 
 ---
 
@@ -196,7 +196,7 @@ tmdx 返回 pandas DataFrame（或 dataclass 模型），需转换为仓库 `KBa
 | 7.2 | **板块链 fallback 时缓存键污染**：`sector:ranking` 无 provider 前缀，可能命中上一轮 ths 的缓存而跳过 tdx | 首轮后 tdx 形同虚设 | `sector:ranking` 加 source 命名空间（`sector:ranking:tdx` / `:ths`），或板块链判源在缓存命中前完成 |
 | 7.3 | **板块指数分钟线无成交量**（vol=null） | 板块分时量能不可用 | 已确认现评分器对板块分时只用价格曲线（gain_curve 基于 pct），不消费 `.volume`，**不阻断**；若未来要用板块量能，改用 `amount` 替代 |
 | 7.4 | **tdx 多主机数据覆盖差异**：个别板块/个股在部分主机取不到数据 | 局部取空触发 fallback | 取空视为「失败」走回退；tdx 自带多主机选优 + 重连 |
-| 7.5 | **Python 版本下限冲突**（tmdx 需 3.10+） | 3.8/3.9 环境不可用 | tmdx 设为 optional extra，扫描时若未安装则自动降级走老链路；`requires-python` 是否上提另行决策 |
+| 7.5 | **Python 版本下限冲突**（tmdx 需 3.10+） | 3.8/3.9 环境不可用 | tmdx 设为**条件默认依赖**（环境标记 `python_version >= '3.10'`，≥3.10 自动装、<3.10 跳过且不报错）；扫描时若未安装则自动降级走老链路，并在控制台提示升级（每次 CLI 命令均提示，除 -h/--help/-v/--version） |
 | 7.6 | **非纯 stdlib 依赖** | 违反 AGENTS.md「仅 stdlib + playwright」约束 | 随本次改动同步更新 AGENTS.md（§9） |
 | 7.7 | **历史分时深度** | 板块历史 5 分 K（10 日）依赖 tmdx 分钟数据深度 | 实测验证；不足则板块历史 5 分 K 保留 ths 回退 |
 | 7.8 | **MAC 字段单位换算**：`FLOAT_SHARES`/`TOTAL_SHARES` 单位万股、`TOTAL_MARKET_CAP_AB` 单位待确认（亿/元）、`amount` 元 | 市值/股本量纲错位（如市值差 1e8） | 实现期逐字段对表核对并换算对齐腾讯口径（`market_cap` 用元）；单测用已知市值个股断言 |
@@ -215,7 +215,7 @@ tmdx 返回 pandas DataFrame（或 dataclass 模型），需转换为仓库 `KBa
 
 ## 9. 实施步骤（建议顺序）
 
-1. **Phase 1 — 基础设施**：加 tmdx 依赖（optional extra）；`create_providers` 注册 `tdx`；`TdxProvider` 骨架 + 连接管理。
+1. **Phase 1 — 基础设施**：加 tmdx 依赖（条件默认依赖 `python_version >= '3.10'` + 空 `[tdx]` extra 别名）；`create_providers` 注册 `tdx`；`TdxProvider` 骨架 + 连接管理。
 2. **Phase 2 — 个股链**：实现 `get_kline` / `get_minute_kline` / `batch_get_quotes`（含 MAC 字段拼装 + 指数映射）+ orchestrator 个股 endpoint 级 fallback。跑通 `scan` 个股数据。
 3. **Phase 3 — 板块链**：实现板块四方法 + orchestrator 板块链锚点判源 + 缓存命名空间隔离。跑通完整 `scan`。
 4. **Phase 4 — 测试与文档**：单测 + 端到端对比 + 故障演练；同步 AGENTS.md / README.md（依赖、板块口径说明、数据源架构、指数代码映射）。
@@ -228,7 +228,7 @@ tmdx 返回 pandas DataFrame（或 dataclass 模型），需转换为仓库 `KBa
 - **AGENTS.md**：
   - 架构总览 `providers/` 增 `tdx.py`；
   - 「数据源」说明改为「TDX（首选）+ 同花顺/雪球/腾讯（回退）」；
-  - 「必须遵守的约束」中「仅 stdlib + playwright」改为「stdlib + playwright + tmdx（optional）」；
+  - 「必须遵守的约束」中「仅 stdlib + playwright」改为「stdlib + playwright + tmdx（条件默认依赖，Python≥3.10）」；
   - 反爬要点增「通达信 TDX TCP」小节；
   - 板块口径注明「TDX 与同花顺行业板块非同一分类，主/备链路口径不同」。
 - **README.md**：同步上述数据源与依赖说明。

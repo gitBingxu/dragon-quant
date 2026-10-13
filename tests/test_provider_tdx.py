@@ -6,7 +6,10 @@
   - orchestrator._try_primary 主链路→老链路回退
   - easy_tdx 未安装时 TdxProvider 优雅降级（恒返回空，触发回退）
 """
+import io
 import unittest
+from collections import namedtuple
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from unittest.mock import patch
 
@@ -14,12 +17,14 @@ from dragon_quant.models.types import SectorPerformance, StockInfo
 from dragon_quant.orchestrator import _try_primary
 from dragon_quant.providers.tdx import (
     TdxProvider,
+    _easy_tdx_installed,
     _market_of,
     _resolve,
     _to_kbars,
     _to_quote,
     _to_sector,
     _to_stockinfo,
+    warn_if_unavailable,
 )
 
 
@@ -145,6 +150,85 @@ class TestTdxProviderDegrade(unittest.TestCase):
             self.assertEqual(p.get_sector_5min_kline_history("881101"), [])
             self.assertEqual(p.batch_get_quotes(["600000", "000001"]), [])
             self.assertIsNone(p.get_quote("600000"))
+
+
+_VersionInfo = namedtuple("VersionInfo", "major minor micro releaselevel serial")
+
+
+class TestEasyTdxInstalled(unittest.TestCase):
+    """_easy_tdx_installed：find_spec 命中→True、未找到→None→False。"""
+
+    def test_true_when_spec_found(self):
+        with patch("importlib.util.find_spec", return_value=object()):
+            self.assertTrue(_easy_tdx_installed())
+
+    def test_false_when_not_found(self):
+        with patch("importlib.util.find_spec", return_value=None):
+            self.assertFalse(_easy_tdx_installed())
+
+
+class TestWarnIfUnavailable(unittest.TestCase):
+    """warn_if_unavailable：已安装不打印；缺失时按 Python 版本打印不同建议到 stderr。"""
+
+    def test_no_warning_when_installed(self):
+        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=True):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                warn_if_unavailable()
+            self.assertEqual(buf.getvalue(), "")
+
+    def test_warn_python_below_310(self):
+        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=False), \
+             patch("dragon_quant.providers.tdx.sys.version_info",
+                   _VersionInfo(3, 9, 0, "final", 0)):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                warn_if_unavailable()
+            text = buf.getvalue()
+            self.assertIn("未安装 tmdx", text)
+            self.assertIn("升级 Python", text)
+            self.assertIn("review-account", text)
+
+    def test_warn_python_ge_310(self):
+        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=False), \
+             patch("dragon_quant.providers.tdx.sys.version_info",
+                   _VersionInfo(3, 11, 0, "final", 0)):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                warn_if_unavailable()
+            text = buf.getvalue()
+            self.assertIn("pip install tmdx", text)
+            self.assertNotIn("升级 Python", text)
+
+
+class TestCliWarnIntegration(unittest.TestCase):
+    """cli.main() 对除 -h/--help/-v/--version 外的所有命令调用 warn_if_unavailable。"""
+
+    def test_warn_called_for_command(self):
+        import dragon_quant.cli as cli
+        with patch.object(cli, "warn_if_unavailable") as mock_warn, \
+             patch.object(cli, "_cmd_blacklist", return_value=None), \
+             patch("sys.argv", ["dragon-quant", "blacklist", "list"]):
+            cli.main()
+        mock_warn.assert_called_once()
+
+    def test_warn_not_called_for_help(self):
+        import dragon_quant.cli as cli
+        with patch.object(cli, "warn_if_unavailable") as mock_warn, \
+             patch("sys.argv", ["dragon-quant", "--help"]), \
+             redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main()
+        mock_warn.assert_not_called()
+
+    def test_warn_not_called_for_version(self):
+        import dragon_quant.cli as cli
+        with patch.object(cli, "warn_if_unavailable") as mock_warn, \
+             patch("sys.argv", ["dragon-quant", "--version"]), \
+             redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main()
+        mock_warn.assert_not_called()
 
 
 if __name__ == "__main__":

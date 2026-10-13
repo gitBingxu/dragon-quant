@@ -10,13 +10,14 @@ web_ui = ["dist/**/*"]
 
 [project]
 name = "dragon-quant"
-version = "0.6.1"
+version = "0.6.2"
 description = "龙头战法四维量化筛选系统 — A股涨停板龙头识别工具"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 dependencies = [
     "playwright>=1.30",
+    "tmdx>=3.0; python_version >= '3.10'",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -40,9 +41,9 @@ Changelog = "https://github.com/gitBingxu/dragon-quant/releases"
 dragon-quant = "dragon_quant.cli:main"
 
 [project.optional-dependencies]
-# tmdx（通达信 TDX 首选数据链路）为可选依赖：代码在缺失时优雅回退到
-# 同花顺/雪球/腾讯，因此不强制安装；仅在 Python ≥3.10 时可用（tmdx 自身要求）。
-tdx = ["tmdx>=3.0; python_version >= '3.10'"]
+# tmdx（通达信 TDX 首选数据链路）已默认安装（见 dependencies 的环境标记）。
+# 保留空 extra 仅为向后兼容，避免 `pip install dragon-quant[tdx]` 触发告警。
+tdx = []
 
 [tool.ruff]
 # 项目风格：行宽 120（不强制 88）；只查 E/F 正确性规则，不做 import 排序 / pyupgrade。

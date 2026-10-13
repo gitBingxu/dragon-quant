@@ -46,12 +46,9 @@ pip install dragon-quant
 # 或从源码
 git clone https://github.com/gitBingxu/dragon-quant.git
 cd dragon-quant && pip install -e .
-
-# 可选：通达信 TDX 首选数据链路（仅 Python ≥3.10，缺失时自动回退老链路）
-pip install dragon-quant[tdx]
 ```
 
-> 要求 Python ≥3.9；`tmdx`（通达信 TDX）为可选依赖，`[tdx]` 额外安装，缺失时扫描自动回退同花顺/雪球/腾讯。
+> 要求 Python ≥3.9；`tmdx`（通达信 TDX）为默认依赖，Python ≥3.10 时随 `pip install dragon-quant` 自动安装；Python 3.9 因 tmdx 自身要求（≥3.10）被跳过，此时所有 CLI 命令（除 `-h`/`--help`/`-v`/`--version`）会在控制台提示升级 Python，scan 自动回退同花顺/雪球/腾讯。
 
 ## 快速开始
 

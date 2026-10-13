@@ -17,6 +17,7 @@ import sys
 from typing import Any, Optional
 
 from dragon_quant.orchestrator import scan as orchestrate_scan  # noqa: F401 — 经 cli 模块转发
+from dragon_quant.providers.tdx import warn_if_unavailable
 
 
 
@@ -421,6 +422,9 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     if argv and argv[0] == "scan_v2":
         argv[0] = "scan"
     args = parser.parse_args(argv)
+
+    # tmdx 缺失时提示升级 Python（-h/--help/-v/--version 在 parse_args 内已 exit，不会到达这里）
+    warn_if_unavailable()
 
     if args.command == "scan":
         _cmd_scan(args)

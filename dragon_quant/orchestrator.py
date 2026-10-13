@@ -345,7 +345,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     now = datetime.now(bj_tz)
     source = "v2"
     rank_up_count = RANK_UP_COUNT
-    
+
     # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
     is_trading_day = now.weekday() < 5
     if not force and is_trading_day and 9 <= now.hour < 15:

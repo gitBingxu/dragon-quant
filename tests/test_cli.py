@@ -154,6 +154,7 @@ class TestCliSourceArgs(unittest.TestCase):
     def test_buy_session_error_prints_message_and_exits(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "buy"]), \
+             patch.object(cli, "warn_if_unavailable"), \
              patch("dragon_quant.live_trade.run_buy", side_effect=ValueError("当前午间休市（11:30–13:00），请 13:00 后执行")), \
              redirect_stderr(buf):
             with self.assertRaises(SystemExit) as cm:
@@ -165,6 +166,7 @@ class TestCliSourceArgs(unittest.TestCase):
     def test_sell_session_error_prints_message_and_exits(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "sell"]), \
+             patch.object(cli, "warn_if_unavailable"), \
              patch("dragon_quant.live_trade.run_sell", side_effect=ValueError("当前已收盘")), \
              redirect_stderr(buf):
             with self.assertRaises(SystemExit) as cm:

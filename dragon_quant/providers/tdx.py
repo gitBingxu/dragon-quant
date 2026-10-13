@@ -2,9 +2,10 @@
 通达信 TDX Provider — 首选数据链路（tmdx / easy_tdx，TCP 协议，无 Cookie 无反爬）
 
 设计要点（见 providers/TDX_PROVIDER_技术方案.md）：
-  - 惰性依赖：easy_tdx（tmdx 包）是可选依赖（`pip install dragon-quant[tdx]`，仅
-    Python ≥3.10 可用），导入放在首次调用（避免 import 开销，并在缺失时优雅降级
-    返回空/None，由 orchestrator 回退到老链路兜底）。
+  - 惰性依赖：easy_tdx（tmdx 包）是默认依赖（`pip install dragon-quant` 在
+    Python ≥3.10 时自动安装；3.9 因 tmdx 自身要求被跳过），导入放在首次调用
+    （避免 import 开销，并在缺失时优雅降级返回空/None，由 orchestrator 回退到
+    老链路兜底）。缺失时的控制台提示见 `warn_if_unavailable()`。
   - 连接模型：单个共享 ``MacClient``（MAC 拓展行情，含板块/复权K线/换手市值PE），
     内部 ``threading.Lock`` 串行化所有调用。注意 ``MacClient._reconnect()`` 会整体
     替换 ``self._conn``，因此「同一时刻仅一个线程调用」是正确性要求——本 provider
@@ -21,7 +22,9 @@
   - 涨跌幅 pct 无直接字段，由 close/pre_close 现算
 """
 
+import importlib.util
 import math
+import sys
 import threading
 import time
 from typing import Any, Optional
@@ -35,7 +38,7 @@ _easytdx: Any = None  # easy_tdx 模块；False=已尝试但不可用
 
 
 def _import_easytdx() -> Any:
-    """惰性导入 easy_tdx（tmdx 必装依赖）。缺失时返回 None 触发兜底回退。"""
+    """惰性导入 easy_tdx（tmdx 条件默认依赖，仅 Python≥3.10 自动安装）。缺失时返回 None 触发兜底回退。"""
     global _easytdx
     if _easytdx is None:
         try:
@@ -49,6 +52,43 @@ def _import_easytdx() -> Any:
 def is_available() -> bool:
     """easy_tdx 是否可用（缺失时主链路静默降级、不记回退事件）。"""
     return _import_easytdx() is not None
+
+
+def _easy_tdx_installed() -> bool:
+    """easy_tdx 是否已安装（find_spec 仅探测模块存在性，零 import 开销、无副作用）。
+
+    注意：探测的是「模块可被找到」而非「可成功导入」——tmdx 已装但其依赖（如
+    pandas）损坏时这里仍返回 True，主链路真实可用性由 `is_available()` 的完整
+    import 兜底判断。此取舍用零开销换取「每次命令都探测」的可行性。
+    """
+    try:
+        return importlib.util.find_spec("easy_tdx") is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+def warn_if_unavailable() -> None:
+    """easy_tdx（tmdx）缺失时向 stderr 打印提示，供 cli.main() 对所有命令调用。
+
+    每次 CLI 命令都会调用，故用 find_spec 探测而非 is_available() 的完整 import，
+    避免命令入口背上 easy_tdx（及 pandas）的 import 开销。
+    """
+    if _easy_tdx_installed():
+        return
+    if sys.version_info < (3, 10):
+        advice = (
+            f"当前 Python {sys.version_info.major}.{sys.version_info.minor} "
+            "无法安装 tmdx（要求 ≥3.10），建议升级 Python 后重新安装 "
+            "dragon-quant，会自动带上 tmdx。"
+        )
+    else:
+        advice = "请执行 `pip install tmdx`（或 `pip install dragon-quant`）补装。"
+    print(
+        "⚠️ 未安装 tmdx（通达信 TDX 首选数据链路），tdx 主链路不可用时将回退到同花顺/雪球/腾讯老链路。\n"
+        f"【建议】{advice}\n"
+        "【注意】后续 review-account / buy / sell 等命令将依赖 tmdx，建议提前安装。",
+        file=sys.stderr,
+    )
 
 
 # 仓库指数别名 → TDX 代码（上证指数 SH000001 → 999999；000001 是平安银行不映射）

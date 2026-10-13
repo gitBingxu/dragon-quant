@@ -10,6 +10,11 @@
 - 截至主分支 `aafe8e0`，覆盖 18 次 MR 合入（编号为 1～5、8～18、20～21）。`v0.2.3` 标签不在 main 历史中，不列作主分支发布；尚未合入 main 的分支提交不计入已发布版本。
 - `0.1.0` 无对应 Git 标签，保留首版日期并按早期提交校正功能归属；后续版本均注明标签与版本提交。
 
+## [Unreleased]
+
+### Changed
+- `tmdx` 从可选依赖（`[tdx]` extra）改回**默认依赖**：`pip install dragon-quant` 在 Python ≥3.10 时自动安装（环境标记 `python_version >= '3.10'`）；Python 3.9 因 tmdx 自身要求被跳过，包仍可正常安装。同时新增运行时控制台提示：缺失 tmdx 时每次 CLI 命令（除 -h/--help/-v/--version）打印建议升级 Python（后续 review-account / buy / sell 将依赖 tmdx），并保留 `[tdx]` 空 extra 作向后兼容别名。
+
 ## [0.6.1] - 2026-10-13
 
 ### Fixed

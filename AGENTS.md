@@ -285,7 +285,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 阈值/权重集中在 `scorers/registry.py`，便于回测调参。
 
 ### 必须遵守的约束
-- **运行时依赖**：`playwright`（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）为必选；`tmdx`（通达信 TDX 首选数据链路）为**可选依赖**（`pip install dragon-quant[tdx]`，仅 Python≥3.10 可用，缺失时自动回退老链路）；其余仅用 Python 3 标准库。项目要求 Python≥3.9。
+- **运行时依赖**：`playwright`（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）为必选；`tmdx`（通达信 TDX 首选数据链路）为**默认依赖**（`pip install dragon-quant` 在 Python≥3.10 时自动安装；Python 3.9 因 tmdx 自身要求被跳过，所有 CLI 命令（除 -h/--help/-v/--version）在 stderr 打印升级提示，scan 回退老链路）；其余仅用 Python 3 标准库。项目要求 Python≥3.9。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scorers/` 与 `*_v2` 表，不再保留旧四维评分代码。

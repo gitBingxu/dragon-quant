@@ -2,7 +2,7 @@ from dataclasses import asdict
 
 from dragon_quant.review_account.data import MarketData, historical_events
 from dragon_quant.review_account.engine import TradingEngine
-from dragon_quant.review_account.market import calendar_start, collect_candidates
+from dragon_quant.review_account.market import calendar_start, collect_candidates, load_market_sentiment
 from dragon_quant.review_account.models import AccountState, Snapshot, StrategyConfig, TimelineEvent
 from dragon_quant.storage import db
 
@@ -28,9 +28,11 @@ class AccountSimulator:
             raise DataCoverageError("回测区间没有完整交易日")
         for day in days:
             candidates = collect_candidates(self._calendar, day, self.cfg, db.get_dragons_by_date)
+            self.state.sentiment_pct = load_market_sentiment(self._calendar, day, self.cfg)
             codes = {c["code"] for c in candidates} | {p.code for p in self.state.positions}
             day_trades = []
             details = {}
+            day_fired = []
             for event in historical_events(day, candidates, codes, self.data):
                 if event.rows:
                     self._day_quality[day] = next(iter(event.rows.values())).get("data_quality", "strict_5min")
@@ -40,16 +42,24 @@ class AccountSimulator:
                 self.closed_positions.extend(result["positions"])
                 for detail in result["details"]:
                     details[(detail["code"], detail["reason_code"])] = detail
+                if result.get("fired_gate"):
+                    day_fired.extend(result["fired_gate"])
                 for trade in result["trades"]:
                     self.events.append(TimelineEvent(day, trade.side, f"{trade.side} {trade.name or trade.code}",
                                                      trade.reason_text, trade.reason_code, trade.code, trade.name,
                                                      self.state.cash, signal=trade.signal))
+            day_fired = list(dict.fromkeys(day_fired))  # 同一闸门逐事件去重
             snapshot = self._snapshot(day)
             if not day_trades:
                 self.events.append(TimelineEvent(day, "HOLD" if self.state.positions else "IDLE",
                     "继续持有" if self.state.positions else "空仓", "未出现可成交的新信号", "no_execution",
                     cash=self.state.cash, total_equity=snapshot.total_equity,
-                    signal={"details": list(details.values())}))
+                    signal={"details": list(details.values()), "fired_gate": day_fired}))
+            elif day_fired:
+                for event in self.events:
+                    if event.event_date == day:
+                        event.signal = {**(event.signal or {}), "fired_gate": day_fired}
+                        break
             for event in self.events:
                 if event.event_date == day:
                     event.total_equity = snapshot.total_equity

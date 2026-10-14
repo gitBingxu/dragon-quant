@@ -191,6 +191,27 @@ CREATE TABLE IF NOT EXISTS buy_sell_signals (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_buy_sell_open ON buy_sell_signals(code) WHERE status = 'open';
 CREATE INDEX IF NOT EXISTS idx_buy_sell_open_by_date ON buy_sell_signals(status, entry_date, code);
+
+CREATE TABLE IF NOT EXISTS prep_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date   TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT 'v2',
+    result_json  TEXT NOT NULL,
+    created_at   TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, source)
+);
+
+CREATE TABLE IF NOT EXISTS auction_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date   TEXT NOT NULL,
+    code         TEXT NOT NULL,
+    name         TEXT,
+    items_json   TEXT NOT NULL,
+    created_at   TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auction_snapshots_date ON auction_snapshots(trade_date);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；
@@ -419,6 +440,16 @@ from dragon_quant.storage.logs import (  # noqa: E402
     list_scan_log_folders,
     log_summary,
     save_scan_logs,
+)
+from dragon_quant.storage.prep import (  # noqa: E402
+    get_prep_snapshot,
+    has_prep_snapshot,
+    save_prep_snapshot,
+)
+from dragon_quant.storage.auction import (  # noqa: E402
+    get_auction_snapshot,
+    list_auction_snapshots,
+    save_auction_snapshot,
 )
 
 

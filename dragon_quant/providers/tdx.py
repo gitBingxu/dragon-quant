@@ -253,6 +253,25 @@ def _to_stockinfo(r: dict, sector_code: str) -> StockInfo:
         pct=pct, price=close,
     )
 
+
+def _to_auction_items(records: list[dict]) -> list[dict]:
+    """MAC get_auction DataFrame(records) → list[{'time','price','matched','unmatched'}]。
+
+    records 键：time(datetime.time) / price / matched / unmatched。time 统一序列化为
+    "HH:MM:SS" 字符串，便于 JSON 落库。
+    """
+    items: list[dict] = []
+    for r in records:
+        t = r.get("time")
+        ts = t.strftime("%H:%M:%S") if hasattr(t, "strftime") else str(t or "")
+        items.append({
+            "time": ts,
+            "price": _f(r.get("price")),
+            "matched": int(_f(r.get("matched"))),
+            "unmatched": int(_f(r.get("unmatched"))),
+        })
+    return items
+
 # ─── Provider ──────────────────────────────────────────────────────────────
 
 
@@ -354,6 +373,67 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_components", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            return []
+
+    def get_fg_board_members(self, board_name: str) -> list[dict]:
+        """取通达信 FG(风格)统计板块成分（如「昨日涨停」「昨日跌停」「最近多板」）。
+
+        返回原始成员 dict（含完整行情字段），供盘后复盘的情绪温度/主线识别使用。
+        board_name 需与通达信板块名精确匹配；未找到或失败返回空列表。
+        """
+        t0 = time.time()
+        try:
+            et = _import_easytdx()
+            if et is None:
+                return []
+            client = self._get_client()
+            if client is None:
+                return []
+            with self._lock:
+                boards = client.get_board_list(
+                    board_type=et.BoardType.FG, count=10000,
+                    sort_column=et.BoardSortColumn.CHANGE_PCT,
+                )
+                target = board_name.strip()
+                code = None
+                for r in boards.to_dict("records"):
+                    if str(r.get("name", "")).strip() == target:
+                        code = str(r.get("code", "")).strip()
+                        break
+                if not code:
+                    return []
+                df = client.get_board_members(
+                    board_symbol=code,
+                    sort_type=et.SortType.CHANGE_PCT,
+                    sort_order=et.SortOrder.DESC,
+                )
+            out = []
+            for r in (df.to_dict("records") if not df.empty else []):
+                out.append({
+                    "code": str(r.get("code", "")),
+                    "name": str(r.get("name", "")),
+                    "close": _f(r.get("close")),
+                    "pre_close": _f(r.get("pre_close")),
+                    "open": _f(r.get("open")),
+                    "high": _f(r.get("high")),
+                    "low": _f(r.get("low")),
+                    "turnover": _f(r.get("turnover")),
+                    "amount": _f(r.get("amount")),
+                    "market_cap": _f(r.get("total_market_cap_ab")),
+                    "main_net_amount": _f(r.get("main_net_amount")),
+                    "buy_price_limit": _f(r.get("buy_price_limit")),
+                    "sell_price_limit": _f(r.get("sell_price_limit")),
+                })
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "fg_board_members", ok=bool(out),
+                                 elapsed_ms=elapsed, note=f"{board_name} n={len(out)}")
+            return out
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "fg_board_members", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []
 
@@ -558,5 +638,36 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "batch_quotes", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            return []
+
+    # ─── 集合竞价 ───
+
+    def get_auction(self, code: str) -> list[dict]:
+        """个股当日集合竞价盘口（仅当日 9:25 后可用，盘后仍可拉取，无历史回看）。
+
+        返回 [{'time','price','matched','unmatched'}, ...]；非交易时段/失败返回 []。
+        """
+        t0 = time.time()
+        try:
+            et = _import_easytdx()
+            if et is None:
+                return []
+            client = self._get_client()
+            if client is None:
+                return []
+            market, c = _resolve(code)
+            with self._lock:
+                df = client.get_auction(market=market, code=c)
+            items = _to_auction_items(df.to_dict("records")) if not df.empty else []
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "auction", ok=bool(items),
+                                 elapsed_ms=elapsed, note=f"{code} n={len(items)}")
+            return items
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "auction", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []

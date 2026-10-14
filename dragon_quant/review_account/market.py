@@ -32,12 +32,32 @@ def candidate_dates(calendar: list[str], day: str, count: int) -> list[str]:
 
 
 def collect_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
-    """前 candidate_lookback_days 个交易日的**全部真龙**并集去重。
+    """候选池：优先读 T-1 盘后复盘快照；缺失/空则回退旧 3 日真龙并集。
 
-    取每日 dragons 全量（真龙物化表），按 code 去重保留综合分更高者，并在共享层
-    统一做真龙标记与综合分门槛过滤，确保 review-account 与 buy/sell 候选池一致。
-    不再截断为前 N 只——买点择优交由 engine 按买点得分 + 五维分排序。
+    快照是「T-1 盘后选、T 日买」的单日候选（主线龙头 + 最高标 + 晋级者），字段与
+    get_dragons_by_date 一致；仅 source=="v2" 消费快照（v1 直接走旧逻辑）。
     """
+    if cfg.source == "v2":
+        dates = candidate_dates(calendar, day, 1)
+        if dates:
+            from dragon_quant.storage import db
+            try:
+                snap = db.get_prep_snapshot(dates[-1], source=cfg.source)
+            except Exception:
+                snap = None
+            if snap and snap.get("candidates"):
+                cands = [
+                    c for c in snap["candidates"]
+                    if not (c.get("is_true_dragon") is False
+                            or (c.get("composite_score") or 0) < cfg.min_score)
+                ]
+                if cands:
+                    return sorted(cands, key=candidate_key)
+    return _legacy_candidates(calendar, day, cfg, loader)
+
+
+def _legacy_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
+    """旧逻辑：前 candidate_lookback_days 个交易日的全部真龙并集去重。"""
     merged = {}
     for date in candidate_dates(calendar, day, cfg.candidate_lookback_days):
         for cand in loader(date, top_n=None, source=cfg.source):

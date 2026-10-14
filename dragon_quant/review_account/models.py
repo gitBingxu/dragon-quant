@@ -3,6 +3,10 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+# 卖出规则链的稳定规则名（sell_rule_toggles 的合法键）
+SELL_RULE_NAMES = ("hard_stop", "trailing", "breakeven", "high_open_clear",
+                   "soft_time_stop", "weak_close", "hard_time_stop", "half", "volume_spike")
+
 
 @dataclass
 class StrategyConfig:
@@ -53,6 +57,27 @@ class StrategyConfig:
     max_daily_buys: int = 1
     min_commission: float = 5.0
     quote_max_age_seconds: int = 60
+    # ── 择时与仓位改造（全部 default-off / =现值，向后兼容）──
+    sentiment_sizing_enabled: bool = False
+    sentiment_ban_enabled: bool = False
+    sell_rule_toggles: dict = field(default_factory=dict)
+    max_daily_loss_pct: float = 0.0
+    drawdown_delevel_pct: float = 0.0
+    streak_delevel_enabled: bool = False
+    soft_time_stop_days: int = 0
+    soft_time_stop_floor_pct: float = 0.0
+    tiered_trailing_enabled: bool = False
+    trailing_tier2_activate_pct: float = 15.0
+    trailing_tier2_drawdown_pct: float = 5.0
+    trailing_tier3_activate_pct: float = 25.0
+    trailing_tier3_drawdown_pct: float = 8.0
+    dragon_comeback_enabled: bool = False
+    dragon_comeback_min_rise_pct: float = 30.0
+    dragon_comeback_min_boards: int = 2
+    dragon_comeback_pullback_days_min: int = 3
+    dragon_comeback_pullback_days_max: int = 10
+    dragon_comeback_volume_ratio: float = 0.333
+    dragon_comeback_confirm_pct: float = 3.0
 
     @classmethod
     def from_dict(cls, values: dict) -> "StrategyConfig":
@@ -76,6 +101,14 @@ class StrategyConfig:
                     raise ValueError(f"{name} 必须是有限数值")
                 if isinstance(default, int) and not isinstance(value, int):
                     raise ValueError(f"{name} 必须是整数")
+            elif isinstance(default, dict):
+                if not isinstance(value, dict):
+                    raise ValueError(f"{name} 必须是对象")
+                for k, v in value.items():
+                    if k not in SELL_RULE_NAMES:
+                        raise ValueError(f"未知卖出规则开关: {k}")
+                    if not isinstance(v, bool):
+                        raise ValueError(f"卖出规则开关 {k} 必须是布尔值")
         if cfg.source not in {"v1", "v2"}:
             raise ValueError("source 必须是 v1 或 v2")
         for name in ("initial_cash", "candidate_top_n", "candidate_lookback_days", "max_positions",
@@ -111,7 +144,9 @@ class StrategyConfig:
         return cfg
 
     def to_json_dict(self) -> dict:
-        return dict(self.__dict__)
+        data = dict(self.__dict__)
+        data["sell_rule_toggles"] = dict(self.sell_rule_toggles)
+        return data
 
 
 @dataclass
@@ -228,6 +263,10 @@ class AccountState:
     buys_today: int = 0
     marks: dict[str, float] = field(default_factory=dict)
     evaluated: dict[str, int] = field(default_factory=dict)
+    realized_today: float = 0.0
+    consecutive_losses: int = 0
+    sentiment_pct: Optional[float] = None
+    peak_equity: float = 0.0
 
     def to_dict(self) -> dict:
         from dataclasses import asdict

@@ -257,9 +257,10 @@ python -m dragon_quant review-account --ui-only --source v2
 - Asia/Shanghai 时序：开盘MA5承接仅用上日指标和量能；突破前高改为**首根5分钟K完成后确认**，要求首根5分钟K换手≥`turn_strong_bar_turnover_min`（默认0.5%）带量，日K兜底日不触发；分歧买龙要求连续缩量一字板后完整6根5分钟K未破昨收且企稳；不允许用未来信号倒选。
 - 择优：**买点得分(priority)降序 → 五维综合分降序 → 代码**，不再参考真龙 rank。
 - 信号待下一可执行事件成交，实时需更晚的新鲜报价；封死涨跌停不假定成交，跳空不能补填止损或成本线。T+1不卖当日仓，但跟踪买入后峰值；同一根K的高点不能反向激活该根K内的保护。
-- 卖出顺序：首个可卖日-3.5%/以后-5%止损 → 已有峰值8%后回撤3.5%移动止盈 → 已有峰值6%后完整成本保护 → 高开7%/5%的5/30分钟窗口 → 14:55弱势/MA5/次日涨停半仓/放量。15:00只估值与更新峰值，不以最终收盘价补成交。
+- 卖出为 9 条 `SellRule` 责任链（`strategy.py` `_SELL_RULES`，顺序即优先级、命中短路，`late_only` 承载「phase!=late 即跳过」阶段门）：首个可卖日-3.5%/以后-5%止损 → 已有峰值8%后回撤3.5%移动止盈（可选分级/ATR 化）→ 已有峰值6%后完整成本保护 → 高开7%/5%的5/30分钟窗口 → 14:55弱势/MA5 → 次日涨停半仓 → 放量；新增 `soft_time_stop`（N日未创新高）与 `hard_time_stop`（持有超 `max_hold_days` 封板豁免）两条时间止损，默认关。`sell_rule_toggles` 逐条开关（空=存量开/新增关）供消融实验。15:00只估值与更新峰值，不以最终收盘价补成交。
 - 当天卖出后不买入；不因下午卖出而取消早上交易。默认每日最多买一次，仓位基线仍使用可用现金；共享配置可开启单票25%/风险1%、MA5距离/趋势、ATR移动止盈实验，未验证参数不自动推广。
 - `--config` JSON 原样传给共享 StrategyConfig；滑点0.2%、佣金0.03%、卖出印花税0.05%、每笔最低佣金5元。`evaluation.compare_strategies` 按60/20/20时间划分、最少交易数与双倍滑点验证，不自动换默认参数。
+- 择时与仓位改造（全部 default-off，向后兼容）：`sentiment_sizing_enabled`/`sentiment_ban_enabled` 消费盘后复盘快照 `sentiment.position_pct`（情绪→仓位→禁买；历史快照为补跑时点近似，以前向验证为主）；`risk.py` 组合风控（日级熔断/净值回撤降仓/连续亏损降仓）；`entry_veto` 买入否决钩子（默认放行，为集合竞价强度一票否决预留口）；龙回头买点 `dragon_comeback_enabled`；验证基建 `plateau_scan`/`ablation`/`drawdown_decomposition`/`trial_count`。分叉声明见 `review_account/STRATEGY.md`。
 - 数据分级：当日所有相关个股都有完整48根5分钟K → 严格盘中撮合；任一缺失 → 整日**日K兜底**（开盘价买、当日OHLC判卖，分时相关规则自然跳过），因雪球5分钟仅约14天，多月回测常见。日K本身缺失/预热不足/无效OHLC仍报 DataCoverageError，不持久化部分结果。兜底成交价保守近似，结果标 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。行情按日期/周期/不复权口径隔离缓存；SH000001用于交易日历，个股000001仍是平安银行。
 - `/account` 生成/删除和历史批次查询保持不变；API可传 `strategy_params`，快照增量补 `positions_json` 存全部持仓（查询返回 `positions`），旧数据仍可读取；已平仓表保持原语义。完整规则见 `review_account/STRATEGY.md`。
 

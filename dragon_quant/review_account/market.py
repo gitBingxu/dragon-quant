@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import math
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from dragon_quant.models.types import KBar
@@ -75,6 +76,33 @@ def candidate_key(candidate: dict) -> tuple:
     """去重/展示序：综合分越高越优先，同分按 rank、代码稳定排序。"""
     return (-(candidate.get("composite_score") or 0), candidate.get("rank") or 999999,
             candidate.get("code", ""))
+
+
+def load_market_sentiment(calendar: list[str], day: str, cfg) -> Optional[float]:
+    """读 T-1 盘后复盘快照的情绪建议仓位（position_pct 标量）。
+
+    快照是「T-1 盘后选、T 日买」，故消费 T-1 快照的 sentiment.position_pct。
+    缺失/空/回退旧逻辑时返回 None（调用方降级为 sizing 1.0、禁买不生效）。
+    """
+    if cfg.source != "v2":
+        return None
+    dates = candidate_dates(calendar, day, 1)
+    if not dates:
+        return None
+    try:
+        from dragon_quant.storage import db
+        snap = db.get_prep_snapshot(dates[-1], source=cfg.source)
+    except Exception:
+        return None
+    sentiment = (snap or {}).get("sentiment") or {}
+    pct = sentiment.get("position_pct")
+    if pct is None:
+        return None
+    try:
+        pct = float(pct)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(1.0, pct))  # clamp 到 [0,1]
 
 
 def validate_bars(bars: list[KBar], day: str, until: int | None = None) -> list[KBar]:

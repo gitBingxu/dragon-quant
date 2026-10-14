@@ -11,20 +11,24 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from dragon_quant.review_account.execution import daily_fallback_sell_price, fee, fill_price
 from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import MarketEvent, Position, StrategyConfig
-from dragon_quant.review_account.strategy import evaluate_buy, evaluate_sell, explain_buy_candidate
+from dragon_quant.review_account.strategy import evaluate_sell, explain_buy_candidate
 
 
 class SignalEngine:
     def __init__(self, cfg: StrategyConfig, positions: list[Position] | None = None,
-                 held_codes: set[str] | None = None):
+                 held_codes: set[str] | None = None, sentiment_pct: Optional[float] = None):
         self.cfg = StrategyConfig.from_dict(cfg.to_json_dict())
         # 未平仓信号以 notional Position（qty=100）注入，供卖出评估与峰值跟踪。
         self.positions = positions or []
         # 已买入未卖出的 code（buy 命令据此跳过重复买入）。
         self.held_codes = held_codes or set()
+        # 情绪建议仓位（由 trader 在回放前注入，供禁买判定）。
+        self.sentiment_pct = sentiment_pct
         self.pending: list[dict] = []
         self.last_event = 0
         self.trade_date = ""
@@ -109,11 +113,11 @@ class SignalEngine:
                     self.evaluated[key] = row["bar_timestamp"]
                 detail = explain_buy_candidate(cand, row, cfg, row.get("prev_row") if row else None,
                                                row.get("hist_rows") if row else None,
-                                               row.get("intraday_bars") if row else None)
+                                               row.get("intraday_bars") if row else None,
+                                               self.sentiment_pct)
                 result["details"].append(detail)
-                if detail["passed"] and row is not None:
-                    sig = evaluate_buy(cand, row, cfg, row["prev_row"], row["hist_rows"], row["intraday_bars"])
-                    signals.append((sig, cand))
+                if detail["passed"] and detail.get("full_signal"):
+                    signals.append((detail["full_signal"], cand))
             signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))
             for sig, cand in signals:
                 self.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))

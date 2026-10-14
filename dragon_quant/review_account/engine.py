@@ -5,7 +5,8 @@ from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import (
     AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade,
 )
-from dragon_quant.review_account.strategy import evaluate_buy, evaluate_sell, explain_buy_candidate
+from dragon_quant.review_account.risk import risk_governor
+from dragon_quant.review_account.strategy import evaluate_sell, explain_buy_candidate
 
 
 class TradingEngine:
@@ -21,8 +22,14 @@ class TradingEngine:
         if state.trade_date != day:
             state.pending = [o for o in state.pending if o["side"] == "SELL"]
             state.trade_date, state.sold_today, state.buys_today = day, False, 0
+            state.realized_today = 0.0
         for code, row in event.rows.items():
             state.marks[code] = row.get("execution_price") or row["bar_close"]
+        equity = self._equity()
+        state.peak_equity = max(state.peak_equity, equity)
+        _, risk_allow_buy, fired = risk_governor(cfg, state, equity)
+        if fired:
+            result.setdefault("fired_gate", []).extend(fired)
         for order in sorted(list(state.pending), key=lambda o: o["side"] != "SELL"):
             if order["created_at"] >= event.timestamp:
                 continue
@@ -31,7 +38,7 @@ class TradingEngine:
                 continue
             if row.get("execution_timestamp", event.timestamp) <= order["created_at"]:
                 continue
-            if order["side"] == "BUY" and not event.allow_buy:
+            if order["side"] == "BUY" and (not event.allow_buy or not risk_allow_buy):
                 continue
             if order["side"] == "BUY" and (state.sold_today or event.timestamp - order["created_at"] > 300_000
                     or state.buys_today >= cfg.max_daily_buys):
@@ -78,7 +85,7 @@ class TradingEngine:
                                      else row["bar_close"])
                     p.highest_price = max(p.highest_price, observed_high)
                     p.highest_return = max(p.highest_return, (p.highest_price / p.entry_price - 1) * 100)
-            if (event.phase != "close" and event.allow_buy
+            if (event.phase != "close" and event.allow_buy and risk_allow_buy
                     and not state.sold_today and state.buys_today < cfg.max_daily_buys
                     and len(state.positions) < cfg.max_positions
                     and not any(o["side"] == "BUY" for o in state.pending)):
@@ -98,11 +105,11 @@ class TradingEngine:
                         state.evaluated[key] = row["bar_timestamp"]
                     detail = explain_buy_candidate(cand, row, cfg, row.get("prev_row") if row else None,
                                                    row.get("hist_rows") if row else None,
-                                                   row.get("intraday_bars") if row else None)
+                                                   row.get("intraday_bars") if row else None,
+                                                   state.sentiment_pct)
                     result["details"].append(detail)
-                    if detail["passed"] and row is not None:
-                        sig = evaluate_buy(cand, row, cfg, row["prev_row"], row["hist_rows"], row["intraday_bars"])
-                        signals.append((sig, cand))
+                    if detail["passed"] and detail.get("full_signal"):
+                        signals.append((detail["full_signal"], cand))
                 # 择优：买点得分越高越优先，同分看五维综合分，再按代码稳定排序。
                 signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))
                 if signals:
@@ -118,6 +125,10 @@ class TradingEngine:
     def _order(code, name, signal, timestamp):
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
                 "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+
+    def _equity(self) -> float:
+        return self.state.cash + sum(p.qty * self.state.marks.get(p.code, p.entry_price)
+                                     for p in self.state.positions)
 
     def _raw_fill_price(self, order, row):
         """日K兜底日的卖出按原因近似定价；盘中及买入仍用 execution_price。"""
@@ -137,7 +148,11 @@ class TradingEngine:
             if any(p.code == code for p in state.positions) or len(state.positions) >= cfg.max_positions:
                 return None, None
             equity = state.cash + sum(p.qty * state.marks.get(p.code, p.entry_price) for p in state.positions)
-            qty = buy_quantity(state.cash, equity, price, cfg)
+            delevel, _, _ = risk_governor(cfg, state, equity)
+            budget_scale = delevel
+            if cfg.sentiment_sizing_enabled and state.sentiment_pct is not None:
+                budget_scale *= state.sentiment_pct
+            qty = buy_quantity(state.cash, equity, price, cfg, budget_scale)
             if not qty:
                 return None, None
             amount, cost_fee = price * qty, fee(price * qty, side, cfg)
@@ -157,6 +172,7 @@ class TradingEngine:
         pnl = amount - cost_fee - cost
         state.cash += amount - cost_fee
         state.sold_today = True
+        state.realized_today += pnl
         p.realized_pnl += pnl
         p.qty -= qty
         p.cost -= cost
@@ -167,6 +183,7 @@ class TradingEngine:
                                     p.entry_reason_code, p.entry_signal, day, price, order["code"], signal,
                                     p.realized_pnl / p.initial_cost * 100, days)
             state.positions.remove(p)
+            state.consecutive_losses = state.consecutive_losses + 1 if closed.realized_return < 0 else 0
         elif order["code"] == "next_day_limit_up_half":
             p.took_profit_half = True
         return Trade(day, code, p.name, side, price, qty, amount, cost_fee, pnl, state.cash,

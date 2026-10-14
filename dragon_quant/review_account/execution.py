@@ -44,8 +44,9 @@ def daily_fallback_sell_price(position: Position, row: dict, reason: str, cfg: S
     return row["bar_close"]
 
 
-def buy_quantity(cash: float, equity: float, price: float, cfg: StrategyConfig) -> int:
-    budget = min(cash, equity * cfg.max_position_pct / 100)
+def buy_quantity(cash: float, equity: float, price: float, cfg: StrategyConfig,
+                 budget_scale: float = 1.0) -> int:
+    budget = min(cash, equity * cfg.max_position_pct / 100) * budget_scale
     qty = int(budget / price / cfg.lot_size) * cfg.lot_size
     if cfg.risk_per_trade_pct:
         risk = equity * cfg.risk_per_trade_pct / 100

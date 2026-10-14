@@ -5,7 +5,7 @@ from datetime import datetime
 from dragon_quant.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.data import MarketData, historical_events
 from dragon_quant.review_account.execution import fee
-from dragon_quant.review_account.market import SHANGHAI, at, bar_times, calendar_start, collect_candidates
+from dragon_quant.review_account.market import SHANGHAI, at, bar_times, calendar_start, collect_candidates, load_market_sentiment
 from dragon_quant.review_account.models import Position, StrategyConfig
 from dragon_quant.storage import db
 
@@ -63,7 +63,8 @@ class LiveTrader:
         held_codes = {s["code"] for s in db.list_open_signals(source=self.source)}
         candidates = collect_candidates(calendar, day, self.cfg, db.get_dragons_by_date)
         codes = {c["code"] for c in candidates}
-        engine = SignalEngine(self.cfg, held_codes=held_codes)
+        sentiment = load_market_sentiment(calendar, day, self.cfg)
+        engine = SignalEngine(self.cfg, held_codes=held_codes, sentiment_pct=sentiment)
         buys, details = [], []
         for event in historical_events(day, candidates, codes, self.data, until=until):
             if event.timestamp > target:

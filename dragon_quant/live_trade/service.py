@@ -35,6 +35,11 @@ def run_sell(trade_date: str, source: str = "v2", verbose: bool = True,
 
 def _print_buy(trade_date: str, result: dict):
     print(f"【买入建议 · {trade_date}】")
+    sp = result.get("sentiment_pct")
+    if sp is None:
+        print("  建议仓位 —（无有效情绪仓位数据，请人工判断）")
+    else:
+        print(f"  建议仓位 {sp * 100:.0f}%（盘后复盘情绪温度，仅参考不代下单）")
     for b in result.get("buys", []):
         print(f"  🟢 买入 {b['name'] or b['code']}（{b['code']}）@{b['entry_price']:.2f}")
         print(f"     {b['reason_text']}")

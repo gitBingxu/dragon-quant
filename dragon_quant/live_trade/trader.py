@@ -79,6 +79,7 @@ class LiveTrader:
         for p in engine.positions:
             db.update_signal_peaks(p.code, p.highest_return, p.highest_price)
         return {"action": "buy" if buys else "idle", "buys": buys, "details": details,
+                "sentiment_pct": sentiment,
                 "reason_text": f"买入 {len(buys)} 只" if buys else "候选池暂无触发买点的标的"}
 
     def _run_sell(self, day, target, until):

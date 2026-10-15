@@ -453,7 +453,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         argv[0] = "scan"
     args = parser.parse_args(argv)
 
-    # tmdx 缺失时提示升级 Python（-h/--help/-v/--version 在 parse_args 内已 exit，不会到达这里）
+    # tmdx 缺失时提示补装（-h/--help/-v/--version 在 parse_args 内已 exit，不会到达这里）
     warn_if_unavailable()
 
     if args.command == "scan":

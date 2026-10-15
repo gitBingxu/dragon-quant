@@ -1,7 +1,7 @@
 {
   "include": ["dragon_quant"],
   "exclude": ["**/__pycache__", "web_ui"],
-  "pythonVersion": "3.14",
+  "pythonVersion": "3.10",
   "typeCheckingMode": "basic",
   "reportUnknownMemberType": false,
   "reportUnknownVariableType": false,

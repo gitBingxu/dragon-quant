@@ -110,6 +110,20 @@ class TestPrintBuy(unittest.TestCase):
         self.assertEqual(out.count("（600001）"), 1)
         self.assertEqual(out.count("（600002）"), 1)
 
+    def test_suggested_position_line(self):
+        """建议仓位展示：有值按百分比，缺失/无 key 显示占位；0.0 不落入缺失分支。"""
+        def render(result):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                _print_buy(DAY, result)
+            return buf.getvalue()
+
+        base = {"buys": [], "details": [], "reason_text": "候选池暂无触发买点的标的"}
+        self.assertIn("建议仓位 80%", render({**base, "sentiment_pct": 0.8}))
+        self.assertIn("建议仓位 0%", render({**base, "sentiment_pct": 0.0}))
+        self.assertIn("建议仓位 —", render({**base, "sentiment_pct": None}))
+        self.assertIn("建议仓位 —", render(base))  # 无 key（向后兼容）
+
 
 class TestPrintSell(unittest.TestCase):
     """sell 命令输出格式化（卖出 + 继续持有）。"""

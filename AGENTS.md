@@ -278,6 +278,7 @@ python -m dragon_quant sell --date 20260908 --at 14:55
 - 历史日期必须同时传 `--date YYYYMMDD --at HH:MM`（重放当日截至该时点的5分钟K）；实时今日回放截至当前已完成的5分钟K。绝不使用当前腾讯报价。
 - 信号表 `buy_sell_signals`：`insert_signal` 对同一未平仓 code 幂等（部分唯一索引 `idx_buy_sell_open`）；`list_open_signals(before_date=...)` 只取买入日早于目标日的持仓；峰值经 `update_signal_peaks` 跨日写回供移动止盈/保本判定。
 - 同输入/参数/信号状态下买卖决策与回测一致；实时延迟与成交条件仍可能导致结果不同，不保证收益。
+- `buy` 输出首行显示**建议仓位**（来自盘后复盘快照 `sentiment.position_pct`，`load_market_sentiment` 读取，缺失时显示 `—`）。该值**仅供人工参考，不参与下单**：`SignalEngine` 无账户，只把它用于禁买判定（`sentiment_ban_enabled` 开启且 `position_pct==0` 时否决买入）。`sell` 不显示仓位。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

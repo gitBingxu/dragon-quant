@@ -8,7 +8,6 @@
 """
 import io
 import unittest
-from collections import namedtuple
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from unittest.mock import patch
@@ -173,9 +172,6 @@ class TestTdxProviderDegrade(unittest.TestCase):
             self.assertIsNone(p.get_quote("600000"))
 
 
-_VersionInfo = namedtuple("VersionInfo", "major minor micro releaselevel serial")
-
-
 class TestEasyTdxInstalled(unittest.TestCase):
     """_easy_tdx_installed：find_spec 命中→True、未找到→None→False。"""
 
@@ -189,7 +185,7 @@ class TestEasyTdxInstalled(unittest.TestCase):
 
 
 class TestWarnIfUnavailable(unittest.TestCase):
-    """warn_if_unavailable：已安装不打印；缺失时按 Python 版本打印不同建议到 stderr。"""
+    """warn_if_unavailable：已安装不打印；缺失时打印补装建议到 stderr。"""
 
     def test_no_warning_when_installed(self):
         with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=True):
@@ -198,28 +194,15 @@ class TestWarnIfUnavailable(unittest.TestCase):
                 warn_if_unavailable()
             self.assertEqual(buf.getvalue(), "")
 
-    def test_warn_python_below_310(self):
-        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=False), \
-             patch("dragon_quant.providers.tdx.sys.version_info",
-                   _VersionInfo(3, 9, 0, "final", 0)):
+    def test_warn_when_not_installed(self):
+        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=False):
             buf = io.StringIO()
             with redirect_stderr(buf):
                 warn_if_unavailable()
             text = buf.getvalue()
             self.assertIn("未安装 tmdx", text)
-            self.assertIn("升级 Python", text)
-            self.assertIn("review-account", text)
-
-    def test_warn_python_ge_310(self):
-        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=False), \
-             patch("dragon_quant.providers.tdx.sys.version_info",
-                   _VersionInfo(3, 11, 0, "final", 0)):
-            buf = io.StringIO()
-            with redirect_stderr(buf):
-                warn_if_unavailable()
-            text = buf.getvalue()
             self.assertIn("pip install tmdx", text)
-            self.assertNotIn("升级 Python", text)
+            self.assertIn("review-account", text)
 
 
 class TestCliWarnIntegration(unittest.TestCase):

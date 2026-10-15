@@ -2,8 +2,8 @@
 通达信 TDX Provider — 首选数据链路（tmdx / easy_tdx，TCP 协议，无 Cookie 无反爬）
 
 设计要点（见 providers/TDX_PROVIDER_技术方案.md）：
-  - 惰性依赖：easy_tdx（tmdx 包）是默认依赖（`pip install dragon-quant` 在
-    Python ≥3.10 时自动安装；3.9 因 tmdx 自身要求被跳过），导入放在首次调用
+  - 惰性依赖：easy_tdx（tmdx 包）是默认依赖，随 `pip install dragon-quant`
+    自动安装，导入放在首次调用
     （避免 import 开销，并在缺失时优雅降级返回空/None，由 orchestrator 回退到
     老链路兜底）。缺失时的控制台提示见 `warn_if_unavailable()`。
   - 连接模型：单个共享 ``MacClient``（MAC 拓展行情，含板块/复权K线/换手市值PE），
@@ -38,7 +38,7 @@ _easytdx: Any = None  # easy_tdx 模块；False=已尝试但不可用
 
 
 def _import_easytdx() -> Any:
-    """惰性导入 easy_tdx（tmdx 条件默认依赖，仅 Python≥3.10 自动安装）。缺失时返回 None 触发兜底回退。"""
+    """惰性导入 easy_tdx（tmdx 默认依赖）。缺失时返回 None 触发兜底回退。"""
     global _easytdx
     if _easytdx is None:
         try:
@@ -75,14 +75,7 @@ def warn_if_unavailable() -> None:
     """
     if _easy_tdx_installed():
         return
-    if sys.version_info < (3, 10):
-        advice = (
-            f"当前 Python {sys.version_info.major}.{sys.version_info.minor} "
-            "无法安装 tmdx（要求 ≥3.10），建议升级 Python 后重新安装 "
-            "dragon-quant，会自动带上 tmdx。"
-        )
-    else:
-        advice = "请执行 `pip install tmdx`（或 `pip install dragon-quant`）补装。"
+    advice = "请执行 `pip install tmdx`（或 `pip install dragon-quant`）补装。"
     print(
         "⚠️ 未安装 tmdx（通达信 TDX 首选数据链路），tdx 主链路不可用时将回退到同花顺/雪球/腾讯老链路。\n"
         f"【建议】{advice}\n"

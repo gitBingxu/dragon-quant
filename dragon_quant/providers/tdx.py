@@ -219,6 +219,8 @@ def _to_quote(r: dict) -> Optional[Quote]:
         bid1_volume=_f(r.get("bid_volume")),
         ask1_volume=_f(r.get("ask_volume")),
         timestamp=0,
+        # 存在性检查：字段缺失保持 None（未知），不被 _f 误置为 0.0（无流入）
+        main_net_amount=_f(r["main_net_amount"]) if "main_net_amount" in r else None,
     )
 
 
@@ -264,6 +266,42 @@ def _to_auction_items(records: list[dict]) -> list[dict]:
             "unmatched": int(_f(r.get("unmatched"))),
         })
     return items
+
+
+def _normalize_value(v):
+    """DataFrame 标量 → native Python 类型；NaN/inf → None（numpy 标量经 item() 还原）。"""
+    if v is None:
+        return None
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, (int, str, bool)):
+        return v
+    item = getattr(v, "item", None)
+    if callable(item):  # numpy 标量
+        try:
+            return _normalize_value(item())
+        except Exception:
+            return None
+    return v
+
+
+# 市场宽度行保留字段（datetime 类字段不入资产，避免序列化歧义）
+_BREADTH_KEYS = ("code", "name", "close", "pre_close", "open", "high", "low",
+                 "vol", "amount", "buy_price_limit", "sell_price_limit")
+
+# FG 板块成员字段映射（值=源字段名；market_cap 取 total_market_cap_ab）。
+# 保持与存量 get_fg_board_members 完全一致的 13 个键，向后兼容。
+_FG_MEMBER_FIELDS = {
+    "code": "code", "name": "name", "close": "close", "pre_close": "pre_close",
+    "open": "open", "high": "high", "low": "low", "turnover": "turnover",
+    "amount": "amount", "market_cap": "total_market_cap_ab",
+    "main_net_amount": "main_net_amount",
+    "buy_price_limit": "buy_price_limit", "sell_price_limit": "sell_price_limit",
+}
+
+
+def _fg_member_row(r: dict) -> dict:
+    return {k: _normalize_value(r.get(src)) for k, src in _FG_MEMBER_FIELDS.items()}
 
 # ─── Provider ──────────────────────────────────────────────────────────────
 
@@ -369,60 +407,57 @@ class TdxProvider(StockProvider):
                                  elapsed_ms=elapsed, error=str(e))
             return []
 
-    def get_fg_board_members(self, board_name: str) -> list[dict]:
-        """取通达信 FG(风格)统计板块成分（如「昨日涨停」「昨日跌停」「最近多板」）。
+    def get_fg_boards(self, names: list[str]) -> dict[str, dict]:
+        """FG(风格)板块批量成员：一次板块列表解析 + 逐板块成员。
 
-        返回原始成员 dict（含完整行情字段），供盘后复盘的情绪温度/主线识别使用。
-        board_name 需与通达信板块名精确匹配；未找到或失败返回空列表。
+        返回 {name: {'rows': [...], 'status': 'ok'|'missing'}}。
+        错误契约（prep 采集）：transport/连接失败抛异常；板块名不存在记 missing。
         """
         t0 = time.time()
-        try:
-            et = _import_easytdx()
-            if et is None:
-                return []
-            client = self._get_client()
-            if client is None:
-                return []
-            with self._lock:
-                boards = client.get_board_list(
-                    board_type=et.BoardType.FG, count=10000,
-                    sort_column=et.BoardSortColumn.CHANGE_PCT,
-                )
-                target = board_name.strip()
-                code = None
-                for r in boards.to_dict("records"):
-                    if str(r.get("name", "")).strip() == target:
-                        code = str(r.get("code", "")).strip()
-                        break
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("tdx 连接不可用")
+        with self._lock:
+            boards = client.get_board_list(
+                board_type=et.BoardType.FG, count=10000,
+                sort_column=et.BoardSortColumn.CHANGE_PCT,
+            )
+            code_by_name = {}
+            for r in boards.to_dict("records"):
+                code_by_name[str(r.get("name", "")).strip()] = str(r.get("code", "")).strip()
+            out: dict[str, dict] = {}
+            for name in names:
+                target = name.strip()
+                code = code_by_name.get(target)
                 if not code:
-                    return []
+                    out[name] = {"rows": [], "status": "missing"}
+                    continue
                 df = client.get_board_members(
                     board_symbol=code,
                     sort_type=et.SortType.CHANGE_PCT,
                     sort_order=et.SortOrder.DESC,
                 )
-            out = []
-            for r in (df.to_dict("records") if not df.empty else []):
-                out.append({
-                    "code": str(r.get("code", "")),
-                    "name": str(r.get("name", "")),
-                    "close": _f(r.get("close")),
-                    "pre_close": _f(r.get("pre_close")),
-                    "open": _f(r.get("open")),
-                    "high": _f(r.get("high")),
-                    "low": _f(r.get("low")),
-                    "turnover": _f(r.get("turnover")),
-                    "amount": _f(r.get("amount")),
-                    "market_cap": _f(r.get("total_market_cap_ab")),
-                    "main_net_amount": _f(r.get("main_net_amount")),
-                    "buy_price_limit": _f(r.get("buy_price_limit")),
-                    "sell_price_limit": _f(r.get("sell_price_limit")),
-                })
-            elapsed = (time.time() - t0) * 1000
-            if self._logger:
-                self._logger.api("tdx", "fg_board_members", ok=bool(out),
-                                 elapsed_ms=elapsed, note=f"{board_name} n={len(out)}")
-            return out
+                rows = [_fg_member_row(r)
+                        for r in (df.to_dict("records") if not df.empty else [])]
+                out[name] = {"rows": rows, "status": "ok"}
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "fg_boards", ok=True, elapsed_ms=elapsed,
+                             note=f"names={len(names)}")
+        return out
+
+    def get_fg_board_members(self, board_name: str) -> list[dict]:
+        """取通达信 FG(风格)统计板块成分（如「昨日涨停」「昨日跌停」「最近多板」）。
+
+        返回原始成员 dict（含完整行情字段），供盘后复盘的情绪温度/主线识别使用。
+        board_name 需与通达信板块名精确匹配；未找到或失败返回空列表（存量契约）。
+        """
+        t0 = time.time()
+        try:
+            return self.get_fg_boards([board_name]).get(board_name, {}).get("rows", [])
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
@@ -633,6 +668,68 @@ class TdxProvider(StockProvider):
                 self._logger.api("tdx", "batch_quotes", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []
+
+    # ─── prep 盘后复盘采集（错误契约：transport 失败抛异常，由采集器捕获记 error）───
+
+    def get_market_breadth_rows(self, count: int = 6000) -> list[dict]:
+        """全 A 实时行情行（市场宽度五合一原始素材）。
+
+        get_stock_quotes_list 内部自动分页（多次串行请求，复用 _lock）；
+        **必须显式传 count≈6000**（默认只回 80 条）。返回行已归一化
+        （numpy 标量 → native，NaN → None），仅保留 _BREADTH_KEYS 字段。
+        """
+        t0 = time.time()
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("tdx 连接不可用")
+        with self._lock:
+            df = client.get_stock_quotes_list(
+                category=et.Category.A, start=0, count=count,
+                fields=self._preset.COMMON,
+            )
+        rows = [{k: _normalize_value(r.get(k)) for k in _BREADTH_KEYS}
+                for r in (df.to_dict("records") if df is not None and not df.empty else [])]
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "market_breadth_rows", ok=bool(rows),
+                             elapsed_ms=elapsed, note=f"n={len(rows)}")
+        # 空结果不上抛：由 prep 采集器按 sample_n 判定 empty_suspicious（契约：
+        # provider 只在 transport 失败时抛异常，不替上层判定数据充分性）
+        return rows
+
+    def get_announcements(self, code: str, count: int = 30, page: int = 1) -> list[dict]:
+        """cninfo 个股公告单页（title/type/date/url），最新在前。
+
+        独立于 MacClient 的 HTTP 客户端（巨潮，无反爬）。失败抛异常（采集契约）。
+        date 统一序列化为 "YYYY-MM-DD" 字符串，便于 JSON 落库与窗口过滤。
+        """
+        _import_easytdx()  # 确保 easy_tdx 可用（CninfoClient 随包分发）
+        from easy_tdx.cninfo import CninfoClient
+        c = code.upper()
+        if c.startswith(("SH", "SZ", "BJ")):
+            c = c[2:]
+        t0 = time.time()
+        try:
+            df = CninfoClient().get_announcements(c, count=count, page=page)
+        except Exception as e:
+            raise RuntimeError(f"cninfo 公告拉取失败 {c} page={page}: {e}") from e
+        out: list[dict] = []
+        for r in (df.to_dict("records") if df is not None and not df.empty else []):
+            d = r.get("date")
+            out.append({
+                "title": str(r.get("title", "")),
+                "type": str(r.get("type", "") or ""),
+                "date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or ""),
+                "url": str(r.get("url", "") or r.get("pdf_url", "") or ""),
+            })
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "announcements", ok=True,
+                             elapsed_ms=elapsed, note=f"{c} p{page} n={len(out)}")
+        return out
 
     # ─── 集合竞价 ───
 

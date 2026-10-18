@@ -229,19 +229,19 @@ class TestLoadMarketSentiment(unittest.TestCase):
         self.assertIsNone(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig(source="v1")))
 
     def test_missing_snapshot_returns_none(self):
-        with patch("dragon_quant.storage.db.get_prep_snapshot", return_value=None):
+        with patch("dragon_quant.storage.prep_db.get_prep_snapshot", return_value=None):
             self.assertIsNone(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()))
 
     def test_hit_returns_clamped_pct(self):
-        with patch("dragon_quant.storage.db.get_prep_snapshot",
+        with patch("dragon_quant.storage.prep_db.get_prep_snapshot",
                    return_value={"sentiment": {"position_pct": 0.8}}):
             self.assertEqual(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()), 0.8)
-        with patch("dragon_quant.storage.db.get_prep_snapshot",
+        with patch("dragon_quant.storage.prep_db.get_prep_snapshot",
                    return_value={"sentiment": {"position_pct": 1.5}}):
             self.assertEqual(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()), 1.0)
 
     def test_invalid_pct_returns_none(self):
-        with patch("dragon_quant.storage.db.get_prep_snapshot",
+        with patch("dragon_quant.storage.prep_db.get_prep_snapshot",
                    return_value={"sentiment": {"position_pct": "not-a-number"}}):
             self.assertIsNone(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()))
 

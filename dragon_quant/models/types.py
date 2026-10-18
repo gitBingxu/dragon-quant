@@ -60,6 +60,7 @@ class Quote:
     bid1_volume: float = 0.0   # 买一量/封单量（gtimg f[10]，单位手）
     ask1_volume: float = 0.0   # 卖一量（gtimg f[20]，单位手）
     timestamp: int = 0
+    main_net_amount: float | None = None  # 今日主力净流入（元；仅 tdx 链路赋值，None=未知，区别于 0=无流入）
 
 
 @dataclass

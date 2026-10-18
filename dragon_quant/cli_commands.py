@@ -318,23 +318,34 @@ def _cmd_dragons(args):
 
 
 def _cmd_prep(args):
-    """盘后复盘：识别主线+情绪温度，产出候选池快照并落库。"""
-    from dragon_quant.review_account.prep import run_prep
+    """盘后复盘：采集数据资产 + 计算候选池/情绪快照，落 prep.db。"""
+    from dragon_quant.review_account.prep import PrepError, run_prep
     from dragon_quant.storage import db
 
-    source = args.source
     if args.date:
         trade_date = _normalize_cli_date(args.date)
     else:
-        dates = db.list_dragon_trade_dates(source=source)
+        dates = db.list_dragon_trade_dates(source="v2")
         if not dates:
-            print(json.dumps({"error": f"无 {source} 龙头记录，无法确定复盘日"},
+            print(json.dumps({"error": "无 v2 龙头记录，无法确定复盘日"},
                              ensure_ascii=False, indent=2))
             sys.exit(1)
         trade_date = dates[-1]
 
-    result = run_prep(trade_date, source=source)
+    try:
+        result = run_prep(trade_date, recompute=args.recompute)
+    except PrepError as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False, indent=2))
+        sys.exit(1)
+    except Exception as e:  # 与其它命令一致：输出 JSON 错误而非抛栈
+        print(json.dumps({"error": f"{type(e).__name__}: {e}"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    # 降级摘要：盘后一眼核对哪些资产缺失/异常（details 见 prep_assets.collection_report）
+    degraded = (result.get("sentiment") or {}).get("degraded") or []
+    if degraded:
+        print(f"⚠️ 降级资产: {', '.join(degraded)}", file=sys.stderr)
 
 
 def _cmd_auction(args):
@@ -460,6 +471,13 @@ def _cmd_storage(args):
                 print(f"{key:10s} {d['files']:6d} {d['size']:>8s}")
             else:
                 print(f"{key:10s}  (不存在)")
+        # 数据库文件（clear --all 不清理，仅展示）
+        print(f"{'数据库':10s} {'':>6s} {'大小':>8s}")
+        print("-" * 28)
+        for key in ("dragon_db", "prep_db"):
+            d = s[key]
+            print(f"{key:10s} {'':>6s} {d['size']:>8s}" if d["exists"]
+                  else f"{key:10s}  (不存在)")
 
     elif args.storage_action == "clear":
         if args.all:

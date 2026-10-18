@@ -40,6 +40,7 @@ LOG_DIR = DATA_DIR / "logs"
 RESULTS_DIR = DATA_DIR / "results"
 SHARED_DIR = DATA_DIR / "shared"
 DB_PATH = DATA_DIR / "dragon.db"
+PREP_DB_PATH = DATA_DIR / "prep.db"   # 盘后复盘独立资产库（prep_assets + prep_snapshots）
 
 for _d in [COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR]:
     _d.mkdir(parents=True, exist_ok=True)

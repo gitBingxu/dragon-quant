@@ -15,6 +15,7 @@
     概念板块为 885xxx 映射，统一在详情页 <input id="clid"> 解析。
 """
 
+import json
 import re
 import threading
 import time
@@ -53,6 +54,20 @@ PAGE_URL = f"{Q_BASE}/thshy/detail/order/desc/page/{{page}}/code/{{code}}/"
 TIME_URL = D_BASE + "/v6/time/48_{inner}/last.js"
 # 历史 K 线路径：周期码 30=5分钟（实测），last1000 取最近 1000 根
 LINE_URL = D_BASE + "/v6/line/48_{inner}/30/last1000.js"
+
+# 涨停聚焦 dataapi（UTF-8 JSON；仅需 UA + Referer，无 Cookie/ut-token/hexin-v）。
+# field 参数为页面同款字段集：缺省时只回 8 个基础字段（无 reason_type 等）。
+# limit 上限实测 200（更大值返回 status_code=-1），大涨停日需按 page 翻页。
+DATAAPI_REFERER = "https://data.10jqka.com.cn/"
+DATAAPI_PAGE_LIMIT = 200
+DATAAPI_MAX_PAGES = 10   # 页数上限保护（10×200=2000，远超历史单日涨停峰值）
+LIMIT_UP_POOL_URL = (
+    DATA_BASE + "/dataapi/limit_up/limit_up_pool?page={page}&limit="
+    + str(DATAAPI_PAGE_LIMIT)
+    + "&field=199112,10,9001,330323,330324,330325,9002,330329,133971,133970,1968584,3475914,9003,9004"
+    "&filter=HS,GEM2STAR&date={date}&order_field=330324&order_type=0"
+)
+BLOCK_TOP_URL = DATA_BASE + "/dataapi/limit_up/block_top?date={date}&limit=200"
 
 # 6 位 code → innerCode 进程内缓存，避免每次 5 分 K 都多一次详情页请求
 _INNER_CACHE: dict[str, str] = {}
@@ -104,6 +119,36 @@ def _fetch(url: str, referer: str = "", gbk: bool = False) -> Optional[str]:
         return raw.decode(enc, errors="ignore")
     except Exception as e:
         _record_failure(e)
+    return None
+
+
+def _fetch_with_retry(url: str, referer: str = "", gbk: bool = False,
+                      attempts: int = 3, backoff: float = 0.8,
+                      raise_on_exhaust: bool = False) -> Optional[str]:
+    """带退避重试的 HTTP GET（应对 403 频控）。
+
+    raise_on_exhaust=False（存量契约，如行业排行）：重试耗尽返回 None，
+    调用方自行降级，绝不上抛异常；raise_on_exhaust=True（prep 采集契约）：
+    重试耗尽抛 RuntimeError，由采集器捕获记 status=error。
+    """
+    last_err: Optional[Exception] = None
+    for attempt in range(attempts):
+        try:
+            headers = {"User-Agent": UA}
+            if referer:
+                headers["Referer"] = referer
+            req = urllib.request.Request(url, headers=headers)
+            enc = "gbk" if gbk else "utf-8"
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                raw = resp.read()
+            return raw.decode(enc, errors="ignore")
+        except Exception as e:
+            last_err = e
+            if attempt < attempts - 1:
+                time.sleep(backoff * (attempt + 1))
+    _record_failure(last_err)  # 只在退避耗尽时计一次，避免失败计数被放大 N 倍
+    if raise_on_exhaust:
+        raise RuntimeError(f"THS 请求重试 {attempts} 次仍失败: {url}: {last_err}")
     return None
 
 
@@ -296,14 +341,10 @@ class THSProvider(StockProvider):
         t0 = time.time()
         seen: dict[str, SectorPerformance] = {}
         for p in range(1, RANKING_MAX_PAGES + 1):
-            part = None
-            for attempt in range(3):  # 退避重试：应对 403 频控
-                html = _fetch(RANKING_URL.format(page=p),
-                             referer=f"{DATA_BASE}/", gbk=True)
-                part = self._parse_ranking_html(html) if html else None
-                if part:
-                    break
-                time.sleep(0.8 * (attempt + 1))  # 0.8s / 1.6s 退避
+            html = _fetch_with_retry(RANKING_URL.format(page=p),
+                                     referer=f"{DATA_BASE}/", gbk=True,
+                                     raise_on_exhaust=False)  # 旧契约：持续 403 → None → continue
+            part = self._parse_ranking_html(html) if html else None
             if not part:  # 重试后仍空 → 末页或持续限流
                 continue
             for s in part:
@@ -346,6 +387,71 @@ class THSProvider(StockProvider):
                 turnover_rate=0.0,
             ))
         return result
+
+    # ─── prep 盘后复盘采集（涨停聚焦 dataapi：UTF-8 JSON，UA+Referer 即可）───
+    # 错误契约：重试耗尽/响应解析失败抛 RuntimeError，由 prep 采集器记 status=error。
+
+    def get_limit_up_pool(self, date: str) -> dict:
+        """THS 涨停池（T 日权威涨停/连板/归因数据源），date=YYYYMMDD。
+
+        返回 {'total': int, 'rows': [原始行]}；行含 reason_type/limit_up_type/
+        open_num/order_volume/limit_up_suc_rate/high_days/first,last_limit_up_time/
+        is_again_limit 等（依赖 URL 中的 field 参数集，缺省只回 8 个基础字段）。
+
+        服务端 limit 上限 200，按 page 翻页取全量（大涨停日 total 可达 800+，
+        单页会静默截断）。页数上限 DATAAPI_MAX_PAGES；按 code 去重，防止服务端
+        忽略 page 时重复累计并放大聚合计数。
+        """
+        rows: list = []
+        seen: set[str] = set()
+        total = 0
+        page = 1
+        while page <= DATAAPI_MAX_PAGES:
+            raw = _fetch_with_retry(LIMIT_UP_POOL_URL.format(page=page, date=date),
+                                    referer=DATAAPI_REFERER, raise_on_exhaust=True)
+            try:
+                payload = json.loads(raw)
+                if payload.get("status_code") not in (0, None):
+                    raise RuntimeError(
+                        f"status_code={payload.get('status_code')} {payload.get('status_msg')}")
+                data = payload["data"]
+                info = data.get("info") or []
+                total = int((data.get("page") or {}).get("total") or 0)
+            except (ValueError, KeyError, TypeError) as e:
+                raise RuntimeError(f"涨停池响应解析失败 date={date} page={page}: {e}") from e
+            for r in info:
+                key = str((r or {}).get("code") or "")
+                if key and key in seen:      # 服务端忽略 page 时的去重保护
+                    continue
+                seen.add(key)
+                rows.append(r)
+            if len(info) < DATAAPI_PAGE_LIMIT:   # 末页
+                break
+            if total and len(rows) >= total:
+                break
+            page += 1
+        # 触顶页数上限仍未取满 → 显式标记，避免「部分数据被当作全量」
+        truncated = bool(total and len(rows) < total)
+        return {"total": total or len(rows), "rows": rows, "truncated": truncated}
+
+    def get_block_top(self, date: str) -> dict:
+        """THS 题材主线榜（题材涨停家数/最高板/成分名单），date=YYYYMMDD。
+
+        返回 {'rows': [原始行]}；行含 name/limit_up_num/high/high_num/
+        continuous_plate_num/stock_list。
+        """
+        raw = _fetch_with_retry(BLOCK_TOP_URL.format(date=date),
+                                referer=DATAAPI_REFERER, raise_on_exhaust=True)
+        try:
+            payload = json.loads(raw)
+            if payload.get("status_code") not in (0, None):
+                raise RuntimeError(
+                    f"status_code={payload.get('status_code')} {payload.get('status_msg')}")
+            data = payload["data"]
+            rows = data if isinstance(data, list) else (data.get("list") or data.get("info") or [])
+        except (ValueError, KeyError, TypeError) as e:
+            raise RuntimeError(f"题材主线榜响应解析失败 date={date}: {e}") from e
+        return {"rows": rows}
 
     # ─── 概念成分股（详情页 HTML，按涨跌幅降序）───
 

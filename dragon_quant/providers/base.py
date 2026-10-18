@@ -88,3 +88,33 @@ class StockProvider(ABC):
     def batch_get_quotes(self, codes: list[str]) -> list[Quote]:
         """批量获取实时行情快照"""
         raise NotImplementedError(f"{self.name} 不提供批量行情")
+
+    # ─── prep 盘后复盘采集方法（普通方法，默认未实现；仅 tdx/ths 覆写）───
+    # 错误契约（与存量「异常吞掉返回 []」不同）：transport 层失败（超时/403/连接错误）
+    # 抛异常，由 prep 采集器捕获记 status=error；仅「请求成功但确无数据」返回空。
+
+    def get_market_breadth_rows(self, count: int = 6000) -> list[dict]:
+        """全 A 实时行情行（已归一化为 native 类型，NaN→None）。
+
+        行含 code/name/close/pre_close/high/low/vol/amount/buy_price_limit/sell_price_limit。
+        """
+        raise NotImplementedError(f"{self.name} 不提供全 A 市场宽度")
+
+    def get_fg_boards(self, names: list[str]) -> dict[str, dict]:
+        """FG(风格)板块批量成员：一次板块列表解析 + 逐板块成员。
+
+        返回 {name: {'rows': [...], 'status': 'ok'|'missing'}}；transport 失败抛异常。
+        """
+        raise NotImplementedError(f"{self.name} 不提供 FG 板块批量成员")
+
+    def get_limit_up_pool(self, date: str) -> dict:
+        """THS 涨停池 dataapi，date=YYYYMMDD；返回 {'total': int, 'rows': [...]}"""
+        raise NotImplementedError(f"{self.name} 不提供涨停池")
+
+    def get_block_top(self, date: str) -> dict:
+        """THS 题材主线榜 dataapi，date=YYYYMMDD；返回 {'rows': [...]}"""
+        raise NotImplementedError(f"{self.name} 不提供题材主线榜")
+
+    def get_announcements(self, code: str, count: int = 30, page: int = 1) -> list[dict]:
+        """cninfo 个股公告单页（title/type/date/url），最新在前；失败抛异常"""
+        raise NotImplementedError(f"{self.name} 不提供公告")

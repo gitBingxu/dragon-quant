@@ -56,9 +56,10 @@ python -m dragon_quant review --ui-only
 python -m dragon_quant dragons
 python -m dragon_quant dragons --date 20260519 --true-only
 
-# 盘后复盘：识别主线+情绪温度(建议仓位)，产出候选池快照（review-account 消费）
+# 盘后复盘：采集原始数据资产(prep.db) + 计算主线/情绪温度/候选池快照（review-account 消费）
 python -m dragon_quant prep
 python -m dragon_quant prep --date 20260519
+python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算（算法升级重放）
 
 # 采集最近 3 日龙头的当日集合竞价盘口（TDX，落库 auction_snapshots）
 python -m dragon_quant auction
@@ -126,7 +127,8 @@ dragon_quant/
 │   ├── paths.py / manager.py
 │   ├── db.py                    # SQLite 门面 + 基础设施（_connect/_ensure_schema/_tables/init_db）
 │   ├── _base.py                 # 转发包装，令 `db._connect` 的 patch 传递到领域模块
-│   ├── blacklist.py / scans.py / dragons.py / prep.py / auction.py / logs.py
+│   ├── blacklist.py / scans.py / dragons.py / auction.py / logs.py
+│   ├── prep_db.py               # 盘后复盘独立库 prep.db（prep_assets 资产 + prep_snapshots 结果）
 │   └── review_account.py / signals.py
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
@@ -222,7 +224,9 @@ dragon_quant/
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 | `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、半仓、平仓原因与持有天数 |
-| `prep_snapshots` | 盘后复盘快照 | `prep` 命令产出；单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池），`UNIQUE(trade_date, source)`；加字段=加 JSON key，无需改表。sentiment 为盘后时点数据，补跑历史时近似 |
+| **`prep.db`（独立库）** | 盘后复盘数据仓 | 与 dragon.db 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示两者体积 |
+| `prep_assets`（prep.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务批量 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`fund_flow`/`cninfo_announcements`/`collection_report`；每日落库=时间换历史 |
+| `prep_snapshots`（prep.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池 + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；加字段=加 JSON key，无需改表 |
 | `auction_snapshots` | 集合竞价盘口快照 | `auction` 命令产出；单列 `items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
 
 ### v2 物理分表兼容
@@ -279,6 +283,20 @@ python -m dragon_quant sell --date 20260908 --at 14:55
 - 信号表 `buy_sell_signals`：`insert_signal` 对同一未平仓 code 幂等（部分唯一索引 `idx_buy_sell_open`）；`list_open_signals(before_date=...)` 只取买入日早于目标日的持仓；峰值经 `update_signal_peaks` 跨日写回供移动止盈/保本判定。
 - 同输入/参数/信号状态下买卖决策与回测一致；实时延迟与成交条件仍可能导致结果不同，不保证收益。
 - `buy` 输出首行显示**建议仓位**（来自盘后复盘快照 `sentiment.position_pct`，`load_market_sentiment` 读取，缺失时显示 `—`）。该值**仅供人工参考，不参与下单**：`SignalEngine` 无账户，只把它用于禁买判定（`sentiment_ban_enabled` 开启且 `position_pct==0` 时否决买入）。`sell` 不显示仓位。
+
+### 盘后复盘 `prep`（两段式 + 独立资产库）
+```bash
+python -m dragon_quant prep                              # 最新有龙头数据的交易日
+python -m dragon_quant prep --date 20260519
+python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算快照
+```
+- **两段式**：采集段按 `ASSET_COLLECTORS` 注册表逐类采集 → 单事务写 `prep.db/prep_assets`；计算段只从 `prep_assets` 读回（快照=资产纯函数）→ 写 `prep_snapshots`。新增因子 = 注册一行 + 一个 collector，不动流水线骨架。
+- **数据源**（tmdx 优先、THS 次之、**排除东财**）：`dragons`（dragons_v2 冻结）/ `ths_limit_up_pool`（涨停原因/板型/炸板次数/连板高度，THS dataapi）/ `ths_block_top`（题材主线，THS dataapi）/ `market_breadth`（全 A 扫描五合一：红盘率/涨停/炸板/跌停/成交额）/ `fg_boards`（昨日涨停溢价/晋级交叉/龙虎榜名单）/ `fund_flow`（候选股 `main_net_amount`）/ `cninfo_announcements`（公告标记）。
+- **时点门禁**：`same_day_only` 资产（`market_breadth`/`fg_boards`/`fund_flow`）仅当日采集，补跑历史日自动 `unavailable`；当日运行须 ≥15:30。日期校验用 TDX 指数日K（不依赖雪球 Cookie），「非交易日」与「日历数据源失败」报错严格区分。
+- **错误契约**：新增采集 provider 方法在 transport 失败时**抛异常**（存量方法「返回空」契约不变，如 `get_sector_ranking` 用 `_fetch_with_retry(raise_on_exhaust=False)`）；采集段逐 collector 隔离、计算段逐因子隔离，**任何单点失败不中断 prep**，失败原因落 `collection_report` 与 `sentiment.factor_errors`/`degraded`。
+- **情绪口径**：`limit_up_cnt` 主口径为 THS T 日精确值（`limit_up_cnt_ths`），FG T-1 交叉值并列保存（`limit_up_cnt_t1_fg`）且不进公式；THS 缺失时显式回退 FG 并标 `degraded`+`position_input` 血缘。`position_advice` 阈值（80/5/30/10）不变。
+- **只观察不进公式**：`broken_rate`/`yesterday_premium_pct`/`promotion_rate`/`max_board_height`/`lhb_cnt` 等 v0.2 因子先落 JSON 供观察与回测，**不改仓位阈值**（未验证参数不推广）。
+- `prep --source` 已移除（固定 v2）。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

@@ -339,21 +339,23 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     dragons_p.add_argument("--true-only", action="store_true",
                            help="只输出真龙 (is_true_dragon=1)")
 
-    # prep 子命令（盘后复盘：主线 + 情绪温度 + 候选池快照）
+    # prep 子命令（盘后复盘：主线 + 情绪温度 + 候选池快照；固定 v2）
     prep_p = sub.add_parser(
         "prep",
         help="盘后复盘，生成候选池+情绪温度快照",
-        usage="dragon-quant prep [--date YYYYMMDD] [--source v2]",
-        description="盘后执行复盘，识别主线与情绪温度，产出候选池快照并落库（review-account 消费）。",
+        usage="dragon-quant prep [--date YYYYMMDD] [--recompute]",
+        description="盘后执行复盘，采集原始数据资产（prep.db prep_assets）并计算候选池快照"
+                    "（prep_snapshots），review-account 消费。",
         epilog="""Examples:
   dragon-quant prep
   dragon-quant prep --date 20260519
+  dragon-quant prep --date 20260519 --recompute   # 用已存资产重算快照（算法升级重放）
 """,
     )
     prep_p.add_argument("--date", default=None,
                         help="复盘日 (YYYYMMDD / YYYY-MM-DD，默认最新有龙头数据的交易日)")
-    prep_p.add_argument("--source", default="v2", choices=["v1", "v2"],
-                        help="候选数据来源体系 (默认 v2)")
+    prep_p.add_argument("--recompute", action="store_true",
+                        help="跳过采集，用已存数据资产重算快照（无资产时报错）")
 
     # auction 子命令（采集最近 N 日龙头的当日集合竞价盘口并落库）
     auction_p = sub.add_parser(

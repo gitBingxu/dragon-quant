@@ -150,6 +150,18 @@ dragon-quant auction --days 3     # 指定回溯交易日数
 
 从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `auction_snapshots`（键 `trade_date+code`，同日重复采集幂等覆盖）。输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）。适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史，供集合竞价买点策略消费。
 
+### `assets` — 数据资产云端同步
+
+```bash
+dragon-quant assets doctor --profile r2 --samples 50
+```
+
+把 `prep` / `auction` 产出的原始数据资产备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选），本地始终是权威副本。当前版本提供 `doctor`（门槛 A：PUT / HEAD / GET / LIST / DELETE + 元数据回环）；`push` / `pull` / `status` / `verify` 在后续里程碑提供。
+
+凭据文件：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），结构为 `default_profile + profiles{r2,b2}`；也可用 `DQ_ASSETS_*` 环境变量覆盖当前 profile。
+
+云端布局：`blobs/<date>/<source>_<type>.<sha256>.json.gz` + `manifests/<date>.json`。设计依据见 `docs/solutions/2026-10-18-assets-cloud-sync-design.md`。
+
 ### `review` — 龙头回测
 
 ```bash
@@ -322,6 +334,7 @@ dragon_quant/
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
 ├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/trader/service，复用 review_account 策略）
+├── assets_sync/          # 数据资产云端同步（codec/models/credentials/doctor/backends）
 ├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
 └── models/types.py      # 数据模型
 ```

@@ -348,6 +348,50 @@ def _cmd_prep(args):
         print(f"⚠️ 降级资产: {', '.join(degraded)}", file=sys.stderr)
 
 
+def _cmd_assets(args):
+    """数据资产云端同步（M1：doctor 连通性门槛）。"""
+    from dragon_quant.assets_sync.backends.s3 import S3Backend
+    from dragon_quant.assets_sync.credentials import load_config
+    from dragon_quant.assets_sync.doctor import run_doctor
+    from dragon_quant.assets_sync.errors import AssetsSyncError
+
+    command = "assets doctor"
+    action = getattr(args, "assets_action", None)
+    if action != "doctor":
+        print(json.dumps({"ok": False, "command": "assets",
+                          "failed": [{"reason": "当前版本仅支持 assets doctor"}],
+                          "summary": {}}, ensure_ascii=False, indent=2))
+        sys.exit(2)
+    if args.samples < 1:
+        print(json.dumps({"ok": False, "command": command,
+                          "failed": [{"reason": "--samples 必须 >= 1"}],
+                          "summary": {}}, ensure_ascii=False, indent=2))
+        sys.exit(2)
+
+    try:
+        config = load_config(profile=args.profile)
+        backend = S3Backend(config, timeout=args.timeout)
+        summary = run_doctor(backend, samples=args.samples)
+    except AssetsSyncError as exc:
+        print(json.dumps({"ok": False, "command": command,
+                          "failed": [{"reason": str(exc)}], "summary": {}},
+                         ensure_ascii=False, indent=2))
+        sys.exit(2)
+    except Exception as exc:  # 配置/网络之外的意外错误也按配置错误退出
+        print(json.dumps({"ok": False, "command": command,
+                          "failed": [{"reason": f"{type(exc).__name__}: {exc}"}],
+                          "summary": {}}, ensure_ascii=False, indent=2))
+        sys.exit(2)
+
+    failed = list(summary.get("errors") or [])
+    failed += [{"op": "cleanup", "error": reason}
+               for reason in (summary.get("cleanup_errors") or [])]
+    print(json.dumps({"ok": summary["ok"], "command": command,
+                      "failed": failed, "summary": summary},
+                     ensure_ascii=False, indent=2))
+    sys.exit(0 if summary["ok"] else 1)
+
+
 def _cmd_auction(args):
     """采集最近 N 日龙头的当日集合竞价盘口并落库（auction_snapshots）。"""
     from dragon_quant.storage import db

@@ -63,6 +63,9 @@ python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重�
 
 # 采集最近 3 日龙头的当日集合竞价盘口（TDX，落库 auction_snapshots）
 python -m dragon_quant auction
+
+# 数据资产云端同步（门槛 A：R2/B2 连通性与元数据回环）
+python -m dragon_quant assets doctor --profile r2 --samples 50
 ```
 
 ### 前置条件
@@ -137,6 +140,11 @@ dragon_quant/
 │   ├── signal_engine.py         # SignalEngine：无账户/资金/数量/仓位限制，buy-all + 峰值跟踪
 │   ├── trader.py                # LiveTrader.buy/sell（回放当日事件流 → 信号入库）
 │   └── service.py               # run_buy/run_sell（策略装配 + 中文输出）
+├── assets_sync/                 # 数据资产云端同步（原始资产备份/恢复）
+│   ├── codec.py / models.py     # 规范化 JSON / gzip / 哈希 / manifest
+│   ├── credentials.py           # profile + 凭据（环境变量 → 0600 文件）
+│   ├── doctor.py                # 门槛 A：连通性与元数据回环
+│   └── backends/                # S3Backend（R2/B2，SigV4）+ LocalDirBackend（测试）
 ├── web_ui/                      # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer）
 └── models/types.py             # dataclass 数据模型
 ```
@@ -297,6 +305,17 @@ python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重�
 - **情绪口径**：`limit_up_cnt` 主口径为 THS T 日精确值（`limit_up_cnt_ths`），FG T-1 交叉值并列保存（`limit_up_cnt_t1_fg`）且不进公式；THS 缺失时显式回退 FG 并标 `degraded`+`position_input` 血缘。`position_advice` 阈值（80/5/30/10）不变。
 - **只观察不进公式**：`broken_rate`/`yesterday_premium_pct`/`promotion_rate`/`max_board_height`/`lhb_cnt` 等 v0.2 因子先落 JSON 供观察与回测，**不改仓位阈值**（未验证参数不推广）。
 - `prep --source` 已移除（固定 v2）。
+
+### 数据资产云端同步（`assets`）
+```bash
+python -m dragon_quant assets doctor --profile r2 --samples 50
+```
+- 目标：把 `prep.db/prep_assets` 与 `dragon.db/auction_snapshots` 的**原始数据资产**备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选）；算法快照、行情缓存、Cookie 不同步。
+- 本地是权威副本；云端只作异地备份。资产不可再生（`same_day_only` 与 `auction` 仅当日可取）。
+- 云端布局：`blobs/<date>/<source>_<type>.<content_sha256>.json.gz` + `manifests/<date>.json`（每日一份，重采覆盖）。哈希身份用**未压缩规范化 JSON** 的 sha256/md5，压缩字节另算传输哈希。
+- 凭据：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），`default_profile + profiles{r2,b2}`；环境变量 `DQ_ASSETS_*` 只覆盖当前 profile。
+- 当前里程碑：M1 提供 `doctor`（门槛 A：PUT/GET/HEAD/LIST/DELETE + 元数据回环）；`push` / `pull` / `status` / `verify` 在 M2-M4 提供。门槛 A 未通过前不得进入 M2。
+- 方案与风险记录：`docs/solutions/2026-10-18-assets-cloud-sync-design.md`、`docs/research/2026-10-18-assets-cloud-storage.md`。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

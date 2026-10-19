@@ -371,6 +371,31 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p.add_argument("--days", type=int, default=3,
                            help="取最近 N 个有龙头数据的交易日（默认 3）")
 
+    # assets 子命令（数据资产云端同步；M1 先提供 doctor）
+    assets_p = sub.add_parser(
+        "assets",
+        help="数据资产云端同步（备份/恢复）",
+        usage="dragon-quant assets <action> [action-options]",
+        description="把 prep/auction 产出的原始数据资产备份到 S3 兼容对象存储，或从云端恢复。",
+        epilog="""Examples:
+  dragon-quant assets doctor --profile r2 --samples 50
+""",
+    )
+    assets_subs = assets_p.add_subparsers(dest="assets_action")
+    assets_subs.title = "Actions"  # type: ignore[assignment]
+    assets_subs.metavar = "<action>"
+    assets_doctor = assets_subs.add_parser(
+        "doctor",
+        help="连通性与元数据回环检查（门槛 A）",
+        usage="dragon-quant assets doctor [--profile NAME] [--samples N]",
+        description="对选定 S3 兼容后端执行 PUT/HEAD/GET/LIST/DELETE，验证元数据回环与成功率。",
+    )
+    assets_doctor.add_argument("--profile", default=None, help="配置 profile（如 r2 / b2）")
+    assets_doctor.add_argument("--samples", type=int, default=50,
+                               help="PUT/HEAD/GET 样本数（默认 50）")
+    assets_doctor.add_argument("--timeout", type=float, default=60.0,
+                               help="单请求超时秒数（默认 60）")
+
     # buy 子命令
     buy_p = sub.add_parser(
         "buy",
@@ -476,6 +501,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_prep(args)
     elif args.command == "auction":
         _cmd_auction(args)
+    elif args.command == "assets":
+        _cmd_assets(args)
     elif args.command == "buy":
         _cmd_buy(args)
     elif args.command == "sell":
@@ -503,6 +530,7 @@ from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循�
     _cmd_dragons,
     _cmd_prep,
     _cmd_auction,
+    _cmd_assets,
     _cmd_buy,
     _cmd_sell,
     _cmd_vpa,

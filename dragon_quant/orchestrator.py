@@ -230,7 +230,7 @@ def _build_candidates(top_sectors: list, filtered_by_key: dict[str, list],
                     primary_sector_category=s.category,
                     primary_sector_source=s.source,
                 )
-            else:
+            elif s.name not in cand.concepts:
                 cand.concepts.append(s.name)
     return out
 
@@ -548,6 +548,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             rows = _cf_sync(f"sector:ranking:tdx:{cat}",
                             lambda c=cat: tdx.get_sector_ranking(asc=False,
                                                                  category=c)) or []
+        except ValueError:
+            raise
         except Exception as e:
             if logger:
                 logger.warn("fallback:sector_ranking",
@@ -560,6 +562,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             rows = _cf_sync(f"sector:ranking:ths:{cat}",
                             lambda c=cat: ths.get_sector_ranking(asc=False,
                                                                  category=c)) or []
+        except ValueError:
+            raise
         except Exception as e:
             if logger:
                 logger.warn("degraded:sector_ranking",
@@ -604,12 +608,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # 协议层按 code 请求、不带 board_type：逐板块剔除跨维度冲突 code（hy > gn > dq）
     rankings, collisions = _drop_code_collisions(rankings, logger)
-    for cat in list(rankings):
-        if not rankings[cat]:
-            rankings.pop(cat, None)
-            sector_sources.pop(cat, None)
-            if cat not in degraded:
-                degraded.append(cat)
+    # 按最终可用维度反推状态：被碰撞清空/取数失败的维度统一 unavailable + degraded
+    degraded = [c for c in SECTOR_CATEGORIES if c not in rankings]
 
     top_up = _merge_sector_rankings(rankings, top_n=SECTOR_TOP_N, keep=_sector_ok)
     # 领跌固定行业口径（资金承接语义不变）
@@ -617,7 +617,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                       key=lambda s: s.pct)[:RANK_DOWN_COUNT]
     sector_providers = {cat: (tdx if sector_sources[cat] == "tdx" else ths)
                         for cat in rankings}
-    sources_out = {cat: sector_sources.get(cat, "unavailable")
+    sources_out = {cat: (sector_sources.get(cat) if cat in rankings else "unavailable")
                    for cat in SECTOR_CATEGORIES}
 
     logger.phase("A", "板块排行", up=len(top_up), down=len(top_down),
@@ -829,8 +829,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     or cache.get(sector_1min_key(key))
                     or cache.get(sector_5min_key(key)))
 
-    sector_cache_miss = bool(candidate_pool) and all(
-        not _has_sector_data(c) for c in candidate_pool)
+    expected_keys = {k for k, comps in sector_components.items() if comps}
+    sector_cache_miss = bool(expected_keys) and all(
+        not _has_sector_data(c) for c in candidate_pool
+        if c.primary_sector_key in expected_keys)
     if sector_cache_miss:
         logger.error("degraded:sector_cache",
                      "所有候选的板块缓存键均未命中，疑似键名失配（评分将整体降级）")

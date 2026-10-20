@@ -105,7 +105,7 @@ dragon_quant/
 ├── providers/                   # 数据源适配层
 │   ├── base.py                  # StockProvider ABC + 板块 K 线方法
 │   ├── tdx.py                   # 通达信 TDX（首选）— 板块/成分股/K线/分时/五档行情，无 Cookie 无反爬
-│   ├── ths.py                   # 同花顺（回退）— 行业排行(HTTP)/成分股(HTML)/板块1分K/历史5分K
+│   ├── ths.py                   # 同花顺（回退）— 行业/概念/地区排行(HTTP)/成分股(HTML)/板块1分K/历史5分K
 │   ├── xueqiu.py                # 雪球（回退）— 个股日K/分时，需 Cookie
 │   ├── tencent.py               # 腾讯（回退）— 零认证，批量行情 + 收盘盘口(bid1)
 │   └── cookie.py                # Cookie 管理 + CLI

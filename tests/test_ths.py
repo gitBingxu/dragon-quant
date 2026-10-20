@@ -224,3 +224,17 @@ class TestCategoryRouting(unittest.TestCase):
         self.assertEqual(p._get_inner_code("300816", "gn"), "885517")
         self.assertIn("gn:300816", _INNER_CACHE)
         _INNER_CACHE.clear()
+
+
+class TestRankingMultiTbody(unittest.TestCase):
+
+    def test_skips_non_data_first_tbody(self):
+        html = ('<table><tbody><tr><td>x</td><td>摘要表</td><td>y</td><td>z</td></tr></tbody></table>'
+                '<table><tbody>'
+                '<tr><td>1</td><td><a href="http://q.10jqka.com.cn/gn/detail/code/300816/">机器人概念</a></td>'
+                '<td>1900</td><td>4.20%</td></tr>'
+                '</tbody></table>')
+        rows = THSProvider._parse_ranking_html(html, "gn")
+        self.assertEqual([r.code for r in rows], ["300816"])
+        self.assertEqual(rows[0].category, "gn")
+        self.assertEqual(rows[0].source, "ths")

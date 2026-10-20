@@ -60,6 +60,7 @@ python -m dragon_quant dragons --date 20260519 --true-only
 python -m dragon_quant prep
 python -m dragon_quant prep --date 20260519
 python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算（算法升级重放）
+python -m dragon_quant prep --verbose                     # 输出完整复盘 JSON（默认 4 行买入摘要）
 
 # 采集最近 3 日龙头的当日集合竞价盘口 + 行情，落原始资产并计算快照
 python -m dragon_quant auction
@@ -313,9 +314,14 @@ python -m dragon_quant sell --date 20260908 --at 14:55
 python -m dragon_quant prep                              # 最新有龙头数据的交易日
 python -m dragon_quant prep --date 20260519
 python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算快照
+python -m dragon_quant prep --verbose                     # 完整复盘 JSON（默认 4 行摘要）
 ```
 - **两段式**：采集段按 `ASSET_COLLECTORS` 注册表逐类采集 → 单事务写 `assets.db/prep_assets`；计算段只从 `prep_assets` 读回（快照=资产纯函数）→ 写 `prep_snapshots`。新增因子 = 注册一行 + 一个 collector，不动流水线骨架。
-- **数据源**（tmdx 优先、THS 次之、**排除东财**）：`dragons`（dragons_v2 冻结）/ `ths_limit_up_pool`（涨停原因/板型/炸板次数/连板高度，THS dataapi）/ `ths_block_top`（题材主线，THS dataapi）/ `market_breadth`（全 A 扫描五合一：红盘率/涨停/炸板/跌停/成交额）/ `fg_boards`（昨日涨停溢价/晋级交叉/龙虎榜名单）/ `fund_flow`（候选股 `main_net_amount`）/ `cninfo_announcements`（公告标记）。
+- **复盘窗口**：含 T 的最近 3 个交易日 `[T-2, T-1, T]`（按交易日历）。窗口日期在**采集段**解析并写入 `dragons` 资产（`window_days` / `window_trade_dates` / `days` 逐日 scan_id/version/count/status），compute 段仍是资产纯函数、`--recompute` 可重放。窗口内缺日跳过并标 `dragons_partial`；日历不足三日标 `dragons_window_short`；**三日并集为空**才算 `empty`；并集无行且存在 error 日 → collector 抛错（不把取数故障伪装成无龙头）。
+- **候选池**：三日真龙并集，同 code 按 `(-composite_score, rank)` 去重、完全同分取较新入选日；每只保留真实 `trade_date`（下游 `candidate_trade_date` 血缘）。`fund_flow` / `cninfo_announcements` codes 取并集（按 code 去重）。THS 归因字段只对 T 日入选候选填充，跨日候选为 `null`；主力净额/公告是 T 日时点信息，对所有候选附加。
+- **数据源**（tmdx 优先、THS 次之、**排除东财**）：`dragons`（dragons_v2 按窗口逐日冻结）/ `ths_limit_up_pool`（涨停原因/板型/炸板次数/连板高度，THS dataapi，T 日）/ `ths_block_top`（题材主线，THS dataapi，T 日）/ `market_breadth`（全 A 扫描五合一：红盘率/涨停/炸板/跌停/成交额）/ `fg_boards`（昨日涨停溢价/晋级交叉/龙虎榜名单）/ `fund_flow`（并集候选股 `main_net_amount`）/ `cninfo_announcements`（并集候选公告标记）。
+- **快照口径**：`version=0.3`；`dragon_source` 含 `window_days` / `dates`（逐日血缘）/ `version_mixed`。`window_days` 语义：`0`=dragons 资产不可用（血缘未知）、`1`=旧版单日口径重算、`3`=三日窗口。旧资产 `--recompute` 按单日口径重算（`window_days=1`），不产生 `dragons_*` 降级、不报错。
+- **CLI 输出**：默认 4 行中文（是否建议买入/仓位/等级/理由），等级 0.8→强烈买入、0.5→一般、0.3→轻仓博弈、0.0→不建议买入、None→不建议买入（数据不足）；降级信息并入理由，不再单独 stderr 警告。`--verbose` 输出完整 JSON。
 - **时点门禁**：`same_day_only` 资产（`market_breadth`/`fg_boards`/`fund_flow`）仅当日采集，补跑历史日自动 `unavailable`；当日运行须 ≥15:30。日期校验用 TDX 指数日K（不依赖雪球 Cookie），「非交易日」与「日历数据源失败」报错严格区分。
 - **错误契约**：新增采集 provider 方法在 transport 失败时**抛异常**（存量方法「返回空」契约不变，如 `get_sector_ranking` 用 `_fetch_with_retry(raise_on_exhaust=False)`）；采集段逐 collector 隔离、计算段逐因子隔离，**任何单点失败不中断 prep**，失败原因落 `collection_report` 与 `sentiment.factor_errors`/`degraded`。
 - **情绪口径**：`limit_up_cnt` 主口径为 THS T 日精确值（`limit_up_cnt_ths`），FG T-1 交叉值并列保存（`limit_up_cnt_t1_fg`）且不进公式；THS 缺失时显式回退 FG 并标 `degraded`+`position_input` 血缘。`position_advice` 阈值（80/5/30/10）不变。

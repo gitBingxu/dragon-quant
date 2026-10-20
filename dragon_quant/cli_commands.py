@@ -318,7 +318,10 @@ def _cmd_dragons(args):
 
 
 def _cmd_prep(args):
-    """盘后复盘：采集数据资产 + 计算候选池/情绪快照，落 assets.db。"""
+    """盘后复盘：采集数据资产 + 计算候选池/情绪快照，落 assets.db。
+
+    默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--verbose 输出完整 JSON。
+    """
     from dragon_quant.review_account.prep import PrepError, run_prep
     from dragon_quant.storage import db
 
@@ -341,11 +344,17 @@ def _cmd_prep(args):
         print(json.dumps({"error": f"{type(e).__name__}: {e}"},
                          ensure_ascii=False, indent=2))
         sys.exit(1)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    # 降级摘要：盘后一眼核对哪些资产缺失/异常（details 见 prep_assets.collection_report）
-    degraded = (result.get("sentiment") or {}).get("degraded") or []
-    if degraded:
-        print(f"⚠️ 降级资产: {', '.join(degraded)}", file=sys.stderr)
+    if getattr(args, "verbose", False):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    # 降级信息已并入理由行（details 见 prep_assets.collection_report / --verbose）
+    from dragon_quant.review_account.advice import format_advice_lines
+    try:
+        print("\n".join(format_advice_lines(result)))
+    except Exception as e:  # 快照已落库：展示失败不应让 cron 误判整次复盘失败
+        print(f"复盘已完成并落库，但摘要生成失败：{type(e).__name__}: {e}"
+              f"（可用 --verbose 查看完整结果）", file=sys.stderr)
 
 
 def _cmd_assets(args):

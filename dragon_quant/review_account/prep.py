@@ -34,6 +34,9 @@ FG_BOARD_NAMES = ["昨日涨停", "昨日跌停", "昨日连板", "昨日首板"
 CNINFO_WINDOW_DAYS = 7   # 公告窗口：保留 [T-7, T] 内公告
 CNINFO_MAX_PAGES = 5     # 翻页上限保护；触顶且未到窗口 → truncated
 
+# 复盘窗口：含 T 在内的最近 N 个日历交易日（T-2 / T-1 / T）
+WINDOW_TRADING_DAYS = 3
+
 _LIMIT_TOL_UP = 0.999    # 涨停/炸板判定容差（涨停价的 0.1%）
 _LIMIT_TOL_DOWN = 1.001
 
@@ -76,12 +79,18 @@ def position_advice(limit_up_cnt: int, limit_down_cnt: int) -> tuple:
 
 @dataclass
 class PrepContext:
-    """采集器共享上下文（dragons 先采，fund_flow/cninfo 消费其候选 codes）。"""
+    """采集器共享上下文（dragons 先采，fund_flow/cninfo 消费其候选 codes）。
+
+    ``window_trade_dates`` 由采集段前置解析（交易日历），采集器不得自行触网取日历；
+    ``window_days`` 是**请求**的窗口长度（日历不足时实际日期可能更少）。
+    """
     trade_date: str
     today: str
     tdx: TdxProvider
     ths: THSProvider
     dragons_rows: list = field(default_factory=list)
+    window_trade_dates: list = field(default_factory=list)
+    window_days: int = WINDOW_TRADING_DAYS
 
 
 @dataclass
@@ -93,18 +102,71 @@ class CollectorSpec:
 
 
 def _collect_dragons(ctx: PrepContext) -> dict:
-    """R 日真龙冻结（compute 的唯一真龙来源；含 scan_id/version 血缘）。"""
-    rows = db.get_dragons(ctx.trade_date, source="v2")
-    ctx.dragons_rows = rows
-    scan_ids = sorted({r.get("scan_id") for r in rows if r.get("scan_id")})
-    versions = sorted({r.get("version") for r in rows if r.get("version")})
+    """窗口内逐日冻结真龙（compute 的唯一真龙来源；含逐日 scan_id/version 血缘）。
+
+    逐日异常隔离：单日读取失败只把该日标 error，其它日继续；仅当**并集无任何行
+    且存在 error 日**时 raise，避免把取数故障伪装成「今日无龙头」。
+    """
+    window = list(ctx.window_trade_dates or [ctx.trade_date])
+    rows_all: list[dict] = []
+    days: list[dict] = []
+    errors: list[str] = []
+    for day in window:
+        try:
+            raw_rows = db.get_dragons(day, source="v2")
+            if not isinstance(raw_rows, list):
+                raise TypeError(f"get_dragons 返回 {type(raw_rows).__name__}，预期 list")
+            day_rows = _list_of_dicts(raw_rows)
+            scan_ids = sorted({r.get("scan_id") for r in day_rows if r.get("scan_id")})
+            versions = sorted({r.get("version") for r in day_rows if r.get("version")})
+            days.append({
+                "trade_date": day,
+                # 同日多次 scan（不同 topN）无法唯一归属 → null，不输出列表
+                "scan_id": scan_ids[0] if len(scan_ids) == 1 else None,
+                "version": versions[0] if len(versions) == 1 else None,
+                "count": len(day_rows),
+                "status": "ok" if day_rows else "empty",
+            })
+        except Exception as e:  # 单日失败不中断：记 error 继续下一个交易日
+            message = f"{type(e).__name__}: {e}"
+            errors.append(f"{day}: {message}")
+            days.append({"trade_date": day, "count": 0, "status": "error", "error": message})
+            continue
+        for row in day_rows:
+            item = dict(row)
+            item["trade_date"] = day       # 保留真实入选日（供 compute 去重/血缘）
+            rows_all.append(item)
+
+    if not rows_all and errors:
+        raise RuntimeError("三日龙头读取失败：" + "；".join(errors))
+
+    ctx.dragons_rows = rows_all
+    all_scan_ids = sorted({d["scan_id"] for d in days if d.get("scan_id")})
+    all_versions = sorted({d["version"] for d in days if d.get("version")})
+    single_day = len(window) == 1
     return {
         "trade_date": ctx.trade_date,
-        "scan_id": scan_ids[0] if len(scan_ids) == 1 else (scan_ids or None),
-        "version": versions[0] if len(versions) == 1 else (versions or None),
-        "count": len(rows),
-        "rows": rows,
+        # 顶层兼容键仅对单日窗口有值；多日窗口血缘一律看 days[]
+        "scan_id": all_scan_ids[0] if single_day and len(all_scan_ids) == 1 else None,
+        "version": all_versions[0] if single_day and len(all_versions) == 1 else None,
+        "count": len(rows_all),
+        "rows": rows_all,
+        "window_days": ctx.window_days,
+        "window_trade_dates": window,
+        "days": days,
     }
+
+
+def _dragon_codes(rows: list) -> list[str]:
+    """并按集 codes：按首次出现去重（保持窗口/日内的确定性顺序）。"""
+    seen: set[str] = set()
+    codes: list[str] = []
+    for row in rows:
+        code = row.get("code") if isinstance(row, dict) else None
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return codes
 
 
 def _collect_ths_limit_up_pool(ctx: PrepContext) -> dict:
@@ -180,7 +242,7 @@ def _fg_suspicious(payload: dict) -> Optional[str]:
 
 
 def _collect_fund_flow(ctx: PrepContext) -> dict:
-    codes = [d.get("code") for d in ctx.dragons_rows if d.get("code")]
+    codes = _dragon_codes(ctx.dragons_rows)
     quotes = ctx.tdx.batch_get_quotes(codes) if codes else []
     return {
         "as_of": ctx.today,
@@ -206,10 +268,7 @@ def _collect_cninfo(ctx: PrepContext) -> dict:
                     - timedelta(days=CNINFO_WINDOW_DAYS)).strftime("%Y-%m-%d")
     items = {}
     truncated_codes = []
-    for d in ctx.dragons_rows:
-        code = d.get("code")
-        if not code:
-            continue
+    for code in _dragon_codes(ctx.dragons_rows):
         anns: list[dict] = []
         truncated = True  # 默认触顶；翻到窗口起点或官方无更多则解除
         for page in range(1, CNINFO_MAX_PAGES + 1):
@@ -267,9 +326,29 @@ def _bar_date(b) -> str:
     return datetime.fromtimestamp(b.timestamp / 1000, SHANGHAI).strftime("%Y-%m-%d")
 
 
+def _trading_dates(tdx: TdxProvider) -> list[str]:
+    """TDX 指数日K → 升序交易日列表（不依赖雪球 Cookie）。"""
+    bars = tdx.get_kline("SH000001", days=120)
+    dates = sorted({_bar_date(b) for b in bars})
+    if not dates:
+        raise PrepError("交易日历数据源失败（TDX 指数日K为空），请稍后重试")
+    return dates
+
+
+def resolve_window_dates(trade_date: str, calendar: list,
+                         size: int = WINDOW_TRADING_DAYS) -> list[str]:
+    """取 `<= trade_date` 的最近 `size` 个交易日（升序）。
+
+    纯函数：不做 I/O；日历不足时返回全部可用日期，由 compute 段标
+    ``dragons_window_short`` 降级。
+    """
+    eligible = sorted(d for d in (calendar or []) if d <= trade_date)
+    return eligible[-size:] if size > 0 else []
+
+
 def _validate_trade_date(trade_date: str, tdx: TdxProvider,
-                         now: Optional[datetime] = None) -> None:
-    """prep 本地日期门禁（不依赖雪球日历）。
+                         now: Optional[datetime] = None) -> list[str]:
+    """prep 本地日期门禁（不依赖雪球日历），返回完整交易日列表。
 
     - T > 今日 → 报错；
     - T == 今日：<15:30 报「盘中」（不查日历，雪球日历 15:05 前不含当日会误判）；
@@ -282,19 +361,26 @@ def _validate_trade_date(trade_date: str, tdx: TdxProvider,
         raise PrepError(f"复盘日 {trade_date} 是未来日期")
     if trade_date == today and (now.hour, now.minute) < _AFTER_CLOSE:
         raise PrepError(f"{trade_date} 当日盘中，请 15:30 收盘后再运行 prep")
-    bars = tdx.get_kline("SH000001", days=120)
-    dates = {_bar_date(b) for b in bars}
-    if not dates:
-        raise PrepError("交易日历数据源失败（TDX 指数日K为空），请稍后重试")
+    dates = _trading_dates(tdx)
     if trade_date not in dates:
         raise PrepError(f"{trade_date} 非交易日")
+    return dates
 
 
-def _collect_all(trade_date: str, tdx: Optional[TdxProvider] = None) -> tuple[dict[str, dict], dict]:
-    """采集段：遍历注册表，逐 collector 隔离异常，返回 (payloads, report)。"""
+def _collect_all(trade_date: str, *, window_trade_dates: list,
+                 window_days: int = WINDOW_TRADING_DAYS,
+                 tdx: Optional[TdxProvider] = None) -> tuple[dict[str, dict], dict]:
+    """采集段：遍历注册表，逐 collector 隔离异常，返回 (payloads, report)。
+
+    ``window_trade_dates`` 必填（由 ``resolve_window_dates`` 从已校验日历解析），
+    避免调用方遗漏时隐式退化为单日或隐式联网取日历。``window_days`` 是**请求**的
+    窗口长度，由调用方显式传入，避免与解析 size 漂移。
+    """
     ctx = PrepContext(trade_date=trade_date,
                       today=datetime.now(SHANGHAI).strftime("%Y-%m-%d"),
-                      tdx=tdx or TdxProvider(), ths=THSProvider())
+                      tdx=tdx or TdxProvider(), ths=THSProvider(),
+                      window_trade_dates=list(window_trade_dates),
+                      window_days=window_days)
     payloads: dict[str, dict] = {}
     report: dict[str, dict] = {}
     for asset_type, spec in ASSET_COLLECTORS.items():
@@ -409,7 +495,30 @@ def _prepare_assets(assets: dict, trade_date: str) -> tuple[dict[str, dict], lis
             degraded.append(asset_type)
         else:
             usable[asset_type] = payload
+            if asset_type == "dragons":
+                degraded.extend(_window_degradations(payload))
     return usable, sorted(set(degraded))
+
+
+def _window_degradations(payload) -> list[str]:
+    """窗口口径降级标记（仅新资产；旧资产无 window_days 时一律跳过）。
+
+    防御式读取：payload 畸形（str/list）或字段缺失不得击穿 compute。
+    """
+    if not isinstance(payload, dict):
+        return []
+    window_days = payload.get("window_days")
+    if not isinstance(window_days, int) or isinstance(window_days, bool) or window_days <= 1:
+        return []
+    marks: list[str] = []
+    window_dates = payload.get("window_trade_dates")
+    window_dates = window_dates if isinstance(window_dates, list) else []
+    if len(window_dates) < window_days:
+        marks.append("dragons_window_short")
+    if any(day.get("status") in ("empty", "error")
+           for day in _list_of_dicts(payload.get("days"))):
+        marks.append("dragons_partial")
+    return marks
 
 
 def compute_sentiment(assets: dict) -> dict:
@@ -556,9 +665,13 @@ def compute_sentiment(assets: dict) -> dict:
 def compute_main_boards(assets: dict) -> list:
     """题材主线：block_top 主路径（题材+涨停家数+最高板+真龙命中数）；
     缺失回退 v0.1 真龙 concepts 计数（元素仅 board_name/dragon_count，消费方须 .get()）。"""
-    bt_raw = (assets.get("ths_block_top") or {}).get("rows")
+    bt_payload = assets.get("ths_block_top")
+    bt_payload = bt_payload if isinstance(bt_payload, dict) else {}
+    bt_raw = bt_payload.get("rows")
     bt_rows = [r for r in bt_raw if isinstance(r, dict)] if isinstance(bt_raw, list) else []
-    dragon_raw = (assets.get("dragons") or {}).get("rows")
+    dragon_payload = assets.get("dragons")
+    dragon_payload = dragon_payload if isinstance(dragon_payload, dict) else {}
+    dragon_raw = dragon_payload.get("rows")
     dragon_rows = [d for d in dragon_raw if isinstance(d, dict)] if isinstance(dragon_raw, list) else []
     dragon_codes = {d.get("code") for d in dragon_rows}
     if bt_rows:
@@ -572,8 +685,15 @@ def compute_main_boards(assets: dict) -> list:
         boards.sort(key=lambda b: (-(b.get("limit_up_num") or 0),
                                    str(b.get("board_name") or "")))
         return boards[:5]
+    # 并集口径：同一 code 跨日重复入选只计一次（保持首次出现顺序）
     counter: dict[str, int] = {}
+    seen_codes: set[str] = set()
     for d in dragon_rows:
+        code = d.get("code")
+        if code:
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
         concepts = d.get("concepts")
         for c in (concepts if isinstance(concepts, list) else []):
             counter[c] = counter.get(c, 0) + 1
@@ -581,43 +701,109 @@ def compute_main_boards(assets: dict) -> list:
     return [{"board_name": name, "dragon_count": cnt} for name, cnt in ranked[:3]]
 
 
+def _candidate_preference(candidate: dict) -> tuple:
+    """去重偏好键：与 ``market.candidate_key`` 对齐（-综合分, rank）。"""
+    score = candidate.get("composite_score")
+    rank = candidate.get("rank")
+    return (-(score if isinstance(score, (int, float)) else 0),
+            rank if isinstance(rank, int) else 999999)
+
+
+def _prefer_candidate(new: dict, old: dict) -> bool:
+    """新候选是否更优：偏好键更小；完全相同则入选日更新者胜。"""
+    key_new, key_old = _candidate_preference(new), _candidate_preference(old)
+    if key_new != key_old:
+        return key_new < key_old
+    return str(new.get("trade_date") or "") > str(old.get("trade_date") or "")
+
+
 def compute_candidates(assets: dict, trade_date: str) -> list:
-    """候选池：真龙 + THS 归因/板型 + 主力净额 + 公告标记（只增 key）。
+    """候选池：窗口内真龙并集（同 code 保留更优）+ 同日 THS 归因 + T 日资金/公告。
+
+    - 每只候选保留**行内真实入选日**（旧资产无行内日期时回退 ``trade_date``）；
+    - 归因字段仅在候选入选日与 THS 池日期一致时填充，跨日候选为 None（未知不伪造）；
+    - ``main_net_amount`` / ``announcements`` 是 T 日时点信息，对所有候选附加。
 
     调用方应已用 ``_prepare_assets`` 过滤不可用资产——例如 fund_flow 处于
     empty_suspicious 时该资产被剔除，main_net_amount 自然为 None（而非误导性 0）。
     """
-    pool_raw = (assets.get("ths_limit_up_pool") or {}).get("rows")
+    dragon_payload = assets.get("dragons")
+    dragon_payload = dragon_payload if isinstance(dragon_payload, dict) else {}
+    dragon_raw = dragon_payload.get("rows")
+    dragon_rows = [d for d in dragon_raw if isinstance(d, dict)] if isinstance(dragon_raw, list) else []
+
+    pool_payload = assets.get("ths_limit_up_pool")
+    pool_payload = pool_payload if isinstance(pool_payload, dict) else {}
+    pool_raw = pool_payload.get("rows")
     pool_rows = [r for r in pool_raw if isinstance(r, dict)] if isinstance(pool_raw, list) else []
     pool_by_code = {r.get("code"): r for r in pool_rows}
+    pool_day = pool_payload.get("trade_date")
+
     flow = (assets.get("fund_flow") or {}).get("quotes")
     flow = flow if isinstance(flow, dict) else {}
     anns = (assets.get("cninfo_announcements") or {}).get("items")
     anns = anns if isinstance(anns, dict) else {}
-    dragon_raw = (assets.get("dragons") or {}).get("rows")
-    dragon_rows = [d for d in dragon_raw if isinstance(d, dict)] if isinstance(dragon_raw, list) else []
-    out = []
+
+    merged: dict[str, dict] = {}
     for d in dragon_rows:
+        code = d.get("code")
+        if not code:
+            continue
         cand = dict(d)
-        cand["trade_date"] = trade_date
-        p = pool_by_code.get(d.get("code"))
+        cand["trade_date"] = d.get("trade_date") or dragon_payload.get("trade_date") or trade_date
+        previous = merged.get(code)
+        if previous is None or _prefer_candidate(cand, previous):
+            merged[code] = cand
+
+    out = []
+    for cand in merged.values():
+        code = cand.get("code")
+        same_day = pool_day is None or cand.get("trade_date") == pool_day
+        p = pool_by_code.get(code) if same_day else None
         cand["reason_type"] = p.get("reason_type") if p else None
         cand["limit_up_type"] = p.get("limit_up_type") if p else None
         cand["open_num"] = p.get("open_num") if p else None
         cand["is_again_limit"] = bool(p.get("is_again_limit")) if p else None
         cand["first_limit_up_time"] = _hhmmss(p.get("first_limit_up_time")) if p else None
-        q = flow.get(d.get("code"))
+        q = flow.get(code)
         cand["main_net_amount"] = q.get("main_net_amount") if isinstance(q, dict) else None
-        item = anns.get(d.get("code"))
+        item = anns.get(code)
         cand["announcements"] = (item.get("announcements") or []) if isinstance(item, dict) else []
         out.append(cand)
     return out
 
 
 def _dragon_source(assets: dict) -> dict:
-    d = assets.get("dragons") or {}
-    return {"trade_date": d.get("trade_date"), "scan_id": d.get("scan_id"),
-            "version": d.get("version"), "count": d.get("count")}
+    """真龙来源血缘：多日窗口输出逐日 dates；旧资产补 window_days=1 以保持口径可判定。"""
+    d = assets.get("dragons")
+    d = d if isinstance(d, dict) else {}
+    if not d:
+        # dragons 资产整体不可用：与「legacy 单日资产」区分（window_days=0）
+        return {"trade_date": None, "scan_id": None, "version": None, "count": None,
+                "window_days": 0, "dates": [], "version_mixed": False}
+    days = _list_of_dicts(d.get("days"))
+    if days:
+        dates = [{"trade_date": day.get("trade_date"), "scan_id": day.get("scan_id"),
+                  "version": day.get("version"), "count": day.get("count"),
+                  "status": day.get("status")} for day in days]
+        window_days = d.get("window_days")
+        window_days = window_days if isinstance(window_days, int) else len(days)
+    else:
+        count = d.get("count") or 0
+        dates = [{"trade_date": d.get("trade_date"), "scan_id": d.get("scan_id"),
+                  "version": d.get("version"), "count": count,
+                  "status": "ok" if count else "empty"}]
+        window_days = 1
+    versions = {item.get("version") for item in dates if item.get("version")}
+    return {
+        "trade_date": d.get("trade_date"),
+        "scan_id": d.get("scan_id"),
+        "version": d.get("version"),
+        "count": d.get("count"),
+        "window_days": window_days,
+        "dates": dates,
+        "version_mixed": len(versions) > 1,
+    }
 
 
 def _compute_all(trade_date: str, assets: dict) -> dict:
@@ -645,7 +831,7 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
     sentiment["degraded"] = sorted(set(sentiment.get("degraded") or []) | set(degraded))
     return {
         "trade_date": trade_date,
-        "version": "0.2",
+        "version": "0.3",
         "sentiment": sentiment,
         "main_boards": main_boards,
         "candidates": candidates,
@@ -672,8 +858,10 @@ def run_prep(trade_date: str, recompute: bool = False) -> dict:
             raise PrepError(f"{trade_date} 无可重算资产（请先正常采集 prep）")
     else:
         tdx = TdxProvider()
-        _validate_trade_date(trade_date, tdx)   # 复用同一 provider，避免二次握手
-        payloads, report = _collect_all(trade_date, tdx)
+        calendar = _validate_trade_date(trade_date, tdx)   # 复用同一 provider，避免二次握手
+        window = resolve_window_dates(trade_date, calendar, WINDOW_TRADING_DAYS)
+        payloads, report = _collect_all(trade_date, window_trade_dates=window,
+                                        window_days=WINDOW_TRADING_DAYS, tdx=tdx)
         assets_db.save_prep_assets(trade_date, payloads, report)
         assets = assets_db.get_prep_assets(trade_date)  # 读回：快照 = 资产的纯函数
     result = _compute_all(trade_date, assets)

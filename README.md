@@ -141,14 +141,21 @@ dragon-quant prep --date 20260519 --recompute # 用已存资产重算快照（�
 
 **时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日时自动跳过并标记 `unavailable`，不会把当日数据写到历史日名下；THS 涨停池/题材榜与 cninfo 公告支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 15:30 收盘后。
 
-### `auction` — 采集集合竞价盘口
+### `auction` — 采集集合竞价盘口与强度快照
 
 ```bash
-dragon-quant auction              # 最近 3 个交易日的龙头并集
-dragon-quant auction --days 3     # 指定回溯交易日数
+dragon-quant auction                        # 最近 3 个交易日的龙头并集
+dragon-quant auction --days 3               # 指定回溯交易日数
+dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
 ```
 
-从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db` 的 `auction_assets`（键 `trade_date+code`，同日重复采集幂等覆盖）。输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）/ `failed`（单股读写失败，逐 code 隔离不中断整批）。适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史，供集合竞价买点策略消费。
+从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，先**整批**获取行情（TDX 主、tencent 兜底，禁止逐股请求），再逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db/auction_assets`（`items_json` 盘口明细 + `quote_json` 行情快照，键 `trade_date+code`，同日重复采集幂等覆盖）。随后逐股评分、整批排名，并以单事务整日替换 `auction_snapshots`（`source="v2"`）。
+
+输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）/ `failed`（逐 code 隔离，含 `stage`）/ `quote`（`source` 为实际生效来源 `tdx`/`tencent`/`none`，含 `matched`/`missing`/`degraded`/`reason`）/ `scored_count` / `snapshot_saved_count` / `snapshot_ok` / `snapshot_skipped` / `snapshot_error` / `snapshots`（每只判定摘要）。行情缺失时快照仍会写入（`unverified` 且大概率被保守否决），并在 `quote.degraded` 与 stderr 告警中显式标注。
+
+`--recompute DATE` 不触网：只读该日 `auction_assets`（`items` + `quote`）重算并覆盖 `auction_snapshots`；`DATE` 支持 `YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`，输出统一 `YYYY-MM-DD`。无原始资产、全部 `items` 为空或全部评分失败时以非零码退出；未来日期拒绝。空结果不会删除既有快照。
+
+适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史；算法升级后用 `--recompute` 重放历史日。
 
 ### `assets` — 数据资产云端同步
 
@@ -356,7 +363,7 @@ SQLite 表分为三类：
 - 共享表：`vpa_analysis` / `sector_blacklist`
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
 - 实盘辅助买卖信号表：`buy_sell_signals`（`buy` / `sell` 命令使用，未平仓 code 唯一）
-- 数据资产独立库 `assets.db`：`prep_assets` / `prep_snapshots`（盘后复盘原始资产/结果）、`auction_assets` / `auction_snapshots`（竞价原始明细/结果；结果表本期仅建表）
+- 数据资产独立库 `assets.db`：`prep_assets` / `prep_snapshots`（盘后复盘原始资产/结果）、`auction_assets` / `auction_snapshots`（竞价原始资产/结果；采集与 `--recompute` 已接线）
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -377,8 +384,8 @@ SQLite 表分为三类：
 
 - **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `collection_report`。
 - **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `candidates` / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。
-- **`auction_assets`**：集合竞价原始盘口明细（`auction` 命令），单列 `items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`UNIQUE(trade_date, code)` 幂等覆盖；`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。
-- **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。**本期仅建表，尚未接线算法**；未来写入者必须遵循该契约，不得另立字段。
+- **`auction_assets`**：集合竞价原始资产（`auction` 命令），`items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`quote_json`（可空）存 `Quote` 行情快照（`prev_close` / `limit_down` / `float_market_cap` 等评分所需字段，非有限浮点清洗为 `null`；旧行为 `NULL`），`UNIQUE(trade_date, code)` 幂等覆盖；同日重采时 `items_json` 以本次为准，`quote_json` 若本次缺失则保留上次成功快照（`COALESCE`），避免瞬时行情故障抹掉不可再生上下文。`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。旧库首次**写入**时自动补 `quote_json` 列；读路径不执行列迁移（不 ALTER 既有表，缺列按 NULL 读取）。
+- **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。由 `auction` 采集与 `auction --recompute DATE` 写入（`source="v2"`）；同日重跑整日原子替换，空结果（无可用资产/全部评分失败）不会删除既有快照。写入者必须遵循该契约，不得另立字段。
 
 `storage status` 会展示 `dragon.db` / `assets.db` 的存在性与体积；旧 `prep.db` 若仍存在，会以 `legacy_prep_db` 单独标注（不再读写，确认后可删除）。`storage clear --all` 只清理 cache/results/logs/shared，数据库文件列入 `protected_databases`，永不删除。
 
@@ -387,8 +394,8 @@ SQLite 表分为三类：
 存储层重构不自动迁移历史数据。旧 `prep.db` 与 dragon.db 的遗留 `auction_snapshots` 表保留但不再读写：
 
 - **首次运行新版本前**：`mv "<DQ_DATA_DIR>/prep.db" "<DQ_DATA_DIR>/assets.db"`（如有 `-wal`/`-shm` 一并移动），即可保留历史复盘资产与快照。
-- **执行迁移 SQL 前先建表**：`assets.db` 的 4 张表在首次读写时惰性创建。刚完成 `mv` 或新建库后，先运行一次会写库的命令，例如 `python -m dragon_quant prep --recompute --date <已存日期>`（无旧资产时用盘后 `python -m dragon_quant prep`，或当日 9:25 后 `python -m dragon_quant auction`）。
-- **导入竞价原始明细**（幂等）：
+- **执行迁移 SQL 前先建表**：`assets.db` 的 4 张表在首次读写时惰性创建。刚完成 `mv` 或新建库后，先运行一次会写库的命令，例如 `python -m dragon_quant prep --recompute --date <已存日期>`（无旧资产时用盘后 `python -m dragon_quant prep`，或当日 9:25 后 `python -m dragon_quant auction`）。旧库缺 `auction_assets.quote_json` 时，首次 `auction` **写入**会自动补列（读路径不执行列迁移）；`auction --recompute` 只读资产，不会补列。
+- **导入竞价原始明细**（幂等；旧表无行情快照，`quote_json` 留 `NULL`）：
 ```bash
 sqlite3 "<DQ_DATA_DIR>/assets.db"
 ```
@@ -398,8 +405,8 @@ INSERT OR IGNORE INTO auction_assets(trade_date, code, name, items_json)
 SELECT trade_date, code, name, items_json FROM legacy.auction_snapshots;
 DETACH DATABASE legacy;
 ```
-  旧 `prep.db` 同理，可用 `ATTACH` + `INSERT OR IGNORE` 将 `prep_assets` / `prep_snapshots` 拷入 `assets.db`。
-- **未迁移时**：历史日 `prep --recompute` 会报「无可重算资产」，review-account 候选池回退「前 3 日真龙并集」、情绪仓位降级（既有回退路径）。
+  旧 `prep.db` 同理，可用 `ATTACH` + `INSERT OR IGNORE` 将 `prep_assets` / `prep_snapshots` 拷入 `assets.db`。旧竞价资产可先补跑一次 `auction` 采集（当日）获得 `quote_json`，或用 `--recompute` 接受行情缺失降级。
+- **未迁移时**：历史日 `prep --recompute` 会报「无可重算资产」；`auction --recompute` 会报「无竞价原始资产」。review-account 候选池回退「前 3 日真龙并集」、情绪仓位降级（既有回退路径）。
 
 ## 免责声明
 

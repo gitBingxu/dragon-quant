@@ -357,19 +357,24 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     prep_p.add_argument("--recompute", action="store_true",
                         help="跳过采集，用已存数据资产重算快照（无资产时报错）")
 
-    # auction 子命令（采集最近 N 日龙头的当日集合竞价盘口并落库）
+    # auction 子命令（采集最近 N 日龙头的当日集合竞价盘口并落库；或重算已存快照）
     auction_p = sub.add_parser(
         "auction",
-        help="采集最近 N 日龙头的当日集合竞价盘口（TDX）",
-        usage="dragon-quant auction [--days 3]",
-        description="从 dragons_v2 取最近 N 个交易日的龙头并集，拉取当日集合竞价盘口并落库到 assets.db/auction_assets。",
+        help="采集最近 N 日龙头的当日集合竞价盘口（TDX），或重算已存快照",
+        usage="dragon-quant auction [--days 3] | dragon-quant auction --recompute DATE",
+        description="从 dragons_v2 取最近 N 个交易日的龙头并集，拉取当日集合竞价盘口与批量行情，"
+                    "落库原始资产（assets.db/auction_assets）并计算强度快照（auction_snapshots）。"
+                    "使用 --recompute 时不触网，用已存原始资产重算指定交易日快照。",
         epilog="""Examples:
   dragon-quant auction
   dragon-quant auction --days 3
+  dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
 """,
     )
     auction_p.add_argument("--days", type=int, default=3,
                            help="取最近 N 个有龙头数据的交易日（默认 3）")
+    auction_p.add_argument("--recompute", metavar="DATE", default=None,
+                           help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
 
     # assets 子命令（数据资产云端同步；M1 先提供 doctor）
     assets_p = sub.add_parser(

@@ -61,8 +61,10 @@ python -m dragon_quant prep
 python -m dragon_quant prep --date 20260519
 python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算（算法升级重放）
 
-# 采集最近 3 日龙头的当日集合竞价盘口（TDX，落库 assets.db/auction_assets）
+# 采集最近 3 日龙头的当日集合竞价盘口 + 行情，落原始资产并计算快照
 python -m dragon_quant auction
+# 用已存原始资产重算某日竞价快照（不触网）
+python -m dragon_quant auction --recompute 20260519
 
 # 数据资产云端同步（门槛 A：R2/B2 连通性与元数据回环）
 python -m dragon_quant assets doctor --profile r2 --samples 50
@@ -121,6 +123,7 @@ dragon_quant/
 ├── auction/                     # 集合竞价强度评分器（纯函数、无 I/O；四维加权 + 否决闸门）
 │   ├── registry.py              # 权重/阈值/窗口常量（集中调参）
 │   ├── strength.py              # evaluate / rank_auctions
+│   ├── serialize.py             # Quote/AuctionVerdict → JSON 原生 dict（NaN/inf 清洗）
 │   └── types.py                 # AuctionVerdict
 │
 ├── vpa/                         # 量价分析（独立模块，插件式因子 FACTORS）
@@ -240,8 +243,8 @@ dragon_quant/
 | **`assets.db`（独立库）** | 数据资产仓（prep + auction） | 与 dragon.db 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示 dragon.db / assets.db / 旧 prep.db 体积 |
 | `prep_assets`（assets.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务批量 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`fund_flow`/`cninfo_announcements`/`collection_report`；每日落库=时间换历史 |
 | `prep_snapshots`（assets.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池 + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；加字段=加 JSON key，无需改表 |
-| `auction_assets`（assets.db） | 集合竞价原始盘口明细 | `auction` 命令产出；单列 `items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
-| `auction_snapshots`（assets.db） | 集合竞价强度计算结果 | 单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version`/`code`/`is_weak`/`strength`/`direction`/`level`/`dims`/`reject_reason`/`unverified`/`rank`），`UNIQUE(trade_date, code, source)`、`source` 默认 `v2`；**本期仅建表，未接线算法** |
+| `auction_assets`（assets.db） | 集合竞价原始资产 | `auction` 命令产出；`items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`quote_json`（可空）存 `Quote` 行情快照（昨收/跌停价/流通市值等，旧行为 NULL），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
+| `auction_snapshots`（assets.db） | 集合竞价强度计算结果 | `auction` 采集/`auction --recompute DATE` 写入；单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version`/`code`/`is_weak`/`strength`/`direction`/`level`/`dims`/`reject_reason`/`unverified`/`rank`），`UNIQUE(trade_date, code, source)`、`source` 默认 `v2`；同日重跑整日原子替换，空结果不删旧快照 |
 
 > **存储层重构（2026-10-20）**：旧 `prep.db`（`prep_assets`/`prep_snapshots`）与 dragon.db 的遗留 `auction_snapshots` 表保留但**不再读写、不自动迁移、不 DROP**。需要保留历史时按 README「持久化」段的手工迁移片段操作。
 
@@ -368,7 +371,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### ✅ 已完成
 - 五维「识别真龙」评分器 `scorers/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
-- 集合竞价强度评分器 `auction/`（方向/供需/量价/末段抢筹四维加权 + 否决闸门，纯函数）；结果表 `assets.db/auction_snapshots` 已建、尚未接线
+- 集合竞价强度评分器 `auction/`（方向/供需/量价/末段抢筹四维加权 + 否决闸门，纯函数）；`auction` 采集与 `auction --recompute DATE` 已接线，结果写 `assets.db/auction_snapshots`（原始资产含 `items_json` + `quote_json`，快照 = 原始资产纯函数）
 - 数据资产独立库 `assets.db`（`prep_assets`/`auction_assets` 原始资产 + `prep_snapshots`/`auction_snapshots` 结果），与 dragon.db 物理隔离
 - 3 个 Provider（同花顺/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 HTTP GET+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）

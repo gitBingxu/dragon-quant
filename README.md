@@ -71,7 +71,7 @@ dragon-quant review --ui
 # 查看龙头回测面板（默认读取 dragons_v2）
 dragon-quant review --ui-only
 
-# 实盘辅助交易（复用 review-account 策略，纯信号记账，不维护模拟账户）
+# 实盘辅助交易（复用 review-account 策略，纯信号记账，不维护真实账户）
 dragon-quant buy                              # 盘中：候选池内触发买点的标的全部记入买入信号
 dragon-quant sell                             # 盘中：对已买入未卖出的信号判定是否卖出
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
@@ -210,13 +210,15 @@ dragon-quant buy                              # 实时：回放截至当前已�
 dragon-quant sell --date 20260908 --at 14:55  # 对已买入未卖出的信号判定卖出
 ```
 
-`buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护模拟账户/资金/数量/仓位**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
+`buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
 
-- `SignalEngine` 复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/数量/仓位/次数限制；卖出用 notional Position（qty=100）保证 `break_even_price` 与回测精确一致。
+- `SignalEngine` 复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/仓位/次数限制；卖出数量用 `notional_quantity`（`initial_cash × max_position_pct`，与回测首仓同口径）落库冻结，保证 `break_even_price` 与回测精确一致；半仓规则只减半不平仓，`half_close_signal` 冻结半仓腿后剩余半仓继续跟踪。
+- 组合风控经 `live_trade/shadow.py` 从信号表按回放时点重建影子状态，逐事件调用同一个 `risk_governor`：日级熔断、连亏熔断与 `equity<=0` 破产闸跟随；delevel 降仓在无 sizing 场景不适用（详见 `review_account/STRATEGY.md` §5）。
+- 数据分级：`buy`/`sell` 的行情完整性判定都覆盖「候选 ∪ 持仓」，任一分时缺失即整日走日K兜底，输出带 `data_quality` 提示。
 - 历史回放必须显式指定 `--date YYYYMMDD --at HH:MM`，仅用历史数据；实时运行不指定 `--at`，回放截至当前已完成的5分钟K。
-- 信号表 `buy_sell_signals`：同一未平仓 code 幂等去重，峰值跨日写回供移动止盈/保本判定。
+- 信号表 `buy_sell_signals`：同一未平仓 code 幂等去重，峰值跨日写回供移动止盈/保本判定；历史重放可能命中既有行，输出标注「未落库」。
 - `buy/sell` 仍不接券商。数据齐全、参数和事件一致时，两条路径的买点/卖点/成交价与回测一致，不代表真实市场必然成交。
-- `buy` 输出首行显示**建议仓位**（盘后复盘快照 `sentiment.position_pct`，缺失显示 `—`），**仅供人工参考、不代下单**（`SignalEngine` 无账户）；该值另外用于禁买判定。
+- `buy` 输出首行显示**建议仓位**（盘后复盘快照 `sentiment.position_pct`，缺失显示 `—`），**仅供人工参考、不代下单**（`SignalEngine` 不维护真实账户）；该值另外用于禁买判定。
 
 
 ### `vpa` — 量价分析
@@ -340,7 +342,7 @@ dragon_quant/
 ├── utils/trading.py     # 交易日历工具
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
-├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/trader/service，复用 review_account 策略）
+├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/shadow/trader/service，复用 review_account 策略）
 ├── assets_sync/          # 数据资产云端同步（codec/models/credentials/doctor/backends）
 ├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
 └── models/types.py      # 数据模型
@@ -376,7 +378,7 @@ SQLite 表分为三类：
 
 `review_account_*` 表用于账户级模拟交易：`runs` 保存 UI 记录名称、策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因，`events` 保存买入、卖出、持仓和空仓原因时间线。
 
-`buy_sell_signals` 表用于实盘辅助交易（`buy` / `sell`）：记录买入（code/name/entry_date/entry_price/买入原因与信号）与卖出（exit_date/exit_price/卖出原因/持有天数），并保存最高浮盈/价（`highest_return`/`highest_price`）与半仓标记供跨日移动止盈/保本判定；未平仓 code 由部分唯一索引 `idx_buy_sell_open` 保证幂等去重。
+`buy_sell_signals` 表用于实盘辅助交易（`buy` / `sell`）：记录买入（code/name/entry_date/entry_price/`qty`/买入原因与信号）与卖出（exit_date/exit_price/卖出原因/持有天数），半仓规则通过 `took_profit_half` + `half_exit_date/price/qty/reason_code/reason_text/signal_json` 冻结半仓腿（`status` 仍为 `open`），并保存最高浮盈/价（`highest_return`/`highest_price`）供跨日移动止盈/保本判定；未平仓 code 由部分唯一索引 `idx_buy_sell_open` 保证幂等去重。
 
 ### 数据资产独立库 `assets.db`
 

@@ -145,7 +145,8 @@ dragon_quant/
 ├── review.py                    # 龙头回测验证
 ├── review_account/              # 共享策略/事件引擎/成交/数据/评估/盘后复盘（strategy/engine/execution/data/market/prep/evaluation）
 ├── live_trade/                  # 实盘辅助交易（buy/sell；复用 review_account 策略，纯信号记账）
-│   ├── signal_engine.py         # SignalEngine：无账户/资金/数量/仓位限制，buy-all + 峰值跟踪
+│   ├── signal_engine.py         # SignalEngine：无账户/资金/仓位限制，buy-all + 峰值跟踪 + 影子风控
+│   ├── shadow.py                # 影子状态：从 buy_sell_signals as-of 重建 AccountState（复用 risk_governor）
 │   ├── trader.py                # LiveTrader.buy/sell（回放当日事件流 → 信号入库）
 │   └── service.py               # run_buy/run_sell（策略装配 + 中文输出）
 ├── assets_sync/                 # 数据资产云端同步（原始资产备份/恢复）
@@ -239,7 +240,7 @@ dragon_quant/
 | `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
-| `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、半仓、平仓原因与持有天数 |
+| `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、`qty`（买入日冻结）、半仓腿（`half_exit_date/price/qty/reason_*/signal_json`）、平仓原因与持有天数 |
 | **`assets.db`（独立库）** | 数据资产仓（prep + auction） | 与 dragon.db 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示 dragon.db / assets.db / 旧 prep.db 体积 |
 | `prep_assets`（assets.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务批量 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`fund_flow`/`cninfo_announcements`/`collection_report`；每日落库=时间换历史 |
 | `prep_snapshots`（assets.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池 + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；加字段=加 JSON key，无需改表 |
@@ -295,13 +296,17 @@ python -m dragon_quant review-account --ui-only --source v2
 python -m dragon_quant buy --date 20260907 --at 10:00
 python -m dragon_quant sell --date 20260908 --at 14:55
 ```
-`buy/sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数（`evaluate_buy`/`evaluate_sell`/`fill_price`/`fee` 等），只做信号记账、**不维护模拟账户/资金/数量/仓位**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从 `buy_sell_signals` 筛出「买入日之前且未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
+`buy/sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数（`evaluate_buy`/`evaluate_sell`/`fill_price`/`fee`/`apply_sell_fill`/`track_peak` 等），只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从 `buy_sell_signals` 筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
 
-- `SignalEngine`（`live_trade/signal_engine.py`）复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/数量/仓位/次数限制；卖出用 notional Position（qty=100）保证 `break_even_price` 与回测精确一致。
-- 历史日期必须同时传 `--date YYYYMMDD --at HH:MM`（重放当日截至该时点的5分钟K）；实时今日回放截至当前已完成的5分钟K。绝不使用当前腾讯报价。
-- 信号表 `buy_sell_signals`：`insert_signal` 对同一未平仓 code 幂等（部分唯一索引 `idx_buy_sell_open`）；`list_open_signals(before_date=...)` 只取买入日早于目标日的持仓；峰值经 `update_signal_peaks` 跨日写回供移动止盈/保本判定。
+- `SignalEngine`（`live_trade/signal_engine.py`）复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/仓位/次数限制；卖出数量用 `notional_quantity`（`initial_cash × max_position_pct`，与回测首仓同口径）落库冻结，保证 `break_even_price` 与回测精确一致；买入不足一手时与回测一样不建仓。卖出/半仓的仓位记账经共享 `apply_sell_fill`，峰值经共享 `track_peak`，两引擎不复制规则。
+- **半仓记账**：`next_day_limit_up_half` 触发时 `half_close_signal` 冻结 `half_exit_qty/price/reason_*` 且保持 `status='open'`，剩余半仓继续跟踪；后续规则可再次触发 `close_signal` 全清。
+- **影子风控**：`live_trade/shadow.py` 从 `buy_sell_signals` 全量记录按回放时点（`as_of=target`）重建 `AccountState`，逐事件调用同一 `risk_governor`；日级熔断/连亏熔断跟随，`equity<=0` 额外触发破产闸；delevel 降仓在无 sizing 场景不适用。`build_shadow_state` 的 `cash` 是净值轧差项（不是现金主张），run 内买入同步扣减。
+- 数据分级：buy/sell 的 `codes` 均为「候选 ∪ as-of 持仓」，任一分时缺失即整日走日K兜底；结果带 `data_quality` 与 `degraded` 提示。
+- 历史日期必须同时传 `--date YYYYMMDD --at HH:MM`（重放当日截至该时点的5分钟K，as-of 过滤也以该时点为准）；实时今日回放截至当前已完成的5分钟K。绝不使用当前腾讯报价。
+- 信号表 `buy_sell_signals`：`insert_signal` 对同一未平仓 code 幂等（部分唯一索引 `idx_buy_sell_open`），返回 `(id, created)`；`list_open_signals(before_date=...)` 只取买入日早于目标日的持仓，`list_all_signals` 供影子重建；峰值经 `update_signal_peaks` 跨日写回供移动止盈/保本判定。
+- 运维契约：峰值新鲜度依赖每个交易日至少运行一次 `buy` 或 `sell`（buy 也会写回既有持仓峰值）；历史重放会写库，幂等命中时输出标注「未落库」。
 - 同输入/参数/信号状态下买卖决策与回测一致；实时延迟与成交条件仍可能导致结果不同，不保证收益。
-- `buy` 输出首行显示**建议仓位**（来自盘后复盘快照 `sentiment.position_pct`，`load_market_sentiment` 读取，缺失时显示 `—`）。该值**仅供人工参考，不参与下单**：`SignalEngine` 无账户，只把它用于禁买判定（`sentiment_ban_enabled` 开启且 `position_pct==0` 时否决买入）。`sell` 不显示仓位。
+- `buy` 输出首行显示**建议仓位**（来自盘后复盘快照 `sentiment.position_pct`，`load_market_sentiment` 读取，缺失时显示 `—`）。该值**仅供人工参考，不参与下单**：`SignalEngine` 不维护真实账户（仅有影子状态），只把它用于禁买判定（`sentiment_ban_enabled` 开启且 `position_pct==0` 时否决买入）。`sell` 不显示仓位。
 
 ### 盘后复盘 `prep`（两段式 + 独立资产库）
 ```bash

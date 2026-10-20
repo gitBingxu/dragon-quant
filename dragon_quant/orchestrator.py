@@ -830,9 +830,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                     or cache.get(sector_5min_key(key)))
 
     expected_keys = {k for k, comps in sector_components.items() if comps}
-    sector_cache_miss = bool(expected_keys) and all(
-        not _has_sector_data(c) for c in candidate_pool
-        if c.primary_sector_key in expected_keys)
+    check = [c for c in candidate_pool
+             if (c.primary_sector_key or c.primary_sector) in expected_keys]
+    sector_cache_miss = bool(check) and all(not _has_sector_data(c) for c in check)
     if sector_cache_miss:
         logger.error("degraded:sector_cache",
                      "所有候选的板块缓存键均未命中，疑似键名失配（评分将整体降级）")

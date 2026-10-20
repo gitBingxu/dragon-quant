@@ -448,8 +448,8 @@ class THSProvider(StockProvider):
                 pct_txt = re.sub(r"<[^>]+>", "", tds[3]).strip().rstrip("%")
                 seen.add(code_m.group(1))
                 result.append(SectorPerformance(
-                code=code_m.group(1),
-                name=name,
+                    code=code_m.group(1),
+                    name=name,
                     pct=_safe_float(pct_txt),
                     amplitude=0.0,
                     turnover_rate=0.0,

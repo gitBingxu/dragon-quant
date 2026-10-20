@@ -124,3 +124,14 @@ class StockProvider(ABC):
     def get_announcements(self, code: str, count: int = 30, page: int = 1) -> list[dict]:
         """cninfo 个股公告单页（title/type/date/url），最新在前；失败抛异常"""
         raise NotImplementedError(f"{self.name} 不提供公告")
+
+    # ─── prep 宏观扰动（普通方法，默认未实现；仅部分 provider 覆写）───
+    # 错误契约：transport/解析失败抛异常，由 providers.macro.collect_macro 逐源回退。
+
+    def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
+        """批量获取宏观日 K/报价，返回 {spec.key: normalized_dict}。
+
+        canonical 取「日 K 中日期 < trade_date 的最后一根」；quote 类回退源必须
+        自行校验 session_date < trade_date，否则拒绝该品种。transport 失败抛异常。
+        """
+        raise NotImplementedError(f"{self.name} 不提供宏观报价")

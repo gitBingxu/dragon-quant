@@ -18,6 +18,8 @@ def _assets(trade_date: str = "2026-10-19", **overrides):
                               "rows": [{"code": "600001", "reason_type": "低空经济",
                                         "limit_up_type": "换手板", "open_num": 3,
                                         "is_again_limit": 1, "high_days": "2天2板",
+                                        "change_rate": 9.99, "turnover_rate": 8.5,
+                                        "limit_up_suc_rate": 1.0,
                                         "first_limit_up_time": 1792114286}]},
         "ths_block_top": {"trade_date": trade_date, "api_date": "20261019",
                           "rows": [{"name": "低空经济", "limit_up_num": 23,
@@ -42,6 +44,52 @@ def _assets(trade_date: str = "2026-10-19", **overrides):
                                       "url": "u"}], "max_announcement_date": "2026-10-18",
                                      "truncated": False}},
                                  "truncated_codes": []},
+        "macro_global": {
+            "trade_date": trade_date, "as_of": trade_date,
+            "caliber": "last_completed_daily_bar_before_trade_date",
+            "instruments": {
+                "us_dji": {"key": "us_dji", "label": "道指", "kind": "index",
+                           "price_unit": "points", "chg_unit": "pct",
+                           "price": 51966.03, "prev_close": 52002.41,
+                           "chg": -36.38, "pct": -0.07, "chg_bp": None,
+                           "chg_bp_approx": None, "source": "tdx_ex",
+                           "code": "A_DJI", "market": "INTL_INDEX",
+                           "session_date": "2026-10-15", "raw_date": "20261015"},
+                "us_ixic": {"key": "us_ixic", "label": "纳指", "kind": "index",
+                            "price_unit": "points", "chg_unit": "pct",
+                            "price": 26430.89, "prev_close": 26140.03,
+                            "chg": 290.85, "pct": 1.11, "chg_bp": None,
+                            "chg_bp_approx": None, "source": "tdx_ex",
+                            "code": "A_IXIC", "market": "INTL_INDEX",
+                            "session_date": "2026-10-15", "raw_date": "20261015"},
+                "us_spx": {"key": "us_spx", "label": "标普", "kind": "index",
+                           "price_unit": "points", "chg_unit": "pct",
+                           "price": 7690.73, "prev_close": 7659.44,
+                           "chg": 31.29, "pct": 0.41, "chg_bp": None,
+                           "chg_bp_approx": None, "source": "tdx_ex",
+                           "code": "A_SPX", "market": "INTL_INDEX",
+                           "session_date": "2026-10-15", "raw_date": "20261015"},
+                "ust10y": {"key": "ust10y", "label": "美债10Y", "kind": "yield",
+                           "price_unit": "pct", "chg_unit": "bp",
+                           "price": 5.15, "prev_close": 5.09, "chg": 0.06,
+                           "pct": None, "chg_bp": 6.0, "chg_bp_approx": True,
+                           "precision_note": "TDX 两位小数日频快照，bp 为近似值",
+                           "source": "tdx_ex", "code": "8_ATY",
+                           "market": "MACRO_INDICATOR",
+                           "session_date": "2026-10-15", "raw_date": "20261015"},
+                "gold": {"key": "gold", "label": "COMEX金", "kind": "commodity",
+                         "price_unit": "usd_per_oz", "chg_unit": "pct",
+                         "price": 4160.30, "prev_close": 4186.70,
+                         "chg": -26.40, "pct": -0.63, "chg_bp": None,
+                         "chg_bp_approx": None, "source": "tdx_ex",
+                         "code": "GC00W", "market": "COMEX_FUTURES",
+                         "session_date": "2026-10-15", "raw_date": "20261015"},
+            },
+            "degraded": [],
+            "sources": {"us_dji": "tdx_ex", "us_ixic": "tdx_ex",
+                        "us_spx": "tdx_ex", "ust10y": "tdx_ex",
+                        "gold": "tdx_ex"},
+        },
         "collection_report": {},
     }
     base.update(overrides)
@@ -164,7 +212,7 @@ class TestComputeErrorIsolation(unittest.TestCase):
     def test_output_contract_keys(self):
         from dragon_quant.review_account.prep import _compute_all
         out = _compute_all("2026-10-19", _assets())
-        self.assertEqual(out["version"], "0.3")
+        self.assertEqual(out["version"], "0.4")
         self.assertEqual(out["dragon_source"]["scan_id"], "v2_20261019_top25")
         for k in ("sentiment", "main_boards", "candidates"):
             self.assertIn(k, out)
@@ -422,7 +470,7 @@ class TestRunPrepIntegration(unittest.TestCase):
         # 快照已落库，且由资产计算而来
         self.assertEqual(snap["sentiment"]["limit_up_cnt"], 10)
         self.assertEqual(snap["candidates"][0]["code"], "600001")
-        self.assertEqual(out["version"], "0.3")
+        self.assertEqual(out["version"], "0.4")
         # run_prep → resolve_window_dates → PrepContext 的窗口透传不能断链
         self.assertEqual(captured["window"], ["2026-10-15", "2026-10-16"])
         self.assertEqual(captured["window_days"], 3)
@@ -600,6 +648,25 @@ class TestRunPrepRecompute(unittest.TestCase):
         # 旧资产（无 window_days）不得凭空产生窗口降级
         self.assertFalse([d for d in out["sentiment"]["degraded"]
                           if str(d).startswith("dragons")])
+
+    def test_recompute_legacy_assets_without_macro_or_facts(self):
+        """旧资产无 macro_global/facts：不报错，macro 降级，候选仍评级。"""
+        from dragon_quant.review_account.prep import run_prep
+        day = "2026-10-16"
+        assets = _assets(day)
+        assets.pop("macro_global")
+        with patch("dragon_quant.storage.assets_db.get_prep_assets",
+                   return_value=assets), \
+             patch("dragon_quant.storage.assets_db.save_prep_snapshot"), \
+             patch("dragon_quant.review_account.prep.TdxProvider"), \
+             patch("dragon_quant.review_account.prep.THSProvider"):
+            out = run_prep(day, recompute=True)
+        self.assertEqual(out["version"], "0.4")
+        self.assertFalse(out["macro"]["available"])
+        self.assertIn("macro_global", out["sentiment"]["degraded"])
+        self.assertTrue(out["candidates"])
+        self.assertIn(out["candidates"][0]["verdict"],
+                      ("strong", "light", "ignore", "unrated"))
 
     def test_recompute_deterministic(self):
         from dragon_quant.review_account.prep import _compute_all
@@ -1062,6 +1129,37 @@ class TestComputeCandidatesWindow(unittest.TestCase):
         self.assertEqual(cand["trade_date"], "2026-10-19")
         self.assertEqual(cand["reason_type"], "低空经济")
 
+    def test_facts_and_verdict_end_to_end_cross_day_in_pool_strong(self):
+        """T-2 入选、T 日再涨停：in_pool_today 解耦，facts 取今日池，可 strong。"""
+        from dragon_quant.review_account.prep import _compute_all
+        rows = [{"code": "600001", "name": "样本", "composite_score": 80,
+                 "rank": 1, "is_true_dragon": True, "concepts": ["低空经济"],
+                 "trade_date": "2026-10-16"}]
+        assets = _window_assets(trade_date="2026-10-20", rows=rows)
+        assets["ths_limit_up_pool"]["trade_date"] = "2026-10-20"
+        assets["ths_limit_up_pool"]["rows"] = [{
+            "code": "600001", "reason_type": "低空经济", "limit_up_type": "换手板",
+            "open_num": 0, "is_again_limit": 1, "high_days": "1天1板",
+            "change_rate": 9.99, "turnover_rate": 10.0,
+            "limit_up_suc_rate": 1.0, "first_limit_up_time": 1792114286,
+        }]
+        assets["ths_block_top"]["rows"] = [{
+            "name": "低空经济", "limit_up_num": 10, "high": "1天1板",
+            "high_num": 1, "stock_list": [{"code": "600001"}],
+        }]
+        assets["fund_flow"]["quotes"] = {
+            "600001": {"main_net_amount": 1.2e8, "pct": 9.99,
+                       "turnover_rate": 10.0, "amount": 2.0e9}}
+        assets["cninfo_announcements"]["items"] = {
+            "600001": {"announcements": [], "truncated": False}}
+        out = _compute_all("2026-10-20", assets)
+        cand = out["candidates"][0]
+        self.assertTrue(cand["facts"]["in_pool_today"])
+        self.assertEqual(cand["facts"]["t_pct"], 9.99)
+        self.assertEqual(cand["facts"]["reason_type_today"], "低空经济")
+        self.assertEqual(cand["verdict"], "strong")
+        self.assertIsNone(cand["reason_type"])     # 入选日归因仍为 null（跨日）
+
     def test_main_boards_count_uses_union(self):
         from dragon_quant.review_account.prep import compute_main_boards
         assets = _window_assets(rows=self._rows())
@@ -1246,7 +1344,7 @@ class TestAdviceLines(unittest.TestCase):
 class TestCmdPrepOutput(unittest.TestCase):
     def _result(self):
         return {
-            "trade_date": "2026-10-19", "version": "0.3",
+            "trade_date": "2026-10-19", "version": "0.4",
             "sentiment": {"position_pct": 0.5, "position_advice": "正常",
                           "limit_up_cnt": 59, "limit_down_cnt": 1, "degraded": []},
             "main_boards": [], "candidates": [],
@@ -1256,7 +1354,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         from types import SimpleNamespace
         return SimpleNamespace(date="20261019", recompute=False, verbose=verbose)
 
-    def test_default_prints_four_lines(self):
+    def test_default_prints_four_lines_and_empty_candidate_list(self):
         import io
         from contextlib import redirect_stdout
         from dragon_quant import cli
@@ -1265,8 +1363,33 @@ class TestCmdPrepOutput(unittest.TestCase):
              redirect_stdout(buf):
             cli._cmd_prep(self._args())
         lines = buf.getvalue().strip().splitlines()
-        self.assertEqual(len(lines), 4)
+        self.assertEqual(len(lines), 6)
         self.assertIn("是否建议买入：是", lines[0])
+        self.assertEqual(lines[4], "")
+        self.assertEqual(lines[5], "无参与复盘标的")
+
+    def test_default_prints_candidate_list_after_blank_line(self):
+        import io
+        from contextlib import redirect_stdout
+        from dragon_quant import cli
+        result = self._result()
+        result["candidates"] = [
+            {"code": "600001", "name": "强票", "composite_score": 82,
+             "verdict": "strong", "verdict_label": "强烈建议",
+             "dimensions": ["质量维度：五维综合 82.0"], "ignore_reason": None},
+            {"code": "600002", "name": "弱票", "composite_score": 60,
+             "verdict": "ignore", "verdict_label": "忽略",
+             "ignore_reason": "今日涨幅 +1.20%、主力净流出 1.00 亿，资金离场"},
+        ]
+        buf = io.StringIO()
+        with patch("dragon_quant.review_account.prep.run_prep", return_value=result), \
+             redirect_stdout(buf):
+            cli._cmd_prep(self._args())
+        lines = buf.getvalue().strip().splitlines()
+        self.assertEqual(lines[4], "")
+        self.assertEqual(lines[5], "✅ 强票-强烈建议")
+        self.assertIn("- 质量维度：五维综合 82.0", lines)
+        self.assertTrue(any(x.startswith("弱票-忽略：") for x in lines))
 
     def test_verbose_prints_json(self):
         import io
@@ -1278,7 +1401,7 @@ class TestCmdPrepOutput(unittest.TestCase):
              redirect_stdout(buf):
             cli._cmd_prep(self._args(verbose=True))
         payload = json.loads(buf.getvalue())
-        self.assertEqual(payload["version"], "0.3")
+        self.assertEqual(payload["version"], "0.4")
         self.assertIn("candidates", payload)
 
     def test_format_failure_still_exits_zero(self):

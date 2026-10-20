@@ -22,6 +22,14 @@ from zoneinfo import ZoneInfo
 
 from dragon_quant.providers.tdx import TdxProvider
 from dragon_quant.providers.ths import THSProvider
+from dragon_quant.providers.tencent import TencentProvider
+from dragon_quant.providers.xueqiu import XueqiuProvider
+from dragon_quant.providers.macro import (
+    MACRO_KEYS, SPEC_BY_KEY, YahooMacroSource, collect_macro,
+)
+from dragon_quant.review_account.verdicts import (
+    evaluate_candidates, find_risk_announcement,
+)
 from dragon_quant.storage import db, assets_db
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -46,7 +54,7 @@ SAMPLE_N_MIN = 3000
 # collection_report 中「不可用」的状态：compute 按缺失降级，绝不使用其值
 _BAD_STATUS = {"error", "unavailable", "empty_suspicious"}
 # 正常交易日不可能为空的资产：status=empty 也按缺失处理
-_MUST_NONEMPTY = {"market_breadth", "fg_boards"}
+_MUST_NONEMPTY = {"market_breadth", "fg_boards", "macro_global"}
 # 需要校验 as_of == trade_date 的资产：仅 same_day_only（实时/时点快照）类。
 # 注意 cninfo_announcements 的 as_of 是采集时间而非数据时点（公告可历史回溯），
 # 其窗口正确性由采集阶段 [T-window, T] 过滤保证，不做 as_of 相等校验。
@@ -91,6 +99,8 @@ class PrepContext:
     dragons_rows: list = field(default_factory=list)
     window_trade_dates: list = field(default_factory=list)
     window_days: int = WINDOW_TRADING_DAYS
+    tencent: Optional[object] = None
+    xueqiu: Optional[object] = None
 
 
 @dataclass
@@ -294,6 +304,27 @@ def _collect_cninfo(ctx: PrepContext) -> dict:
             "truncated_codes": sorted(truncated_codes)}
 
 
+def _collect_macro(ctx: PrepContext) -> dict:
+    """宏观扰动：外围指数/美债/黄金（日 K canonical，源优先级见 MACRO_SPECS）。
+
+    源对象：tdx（扩展行情日 K）、tencent（美股指数 quote）、yahoo（best-effort）、
+    xueqiu（Cookie，最后备选）；全部失败由 collect_macro 抛 RuntimeError。
+    """
+    sources = {
+        "tdx": ctx.tdx,
+        "tencent": ctx.tencent,
+        "yahoo": YahooMacroSource(),
+        "xueqiu": ctx.xueqiu,
+    }
+    return collect_macro(sources, ctx.trade_date, as_of=ctx.trade_date)
+
+
+def _macro_suspicious(payload: dict) -> Optional[str]:
+    if not (payload.get("instruments") or {}):
+        return "宏观品种全部缺失"
+    return None
+
+
 ASSET_COLLECTORS: dict[str, CollectorSpec] = {
     # 顺序有意义：dragons 先采（fund_flow/cninfo 依赖其候选 codes）
     "dragons": CollectorSpec(_collect_dragons, same_day_only=False),
@@ -307,6 +338,9 @@ ASSET_COLLECTORS: dict[str, CollectorSpec] = {
     "fund_flow": CollectorSpec(_collect_fund_flow, same_day_only=True,
                                suspicious_check=_fund_flow_suspicious),
     "cninfo_announcements": CollectorSpec(_collect_cninfo, same_day_only=False),
+    # 宏观日 K canonical：对历史日可确定性重建，不设 same_day_only
+    "macro_global": CollectorSpec(_collect_macro, same_day_only=False,
+                                  suspicious_check=_macro_suspicious),
 }
 
 # 各类资产的「真空」判定键（用于 collection_report 的 empty 状态）
@@ -319,6 +353,7 @@ _EMPTY_KEYS = {
                                    for b in (p.get("boards") or {}).values()),
     "fund_flow": lambda p: not (p.get("quotes") or {}),
     "cninfo_announcements": lambda p: not (p.get("items") or {}),
+    "macro_global": lambda p: not (p.get("instruments") or {}),
 }
 
 
@@ -379,6 +414,7 @@ def _collect_all(trade_date: str, *, window_trade_dates: list,
     ctx = PrepContext(trade_date=trade_date,
                       today=datetime.now(SHANGHAI).strftime("%Y-%m-%d"),
                       tdx=tdx or TdxProvider(), ths=THSProvider(),
+                      tencent=TencentProvider(), xueqiu=XueqiuProvider(),
                       window_trade_dates=list(window_trade_dates),
                       window_days=window_days)
     payloads: dict[str, dict] = {}
@@ -447,6 +483,17 @@ def _hhmmss(ts) -> Optional[str]:
 def _list_of_dicts(value) -> list:
     """类型收敛：仅保留 list 中的 dict 元素（畸形 payload 不抛异常）。"""
     return [r for r in value if isinstance(r, dict)] if isinstance(value, list) else []
+
+
+def _num_or_none(value) -> Optional[float]:
+    """float 归一；NaN/inf/异常 → None。"""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    if x != x or x in (float("inf"), float("-inf")):
+        return None
+    return x
 
 
 def _fg_board_rows(fg: dict, name: str) -> tuple[list, bool]:
@@ -755,20 +802,59 @@ def compute_candidates(assets: dict, trade_date: str) -> list:
         if previous is None or _prefer_candidate(cand, previous):
             merged[code] = cand
 
+    pool_available = bool(pool_rows)
     out = []
     for cand in merged.values():
         code = cand.get("code")
-        same_day = pool_day is None or cand.get("trade_date") == pool_day
-        p = pool_by_code.get(code) if same_day else None
-        cand["reason_type"] = p.get("reason_type") if p else None
-        cand["limit_up_type"] = p.get("limit_up_type") if p else None
-        cand["open_num"] = p.get("open_num") if p else None
-        cand["is_again_limit"] = bool(p.get("is_again_limit")) if p else None
-        cand["first_limit_up_time"] = _hhmmss(p.get("first_limit_up_time")) if p else None
+        p = pool_by_code.get(code) if pool_available else None
+        # 入选日归因（既有契约）：仅候选入选日 == 今日池日期时填充，跨日为 null
+        same_day = pool_available and pool_day is not None and cand.get("trade_date") == pool_day
+        p_same_day = p if same_day else None
+        cand["reason_type"] = p_same_day.get("reason_type") if p_same_day else None
+        cand["limit_up_type"] = p_same_day.get("limit_up_type") if p_same_day else None
+        cand["open_num"] = p_same_day.get("open_num") if p_same_day else None
+        cand["is_again_limit"] = bool(p_same_day.get("is_again_limit")) if p_same_day else None
+        cand["first_limit_up_time"] = (_hhmmss(p_same_day.get("first_limit_up_time"))
+                                       if p_same_day else None)
+
         q = flow.get(code)
-        cand["main_net_amount"] = q.get("main_net_amount") if isinstance(q, dict) else None
+        q = q if isinstance(q, dict) else None
         item = anns.get(code)
-        cand["announcements"] = (item.get("announcements") or []) if isinstance(item, dict) else []
+        raw_anns = item.get("announcements") if isinstance(item, dict) else None
+        announcements = raw_anns if isinstance(raw_anns, list) else []
+        cand["main_net_amount"] = q.get("main_net_amount") if q else None
+        cand["announcements"] = announcements
+
+        # facts：今日事实一次算清（in_pool_today 与入选日解耦）
+        t_pct = _num_or_none(p.get("change_rate")) if p else None
+        if t_pct is None and q is not None:
+            t_pct = _num_or_none(q.get("pct"))
+        t_turnover = _num_or_none(p.get("turnover_rate")) if p else None
+        if t_turnover is None and q is not None:
+            t_turnover = _num_or_none(q.get("turnover_rate"))
+        announcements_available = isinstance(item, dict)
+        risk = find_risk_announcement(announcements, trade_date,
+                                      announcements_available)
+        cand["facts"] = {
+            "pool_available": pool_available,
+            "in_pool_today": p is not None,
+            "t_pct": t_pct,
+            "t_turnover": t_turnover,
+            "t_amount": _num_or_none(q.get("amount")) if q else None,
+            "open_num": p.get("open_num") if p else None,
+            "high_days": p.get("high_days") if p else None,
+            "reason_type_today": p.get("reason_type") if p else None,
+            "limit_up_type": p.get("limit_up_type") if p else None,
+            "first_limit_up_time": (_hhmmss(p.get("first_limit_up_time"))
+                                    if p else None),
+            "limit_up_suc_rate": (_num_or_none(p.get("limit_up_suc_rate"))
+                                  if p else None),
+            "main_net_amount": _num_or_none(q.get("main_net_amount")) if q else None,
+            "flow_available": q is not None,
+            "announcements_available": announcements_available,
+            "announcement_count": len(announcements),
+            "risk_announcement": risk,
+        }
         out.append(cand)
     return out
 
@@ -806,6 +892,109 @@ def _dragon_source(assets: dict) -> dict:
     }
 
 
+def _empty_macro() -> dict:
+    return {
+        "available": False,
+        "as_of": None,
+        "session": None,
+        "caliber": None,
+        "instruments": {},
+        "degraded": ["macro_global"],
+        "sources": {},
+    }
+
+
+def _macro_stale(session_date, trade_date: str) -> bool:
+    try:
+        lag = (datetime.fromisoformat(trade_date).date()
+               - datetime.fromisoformat(str(session_date)[:10]).date()).days
+        return lag > 4
+    except (TypeError, ValueError):
+        return False
+
+
+def _macro_session(instruments: dict, trade_date: str) -> Optional[str]:
+    dates = []
+    for key in ("us_dji", "us_ixic", "us_spx"):
+        rec = instruments.get(key)
+        if isinstance(rec, dict):
+            day = rec.get("session_date")
+            if isinstance(day, str) and len(day) >= 10:
+                dates.append(day[:10])
+    if not dates:
+        return None
+    if any(day == trade_date for day in dates):
+        return "intraday"
+    if all(day < trade_date for day in dates):
+        return "overnight"
+    return "unknown"
+
+
+def _normalize_macro_record(rec: dict, key: str, trade_date: str) -> Optional[dict]:
+    spec = SPEC_BY_KEY.get(key)
+    if spec is None or not isinstance(rec, dict):
+        return None
+    price = _num_or_none(rec.get("price"))
+    if price is None or price <= 0:
+        return None
+    session_date = rec.get("session_date")
+    session_date = session_date[:10] if isinstance(session_date, str) else None
+    return {
+        "key": key,
+        "label": str(rec.get("label") or spec.label),
+        "kind": str(rec.get("kind") or spec.kind),
+        "price_unit": str(rec.get("price_unit") or spec.price_unit),
+        "chg_unit": str(rec.get("chg_unit") or spec.chg_unit),
+        "price": price,
+        "prev_close": _num_or_none(rec.get("prev_close")),
+        "chg": _num_or_none(rec.get("chg")),
+        "pct": _num_or_none(rec.get("pct")),
+        "chg_bp": _num_or_none(rec.get("chg_bp")),
+        "chg_bp_approx": (rec.get("chg_bp_approx")
+                          if isinstance(rec.get("chg_bp_approx"), bool) else None),
+        "precision_note": (str(rec.get("precision_note"))
+                           if rec.get("precision_note") else None),
+        "source": str(rec.get("source") or ""),
+        "code": str(rec.get("code") or ""),
+        "market": str(rec.get("market") or ""),
+        "session_date": session_date,
+        "raw_date": rec.get("raw_date"),
+        "raw_time": rec.get("raw_time"),
+        "stale": _macro_stale(session_date, trade_date),
+    }
+
+
+def compute_macro(assets: dict, trade_date: str) -> dict:
+    """宏观资产 → 快照归一结果（纯函数）；缺失/畸形 → available=False。"""
+    payload = assets.get("macro_global")
+    if not isinstance(payload, dict):
+        return _empty_macro()
+    raw = payload.get("instruments")
+    if not isinstance(raw, dict):
+        return _empty_macro()
+    instruments = {}
+    for key in MACRO_KEYS:
+        rec = _normalize_macro_record(raw.get(key), key, trade_date)
+        if rec is not None:
+            instruments[key] = rec
+    if not instruments:
+        return _empty_macro()
+
+    raw_degraded = payload.get("degraded")
+    degraded = {str(item) for item in raw_degraded if isinstance(item, str)} \
+        if isinstance(raw_degraded, list) else set()
+    degraded |= {key for key in MACRO_KEYS if key not in instruments}
+    return {
+        "available": True,
+        "as_of": payload.get("as_of"),
+        "session": _macro_session(instruments, trade_date),
+        "caliber": payload.get("caliber"),
+        "instruments": instruments,
+        "degraded": sorted(degraded),
+        "sources": payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
+    }
+
+
 def _compute_all(trade_date: str, assets: dict) -> dict:
     """compute 段：先按 collection_report/as_of 过滤不可用资产，再逐因子错误隔离。
 
@@ -826,14 +1015,27 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
                        {"degraded": ["compute_error"]})
     main_boards = _guard("main_boards", lambda: compute_main_boards(usable), [])
     candidates = _guard("candidates", lambda: compute_candidates(usable, trade_date), [])
+    candidates = _guard("verdicts",
+                        lambda: evaluate_candidates(candidates, main_boards, trade_date),
+                        candidates)
+    macro = _guard("macro", lambda: compute_macro(usable, trade_date), _empty_macro())
+
+    macro_marks: list[str] = []
+    if not macro.get("available"):
+        macro_marks.append("macro_global")
+    elif macro.get("degraded"):
+        macro_marks.append("macro_partial")
+
     if errors:
         sentiment["factor_errors"] = {**sentiment.get("factor_errors", {}), **errors}
-    sentiment["degraded"] = sorted(set(sentiment.get("degraded") or []) | set(degraded))
+    sentiment["degraded"] = sorted(
+        set(sentiment.get("degraded") or []) | set(degraded) | set(macro_marks))
     return {
         "trade_date": trade_date,
-        "version": "0.3",
+        "version": "0.4",
         "sentiment": sentiment,
         "main_boards": main_boards,
+        "macro": macro,
         "candidates": candidates,
         "dragon_source": _dragon_source(usable),
     }

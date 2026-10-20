@@ -349,12 +349,21 @@ def _cmd_prep(args):
         return
 
     # 降级信息已并入理由行（details 见 prep_assets.collection_report / --verbose）
-    from dragon_quant.review_account.advice import format_advice_lines
+    from dragon_quant.review_account.advice import (
+        format_advice_lines, format_candidate_lines,
+    )
     try:
-        print("\n".join(format_advice_lines(result)))
+        lines = format_advice_lines(result)
     except Exception as e:  # 快照已落库：展示失败不应让 cron 误判整次复盘失败
         print(f"复盘已完成并落库，但摘要生成失败：{type(e).__name__}: {e}"
               f"（可用 --verbose 查看完整结果）", file=sys.stderr)
+        return
+    try:
+        lines = lines + [""] + format_candidate_lines(result)
+    except Exception as e:  # 清单失败仍打印 4 行摘要，不让整次输出丢失
+        print(f"标的清单生成失败：{type(e).__name__}: {e}"
+              f"（可用 --verbose 查看完整结果）", file=sys.stderr)
+    print("\n".join(lines))
 
 
 def _cmd_assets(args):

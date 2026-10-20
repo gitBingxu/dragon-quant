@@ -289,6 +289,53 @@ def _normalize_value(v):
     return v
 
 
+# ─── 宏观日 K 转换（纯函数，可单测）──────────────────────────────────────────
+
+
+def _ex_enums():
+    """惰性导入扩展行情枚举（测试可 patch 此函数，避免依赖真实 easy_tdx）。"""
+    from easy_tdx.mac.enums import ExMarket, Period
+    return ExMarket, Period
+
+
+def _macro_record_from_kline(spec, df, trade_date: str,
+                             market_name: str, code: str):
+    """扩展市场日 K DataFrame → 归一宏观记录（取 < trade_date 的最后一根）。"""
+    from dragon_quant.providers.macro import build_macro_record
+
+    records = df.to_dict("records") if df is not None and not df.empty else []
+    rows: list[tuple[str, float]] = []
+    for r in records:
+        dt = r.get("datetime")
+        if hasattr(dt, "strftime"):
+            day = dt.strftime("%Y-%m-%d")
+        else:
+            day = str(dt or "")[:10]
+        if len(day) != 10 or day >= trade_date:   # 排除盘中/未来 bar
+            continue
+        close = _f(r.get("close"))
+        if close <= 0:
+            continue
+        rows.append((day, close))
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item[0])
+    session_date, price = rows[-1]
+    prev_close = rows[-2][1] if len(rows) >= 2 else None
+
+    label = price_unit = None
+    if market_name == "SH_GOLD":       # 沪金口径（元/克），与 COMEX 美元金区分
+        label, price_unit = "沪金", "cny_per_g"
+    return build_macro_record(
+        spec, price=price, prev_close=prev_close, source="tdx_ex",
+        code=code, market=market_name, session_date=session_date,
+        chg_bp_approx=True if spec.kind == "yield" else None,
+        precision_note=("TDX 两位小数日频快照，bp 为近似值"
+                        if spec.kind == "yield" else None),
+        label=label, price_unit=price_unit,
+    )
+
+
 # 市场宽度行保留字段（datetime 类字段不入资产，避免序列化歧义）
 _BREADTH_KEYS = ("code", "name", "close", "pre_close", "open", "high", "low",
                  "vol", "amount", "buy_price_limit", "sell_price_limit")
@@ -316,6 +363,8 @@ class TdxProvider(StockProvider):
         super().__init__()
         self._lock = threading.Lock()
         self._client: Any = None  # MacClient；False=永久不可用
+        self._macro_client: Any = None  # MacExClient（扩展行情）；False=永久不可用
+        self._macro_error: Optional[str] = None  # 首次失败根因（供 RuntimeError 诊断）
         self._preset: Any = None  # easy_tdx PresetField
 
     @property
@@ -341,6 +390,29 @@ class TdxProvider(StockProvider):
                 self._client = False
                 return None
         return self._client or None
+
+    def _get_macro_client(self):
+        """惰性创建 MacExClient（扩展行情，端口 7727）。不可用 → None。
+
+        失败时抛出的异常由 ``get_macro_quotes`` 统一转 RuntimeError（provider 契约：
+        transport/解析/写盘失败必须抛出，由 providers.macro 门面逐源回退）。
+        """
+        if self._macro_client is None:
+            et = _import_easytdx()
+            if et is None:
+                self._macro_error = "easy_tdx 不可用"
+                self._macro_client = False
+                return None
+            try:
+                from easy_tdx.ex.mac_client import MacExClient
+                client = MacExClient.from_best_host(timeout=8, ping_timeout=2)
+                client.connect()
+                self._macro_client = client
+            except Exception as exc:
+                self._macro_error = f"{type(exc).__name__}: {exc}"
+                self._macro_client = False
+                return None
+        return self._macro_client or None
 
     def _quote_fields(self):
         """完整 Quote 字段集：COMMON（换手/量比/市值/PE/涨跌停）+ QUOTE（买一卖一）。"""
@@ -752,6 +824,55 @@ class TdxProvider(StockProvider):
         if self._logger:
             self._logger.api("tdx", "announcements", ok=True,
                              elapsed_ms=elapsed, note=f"{c} p{page} n={len(out)}")
+        return out
+
+    # ─── 宏观扰动（扩展行情日 K；错误契约：失败抛异常）────────────────────────
+
+    def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
+        """扩展行情日 K → 宏观记录（外围指数/美债/COMEX 金/沪金）。
+
+        canonical：取每个 code 日 K 中日期 ``< trade_date`` 的最后一根已完成 bar，
+        与运行时刻解耦；`GC00W` 无数据时自动尝试 `SH_GOLD/Au99.99`。
+        transport/解析失败抛 RuntimeError（由 providers.macro 门面回退）。
+        """
+        t0 = time.time()
+        client = self._get_macro_client()
+        if client is None:
+            detail = f": {self._macro_error}" if self._macro_error else ""
+            raise RuntimeError(f"tdx 扩展行情不可用{detail}")
+        ExMarket, Period = _ex_enums()
+        wanted: list[tuple] = []
+        for spec in specs or []:
+            for market_name, code in getattr(spec, "tdx", ()) or ():
+                try:
+                    market = int(getattr(ExMarket, market_name))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+                wanted.append((spec, market_name, market, code))
+        if not wanted:
+            return {}
+
+        out: dict[str, dict] = {}
+        errors: list[str] = []
+        with self._lock:
+            for spec, market_name, market, code in wanted:
+                if spec.key in out:          # 前序候选已命中（COMEX 优先于沪金）
+                    continue
+                try:
+                    df = client.goods_kline(market, code, Period.DAILY, 0, 10)
+                except Exception as exc:
+                    errors.append(f"{market_name}/{code}: {type(exc).__name__}: {exc}")
+                    continue
+                rec = _macro_record_from_kline(
+                    spec, df, trade_date, market_name, code)
+                if rec:
+                    out[spec.key] = rec
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "macro_quotes", ok=bool(out), elapsed_ms=elapsed,
+                             note=f"n={len(out)}")
+        if not out and errors:
+            raise RuntimeError("tdx 宏观日 K 全部失败：" + "；".join(errors))
         return out
 
     # ─── 集合竞价 ───

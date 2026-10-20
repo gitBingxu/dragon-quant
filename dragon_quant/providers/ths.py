@@ -44,13 +44,32 @@ HTTP_TIMEOUT = 12
 # hyzjl=行业资金流（约90个行业板块，code 为 881xxx）。
 RANKING_URL = DATA_BASE + "/funds/hyzjl/field/zdf/order/desc/page/{page}/"
 RANKING_MAX_PAGES = 3  # 行业板块约 90 个，每页 50，翻 3 页足够（末页不足自然停止）
+
+# 维度 → 排行/详情/翻页 URL。概念 gnzjl 与行业 hyzjl 表结构一致；
+# 地区排行是 q.10jqka.com.cn/dy/ 的单页表格（字段布局不同，需独立解析器）。
+_CONCEPT_RANKING_URL = DATA_BASE + "/funds/gnzjl/field/zdf/order/desc/page/{page}/"
+_RANKING_URLS = {
+    "hy": RANKING_URL,
+    "gn": _CONCEPT_RANKING_URL,
+}
+REGION_RANKING_URL = f"{Q_BASE}/dy/"
+_DETAIL_URLS = {
+    "hy": f"{Q_BASE}/thshy/detail/code/{{code}}/",
+    "gn": f"{Q_BASE}/gn/detail/code/{{code}}/",
+    "dq": f"{Q_BASE}/dy/detail/code/{{code}}/",
+}
+_PAGE_URLS = {
+    "hy": f"{Q_BASE}/thshy/detail/order/desc/page/{{page}}/code/{{code}}/",
+    "gn": f"{Q_BASE}/gn/detail/order/desc/page/{{page}}/code/{{code}}/",
+    "dq": f"{Q_BASE}/dy/detail/order/desc/page/{{page}}/code/{{code}}/",
+}
 # 成分股详情页（按涨跌幅降序），page 翻页
 COMPONENTS_URL = (
     f"{Q_BASE}/thshy/detail/field/264648/order/desc/page/{{page}}/ajax/1/code/{{code}}/"
 )
-DETAIL_URL = f"{Q_BASE}/thshy/detail/code/{{code}}/"
+DETAIL_URL = _DETAIL_URLS["hy"]
 # 非 ajax 翻页路径（免登录翻页），行业成分股按涨跌幅降序，每页约 20 只
-PAGE_URL = f"{Q_BASE}/thshy/detail/order/desc/page/{{page}}/code/{{code}}/"
+PAGE_URL = _PAGE_URLS["hy"]
 TIME_URL = D_BASE + "/v6/time/48_{inner}/last.js"
 # 历史 K 线路径：周期码 30=5分钟（实测），last1000 取最近 1000 根
 LINE_URL = D_BASE + "/v6/line/48_{inner}/30/last1000.js"
@@ -168,31 +187,58 @@ def _parse_components_html(html: str, sector_code: str) -> list[StockInfo]:
     """解析成分股详情页表格。
 
     列：td[1]=代码 td[2]=名称 td[3]=现价 td[4]=涨跌幅%
+    页面可能含多个 ``<tbody>``（概念详情页第一个 tbody 是「领涨股」名称行，
+    成员表在第二个），因此遍历全部 tbody，只接受 td[1] 为 6 位代码的行。
     """
     result: list[StockInfo] = []
-    m = re.search(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL)
-    if not m:
-        return result
-    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", m.group(1), re.DOTALL)
-    for row in rows:
-        tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
-        if len(tds) < 5:
-            continue
+    for body in re.findall(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL):
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.DOTALL):
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+            if len(tds) < 5:
+                continue
 
-        def _txt(s: str) -> str:
-            return re.sub(r"<[^>]+>", "", s).strip()
+            def _txt(s: str) -> str:
+                return re.sub(r"<[^>]+>", "", s).strip()
 
-        code = _txt(tds[1])
-        name = _txt(tds[2])
-        if not re.fullmatch(r"\d{6}", code):
-            continue
-        result.append(StockInfo(
-            code=code,
-            name=name,
-            sector_code=sector_code,
-            pct=_safe_float(_txt(tds[4])),
-            price=_safe_float(_txt(tds[3])),
-        ))
+            code = _txt(tds[1])
+            name = _txt(tds[2])
+            if not re.fullmatch(r"\d{6}", code):
+                continue
+            result.append(StockInfo(
+                code=code,
+                name=name,
+                sector_code=sector_code,
+                pct=_safe_float(_txt(tds[4])),
+                price=_safe_float(_txt(tds[3])),
+            ))
+    return result
+
+
+def _parse_region_ranking_html(html: str) -> list[SectorPerformance]:
+    """解析地区板块排行页（q.10jqka.com.cn/dy/）。
+
+    列：td[0]=序号 td[1]=板块(含 detail/code 链接) td[2]=涨跌幅%
+    地区板块共 33 个，单页返回，服务端默认按涨跌幅降序。
+    """
+    result: list[SectorPerformance] = []
+    for body in re.findall(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL):
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.DOTALL):
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+            if len(tds) < 3:
+                continue
+            code_m = re.search(r"detail/code/(\d+)/", tds[1])
+            name = re.sub(r"<[^>]+>", "", tds[1]).strip()
+            if not code_m or not name:
+                continue
+            pct_txt = re.sub(r"<[^>]+>", "", tds[2]).strip().rstrip("%")
+            result.append(SectorPerformance(
+                code=code_m.group(1),
+                name=name,
+                pct=_safe_float(pct_txt),
+                amplitude=0.0,
+                category="dq",
+                source="ths",
+            ))
     return result
 
 
@@ -331,20 +377,39 @@ class THSProvider(StockProvider):
 
     # ─── 行业板块排行（HTTP GET field=zdf 排行页，多页+本地排序）───
 
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
-        """行业板块涨跌幅排行。asc=False 涨幅榜 / asc=True 跌幅榜。
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
+        """板块涨跌幅排行（hy/gn 走 /funds/*zjl 多页；dq 走 /dy/ 单页）。
 
-        HTTP GET 抓取 field=zdf 排行页多页（GBK，无需 Playwright/Cookie），合并去重后
+        HTTP GET 抓取 field=zdf 排行页（GBK，无需 Playwright/Cookie），合并去重后
         本地按涨跌幅排序（单页 DOM 非严格有序，必须本地 re-sort）。
         同花顺数据网关有频控（403），单页带退避重试 + 页间小延迟降低触发概率。
+
+        未知维度抛 ValueError（编程错误，不伪装成数据源故障），由 orchestrator
+        按维度降级。
         """
+        if category != "dq" and category not in _RANKING_URLS:
+            raise ValueError(f"未知板块维度: {category!r}")
         t0 = time.time()
         seen: dict[str, SectorPerformance] = {}
+        if category == "dq":
+            html = _fetch_with_retry(REGION_RANKING_URL, referer=f"{Q_BASE}/",
+                                     gbk=True, raise_on_exhaust=False)
+            rows = _parse_region_ranking_html(html) if html else []
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("ths", "sector_ranking", ok=bool(rows),
+                                 elapsed_ms=elapsed, note=f"{category} n={len(rows)}",
+                                 dimension=category)
+            rows.sort(key=lambda s: s.pct, reverse=not asc)
+            return rows
+
+        url = _RANKING_URLS[category]
         for p in range(1, RANKING_MAX_PAGES + 1):
-            html = _fetch_with_retry(RANKING_URL.format(page=p),
+            html = _fetch_with_retry(url.format(page=p),
                                      referer=f"{DATA_BASE}/", gbk=True,
                                      raise_on_exhaust=False)  # 旧契约：持续 403 → None → continue
-            part = self._parse_ranking_html(html) if html else None
+            part = self._parse_ranking_html(html, category) if html else None
             if not part:  # 重试后仍空 → 末页或持续限流
                 continue
             for s in part:
@@ -355,15 +420,17 @@ class THSProvider(StockProvider):
         elapsed = (time.time() - t0) * 1000
         if self._logger:
             self._logger.api("ths", "sector_ranking", ok=bool(rows),
-                             elapsed_ms=elapsed, note=f"n={len(rows)}")
+                             elapsed_ms=elapsed, note=f"{category} n={len(rows)}",
+                             dimension=category)
         rows.sort(key=lambda s: s.pct, reverse=not asc)
         return rows
 
     @staticmethod
-    def _parse_ranking_html(html: str) -> list[SectorPerformance]:
-        """解析概念资金流排行表格。
+    def _parse_ranking_html(html: str, category: str = "hy",
+                            source: str = "ths") -> list[SectorPerformance]:
+        """解析板块资金流排行表格（行业 hyzjl 与概念 gnzjl 结构一致）。
 
-        列：td[1]=概念名(含 detail/code 链接) td[3]=涨跌幅%
+        列：td[1]=板块名(含 detail/code 链接) td[3]=涨跌幅%
         """
         result: list[SectorPerformance] = []
         m = re.search(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL)
@@ -385,6 +452,8 @@ class THSProvider(StockProvider):
                 pct=_safe_float(pct_txt),
                 amplitude=0.0,
                 turnover_rate=0.0,
+                category=category,
+                source=source,
             ))
         return result
 
@@ -457,26 +526,34 @@ class THSProvider(StockProvider):
 
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
-        """概念成分股（按涨跌幅降序）。
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
+        """板块成分股（按涨跌幅降序），按维度路由详情页/翻页 URL。
 
-        第 1 页用详情页 DETAIL_URL（完整 HTML，无反爬）；后续页用 ajax 翻页接口
-        （可能触发 hexin-v 反爬，被拦截则止于第 1 页）。第 1 页约 10 只，
-        已能满足编排器 pre_n（candidates_n*2≈10）需求。
+        第 1 页用详情页（完整 HTML，无反爬）；后续页用非 ajax 翻页路径。
+        行业/地区约 20 只/页，概念约 10 只/页；``all_pages`` 时最多翻 3 页
+        （概念 ≈30 只、行业/地区 ≈60 只），与既有采样口径一致，避免回退路径
+        请求量失控。
+        未知维度抛 ValueError（编程错误）。
         """
+        detail_url = _DETAIL_URLS.get(category)
+        page_url = _PAGE_URLS.get(category)
+        if detail_url is None or page_url is None:
+            raise ValueError(f"未知板块维度: {category!r}")
+
         t0 = time.time()
         result: list[StockInfo] = []
 
         # 第 1 页：详情页完整 HTML
-        html = _fetch(DETAIL_URL.format(code=sector_code), gbk=True)
+        html = _fetch(detail_url.format(code=sector_code), gbk=True)
         if html:
             result.extend(_parse_components_html(html, sector_code))
 
-        # 翻页（仅 all_pages 时尝试；非 ajax 路径免登录，前 5 页≈50 只）
+        # 翻页（仅 all_pages 时尝试；最多 3 页）
         if all_pages and result:
-            for p in range(2, 6):
-                url = PAGE_URL.format(page=p, code=sector_code)
-                ph = _fetch(url, referer=DETAIL_URL.format(code=sector_code), gbk=True)
+            for p in range(2, 4):
+                url = page_url.format(page=p, code=sector_code)
+                ph = _fetch(url, referer=detail_url.format(code=sector_code), gbk=True)
                 if not ph:
                     break
                 part = _parse_components_html(ph, sector_code)
@@ -489,43 +566,53 @@ class THSProvider(StockProvider):
         elapsed = (time.time() - t0) * 1000
         if self._logger:
             self._logger.api("ths", "sector_components", ok=bool(result),
-                             elapsed_ms=elapsed, note=f"n={len(result)}")
+                             elapsed_ms=elapsed,
+                             note=f"{category} n={len(result)}", dimension=category)
         return result
 
     # ─── 板块 5 分钟 K 线（1 分钟分时聚合）───
 
-    def _get_inner_code(self, sector_code: str) -> str:
-        """6 位 code → innerCode，解析详情页 <input id="clid">，带缓存。
-        行业板块 clid 即 code 本身（881xxx）；概念板块为 885xxx 映射。"""
-        if sector_code in _INNER_CACHE:
-            return _INNER_CACHE[sector_code]
+    def _get_inner_code(self, sector_code: str, category: str = "hy") -> str:
+        """6 位 code → innerCode，按维度解析详情页 <input id="clid">，带缓存。
+
+        行业板块 clid 即 code 本身（881xxx）；概念板块为 885xxx 映射；
+        地区板块 clid 即 code（882xxx）。缓存键含维度，避免跨维度同 code 串号。
+        """
+        cache_key = f"{category}:{sector_code}"
+        if cache_key in _INNER_CACHE:
+            return _INNER_CACHE[cache_key]
+
+        detail_url = _DETAIL_URLS.get(category)
+        if detail_url is None:
+            raise ValueError(f"未知板块维度: {category!r}")
 
         # 行业板块（881xxx）的 clid 与板块代码一致，无需依赖详情页解析。
         # 详情页偶发返回异常/空页面时，历史 5 分 K 与当日 1 分 K 会被误判为
         # innerCode 解析失败，进而导致 v2 资金承接降级为“目标板块5分K不足”。
-        if re.fullmatch(r"881\d{3}", sector_code):
-            _INNER_CACHE[sector_code] = sector_code
+        if category == "hy" and re.fullmatch(r"881\d{3}", sector_code):
+            _INNER_CACHE[cache_key] = sector_code
             return sector_code
 
-        html = _fetch(DETAIL_URL.format(code=sector_code), gbk=True)
+        html = _fetch(detail_url.format(code=sector_code), gbk=True)
         inner = ""
         if html:
             m = re.search(r'id=["\']clid["\']\s+value=["\'](\d+)["\']', html)
             if m:
                 inner = m.group(1)
         if inner:
-            _INNER_CACHE[sector_code] = inner
+            _INNER_CACHE[cache_key] = inner
         return inner
 
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         """板块 5 分钟 K 线（同花顺 1 分钟分时聚合而来）。"""
         t0 = time.time()
-        inner = self._get_inner_code(sector_code)
+        inner = self._get_inner_code(sector_code, category)
         if not inner:
             if self._logger:
                 self._logger.api("ths", "sector_5min_kline", ok=False,
                                  elapsed_ms=(time.time() - t0) * 1000,
-                                 error="innerCode 解析失败")
+                                 error="innerCode 解析失败", dimension=category)
             return []
         raw = _fetch(TIME_URL.format(inner=inner), referer=f"{Q_BASE}/")
         data = _parse_jsonp(raw) if raw else None
@@ -533,7 +620,7 @@ class THSProvider(StockProvider):
         if not data:
             if self._logger:
                 self._logger.api("ths", "sector_5min_kline", ok=False,
-                                 elapsed_ms=elapsed, error="分时为空")
+                                 elapsed_ms=elapsed, error="分时为空", dimension=category)
             return []
         node = data.get(f"48_{inner}", {})
         kbars = _aggregate_5min(
@@ -541,18 +628,20 @@ class THSProvider(StockProvider):
             _safe_float(node.get("pre")))
         if self._logger:
             self._logger.api("ths", "sector_5min_kline", ok=bool(kbars),
-                             elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                             elapsed_ms=elapsed, note=f"{category} n={len(kbars)}",
+                             dimension=category)
         return kbars[-bars:] if bars else kbars
 
-    def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
+    def get_sector_1min_kline(self, sector_code: str, bars: int = 240,
+                              category: str = "hy") -> list[KBar]:
         """板块当日 1 分钟分时 K 线（原始 1 分，不聚合）。"""
         t0 = time.time()
-        inner = self._get_inner_code(sector_code)
+        inner = self._get_inner_code(sector_code, category)
         if not inner:
             if self._logger:
                 self._logger.api("ths", "sector_1min_kline", ok=False,
                                  elapsed_ms=(time.time() - t0) * 1000,
-                                 error="innerCode 解析失败")
+                                 error="innerCode 解析失败", dimension=category)
             return []
         raw = _fetch(TIME_URL.format(inner=inner), referer=f"{Q_BASE}/")
         data = _parse_jsonp(raw) if raw else None
@@ -560,7 +649,7 @@ class THSProvider(StockProvider):
         if not data:
             if self._logger:
                 self._logger.api("ths", "sector_1min_kline", ok=False,
-                                 elapsed_ms=elapsed, error="分时为空")
+                                 elapsed_ms=elapsed, error="分时为空", dimension=category)
             return []
         node = data.get(f"48_{inner}", {})
         kbars = _parse_1min(
@@ -568,23 +657,25 @@ class THSProvider(StockProvider):
             _safe_float(node.get("pre")))
         if self._logger:
             self._logger.api("ths", "sector_1min_kline", ok=bool(kbars),
-                             elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                             elapsed_ms=elapsed, note=f"{category} n={len(kbars)}",
+                             dimension=category)
         return kbars[-bars:] if bars else kbars
 
     def get_sector_5min_kline_history(self, sector_code: str,
-                                      days: int = 10) -> list[KBar]:
+                                      days: int = 10,
+                                      category: str = "hy") -> list[KBar]:
         """板块近 days 个交易日的 5 分钟历史 K 线（真实 OHLC）。
 
         同花顺 /v6/line/48_{inner}/30/last1000.js（周期码30=5分），_parse_jsonp
         后节点即顶层 dict，data 行 YYYYMMDDHHMM,开,高,低,收,量,额,... 直接 OHLC。
         """
         t0 = time.time()
-        inner = self._get_inner_code(sector_code)
+        inner = self._get_inner_code(sector_code, category)
         if not inner:
             if self._logger:
                 self._logger.api("ths", "sector_5min_history", ok=False,
                                  elapsed_ms=(time.time() - t0) * 1000,
-                                 error="innerCode 解析失败")
+                                 error="innerCode 解析失败", dimension=category)
             return []
         raw = _fetch(LINE_URL.format(inner=inner), referer=f"{Q_BASE}/")
         data = _parse_jsonp(raw) if raw else None
@@ -592,7 +683,7 @@ class THSProvider(StockProvider):
         if not data:
             if self._logger:
                 self._logger.api("ths", "sector_5min_history", ok=False,
-                                 elapsed_ms=elapsed, error="历史K线为空")
+                                 elapsed_ms=elapsed, error="历史K线为空", dimension=category)
             return []
         kbars = _parse_line_5min(data.get("data", ""))
         # 截取最近 days 个交易日（按日期分组取末 days 天）
@@ -606,7 +697,8 @@ class THSProvider(StockProvider):
             kbars = [kb for d in keep_days for kb in by_day[d]]
         if self._logger:
             self._logger.api("ths", "sector_5min_history", ok=bool(kbars),
-                             elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                             elapsed_ms=elapsed, note=f"{category} n={len(kbars)}",
+                             dimension=category)
         return kbars
 
     # ─── 未实现（个股相关由雪球/腾讯提供）───

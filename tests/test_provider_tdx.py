@@ -237,3 +237,39 @@ class TestCliWarnIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCategoryMapping(unittest.TestCase):
+
+    def test_unknown_category_raises(self):
+        with self.assertRaises(ValueError):
+            TdxProvider().get_sector_ranking(category="xx")
+
+    def test_category_maps_to_board_type(self):
+        seen = []
+
+        class _BT:
+            HY, GN, DQ = "HY", "GN", "DQ"
+
+        class _SC:
+            CHANGE_PCT = 0
+
+        class _Et:
+            BoardType, BoardSortColumn = _BT, _SC
+
+        class _Client:
+            def get_board_list(self, board_type, count, sort_column):
+                seen.append(board_type)
+                import pandas as pd
+                return pd.DataFrame([{"code": "880001", "name": "x",
+                                      "price": 1.1, "pre_close": 1.0}])
+
+        p = TdxProvider()
+        with patch("dragon_quant.providers.tdx._import_easytdx", return_value=_Et), \
+                patch.object(TdxProvider, "_get_client", return_value=_Client()):
+            for cat in ("hy", "gn", "dq"):
+                rows = p.get_sector_ranking(category=cat)
+                self.assertAlmostEqual(rows[0].pct, 10.0)
+                self.assertEqual(rows[0].category, cat)
+                self.assertEqual(rows[0].source, "tdx")
+        self.assertEqual(seen, ["HY", "GN", "DQ"])

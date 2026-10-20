@@ -30,17 +30,25 @@ _HARD_DIMS = ("drive", "leadership", "anti_drop", "liquidity")
 def evaluate(code: str, cache: DataCache, *,
              candidate_pool: Optional[list[Candidate]] = None,
              primary_sector: str = "",
+             primary_sector_key: str = "",
              all_sector_codes: Optional[list[str]] = None,
+             all_sector_keys: Optional[list[str]] = None,
              sector_name_map: Optional[dict[str, str]] = None) -> DragonVerdict:
-    """对单只候选股做五维评分 + 门槛/加权聚合。"""
+    """对单只候选股做五维评分 + 门槛/加权聚合。
+
+    primary_sector_key / all_sector_keys 为规范化板块键（source:category:code），
+    缺省时回退裸 code（历史调用兼容）。
+    """
     dims: dict[str, ScoreResult] = {}
     for dim, fn in _SCORERS.items():
         try:
             dims[dim] = fn(
                 code, cache,
                 primary_sector=primary_sector,
+                primary_sector_key=primary_sector_key,
                 candidate_pool=candidate_pool,
                 all_sector_codes=all_sector_codes,
+                all_sector_keys=all_sector_keys,
                 sector_name_map=sector_name_map,
             )
         except Exception as e:

@@ -8,6 +8,7 @@ from typing import Optional
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import Candidate, KBar, ScoreResult, StockInfo
 from dragon_quant.scorers import registry as R
+from dragon_quant.sectors import components_key, sector_1min_key
 from dragon_quant.scorers.base import (
     CHINA_TZ, at_limit, clip, common_minute_axis, continuous_ranges, gain_curve,
 )
@@ -18,12 +19,14 @@ EPS = 1e-9
 
 
 def score(code: str, cache: DataCache, primary_sector: str = "",
+          primary_sector_key: str = "",
           candidate_pool: Optional[list[Candidate]] = None, **kwargs) -> ScoreResult:
+    key = primary_sector_key or primary_sector
     minute = cache.get(f"kline:1min:{code}") or []
-    sector_min = cache.get(f"kline:1min:sector:{primary_sector}") or []
-    components = cache.get(f"sector:components:{primary_sector}") or []
+    sector_min = cache.get(sector_1min_key(key)) or []
+    components = cache.get(components_key(key)) or []
     qmap = {q.code: q for q in cache.get("quotes:batch") or []}
-    s_early, d_early = _early_seal(code, cache, primary_sector, components, qmap,
+    s_early, d_early = _early_seal(code, cache, key, components, qmap,
                                   candidate_pool)
     quote = qmap.get(code)
     s_lead, d_lead = _lead_sector(minute, sector_min, quote.limit_up if quote else 0)

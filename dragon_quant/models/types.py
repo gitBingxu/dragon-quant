@@ -66,11 +66,13 @@ class Quote:
 @dataclass
 class SectorPerformance:
     """板块行情"""
-    code: str               # BK1145
+    code: str               # 板块代码（TDX 880xxx/881xxx；THS 881xxx/3xxxxx/882xxx）
     name: str               # 机器人执行器
     pct: float              # 涨跌幅 %
     amplitude: float        # 振幅 %
     turnover_rate: float = 0.0
+    category: str = ""      # 维度：hy 行业 / gn 概念 / dq 地区（空=历史数据未标注）
+    source: str = ""        # 来源：tdx / ths（空=历史数据未标注）
 
 
 @dataclass
@@ -81,8 +83,11 @@ class Candidate:
     concepts: list[str] = field(default_factory=list)   # 所属领涨概念列表
     board_count: int = 0                                # 连板高度
     fived_pct: float = 0.0                              # 5日总涨幅 %（Phase C 写入，leadership 用）
-    primary_sector: str = ""                            # 主选板块（涨停股最多的）
+    primary_sector: str = ""                            # 主选板块原生 code（总榜排名最高）
     score: float = 0.0                                  # 综合评分（填充后）
+    primary_sector_key: str = ""                        # 规范化板块键 source:category:code
+    primary_sector_category: str = ""                   # 主选板块维度 hy/gn/dq
+    primary_sector_source: str = ""                     # 主选板块来源 tdx/ths
 
 
 @dataclass

@@ -13,6 +13,7 @@ from typing import Optional
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, ScoreResult
 from dragon_quant.scorers import registry as R
+from dragon_quant.sectors import sector_1min_key
 from dragon_quant.scorers.base import (
     CHINA_TZ, clip, common_minute_axis, continuous_ranges, gain_curve,
 )
@@ -23,10 +24,11 @@ EPS = 1e-9
 
 
 def score(code: str, cache: DataCache, primary_sector: str = "",
-          **kwargs) -> ScoreResult:
+          primary_sector_key: str = "", **kwargs) -> ScoreResult:
+    key = primary_sector_key or primary_sector
     stock: list[KBar] = cache.get(f"kline:1min:{code}") or []
     market: list[KBar] = cache.get(f"kline:1min:{R.MARKET_SYMBOL}") or []
-    sector: list[KBar] = cache.get(f"kline:1min:sector:{primary_sector}") or []
+    sector: list[KBar] = cache.get(sector_1min_key(key)) or []
 
     if not stock:
         return ScoreResult(dim=DIM, score=R.ANTIDROP_NEUTRAL, weight=WEIGHT,

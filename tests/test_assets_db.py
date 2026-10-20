@@ -185,6 +185,21 @@ class TestAuctionAssets(AssetsDbTestBase):
             self.assertIsNone(assets_db.get_auction_asset("1999-01-01", "600172"))
             self.assertEqual(assets_db.list_auction_assets("1999-01-01"), [])
 
+    def test_quote_roundtrip_and_null(self):
+        from dragon_quant.storage import assets_db
+        items = [{"time": "09:25:00", "price": 10.0, "matched": 100, "unmatched": 50}]
+        quote = {"code": "600172", "prev_close": 10.0, "limit_down": 9.0,
+                 "float_market_cap": 3.2e9, "price": 10.5}
+        with self._patch():
+            assets_db.save_auction_asset("2026-10-20", "600172", "黄河旋风",
+                                         items, quote=quote)
+            self.assertEqual(assets_db.get_auction_asset("2026-10-20", "600172")["quote"], quote)
+            assets_db.save_auction_asset("2026-10-20", "600001", "A", items)
+            self.assertIsNone(assets_db.get_auction_asset("2026-10-20", "600001")["quote"])
+            by_code = {r["code"]: r for r in assets_db.list_auction_assets("2026-10-20")}
+            self.assertEqual(by_code["600172"]["quote"], quote)
+            self.assertIsNone(by_code["600001"]["quote"])
+
     def test_nan_rejected(self):
         from dragon_quant.storage import assets_db
         with self._patch():
@@ -193,6 +208,24 @@ class TestAuctionAssets(AssetsDbTestBase):
                     "2026-10-20", "600172", "x",
                     [{"time": "09:25:00", "price": float("nan"),
                       "matched": 1, "unmatched": 0}])
+
+    def test_null_quote_keeps_previous_quote(self):
+        """同日重采行情缺失不得抹掉上次成功快照（原始资产不可再生）。"""
+        from dragon_quant.storage import assets_db
+        quote = {"code": "600172", "prev_close": 10.0, "limit_down": 9.0}
+        with self._patch():
+            assets_db.save_auction_asset("2026-10-20", "600172", "x", [], quote=quote)
+            assets_db.save_auction_asset("2026-10-20", "600172", "x", [], quote=None)
+            self.assertEqual(
+                assets_db.get_auction_asset("2026-10-20", "600172")["quote"], quote)
+
+    def test_quote_nan_rejected(self):
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            with self.assertRaises(ValueError):
+                assets_db.save_auction_asset(
+                    "2026-10-20", "600172", "x", [],
+                    quote={"code": "600172", "price": float("nan")})
 
     def test_isolated_from_prep_tables(self):
         from dragon_quant.storage import assets_db
@@ -256,7 +289,7 @@ class TestLegacyPrepDbCompatibility(AssetsDbTestBase):
 
 
 class TestAuctionSnapshotsTable(AssetsDbTestBase):
-    """结果表本期仅建表：schema 可承载 AuctionVerdict 序列化契约。"""
+    """快照表已由采集/重算写入；本用例校验 analysis_json 契约可被承载。"""
 
     def test_table_accepts_analysis_json(self):
         import json
@@ -280,6 +313,199 @@ class TestAuctionSnapshotsTable(AssetsDbTestBase):
         finally:
             conn.close()
         self.assertEqual(json.loads(row[0]), payload)
+
+
+class TestAuctionQuoteMigration(AssetsDbTestBase):
+    """旧 auction_assets 缺 quote_json：读路径不写 schema，写路径幂等补列。"""
+
+    def _create_old_schema(self):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.executescript("""
+            CREATE TABLE auction_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date TEXT NOT NULL,
+                code TEXT NOT NULL,
+                name TEXT,
+                items_json TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(trade_date, code)
+            );
+            CREATE TABLE auction_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date TEXT NOT NULL,
+                code TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'v2',
+                analysis_json TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(trade_date, code, source)
+            );
+            """)
+            conn.execute(
+                "INSERT INTO auction_assets(trade_date, code, name, items_json) "
+                "VALUES ('2026-10-19', '600001', 'old', '[]')")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _columns(self, table):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        finally:
+            conn.close()
+
+    def test_read_path_does_not_migrate(self):
+        self._create_old_schema()
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            asset = assets_db.get_auction_asset("2026-10-19", "600001")
+            self.assertEqual(asset["items"], [])
+            self.assertIsNone(asset["quote"])
+            self.assertEqual(len(assets_db.list_auction_assets("2026-10-19")), 1)
+        self.assertNotIn("quote_json", self._columns("auction_assets"))
+
+    def test_write_path_migrates_idempotently(self):
+        self._create_old_schema()
+        from dragon_quant.storage import assets_db
+        quote = {"code": "600172", "prev_close": 10.0}
+        with self._patch():
+            assets_db.save_auction_asset("2026-10-20", "600172", "x", [], quote=quote)
+            assets_db.save_auction_asset("2026-10-20", "600172", "x", [], quote=quote)
+            self.assertEqual(assets_db.get_auction_asset("2026-10-20", "600172")["quote"], quote)
+            self.assertIsNone(assets_db.get_auction_asset("2026-10-19", "600001")["quote"])
+        self.assertIn("quote_json", self._columns("auction_assets"))
+
+    def test_wrong_db_still_raises_on_read_and_write(self):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute("CREATE TABLE auction_snapshots (trade_date TEXT, code TEXT, "
+                         "name TEXT, items_json TEXT)")
+            conn.commit()
+        finally:
+            conn.close()
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            with self.assertRaises(assets_db.AssetsDbSchemaError):
+                assets_db.get_auction_asset("2026-10-20", "600172")
+            with self.assertRaises(assets_db.AssetsDbSchemaError):
+                assets_db.save_auction_asset("2026-10-20", "600172", "x", [])
+
+
+    def test_wrong_db_write_does_not_alter_before_probe(self):
+        """错库必须先被形状探针拦截，绝不能先 ALTER 再报错。"""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.executescript("""
+            CREATE TABLE auction_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date TEXT NOT NULL,
+                code TEXT NOT NULL,
+                name TEXT,
+                items_json TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(trade_date, code)
+            );
+            CREATE TABLE auction_snapshots (
+                trade_date TEXT, code TEXT, name TEXT, items_json TEXT
+            );
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            with self.assertRaises(assets_db.AssetsDbSchemaError):
+                assets_db.save_auction_asset("2026-10-20", "600172", "x", [])
+        self.assertNotIn("quote_json", self._columns("auction_assets"))
+
+
+class TestAuctionSnapshotsReplace(AssetsDbTestBase):
+    def _rows(self, trade_date="2026-10-20", source="v2"):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            return conn.execute(
+                "SELECT code, analysis_json FROM auction_snapshots "
+                "WHERE trade_date=? AND source=? ORDER BY code",
+                (trade_date, source),
+            ).fetchall()
+        finally:
+            conn.close()
+
+    def test_replace_rerun_and_stale_removal(self):
+        from dragon_quant.storage import assets_db
+        p1 = {"version": "1", "code": "600001", "strength": 10.0}
+        p2 = {"version": "1", "code": "600002", "strength": 20.0}
+        with self._patch():
+            self.assertEqual(
+                assets_db.replace_auction_snapshots("2026-10-20", {"600001": p1, "600002": p2}),
+                2)
+            self.assertEqual(len(self._rows()), 2)
+            self.assertEqual(
+                assets_db.replace_auction_snapshots("2026-10-20", {"600001": p1}), 1)
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "600001")
+
+    def test_empty_payloads_keeps_old_rows(self):
+        from dragon_quant.storage import assets_db
+        p1 = {"version": "1", "code": "600001"}
+        with self._patch():
+            assets_db.replace_auction_snapshots("2026-10-20", {"600001": p1})
+            self.assertEqual(assets_db.replace_auction_snapshots("2026-10-20", {}), 0)
+        self.assertEqual(len(self._rows()), 1)
+
+    def test_nan_payload_rolls_back(self):
+        from dragon_quant.storage import assets_db
+        p1 = {"version": "1", "code": "600001"}
+        with self._patch():
+            assets_db.replace_auction_snapshots("2026-10-20", {"600001": p1})
+            with self.assertRaises(ValueError):
+                assets_db.replace_auction_snapshots(
+                    "2026-10-20", {"600002": {"x": float("nan")}})
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "600001")
+
+
+class TestAuctionCorruptJson(AssetsDbTestBase):
+    """单行 JSON 损坏必须逐行隔离，不得打断整批读取。"""
+
+    def _seed(self, code, items_json, quote_json):
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.save_auction_asset("2026-10-20", code, "x", [])
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                "UPDATE auction_assets SET items_json=?, quote_json=? "
+                "WHERE trade_date=? AND code=?",
+                (items_json, quote_json, "2026-10-20", code))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_corrupt_quote_isolated(self):
+        self._seed("600001", "[]", "{not-json")
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            asset = assets_db.get_auction_asset("2026-10-20", "600001")
+            self.assertIsNone(asset["quote"])
+            self.assertIn("JSONDecodeError", asset["quote_error"])
+            rows = assets_db.list_auction_assets("2026-10-20")
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["quote"])
+        self.assertIsNotNone(rows[0]["quote_error"])
+
+    def test_corrupt_items_isolated(self):
+        self._seed("600001", "{bad", None)
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            asset = assets_db.get_auction_asset("2026-10-20", "600001")
+            self.assertEqual(asset["items"], [])
+            self.assertIn("JSONDecodeError", asset["items_error"])
+            self.assertEqual(len(assets_db.list_auction_assets("2026-10-20")), 1)
 
 
 if __name__ == "__main__":

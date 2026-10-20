@@ -392,10 +392,248 @@ def _cmd_assets(args):
     sys.exit(0 if summary["ok"] else 1)
 
 
+def _norm_auction_code(code) -> str:
+    """行情/候选代码归一：去 SH/SZ 前后缀，取末 6 位数字。"""
+    text = str(code or "").strip().upper()
+    if "." in text:
+        parts = text.split(".")
+        text = next((p for p in parts if p.isdigit()), parts[-1])
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return digits[-6:].zfill(6) if digits else text
+
+
+def _index_quotes(quotes) -> dict:
+    """Quote 列表 → {归一化 code: Quote}；重复 code 保留首个。"""
+    result = {}
+    for quote in quotes or []:
+        code = _norm_auction_code(getattr(quote, "code", ""))
+        if code and code not in result:
+            result[code] = quote
+    return result
+
+
+def _fetch_auction_quotes(codes: list[str]) -> tuple[dict, dict]:
+    """批量取行情（TDX 主、tencent 兜底），返回 ({code: Quote}, 报告)。
+
+    两条链路都是**整批**请求，绝不逐股请求。TDX 内部吞异常返回 []，
+    因此降级判定必须基于 `matched < requested` 的结果，而非是否抛异常。
+    """
+    from dragon_quant.data import batch_get_quotes
+
+    requested = len(codes)
+    report = {
+        "source": "none",
+        "fallback_used": False,
+        "requested": requested,
+        "matched": 0,
+        "missing": sorted(codes),
+        "degraded": False,
+        "reason": None,
+        "error": None,
+    }
+    if not codes:
+        return {}, report
+
+    def _request(source: str):
+        try:
+            return _index_quotes(batch_get_quotes(codes, source=source))
+        except Exception as exc:              # 兜底：正常链路返回 []，不抛异常
+            report["error"] = f"{type(exc).__name__}: {exc}"
+            return {}
+
+    wanted = set(codes)
+    quote_map = _request("tdx")
+    matched = len(set(quote_map) & wanted)
+    if matched:
+        report["source"] = "tdx"
+    else:
+        report["fallback_used"] = True
+        quote_map = _request("tencent")
+        matched = len(set(quote_map) & wanted)
+        if matched:
+            report["source"] = "tencent"
+
+    report["matched"] = matched
+    report["missing"] = sorted(wanted - set(quote_map))
+    if matched == 0:
+        report["degraded"] = True
+        report["reason"] = "error" if report["error"] else "empty"
+        report["source"] = "none"
+    elif matched < requested:
+        report["degraded"] = True
+        report["reason"] = "partial"
+    return quote_map, report
+
+
+def _snapshot_summary(verdict) -> dict:
+    return {
+        "code": verdict.code,
+        "is_weak": verdict.is_weak,
+        "strength": verdict.strength,
+        "direction": verdict.direction,
+        "level": verdict.level,
+        "unverified": verdict.unverified,
+        "rank": verdict.rank,
+        "reject_reason": verdict.reject_reason,
+    }
+
+
+def _score_auction_assets(assets: list[dict]) -> tuple[dict, list, dict]:
+    """evaluate → rank_auctions → verdict_to_payload（顺序固定）。
+
+    assets: [{"code", "items", "quote"}]；返回 (payloads, failures, summaries)。
+    单股异常隔离，不中断整批。
+    """
+    from dragon_quant.auction import evaluate, rank_auctions
+    from dragon_quant.auction.serialize import verdict_to_payload
+
+    verdicts, failures, summaries = [], [], {}
+    for asset in assets:
+        code = asset["code"]
+        try:
+            verdicts.append(evaluate(code, asset["items"], asset.get("quote")))
+        except Exception as exc:
+            failures.append({"code": code, "stage": "score",
+                             "error": f"{type(exc).__name__}: {exc}"})
+
+    rank_auctions(verdicts)          # 必须先 rank 再序列化，否则 rank 永远丢失
+
+    payloads = {}
+    for verdict in verdicts:
+        try:
+            payloads[verdict.code] = verdict_to_payload(verdict)
+            summaries[verdict.code] = _snapshot_summary(verdict)
+        except Exception as exc:
+            failures.append({"code": verdict.code, "stage": "serialize",
+                             "error": f"{type(exc).__name__}: {exc}"})
+    return payloads, failures, summaries
+
+
+def _parse_auction_date(raw: str) -> str:
+    """归一 + 严格校验交易日；非法格式/不存在的日期抛 ValueError。"""
+    from datetime import datetime
+    normalized = _normalize_cli_date(raw)
+    try:
+        return datetime.strptime(normalized, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(
+            f"无效日期: {raw}（支持 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD）"
+        ) from exc
+
+
+def _cmd_auction_recompute(raw_date: str):
+    """用已存原始资产重算某日竞价快照（不触网）。"""
+    from dragon_quant.storage import assets_db
+    from dragon_quant.auction.serialize import quote_from_payload
+
+    try:
+        trade_date = _parse_auction_date(raw_date)
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "mode": "recompute",
+                          "trade_date": raw_date, "error": str(exc)},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    today = _resolve_trade_date(None)
+    if trade_date > today:
+        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                          "error": f"未来日期不可重算: {trade_date} > {today}"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    try:
+        assets = assets_db.list_auction_assets(trade_date)
+    except Exception as exc:
+        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                          "error": f"读取竞价原始资产失败: {type(exc).__name__}: {exc}"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+    if not assets:
+        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                          "error": f"{trade_date} 无竞价原始资产，无法重算"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    usable, skipped_empty, failed, quote_missing = [], [], [], []
+    for asset in assets:
+        code = asset["code"]
+        if asset.get("items_error"):
+            failed.append({"code": code, "stage": "asset",
+                           "error": asset["items_error"]})
+            continue
+        if asset.get("quote_error"):
+            failed.append({"code": code, "stage": "quote",
+                           "error": asset["quote_error"]})
+            continue
+        if not asset.get("items"):
+            skipped_empty.append(code)
+            continue
+        raw_quote = asset.get("quote")
+        try:
+            quote = quote_from_payload(raw_quote)
+        except Exception as exc:          # 有 quote_json 但损坏 → 单独计失败
+            failed.append({"code": code, "stage": "quote",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        if raw_quote is None:
+            quote_missing.append(code)
+        usable.append({"code": code, "items": asset["items"], "quote": quote})
+
+    if not usable:
+        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                          "asset_count": len(assets), "skipped_empty": skipped_empty,
+                          "failed": failed,
+                          "error": "无可计算资产（items 全为空或行情 payload 全部损坏）"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    payloads, score_failures, summaries = _score_auction_assets(usable)
+    failed.extend(score_failures)
+    if not payloads:
+        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                          "asset_count": len(assets), "usable_count": len(usable),
+                          "skipped_empty": skipped_empty, "quote_missing": quote_missing,
+                          "failed": failed, "error": "全部评分/序列化失败，快照未写入"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    try:
+        saved = assets_db.replace_auction_snapshots(trade_date, payloads, source="v2")
+    except Exception as exc:
+        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                          "error": f"快照写入失败: {type(exc).__name__}: {exc}"},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    print(json.dumps({
+        "ok": not failed,
+        "mode": "recompute",
+        "trade_date": trade_date,
+        "source": "v2",
+        "asset_count": len(assets),
+        "usable_count": len(usable),
+        "skipped_empty": skipped_empty,
+        "quote_missing": quote_missing,
+        "scored_count": len(payloads),
+        "snapshot_saved_count": saved,
+        "snapshot_ok": True,
+        "snapshot_skipped": None,
+        "snapshot_error": None,
+        "failed": failed,
+        "snapshots": [summaries[c] for c in sorted(summaries)],
+    }, ensure_ascii=False, indent=2))
+
+
 def _cmd_auction(args):
-    """采集最近 N 日龙头的当日集合竞价盘口并落库（assets.db/auction_assets）。"""
+    """采集最近 N 日龙头的当日集合竞价盘口 + 行情，落原始资产并计算快照。"""
     from dragon_quant.storage import db, assets_db
     from dragon_quant.data import get_auction
+    from dragon_quant.auction.serialize import quote_to_payload, quote_from_payload
+
+    recompute = getattr(args, "recompute", None)
+    if recompute is not None:
+        _cmd_auction_recompute(recompute)
+        return
 
     source = "v2"
     dates = db.list_dragon_trade_dates(source=source)
@@ -422,33 +660,130 @@ def _cmd_auction(args):
         sys.exit(1)
 
     trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
-    saved, empty, failed = [], [], []
-    for code in sorted(by_code):
-        items = get_auction(code)
-        if items:
-            try:
-                assets_db.save_auction_asset(trade_date, code, by_code[code], items)
-                saved.append({"code": code, "name": by_code[code], "n": len(items)})
-            except Exception as exc:   # 单股失败不中断整批（原始资产逐日积累）
-                failed.append({"code": code,
-                               "error": f"{type(exc).__name__}: {exc}"})
-        else:
-            empty.append(code)
+    codes = sorted(by_code)
 
-    ok = not failed
+    # 行情整批获取（TDX 主、tencent 兜底），绝不逐股请求
+    quote_map, quote_report = _fetch_auction_quotes(codes)
+
+    saved, empty, failed, run_assets = [], [], [], []
+    for code in codes:
+        try:
+            items = get_auction(code)
+        except Exception as exc:
+            failed.append({"code": code, "stage": "auction",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        if not items:
+            empty.append(code)
+            continue
+
+        raw_quote = quote_map.get(code)
+        try:
+            quote_payload = quote_to_payload(raw_quote)
+        except Exception as exc:
+            failed.append({"code": code, "stage": "quote",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            quote_payload = None
+
+        try:
+            assets_db.save_auction_asset(trade_date, code, by_code[code], items,
+                                         quote=quote_payload)
+        except Exception as exc:   # 单股失败不中断整批（原始资产逐日积累）
+            failed.append({"code": code, "stage": "asset",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            continue
+
+        # M2：评分输入与落库同源（payload 往返），保证采集与重算一致
+        try:
+            score_quote = quote_from_payload(quote_payload)
+        except Exception as exc:
+            failed.append({"code": code, "stage": "quote",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            score_quote = None
+
+        saved.append({"code": code, "name": by_code[code], "n": len(items)})
+        run_assets.append({"code": code, "items": items, "quote": score_quote})
+
+    # 评分输入 = 该日全部已存资产（含同日早前批次），保证
+    # 「快照 code 集合 = 有 items 的资产 code 集合」。读取失败时回退本轮内存数据。
+    asset_read_error = None
+    try:
+        persisted = assets_db.list_auction_assets(trade_date)
+    except Exception as exc:
+        persisted = None
+        asset_read_error = f"{type(exc).__name__}: {exc}"
+        failed.append({"code": None, "stage": "asset_read", "error": asset_read_error})
+
+    score_inputs, quote_missing = [], []
+    if persisted is None:
+        score_inputs = run_assets
+    else:
+        for asset in persisted:
+            code = asset["code"]
+            if asset.get("items_error"):
+                failed.append({"code": code, "stage": "asset",
+                               "error": asset["items_error"]})
+                continue
+            if asset.get("quote_error"):
+                failed.append({"code": code, "stage": "quote",
+                               "error": asset["quote_error"]})
+                continue
+            if not asset.get("items"):
+                continue
+            try:
+                score_quote = quote_from_payload(asset.get("quote"))
+            except Exception as exc:      # 有 quote_json 但损坏 → 单独计失败
+                failed.append({"code": code, "stage": "quote",
+                               "error": f"{type(exc).__name__}: {exc}"})
+                continue
+            if asset.get("quote") is None:
+                quote_missing.append(code)
+            score_inputs.append({"code": code, "items": asset["items"],
+                                 "quote": score_quote})
+
+    payloads, score_failures, summaries = _score_auction_assets(score_inputs)
+    failed.extend(score_failures)
+    snapshot_saved_count, snapshot_error, snapshot_skipped = 0, None, None
+    if payloads:
+        try:
+            snapshot_saved_count = assets_db.replace_auction_snapshots(
+                trade_date, payloads, source=source)
+        except Exception as exc:
+            snapshot_error = f"{type(exc).__name__}: {exc}"
+    else:
+        # 不调用 replace：空 payload 不删除既有快照
+        snapshot_skipped = "no_payloads"
+
+    snapshot_ok = (snapshot_error is None
+                   and (snapshot_saved_count > 0 or (not saved and not failed)))
+    ok = not failed and snapshot_error is None and snapshot_ok
+    if saved and not snapshot_ok:
+        print("⚠️ 竞价原始资产已写入，但快照未产出；请检查 failed/snapshot_error",
+              file=sys.stderr)
+
     print(json.dumps({
         "ok": ok,
+        "mode": "collect",
         "trade_date": trade_date,
         "source": source,
         "lookback_dates": recent_dates,
-        "candidate_codes": len(by_code),
+        "candidate_codes": len(codes),
         "saved_count": len(saved),
         "saved": saved,
         "empty": empty,
         "failed": failed,
+        "quote": quote_report,
+        "quote_missing": quote_missing,
+        "asset_read_error": asset_read_error,
+        "scored_count": len(payloads),
+        "snapshot_saved_count": snapshot_saved_count,
+        "snapshot_ok": snapshot_ok,
+        "snapshot_skipped": snapshot_skipped,
+        "snapshot_error": snapshot_error,
+        "snapshots": [summaries[c] for c in sorted(summaries)],
     }, ensure_ascii=False, indent=2))
-    if failed and not saved:
-        # 全部 code 写入失败通常是系统性故障（schema 不匹配/磁盘/权限），
+    if len(saved) == 0 and (failed or snapshot_error):
+        # 原始资产一条都没写成功通常是系统性故障（schema/磁盘/权限），
         # 不能让定时任务把「一条都没写成功」当作成功。
         sys.exit(1)
 

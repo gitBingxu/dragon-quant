@@ -8,7 +8,9 @@
   LOG_DIR     — 结构化日志 (JSONL)
   RESULTS_DIR — 扫描报告 (TXT)
   SHARED_DIR  — 子进程共享缓存快照
-  DB_PATH     — SQLite 数据库文件
+  DB_PATH           — dragon.db（扫描/回测主库）
+  ASSETS_DB_PATH    — assets.db（原始数据资产 + 算法快照，独立库）
+  LEGACY_PREP_DB_PATH — 旧 prep.db（仅 status 展示，不再读写）
 
 跨平台兼容：macOS / Linux / Windows
 """
@@ -40,7 +42,8 @@ LOG_DIR = DATA_DIR / "logs"
 RESULTS_DIR = DATA_DIR / "results"
 SHARED_DIR = DATA_DIR / "shared"
 DB_PATH = DATA_DIR / "dragon.db"
-PREP_DB_PATH = DATA_DIR / "prep.db"   # 盘后复盘独立资产库（prep_assets + prep_snapshots）
+ASSETS_DB_PATH = DATA_DIR / "assets.db"        # 数据资产独立库（prep + auction）
+LEGACY_PREP_DB_PATH = DATA_DIR / "prep.db"     # 旧资产库，仅 status 展示，不再读写
 
 for _d in [COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR]:
     _d.mkdir(parents=True, exist_ok=True)

@@ -4,7 +4,7 @@
 
 架构（见 review_account/prep因子扩展技术方案.md）：
   - collect 段：遍历 ASSET_COLLECTORS 注册表，逐 collector 隔离异常，
-    全部 payload 经 ``prep_db.save_prep_assets`` 单事务落库（含 collection_report）。
+    全部 payload 经 ``assets_db.save_prep_assets`` 单事务落库（含 collection_report）。
   - compute 段：只从 prep_assets 读回（快照 = 资产的纯函数），逐因子错误隔离；
     ``--recompute`` 时用已存资产重算快照（算法升级可重放历史口径）。
   - same_day_only 资产（FG/实时行情类）补跑历史日时跳过，防止时点污染。
@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 from dragon_quant.providers.tdx import TdxProvider
 from dragon_quant.providers.ths import THSProvider
-from dragon_quant.storage import db, prep_db
+from dragon_quant.storage import db, assets_db
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -667,15 +667,15 @@ def run_prep(trade_date: str, recompute: bool = False) -> dict:
     if recompute:
         if trade_date > datetime.now(SHANGHAI).strftime("%Y-%m-%d"):
             raise PrepError(f"复盘日 {trade_date} 是未来日期")
-        assets = prep_db.get_prep_assets(trade_date)
+        assets = assets_db.get_prep_assets(trade_date)
         if not assets:
             raise PrepError(f"{trade_date} 无可重算资产（请先正常采集 prep）")
     else:
         tdx = TdxProvider()
         _validate_trade_date(trade_date, tdx)   # 复用同一 provider，避免二次握手
         payloads, report = _collect_all(trade_date, tdx)
-        prep_db.save_prep_assets(trade_date, payloads, report)
-        assets = prep_db.get_prep_assets(trade_date)  # 读回：快照 = 资产的纯函数
+        assets_db.save_prep_assets(trade_date, payloads, report)
+        assets = assets_db.get_prep_assets(trade_date)  # 读回：快照 = 资产的纯函数
     result = _compute_all(trade_date, assets)
-    prep_db.save_prep_snapshot(trade_date, result, source="v2")
+    assets_db.save_prep_snapshot(trade_date, result, source="v2")
     return result

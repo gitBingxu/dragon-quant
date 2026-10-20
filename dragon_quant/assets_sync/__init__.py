@@ -4,7 +4,7 @@
   - codec      规范化 JSON / gzip / 哈希
   - models     不可变值对象
   - backends   Strategy：S3Backend / LocalDirBackend
-  - sources    Adapter：prep_assets / auction_snapshots（M2）
+  - sources    Adapter：assets.db 的 prep_assets / auction_assets（M2）
   - service    push / pull / status / verify（M3）
 """
 

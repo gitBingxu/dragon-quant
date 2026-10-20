@@ -132,7 +132,7 @@ dragon-quant prep --date 20260519 --recompute # 用已存资产重算快照（�
 
 盘后执行复盘，分**两段式流水线**（固定 `source=v2`）：
 
-1. **采集段**：按资产注册表逐类采集原始数据 → 单事务写入 **`prep.db`** 的 `prep_assets`（含 `collection_report` 记录每类资产的 `ok/empty/unavailable/error` 状态）。
+1. **采集段**：按资产注册表逐类采集原始数据 → 单事务写入 **`assets.db`** 的 `prep_assets`（含 `collection_report` 记录每类资产的 `ok/empty/unavailable/error` 状态）。
    - tmdx：全 A 市场宽度（红盘率/涨停/炸板/跌停/成交额）、FG 板块（昨日涨停溢价/晋级交叉/龙虎榜名单）、候选股主力净额、cninfo 公告
    - THS dataapi：涨停池（涨停原因/板型/炸板次数/连板高度）、题材主线榜（题材涨停家数/最高板）
 2. **计算段**：只从 `prep_assets` 读回资产（快照 = 资产的纯函数）→ 计算 `sentiment` / `main_boards` / `candidates` → 写入 `prep_snapshots`。
@@ -148,7 +148,7 @@ dragon-quant auction              # 最近 3 个交易日的龙头并集
 dragon-quant auction --days 3     # 指定回溯交易日数
 ```
 
-从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `auction_snapshots`（键 `trade_date+code`，同日重复采集幂等覆盖）。输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）。适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史，供集合竞价买点策略消费。
+从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db` 的 `auction_assets`（键 `trade_date+code`，同日重复采集幂等覆盖）。输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）/ `failed`（单股读写失败，逐 code 隔离不中断整批）。适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史，供集合竞价买点策略消费。
 
 ### `assets` — 数据资产云端同步
 
@@ -356,8 +356,7 @@ SQLite 表分为三类：
 - 共享表：`vpa_analysis` / `sector_blacklist`
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
 - 实盘辅助买卖信号表：`buy_sell_signals`（`buy` / `sell` 命令使用，未平仓 code 唯一）
-- 盘后复盘独立库 `prep.db`：`prep_assets`（原始数据资产）/ `prep_snapshots`（计算结果）
-- 集合竞价盘口快照表：`auction_snapshots`（`auction` 命令使用，单列 `items_json` 存当日竞价盘口明细）
+- 数据资产独立库 `assets.db`：`prep_assets` / `prep_snapshots`（盘后复盘原始资产/结果）、`auction_assets` / `auction_snapshots`（竞价原始明细/结果；结果表本期仅建表）
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 
@@ -372,16 +371,35 @@ SQLite 表分为三类：
 
 `buy_sell_signals` 表用于实盘辅助交易（`buy` / `sell`）：记录买入（code/name/entry_date/entry_price/买入原因与信号）与卖出（exit_date/exit_price/卖出原因/持有天数），并保存最高浮盈/价（`highest_return`/`highest_price`）与半仓标记供跨日移动止盈/保本判定；未平仓 code 由部分唯一索引 `idx_buy_sell_open` 保证幂等去重。
 
-### 盘后复盘独立库 `prep.db`
+### 数据资产独立库 `assets.db`
 
-`prep` 命令的数据落在**独立 SQLite 库** `prep.db`（与 `dragon.db` 同目录，随 `DQ_DATA_DIR` 覆盖），与可重算的扫描产物物理隔离——原始数据资产不可再生，避免被 `storage clear --all` 连带清理：
+`prep` 与 `auction` 的数据落在**独立 SQLite 库** `assets.db`（与 `dragon.db` 同目录，随 `DQ_DATA_DIR` 覆盖），与可重算的扫描产物物理隔离——原始数据资产不可再生，避免被 `storage clear --all` 连带清理：
 
-- **`prep_assets`**：原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `collection_report`。
+- **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `collection_report`。
 - **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `candidates` / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。
+- **`auction_assets`**：集合竞价原始盘口明细（`auction` 命令），单列 `items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`UNIQUE(trade_date, code)` 幂等覆盖；`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。
+- **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。**本期仅建表，尚未接线算法**；未来写入者必须遵循该契约，不得另立字段。
 
-`storage status` 会展示 `dragon.db` / `prep.db` 的存在性与体积。
+`storage status` 会展示 `dragon.db` / `assets.db` 的存在性与体积；旧 `prep.db` 若仍存在，会以 `legacy_prep_db` 单独标注（不再读写，确认后可删除）。`storage clear --all` 只清理 cache/results/logs/shared，数据库文件列入 `protected_databases`，永不删除。
 
-`auction_snapshots` 表用于集合竞价盘口（`auction` 命令）：单列 `items_json` 存当日竞价盘口明细数组（`time`/`price`/`matched`/`unmatched`），`UNIQUE(trade_date, code)` 幂等覆盖；`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日竞价数据，故该表只通过逐日采集积累历史，无法事后回补。
+#### 从旧库迁移（可选，代码不自动执行）
+
+存储层重构不自动迁移历史数据。旧 `prep.db` 与 dragon.db 的遗留 `auction_snapshots` 表保留但不再读写：
+
+- **首次运行新版本前**：`mv "<DQ_DATA_DIR>/prep.db" "<DQ_DATA_DIR>/assets.db"`（如有 `-wal`/`-shm` 一并移动），即可保留历史复盘资产与快照。
+- **执行迁移 SQL 前先建表**：`assets.db` 的 4 张表在首次读写时惰性创建。刚完成 `mv` 或新建库后，先运行一次会写库的命令，例如 `python -m dragon_quant prep --recompute --date <已存日期>`（无旧资产时用盘后 `python -m dragon_quant prep`，或当日 9:25 后 `python -m dragon_quant auction`）。
+- **导入竞价原始明细**（幂等）：
+```bash
+sqlite3 "<DQ_DATA_DIR>/assets.db"
+```
+```sql
+ATTACH DATABASE '<DQ_DATA_DIR>/dragon.db' AS legacy;
+INSERT OR IGNORE INTO auction_assets(trade_date, code, name, items_json)
+SELECT trade_date, code, name, items_json FROM legacy.auction_snapshots;
+DETACH DATABASE legacy;
+```
+  旧 `prep.db` 同理，可用 `ATTACH` + `INSERT OR IGNORE` 将 `prep_assets` / `prep_snapshots` 拷入 `assets.db`。
+- **未迁移时**：历史日 `prep --recompute` 会报「无可重算资产」，review-account 候选池回退「前 3 日真龙并集」、情绪仓位降级（既有回退路径）。
 
 ## 免责声明
 

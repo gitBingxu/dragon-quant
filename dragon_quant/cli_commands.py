@@ -318,7 +318,7 @@ def _cmd_dragons(args):
 
 
 def _cmd_prep(args):
-    """盘后复盘：采集数据资产 + 计算候选池/情绪快照，落 prep.db。"""
+    """盘后复盘：采集数据资产 + 计算候选池/情绪快照，落 assets.db。"""
     from dragon_quant.review_account.prep import PrepError, run_prep
     from dragon_quant.storage import db
 
@@ -393,8 +393,8 @@ def _cmd_assets(args):
 
 
 def _cmd_auction(args):
-    """采集最近 N 日龙头的当日集合竞价盘口并落库（auction_snapshots）。"""
-    from dragon_quant.storage import db
+    """采集最近 N 日龙头的当日集合竞价盘口并落库（assets.db/auction_assets）。"""
+    from dragon_quant.storage import db, assets_db
     from dragon_quant.data import get_auction
 
     source = "v2"
@@ -422,16 +422,22 @@ def _cmd_auction(args):
         sys.exit(1)
 
     trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
-    saved, empty = [], []
+    saved, empty, failed = [], [], []
     for code in sorted(by_code):
         items = get_auction(code)
         if items:
-            db.save_auction_snapshot(trade_date, code, by_code[code], items)
-            saved.append({"code": code, "name": by_code[code], "n": len(items)})
+            try:
+                assets_db.save_auction_asset(trade_date, code, by_code[code], items)
+                saved.append({"code": code, "name": by_code[code], "n": len(items)})
+            except Exception as exc:   # 单股失败不中断整批（原始资产逐日积累）
+                failed.append({"code": code,
+                               "error": f"{type(exc).__name__}: {exc}"})
         else:
             empty.append(code)
 
+    ok = not failed
     print(json.dumps({
+        "ok": ok,
         "trade_date": trade_date,
         "source": source,
         "lookback_dates": recent_dates,
@@ -439,7 +445,12 @@ def _cmd_auction(args):
         "saved_count": len(saved),
         "saved": saved,
         "empty": empty,
+        "failed": failed,
     }, ensure_ascii=False, indent=2))
+    if failed and not saved:
+        # 全部 code 写入失败通常是系统性故障（schema 不匹配/磁盘/权限），
+        # 不能让定时任务把「一条都没写成功」当作成功。
+        sys.exit(1)
 
 
 def _cmd_buy(args):
@@ -518,16 +529,28 @@ def _cmd_storage(args):
         # 数据库文件（clear --all 不清理，仅展示）
         print(f"{'数据库':10s} {'':>6s} {'大小':>8s}")
         print("-" * 28)
-        for key in ("dragon_db", "prep_db"):
+        for key in ("dragon_db", "assets_db"):
             d = s[key]
             print(f"{key:10s} {'':>6s} {d['size']:>8s}" if d["exists"]
                   else f"{key:10s}  (不存在)")
+        legacy = s["legacy_prep_db"]
+        if legacy["exists"]:
+            print(f"legacy_prep_db (历史库，不再读写，确认 assets.db 有数据后可删除) "
+                  f"{legacy['size']}")
 
     elif args.storage_action == "clear":
         if args.all:
             r = mgr.clear_all()
             for k, v in r.items():
+                if k == "protected_databases":
+                    continue
                 print(f"  清理 {k}: {v} 个文件")
+            if r.get("protected_databases"):
+                print("  保留数据库（不清理）:")
+                for path in r["protected_databases"]:
+                    note = "（历史库，确认 assets.db 有数据后可删除）" \
+                        if path.endswith("prep.db") else ""
+                    print(f"    {path}{note}")
         else:
             if args.cache:
                 n = mgr.clear_cache()

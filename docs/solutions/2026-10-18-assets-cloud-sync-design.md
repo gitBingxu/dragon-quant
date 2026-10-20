@@ -120,8 +120,8 @@ flowchart LR
     end
 
     subgraph SRC["资产源（Adapter）"]
-        P1["PrepAssetSource\nprep.db / prep_assets"]
-        P2["AuctionAssetSource\ndragon.db / auction_snapshots"]
+        P1["PrepAssetSource\nassets.db / prep_assets"]
+        P2["AuctionAssetSource\nassets.db / auction_assets"]
         R["ASSET_SOURCES 注册表"]
     end
 
@@ -172,7 +172,7 @@ flowchart LR
 ### 设计模式与动机
 
 - **Strategy**：`ObjectStorage` 后端，R2/B2 只差配置。
-- **Adapter**：`AssetSource` 适配 `prep_assets` 与 `auction_snapshots`。
+- **Adapter**：`AssetSource` 适配 `assets.db` 的 `prep_assets` 与 `auction_assets`。
 - **Registry**：`ASSET_SOURCES` 新增资产类型只加一行，并在启动时断言 `source:type` 全局唯一。
 - **Facade**：`assets` CLI 隐藏 manifest/签名细节。
 - **Value Object**：`AssetShard` / `Manifest` 不可变，便于哈希与测试。
@@ -251,12 +251,13 @@ flowchart LR
 
 | 来源 | 表 | 单元 | 说明 |
 |---|---|---|---|
-| prep | `prep.db / prep_assets` | `(trade_date, asset_type)` | 含 `collection_report` |
-| auction | `dragon.db / auction_snapshots` | `trade_date` 聚合 | `{trade_date, items:[{code,name,items}...]}`，按 code 排序 |
+| prep | `assets.db / prep_assets` | `(trade_date, asset_type)` | 含 `collection_report` |
+| auction | `assets.db / auction_assets` | `trade_date` 聚合 | `{trade_date, items:[{code,name,items}...]}`，按 code 排序 |
 
 - `prep_snapshots` 不上传。
 - `auction` 必须纳入：`get_auction` 只返回当日数据、无历史回看，**不可再生**。
   （更正：`storage clear --all` 只清 cache/results/logs/shared，不删除任何 `.db`；此前“会被 clear 清理”的前提不成立。）
+- **旧库遗留表**：`dragon.db / auction_snapshots`（2026-10-20 存储层重构前的原始明细表）与旧 `prep.db` **不自动纳入 M2 备份**。若未按 README/AGENTS 的手工迁移片段迁入 `assets.db`，该历史仅存本地；迁移后以 `assets.db` 为唯一上传源。
 
 ---
 

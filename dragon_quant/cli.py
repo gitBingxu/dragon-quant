@@ -344,7 +344,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "prep",
         help="盘后复盘，生成候选池+情绪温度快照",
         usage="dragon-quant prep [--date YYYYMMDD] [--recompute]",
-        description="盘后执行复盘，采集原始数据资产（prep.db prep_assets）并计算候选池快照"
+        description="盘后执行复盘，采集原始数据资产（assets.db prep_assets）并计算候选池快照"
                     "（prep_snapshots），review-account 消费。",
         epilog="""Examples:
   dragon-quant prep
@@ -362,7 +362,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "auction",
         help="采集最近 N 日龙头的当日集合竞价盘口（TDX）",
         usage="dragon-quant auction [--days 3]",
-        description="从 dragons_v2 取最近 N 个交易日的龙头并集，拉取当日集合竞价盘口并落库到 auction_snapshots。",
+        description="从 dragons_v2 取最近 N 个交易日的龙头并集，拉取当日集合竞价盘口并落库到 assets.db/auction_assets。",
         epilog="""Examples:
   dragon-quant auction
   dragon-quant auction --days 3
@@ -469,7 +469,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 
     clear_p = st_subs.add_parser("clear", help="清理数据",
                                  usage="dragon-quant storage clear [options]")
-    clear_p.add_argument("--all", action="store_true", help="清理全部(cache+results+logs)")
+    clear_p.add_argument("--all", action="store_true",
+                         help="清理全部(cache+results+logs)；数据库文件不清理")
     clear_p.add_argument("--cache", action="store_true", help="清理缓存")
     clear_p.add_argument("--results", action="store_true", help="清理结果")
     clear_p.add_argument("--logs", action="store_true", help="清理日志")

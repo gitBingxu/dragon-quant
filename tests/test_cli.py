@@ -308,5 +308,57 @@ class TestCliDragons(unittest.TestCase):
         self.assertIn("error", json.loads(buf.getvalue()))
 
 
+class TestCmdAuctionStorage(unittest.TestCase):
+    """auction 必须写入 assets.db/auction_assets，且不得回落 dragon.db。"""
+
+    def _run(self, dragons, save_side_effect=None):
+        from types import SimpleNamespace
+        from dragon_quant import cli_commands
+        from dragon_quant.storage import db, assets_db
+
+        items = [{"time": "09:25:00", "price": 10.0, "matched": 100, "unmatched": 0}]
+        buf = io.StringIO()
+        with patch.object(db, "list_dragon_trade_dates", return_value=["2026-10-20"]), \
+             patch.object(db, "get_dragons", return_value=dragons), \
+             patch.object(cli_commands, "_resolve_trade_date", return_value="2026-10-20"), \
+             patch("dragon_quant.data.get_auction", return_value=items), \
+             patch.object(assets_db, "save_auction_asset",
+                          side_effect=save_side_effect) as save, \
+             redirect_stdout(buf):
+            cli_commands._cmd_auction(SimpleNamespace(days=3))
+        return save, json.loads(buf.getvalue())
+
+    def test_writes_auction_assets_only(self):
+        dragon = {"code": "600172", "name": "黄河旋风"}
+        save, out = self._run([dragon])
+        save.assert_called_once()
+        self.assertEqual(save.call_args.args[1], "600172")
+        self.assertEqual(out["saved_count"], 1)
+        self.assertEqual(out["failed"], [])
+
+        from dragon_quant.storage import db
+        for name in ("save_auction_snapshot", "get_auction_snapshot",
+                     "list_auction_snapshots"):
+            self.assertFalse(hasattr(db, name), f"db.{name} 应已移除")
+
+    def test_single_code_failure_isolated(self):
+        dragons = [{"code": "600001", "name": "A"},
+                   {"code": "600002", "name": "B"}]
+        save, out = self._run(dragons, save_side_effect=[RuntimeError("boom"), None])
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual(out["saved_count"], 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(len(out["failed"]), 1)
+        self.assertEqual(out["failed"][0]["code"], "600001")
+        self.assertIn("boom", out["failed"][0]["error"])
+
+    def test_all_failed_exits_nonzero(self):
+        """全部写入失败通常是系统性故障，必须让定时任务感知。"""
+        with self.assertRaises(SystemExit) as cm:
+            self._run([{"code": "600001", "name": "A"}],
+                      save_side_effect=[RuntimeError("disk full")])
+        self.assertEqual(cm.exception.code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

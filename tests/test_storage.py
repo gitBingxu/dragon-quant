@@ -42,6 +42,9 @@ class TestStorageManager(unittest.TestCase):
         status = self.mgr.status()
         self.assertIn("results", status)
         self.assertIn("logs", status)
+        self.assertIn("assets_db", status)
+        self.assertIn("legacy_prep_db", status)
+        self.assertNotIn("prep_db", status)
 
     def test_size(self):
         size = self.mgr.size()
@@ -49,9 +52,43 @@ class TestStorageManager(unittest.TestCase):
         self.assertIn("by_dir", size)
 
     def test_clear_no_error(self):
-        self.mgr.clear_all()
-        self.mgr.clear_results()
-        self.mgr.clear_logs()
+        """clear 只作用于临时目录，绝不清理真实 cache/results/logs。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for name in ("cache", "logs", "results", "shared"):
+                (base / name).mkdir()
+            with patch("dragon_quant.storage.manager.CACHE_DIR", base / "cache"), \
+                 patch("dragon_quant.storage.manager.LOG_DIR", base / "logs"), \
+                 patch("dragon_quant.storage.manager.RESULTS_DIR", base / "results"), \
+                 patch("dragon_quant.storage.manager.SHARED_DIR", base / "shared"), \
+                 patch("dragon_quant.storage.db.delete_all_scan_logs", return_value=0), \
+                 patch("dragon_quant.storage.db.delete_old_scan_logs", return_value=0):
+                self.mgr.clear_all()
+                self.mgr.clear_results()
+                self.mgr.clear_logs()
+
+    def test_clear_all_protects_databases(self):
+        """数据库文件永不进入清理计数，作为独立 protected_databases 字段返回。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for name in ("dragon.db", "assets.db", "prep.db"):
+                (base / name).write_bytes(b"x")
+            with patch("dragon_quant.storage.manager.CACHE_DIR", base / "cache"), \
+                 patch("dragon_quant.storage.manager.LOG_DIR", base / "logs"), \
+                 patch("dragon_quant.storage.manager.RESULTS_DIR", base / "results"), \
+                 patch("dragon_quant.storage.manager.SHARED_DIR", base / "shared"), \
+                 patch("dragon_quant.storage.manager.DB_PATH", base / "dragon.db"), \
+                 patch("dragon_quant.storage.manager.ASSETS_DB_PATH", base / "assets.db"), \
+                 patch("dragon_quant.storage.manager.LEGACY_PREP_DB_PATH", base / "prep.db"), \
+                 patch("dragon_quant.storage.db.delete_all_scan_logs", return_value=0), \
+                 patch("dragon_quant.storage.db.delete_old_scan_logs", return_value=0):
+                result = self.mgr.clear_all()
+
+        protected = {Path(p).name for p in result["protected_databases"]}
+        self.assertEqual(protected, {"dragon.db", "assets.db", "prep.db"})
+        # 保护字段不混入清理计数
+        for key in ("cache", "results", "logs", "shared"):
+            self.assertIsInstance(result[key], int)
 
 
 class TestGetPendingDragons(unittest.TestCase):
@@ -579,48 +616,50 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             self.assertIsNone(rows[0]["is_true_dragon"])
 
 
-class TestAuctionSnapshots(unittest.TestCase):
-    """auction_snapshots 持久化 roundtrip + UPSERT 幂等。"""
+class TestDragonDbHasNoAuctionStorage(unittest.TestCase):
+    """存储层重构回归：dragon.db 不再创建/暴露竞价相关表与 API。"""
 
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmpdir.name) / "test.db")
-        self._conn = sqlite3.connect(self._db_path)
+        self._db_path = str(Path(self._tmpdir.name) / "dragon.db")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_init_db_does_not_create_auction_tables(self):
         with patch("dragon_quant.storage.db._connect",
                    side_effect=lambda: sqlite3.connect(self._db_path)):
             from dragon_quant.storage import db
             db.init_db()
+        conn = sqlite3.connect(self._db_path)
+        try:
+            names = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            conn.close()
+        self.assertNotIn("auction_snapshots", names)
+        self.assertNotIn("auction_assets", names)
 
-    def tearDown(self):
-        self._conn.close()
-        self._tmpdir.cleanup()
+    def test_db_no_longer_exports_auction_apis(self):
+        from dragon_quant.storage import db
+        for name in ("save_auction_snapshot", "get_auction_snapshot",
+                     "list_auction_snapshots"):
+            self.assertFalse(hasattr(db, name), f"db.{name} 应已移除")
 
-    def test_save_and_get_roundtrip(self):
+    def test_legacy_auction_table_is_ignored(self):
+        """旧库已有 auction_snapshots 时，新代码不依赖也不报错。"""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                "CREATE TABLE auction_snapshots (trade_date TEXT, code TEXT, "
+                "name TEXT, items_json TEXT)")
+            conn.commit()
+        finally:
+            conn.close()
         with patch("dragon_quant.storage.db._connect",
                    side_effect=lambda: sqlite3.connect(self._db_path)):
             from dragon_quant.storage import db
-            items = [{"time": "09:15:00", "price": 10.0, "matched": 100, "unmatched": 50}]
-            db.save_auction_snapshot("2026-10-12", "600172", "黄河旋风", items)
-            snap = db.get_auction_snapshot("2026-10-12", "600172")
-            all_snaps = db.list_auction_snapshots("2026-10-12")
-
-        self.assertIsNotNone(snap)
-        self.assertEqual(snap["code"], "600172")
-        self.assertEqual(snap["name"], "黄河旋风")
-        self.assertEqual(snap["items"], items)
-        self.assertEqual(len(all_snaps), 1)
-
-    def test_upsert_overwrites_same_day_code(self):
-        with patch("dragon_quant.storage.db._connect",
-                   side_effect=lambda: sqlite3.connect(self._db_path)):
-            from dragon_quant.storage import db
-            db.save_auction_snapshot("2026-10-12", "600172", "旧名",
-                                     [{"time": "09:15:00", "price": 1.0, "matched": 1, "unmatched": 1}])
-            db.save_auction_snapshot("2026-10-12", "600172", "黄河旋风",
-                                     [{"time": "09:25:00", "price": 2.0, "matched": 2, "unmatched": 2}])
-            snap = db.get_auction_snapshot("2026-10-12", "600172")
-            all_snaps = db.list_auction_snapshots("2026-10-12")
-
-        self.assertEqual(len(all_snaps), 1)
-        self.assertEqual(snap["name"], "黄河旋风")
-        self.assertEqual(snap["items"][0]["price"], 2.0)
+            db.init_db()
+            db.save_dragons("2026-10-20", [{"code": "A", "rank": 1}], source="v1")
+            rows = db.get_dragons("2026-10-20", source="v1")
+        self.assertEqual(len(rows), 1)

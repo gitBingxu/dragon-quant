@@ -11,7 +11,7 @@ class AssetShard:
 
     trade_date: str          # YYYY-MM-DD
     asset_type: str
-    source: str              # prep / auction
+    source: str              # prep / auction（assets.db）
     content: bytes           # 规范化 JSON（未压缩）
     sha256: str
     md5: str

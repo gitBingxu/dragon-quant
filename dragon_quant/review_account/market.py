@@ -41,9 +41,9 @@ def collect_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]
     if cfg.source == "v2":
         dates = candidate_dates(calendar, day, 1)
         if dates:
-            from dragon_quant.storage import prep_db
+            from dragon_quant.storage import assets_db
             try:
-                snap = prep_db.get_prep_snapshot(dates[-1], source=cfg.source)
+                snap = assets_db.get_prep_snapshot(dates[-1], source=cfg.source)
             except Exception:
                 snap = None
             if snap and snap.get("candidates"):
@@ -90,8 +90,8 @@ def load_market_sentiment(calendar: list[str], day: str, cfg) -> Optional[float]
     if not dates:
         return None
     try:
-        from dragon_quant.storage import prep_db
-        snap = prep_db.get_prep_snapshot(dates[-1], source=cfg.source)
+        from dragon_quant.storage import assets_db
+        snap = assets_db.get_prep_snapshot(dates[-1], source=cfg.source)
     except Exception:
         return None
     sentiment = (snap or {}).get("sentiment") or {}

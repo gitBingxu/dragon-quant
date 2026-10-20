@@ -11,7 +11,7 @@ from typing import Optional
 
 from dragon_quant.storage.paths import (
     DATA_DIR, COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR,
-    DB_PATH, PREP_DB_PATH,
+    DB_PATH, ASSETS_DB_PATH, LEGACY_PREP_DB_PATH,
 )
 
 
@@ -85,7 +85,8 @@ class StorageManager:
             "results": _dir_info(RESULTS_DIR),
             "shared": _dir_info(SHARED_DIR),
             "dragon_db": _db_info(DB_PATH),
-            "prep_db": _db_info(PREP_DB_PATH),
+            "assets_db": _db_info(ASSETS_DB_PATH),
+            "legacy_prep_db": _db_info(LEGACY_PREP_DB_PATH),
         }
 
     def size(self) -> dict:
@@ -121,11 +122,15 @@ class StorageManager:
         return removed
 
     def clear_all(self) -> dict:
+        protected = [str(p) for p in (DB_PATH, ASSETS_DB_PATH, LEGACY_PREP_DB_PATH)
+                     if p.exists()]
         return {
             "cache": self.clear_cache(),
             "results": self.clear_results(),
             "logs": self.clear_logs(),
             "shared": _clear_dir(SHARED_DIR),
+            # 独立字段，绝不混入「清理计数」：数据库文件必须保留。
+            "protected_databases": protected,
         }
 
 

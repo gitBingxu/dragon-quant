@@ -56,12 +56,12 @@ python -m dragon_quant review --ui-only
 python -m dragon_quant dragons
 python -m dragon_quant dragons --date 20260519 --true-only
 
-# 盘后复盘：采集原始数据资产(prep.db) + 计算主线/情绪温度/候选池快照（review-account 消费）
+# 盘后复盘：采集原始数据资产(assets.db) + 计算主线/情绪温度/候选池快照（review-account 消费）
 python -m dragon_quant prep
 python -m dragon_quant prep --date 20260519
 python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算（算法升级重放）
 
-# 采集最近 3 日龙头的当日集合竞价盘口（TDX，落库 auction_snapshots）
+# 采集最近 3 日龙头的当日集合竞价盘口（TDX，落库 assets.db/auction_assets）
 python -m dragon_quant auction
 
 # 数据资产云端同步（门槛 A：R2/B2 连通性与元数据回环）
@@ -118,6 +118,11 @@ dragon_quant/
 │   ├── absorption.py            # 资金承接 10%（跨板块虹吸，回看10交易日）
 │   └── aggregator.py            # 门槛+加权聚合 → DragonVerdict
 │
+├── auction/                     # 集合竞价强度评分器（纯函数、无 I/O；四维加权 + 否决闸门）
+│   ├── registry.py              # 权重/阈值/窗口常量（集中调参）
+│   ├── strength.py              # evaluate / rank_auctions
+│   └── types.py                 # AuctionVerdict
+│
 ├── vpa/                         # 量价分析（独立模块，插件式因子 FACTORS）
 │   ├── engine.py / types.py / report.py
 │   └── factors/                 # vol_amount / trend_verify / breakout / divergence
@@ -130,8 +135,8 @@ dragon_quant/
 │   ├── paths.py / manager.py
 │   ├── db.py                    # SQLite 门面 + 基础设施（_connect/_ensure_schema/_tables/init_db）
 │   ├── _base.py                 # 转发包装，令 `db._connect` 的 patch 传递到领域模块
-│   ├── blacklist.py / scans.py / dragons.py / auction.py / logs.py
-│   ├── prep_db.py               # 盘后复盘独立库 prep.db（prep_assets 资产 + prep_snapshots 结果）
+│   ├── blacklist.py / scans.py / dragons.py / logs.py
+│   ├── assets_db.py             # 数据资产独立库 assets.db（prep/auction 原始资产 + 算法快照）
 │   └── review_account.py / signals.py
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
@@ -232,10 +237,13 @@ dragon_quant/
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 | `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、半仓、平仓原因与持有天数 |
-| **`prep.db`（独立库）** | 盘后复盘数据仓 | 与 dragon.db 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示两者体积 |
-| `prep_assets`（prep.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务批量 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`fund_flow`/`cninfo_announcements`/`collection_report`；每日落库=时间换历史 |
-| `prep_snapshots`（prep.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池 + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；加字段=加 JSON key，无需改表 |
-| `auction_snapshots` | 集合竞价盘口快照 | `auction` 命令产出；单列 `items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
+| **`assets.db`（独立库）** | 数据资产仓（prep + auction） | 与 dragon.db 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示 dragon.db / assets.db / 旧 prep.db 体积 |
+| `prep_assets`（assets.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务批量 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`fund_flow`/`cninfo_announcements`/`collection_report`；每日落库=时间换历史 |
+| `prep_snapshots`（assets.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `candidates` 候选池 + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；加字段=加 JSON key，无需改表 |
+| `auction_assets`（assets.db） | 集合竞价原始盘口明细 | `auction` 命令产出；单列 `items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
+| `auction_snapshots`（assets.db） | 集合竞价强度计算结果 | 单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version`/`code`/`is_weak`/`strength`/`direction`/`level`/`dims`/`reject_reason`/`unverified`/`rank`），`UNIQUE(trade_date, code, source)`、`source` 默认 `v2`；**本期仅建表，未接线算法** |
+
+> **存储层重构（2026-10-20）**：旧 `prep.db`（`prep_assets`/`prep_snapshots`）与 dragon.db 的遗留 `auction_snapshots` 表保留但**不再读写、不自动迁移、不 DROP**。需要保留历史时按 README「持久化」段的手工迁移片段操作。
 
 ### v2 物理分表兼容
 - 新扫描的缓存、扫描明细、日志、龙头物化全部读写 `*_v2` 表。
@@ -298,7 +306,7 @@ python -m dragon_quant prep                              # 最新有龙头数据
 python -m dragon_quant prep --date 20260519
 python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重算快照
 ```
-- **两段式**：采集段按 `ASSET_COLLECTORS` 注册表逐类采集 → 单事务写 `prep.db/prep_assets`；计算段只从 `prep_assets` 读回（快照=资产纯函数）→ 写 `prep_snapshots`。新增因子 = 注册一行 + 一个 collector，不动流水线骨架。
+- **两段式**：采集段按 `ASSET_COLLECTORS` 注册表逐类采集 → 单事务写 `assets.db/prep_assets`；计算段只从 `prep_assets` 读回（快照=资产纯函数）→ 写 `prep_snapshots`。新增因子 = 注册一行 + 一个 collector，不动流水线骨架。
 - **数据源**（tmdx 优先、THS 次之、**排除东财**）：`dragons`（dragons_v2 冻结）/ `ths_limit_up_pool`（涨停原因/板型/炸板次数/连板高度，THS dataapi）/ `ths_block_top`（题材主线，THS dataapi）/ `market_breadth`（全 A 扫描五合一：红盘率/涨停/炸板/跌停/成交额）/ `fg_boards`（昨日涨停溢价/晋级交叉/龙虎榜名单）/ `fund_flow`（候选股 `main_net_amount`）/ `cninfo_announcements`（公告标记）。
 - **时点门禁**：`same_day_only` 资产（`market_breadth`/`fg_boards`/`fund_flow`）仅当日采集，补跑历史日自动 `unavailable`；当日运行须 ≥15:30。日期校验用 TDX 指数日K（不依赖雪球 Cookie），「非交易日」与「日历数据源失败」报错严格区分。
 - **错误契约**：新增采集 provider 方法在 transport 失败时**抛异常**（存量方法「返回空」契约不变，如 `get_sector_ranking` 用 `_fetch_with_retry(raise_on_exhaust=False)`）；采集段逐 collector 隔离、计算段逐因子隔离，**任何单点失败不中断 prep**，失败原因落 `collection_report` 与 `sentiment.factor_errors`/`degraded`。
@@ -310,7 +318,7 @@ python -m dragon_quant prep --date 20260519 --recompute   # 用已存资产重�
 ```bash
 python -m dragon_quant assets doctor --profile r2 --samples 50
 ```
-- 目标：把 `prep.db/prep_assets` 与 `dragon.db/auction_snapshots` 的**原始数据资产**备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选）；算法快照、行情缓存、Cookie 不同步。
+- 目标：把 `assets.db/prep_assets` 与 `assets.db/auction_assets` 的**原始数据资产**备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选）；算法快照、行情缓存、Cookie 不同步。旧 `prep.db` 与 dragon.db 遗留竞价表不自动纳入备份（需先按 README 手工迁移）。
 - 本地是权威副本；云端只作异地备份。资产不可再生（`same_day_only` 与 `auction` 仅当日可取）。
 - 云端布局：`blobs/<date>/<source>_<type>.<content_sha256>.json.gz` + `manifests/<date>.json`（每日一份，重采覆盖）。哈希身份用**未压缩规范化 JSON** 的 sha256/md5，压缩字节另算传输哈希。
 - 凭据：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），`default_profile + profiles{r2,b2}`；环境变量 `DQ_ASSETS_*` 只覆盖当前 profile。
@@ -360,6 +368,8 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### ✅ 已完成
 - 五维「识别真龙」评分器 `scorers/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
+- 集合竞价强度评分器 `auction/`（方向/供需/量价/末段抢筹四维加权 + 否决闸门，纯函数）；结果表 `assets.db/auction_snapshots` 已建、尚未接线
+- 数据资产独立库 `assets.db`（`prep_assets`/`auction_assets` 原始资产 + `prep_snapshots`/`auction_snapshots` 结果），与 dragon.db 物理隔离
 - 3 个 Provider（同花顺/雪球/腾讯）含完整反爬；同花顺**行业板块**数据源（排行 HTTP GET+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）
 - DB 板块黑名单表 + CLI `blacklist` 管理

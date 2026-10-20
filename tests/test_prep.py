@@ -378,7 +378,7 @@ class TestTdxFgBoards(unittest.TestCase):
 
 
 class TestRunPrepIntegration(unittest.TestCase):
-    """采集→单事务落库→读回→计算 全链路（provider 用假实现，prep.db 用 tmp）。"""
+    """采集→单事务落库→读回→计算 全链路（provider 用假实现，assets.db 用 tmp）。"""
 
     def test_full_pipeline_persists_assets_and_snapshot(self):
         import sqlite3
@@ -387,7 +387,7 @@ class TestRunPrepIntegration(unittest.TestCase):
         from dragon_quant.review_account import prep as prep_mod
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = str(Path(tmp) / "prep.db")
+            db_path = str(Path(tmp) / "assets.db")
 
             def fake_collect(ctx):
                 return {"count": 1,
@@ -403,13 +403,13 @@ class TestRunPrepIntegration(unittest.TestCase):
                  patch("dragon_quant.review_account.prep._validate_trade_date"), \
                  patch("dragon_quant.review_account.prep.TdxProvider"), \
                  patch("dragon_quant.review_account.prep.THSProvider"), \
-                 patch("dragon_quant.storage.prep_db._connect",
-                       side_effect=lambda: sqlite3.connect(db_path)):
+                 patch("dragon_quant.storage.assets_db._connect",
+                       side_effect=lambda *args, **kwargs: sqlite3.connect(db_path)):
                 out = prep_mod.run_prep("2026-10-16")
 
-                from dragon_quant.storage import prep_db
-                assets = prep_db.get_prep_assets("2026-10-16")
-                snap = prep_db.get_prep_snapshot("2026-10-16")
+                from dragon_quant.storage import assets_db
+                assets = assets_db.get_prep_assets("2026-10-16")
+                snap = assets_db.get_prep_snapshot("2026-10-16")
 
         # 资产已落库并含 collection_report
         self.assertEqual(set(assets), {"dragons", "ths_limit_up_pool", "collection_report"})
@@ -569,16 +569,16 @@ class TestValidateTradeDate(unittest.TestCase):
 class TestRunPrepRecompute(unittest.TestCase):
     def test_recompute_without_assets_raises(self):
         from dragon_quant.review_account.prep import PrepError, run_prep
-        with patch("dragon_quant.storage.prep_db.get_prep_assets", return_value={}):
+        with patch("dragon_quant.storage.assets_db.get_prep_assets", return_value={}):
             with self.assertRaises(PrepError):
                 run_prep("2026-10-19", recompute=True)
 
     def test_recompute_uses_stored_assets_only(self):
         from dragon_quant.review_account.prep import run_prep
         day = "2026-10-16"   # 历史日（今日 2026-10-18，未来日期会被门禁拒绝）
-        with patch("dragon_quant.storage.prep_db.get_prep_assets",
+        with patch("dragon_quant.storage.assets_db.get_prep_assets",
                    return_value=_assets(day)) as ga, \
-             patch("dragon_quant.storage.prep_db.save_prep_snapshot") as save, \
+             patch("dragon_quant.storage.assets_db.save_prep_snapshot") as save, \
              patch("dragon_quant.review_account.prep.TdxProvider") as tdx_cls, \
              patch("dragon_quant.review_account.prep.THSProvider") as ths_cls:
             out = run_prep(day, recompute=True)
@@ -742,7 +742,7 @@ class TestThsRetry(unittest.TestCase):
 
 
 class TestCollectCandidatesSnapshot(unittest.TestCase):
-    """collect_candidates / load_market_sentiment 改读 prep.db 后行为不变。"""
+    """collect_candidates / load_market_sentiment 改读 assets.db 后行为不变。"""
 
     def test_uses_snapshot_when_present(self):
         from dragon_quant.review_account.market import collect_candidates
@@ -753,7 +753,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
             {"code": "D", "composite_score": 80, "is_true_dragon": False},
         ]}
         loader = MagicMock(return_value=[])
-        with patch("dragon_quant.storage.prep_db.get_prep_snapshot", return_value=snap):
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=snap):
             got = collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(), loader)
         self.assertEqual([c["code"] for c in got], ["A", "B"])
         loader.assert_not_called()
@@ -761,7 +761,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
     def test_falls_back_when_no_snapshot(self):
         from dragon_quant.review_account.market import collect_candidates
         loader = MagicMock(return_value=[])
-        with patch("dragon_quant.storage.prep_db.get_prep_snapshot", return_value=None):
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=None):
             collect_candidates(
                 ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07"],
                 "2026-09-07", StrategyConfig(), loader)
@@ -772,7 +772,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
         from dragon_quant.review_account.market import collect_candidates
         loader = MagicMock(return_value=[{"code": "X", "composite_score": 60,
                                           "is_true_dragon": True}])
-        with patch("dragon_quant.storage.prep_db.get_prep_snapshot",
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
                    side_effect=RuntimeError("db down")):
             got = collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(), loader)
         self.assertEqual([c["code"] for c in got], ["X"])
@@ -780,7 +780,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
     def test_v1_source_skips_snapshot(self):
         from dragon_quant.review_account.market import collect_candidates
         loader = MagicMock(return_value=[])
-        with patch("dragon_quant.storage.prep_db.get_prep_snapshot") as gp:
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot") as gp:
             collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(source="v1"), loader)
         gp.assert_not_called()
 
@@ -789,7 +789,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
         snap = {"candidates": [{"code": "LOW", "composite_score": 10, "is_true_dragon": True}]}
         loader = MagicMock(return_value=[{"code": "X", "composite_score": 60,
                                           "is_true_dragon": True}])
-        with patch("dragon_quant.storage.prep_db.get_prep_snapshot", return_value=snap):
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=snap):
             got = collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(), loader)
         self.assertEqual([c["code"] for c in got], ["X"])
 

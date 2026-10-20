@@ -345,7 +345,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         help="盘后复盘，生成候选池+情绪温度快照",
         usage="dragon-quant prep [--date YYYYMMDD] [--recompute] [--verbose]",
         description="盘后执行复盘，采集原始数据资产（assets.db prep_assets）并计算候选池快照"
-                    "（prep_snapshots），review-account 消费。默认输出买入建议摘要，"
+                    "（prep_snapshots），review-account 消费。默认输出 4 行市场摘要 + 标的清单，"
                     "--verbose 输出完整复盘 JSON。",
         epilog="""Examples:
   dragon-quant prep

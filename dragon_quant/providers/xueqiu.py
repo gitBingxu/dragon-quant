@@ -6,8 +6,11 @@
 import json
 import sys
 import time
+import urllib.parse
 import urllib.request
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 from dragon_quant.models.types import Quote, KBar, StockInfo, SectorPerformance
 from dragon_quant.providers.base import StockProvider
 from dragon_quant.providers.cookie import get_xq
@@ -85,6 +88,19 @@ def _fetch(path: str, logger=None, endpoint: str = "") -> Optional[dict]:
     if logger:
         logger.api("xueqiu", endpoint, ok=True, elapsed_ms=elapsed)
     return data
+
+
+def _fetch_macro_quote_json(url: str, cookie: str) -> dict:
+    """雪球宏观 quote JSON；HTTP/解析失败抛 RuntimeError（provider 契约）。"""
+    headers = dict(HEADERS)
+    headers["Cookie"] = cookie
+    headers["Referer"] = "https://xueqiu.com/"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"雪球宏观行情失败: {exc}") from exc
 
 
 def _parse_kline(items: list[list]) -> list[KBar]:
@@ -213,6 +229,64 @@ class XueqiuProvider(StockProvider):
     def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
                               category: str = "hy") -> list[KBar]:
         raise NotImplementedError("雪球不提供板块 K 线")
+
+    # ─── 宏观扰动（仅美股指数，Cookie 最后备选）──────────────────────────────
+
+    def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
+        """雪球全球指数 quote 回退（.DJI/.IXIC/.INX）。
+
+        三态：无 Cookie → 返回 {}（配置缺失，不算 transport 失败）；
+        HTTP/解析失败 → 抛 RuntimeError；符号无数据 → 跳过。
+        只接受 ``session_date < trade_date`` 的已完成 session。
+        """
+        from dragon_quant.providers.macro import build_macro_record
+
+        wanted = [s for s in (specs or []) if getattr(s, "xueqiu", None)]
+        if not wanted:
+            return {}
+        cookie = get_xq()
+        if not cookie:
+            return {}
+
+        out: dict[str, dict] = {}
+        errors: list[str] = []
+        for spec in wanted:
+            symbol = spec.xueqiu
+            url = (f"{BASE}/v5/stock/quote.json?symbol="
+                   f"{urllib.parse.quote(symbol, safe='')}&extend=detail")
+            try:
+                data = _fetch_macro_quote_json(url, cookie)
+            except Exception as exc:
+                errors.append(f"{spec.key}: {type(exc).__name__}: {exc}")
+                continue
+            q = ((data or {}).get("data") or {}).get("quote") or {}
+            try:
+                price = float(q.get("current") or 0)
+                prev_close = float(q.get("last_close") or 0)
+            except (TypeError, ValueError):
+                continue
+            if price <= 0 or prev_close <= 0:
+                continue
+            ts = q.get("timestamp")
+            session_date = None
+            if ts:
+                try:
+                    session_date = datetime.fromtimestamp(
+                        float(ts) / 1000, ZoneInfo("America/New_York")
+                    ).strftime("%Y-%m-%d")
+                except (TypeError, ValueError, OSError):
+                    session_date = None
+            if not session_date or session_date >= trade_date:
+                continue
+            rec = build_macro_record(
+                spec, price=price, prev_close=prev_close, source="xueqiu",
+                code=symbol, market="xueqiu", session_date=session_date,
+            )
+            if rec:
+                out[spec.key] = rec
+        if not out and errors:
+            raise RuntimeError("雪球宏观数据不可用：" + "；".join(errors))
+        return out
 
     def get_quote(self, code: str) -> Optional[Quote]:
         """获取实时行情（通过雪球 quote.json?extend=detail）"""

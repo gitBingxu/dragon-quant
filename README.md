@@ -128,16 +128,23 @@ dragon-quant dragons --date 20260519 --true-only # 只输出真龙 (is_true_drag
 dragon-quant prep                             # 最新有龙头数据的交易日
 dragon-quant prep --date 20260519             # 指定复盘日
 dragon-quant prep --date 20260519 --recompute # 用已存资产重算快照（算法升级重放）
+dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认只给买入摘要）
 ```
 
 盘后执行复盘，分**两段式流水线**（固定 `source=v2`）：
 
 1. **采集段**：按资产注册表逐类采集原始数据 → 单事务写入 **`assets.db`** 的 `prep_assets`（含 `collection_report` 记录每类资产的 `ok/empty/unavailable/error` 状态）。
-   - tmdx：全 A 市场宽度（红盘率/涨停/炸板/跌停/成交额）、FG 板块（昨日涨停溢价/晋级交叉/龙虎榜名单）、候选股主力净额、cninfo 公告
-   - THS dataapi：涨停池（涨停原因/板型/炸板次数/连板高度）、题材主线榜（题材涨停家数/最高板）
+   - **窗口**：复盘范围为含 T 的最近 3 个交易日 `[T-2, T-1, T]`（按交易日历，采集段解析并写入 `dragons` 资产）。窗口内某日无龙头记录（未跑 scan/无真龙）→ 跳过该日并标 `dragons_partial` 降级，不中断；三日并集为空才视为 `empty`。T 日尚未 scan 时仍可用前两日候选。
+   - tmdx：全 A 市场宽度（红盘率/涨停/炸板/跌停/成交额）、FG 板块（昨日涨停溢价/晋级交叉/龙虎榜名单）、并集候选股主力净额、cninfo 公告
+   - THS dataapi：涨停池（涨停原因/板型/炸板次数/连板高度）、题材主线榜（题材涨停家数/最高板）；仍按 T 日口径采集
 2. **计算段**：只从 `prep_assets` 读回资产（快照 = 资产的纯函数）→ 计算 `sentiment` / `main_boards` / `candidates` → 写入 `prep_snapshots`。
+   - 候选池 = 三日真龙并集，同 code 去重保留综合分更优者，每只保留**真实入选日**（`trade_date`，下游 `candidate_trade_date` 血缘）。
+   - THS 归因字段（涨停原因/板型/炸板次数等）只对 **T 日入选**的候选填充；跨日候选为 `null`（未知不伪造）。主力净额与公告是 T 日时点信息，对所有候选附加。
+   - 快照 `version=0.3`，`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
 
-`review-account` / `buy` / `sell` 优先消费该快照作为候选池与情绪仓位，快照缺失/空/异常时回退到「前 3 日真龙并集」旧逻辑。
+**默认输出**（4 行中文）：是否建议买入 / 建议仓位 / 建议等级 / 买入理由。等级映射：0.8 强烈买入、0.5 一般、0.3 轻仓博弈、0.0 不建议买入、数据不足时「不建议买入（数据不足）」；降级信息并入理由。需要完整 JSON（含 `sentiment`/`candidates`/`dragon_source`）时加 `--verbose`。
+
+`review-account` / `buy` / `sell` 优先消费该快照作为候选池与情绪仓位，快照缺失/空/异常时回退到「前 3 日真龙并集」旧逻辑。快照窗口与 `StrategyConfig.candidate_lookback_days` 无关（后者只作用于回退路径）；`auction --days N` 的口径是「最近 N 个有龙头数据的交易日」，与本命令的日历窗口不同。
 
 **时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日时自动跳过并标记 `unavailable`，不会把当日数据写到历史日名下；THS 涨停池/题材榜与 cninfo 公告支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 15:30 收盘后。
 
@@ -385,7 +392,7 @@ SQLite 表分为三类：
 `prep` 与 `auction` 的数据落在**独立 SQLite 库** `assets.db`（与 `dragon.db` 同目录，随 `DQ_DATA_DIR` 覆盖），与可重算的扫描产物物理隔离——原始数据资产不可再生，避免被 `storage clear --all` 连带清理：
 
 - **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `collection_report`。
-- **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `candidates` / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。
+- **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `candidates` / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。当前版本 `version=0.3`（三日窗口）；`dragon_source.window_days`：`0` 表示 dragons 资产不可用（血缘未知）、`1` 表示旧版单日口径重算、`3` 表示三日窗口。
 - **`auction_assets`**：集合竞价原始资产（`auction` 命令），`items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`quote_json`（可空）存 `Quote` 行情快照（`prev_close` / `limit_down` / `float_market_cap` 等评分所需字段，非有限浮点清洗为 `null`；旧行为 `NULL`），`UNIQUE(trade_date, code)` 幂等覆盖；同日重采时 `items_json` 以本次为准，`quote_json` 若本次缺失则保留上次成功快照（`COALESCE`），避免瞬时行情故障抹掉不可再生上下文。`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。旧库首次**写入**时自动补 `quote_json` 列；读路径不执行列迁移（不 ALTER 既有表，缺列按 NULL 读取）。
 - **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。由 `auction` 采集与 `auction --recompute DATE` 写入（`source="v2"`）；同日重跑整日原子替换，空结果（无可用资产/全部评分失败）不会删除既有快照。写入者必须遵循该契约，不得另立字段。
 

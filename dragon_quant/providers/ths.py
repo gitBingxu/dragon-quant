@@ -221,6 +221,7 @@ def _parse_region_ranking_html(html: str) -> list[SectorPerformance]:
     地区板块共 33 个，单页返回，服务端默认按涨跌幅降序。
     """
     result: list[SectorPerformance] = []
+    seen: set[str] = set()
     for body in re.findall(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL):
         for row in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.DOTALL):
             tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
@@ -228,8 +229,9 @@ def _parse_region_ranking_html(html: str) -> list[SectorPerformance]:
                 continue
             code_m = re.search(r"detail/code/(\d+)/", tds[1])
             name = re.sub(r"<[^>]+>", "", tds[1]).strip()
-            if not code_m or not name:
+            if not code_m or not name or code_m.group(1) in seen:
                 continue
+            seen.add(code_m.group(1))
             pct_txt = re.sub(r"<[^>]+>", "", tds[2]).strip().rstrip("%")
             result.append(SectorPerformance(
                 code=code_m.group(1),
@@ -433,28 +435,27 @@ class THSProvider(StockProvider):
         列：td[1]=板块名(含 detail/code 链接) td[3]=涨跌幅%
         """
         result: list[SectorPerformance] = []
-        m = re.search(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL)
-        if not m:
-            return result
-        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", m.group(1), re.DOTALL)
-        for row in rows:
-            tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
-            if len(tds) < 4:
-                continue
-            code_m = re.search(r"detail/code/(\d+)/", tds[1])
-            name = re.sub(r"<[^>]+>", "", tds[1]).strip()
-            if not code_m or not name:
-                continue
-            pct_txt = re.sub(r"<[^>]+>", "", tds[3]).strip().rstrip("%")
-            result.append(SectorPerformance(
+        seen: set[str] = set()
+        for body in re.findall(r"<tbody[^>]*>(.*?)</tbody>", html, re.DOTALL):
+            for row in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.DOTALL):
+                tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+                if len(tds) < 4:
+                    continue
+                code_m = re.search(r"detail/code/(\d+)/", tds[1])
+                name = re.sub(r"<[^>]+>", "", tds[1]).strip()
+                if not code_m or not name or code_m.group(1) in seen:
+                    continue
+                pct_txt = re.sub(r"<[^>]+>", "", tds[3]).strip().rstrip("%")
+                seen.add(code_m.group(1))
+                result.append(SectorPerformance(
                 code=code_m.group(1),
                 name=name,
-                pct=_safe_float(pct_txt),
-                amplitude=0.0,
-                turnover_rate=0.0,
-                category=category,
-                source=source,
-            ))
+                    pct=_safe_float(pct_txt),
+                    amplitude=0.0,
+                    turnover_rate=0.0,
+                    category=category,
+                    source=source,
+                ))
         return result
 
     # ─── prep 盘后复盘采集（涨停聚焦 dataapi：UTF-8 JSON，UA+Referer 即可）───
@@ -562,6 +563,12 @@ class THSProvider(StockProvider):
                 result.extend(part)
                 if len(part) < 10:
                     break
+
+        # 相邻页可能重叠：按 code 去重并保持首次出现顺序
+        dedup: dict[str, StockInfo] = {}
+        for st in result:
+            dedup.setdefault(st.code, st)
+        result = list(dedup.values())
 
         elapsed = (time.time() - t0) * 1000
         if self._logger:

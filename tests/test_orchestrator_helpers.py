@@ -314,3 +314,22 @@ class TestScanScoringIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestApiFailureAttribution(unittest.TestCase):
+
+    def test_fallback_rescue_is_per_dimension(self):
+        from dragon_quant.logging.logger import ScanLogger
+        logger = ScanLogger()
+        logger.api("tdx", "sector_ranking", ok=False, error="boom-1",
+                   dimension="gn")
+        logger.api("tdx", "sector_ranking", ok=False, error="boom-2",
+                   dimension="dq")
+        logger.warn("fallback:sector_ranking", "gn 已回退", dimension="gn")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            orch._report_api_failures(logger, 0, True)
+        text = err.getvalue()
+        self.assertIn("[gn]", text)
+        self.assertIn("已回退老链路", text.split("[dq]")[0])
+        self.assertIn("[dq]", text)
+        self.assertNotIn("[dq] 失败 1 次（已回退老链路）", text)

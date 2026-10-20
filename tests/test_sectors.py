@@ -222,6 +222,16 @@ class TestThreeDimensionScan(unittest.TestCase):
         codes = {r["code"] for r in out["ranking"]}
         self.assertIn("600002", codes)
 
+    def test_collision_emptied_dimension_marked_unavailable(self):
+        self._rankings(
+            hy=[_sp("880001", "H", 5.0, "hy")],
+            gn=[_sp("880001", "G", 4.0, "gn")],
+        )
+        self.tdx.get_sector_components.return_value = [StockInfo("600001", "X", pct=10.0)]
+        out = orch.scan(top_n=1, verbose=False, force=True)
+        self.assertEqual(out["sectors"]["sources"]["gn"], "unavailable")
+        self.assertIn("gn", out["sectors"]["degraded"])
+
     def test_st_filter_on_concept_components(self):
         self._rankings(gn=[_sp("880001", "概念A", 5.0, "gn")])
         self.tdx.get_sector_components.side_effect = (

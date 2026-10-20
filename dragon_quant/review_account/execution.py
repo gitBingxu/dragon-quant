@@ -64,6 +64,45 @@ def sell_quantity(position: Position, reason: str, cfg: StrategyConfig) -> int:
     return (position.qty // 2 // cfg.lot_size) * cfg.lot_size or position.qty
 
 
+def notional_quantity(cfg: StrategyConfig, price: float) -> int:
+    """实盘辅助的虚拟数量口径：满仓单票（initial_cash × max_position_pct），与回测首仓同口径。
+
+    可能返回 0（股价超预算），调用方按回测 `_fill` 的同款语义不建仓。
+    """
+    return buy_quantity(cfg.initial_cash, cfg.initial_cash, price, cfg)
+
+
+def apply_sell_fill(position: Position, price: float, reason_code: str, cfg: StrategyConfig) -> dict:
+    """卖出成交的仓位记账原语（TradingEngine._fill 与 live_trade.SignalEngine._fill_sell 共用）。
+
+    副作用：扣减 position.qty/cost、累加 realized_pnl、半仓时置 took_profit_half。
+    返回 {qty, amount, fee, cost, pnl, partial}；账户/信号簿记（现金、realized_today、
+    ClosedPosition、DB 路由）由调用方负责。
+    """
+    qty = sell_quantity(position, reason_code, cfg)
+    amount, cost_fee = price * qty, fee(price * qty, "SELL", cfg)
+    cost = position.cost * qty / position.qty
+    pnl = amount - cost_fee - cost
+    position.realized_pnl += pnl
+    position.qty -= qty
+    position.cost -= cost
+    partial = bool(position.qty)
+    if partial and reason_code == "next_day_limit_up_half":
+        position.took_profit_half = True
+    return {"qty": qty, "amount": amount, "fee": cost_fee, "cost": cost,
+            "pnl": pnl, "partial": partial}
+
+
+def track_peak(position: Position, row: dict, entry_ts: int) -> None:
+    """峰值跟踪原语：同一根 K 的高点不能反向激活该根 K 内的保护（两引擎共用）。"""
+    if row["bar_timestamp"] > entry_ts:
+        observed_high = (row["bar_high"] if row["bar_timestamp"] - 300_000 >= entry_ts
+                         else row["bar_close"])
+        position.highest_price = max(position.highest_price, observed_high)
+        position.highest_return = max(position.highest_return,
+                                      (position.highest_price / position.entry_price - 1) * 100)
+
+
 def break_even_price(position: Position, cfg: StrategyConfig) -> float:
     qty = position.qty
     percentage = position.cost / (1 - cfg.commission_rate - cfg.stamp_tax_rate)

@@ -1,5 +1,5 @@
 from dragon_quant.review_account.execution import (
-    buy_quantity, daily_fallback_sell_price, fee, fill_price, sell_quantity,
+    apply_sell_fill, buy_quantity, daily_fallback_sell_price, fee, fill_price, track_peak,
 )
 from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import (
@@ -80,11 +80,7 @@ class TradingEngine:
                     if signals:
                         state.pending.append(self._order(p.code, p.name, signals[0], event.timestamp))
                 # The current bar cannot activate protection retroactively within that same bar.
-                if row["bar_timestamp"] > entry_ts:
-                    observed_high = (row["bar_high"] if row["bar_timestamp"] - 300_000 >= entry_ts
-                                     else row["bar_close"])
-                    p.highest_price = max(p.highest_price, observed_high)
-                    p.highest_return = max(p.highest_return, (p.highest_price / p.entry_price - 1) * 100)
+                track_peak(p, row, entry_ts)
             if (event.phase != "close" and event.allow_buy and risk_allow_buy
                     and not state.sold_today and state.buys_today < cfg.max_daily_buys
                     and len(state.positions) < cfg.max_positions
@@ -166,25 +162,17 @@ class TradingEngine:
         p = next((p for p in state.positions if p.code == code), None)
         if p is None or p.entry_date >= day:
             return None, None
-        qty = sell_quantity(p, order["code"], cfg)
-        amount, cost_fee = price * qty, fee(price * qty, side, cfg)
-        cost = p.cost * qty / p.qty
-        pnl = amount - cost_fee - cost
-        state.cash += amount - cost_fee
+        fill = apply_sell_fill(p, price, order["code"], cfg)
+        state.cash += fill["amount"] - fill["fee"]
         state.sold_today = True
-        state.realized_today += pnl
-        p.realized_pnl += pnl
-        p.qty -= qty
-        p.cost -= cost
+        state.realized_today += fill["pnl"]
         closed = None
-        if not p.qty:
+        if not fill["partial"]:
             days = sum(p.entry_date < r["date"] < day for r in row["hist_rows"]) + 1
             closed = ClosedPosition(p.code, p.name, p.entry_date, p.entry_price, p.initial_qty,
                                     p.entry_reason_code, p.entry_signal, day, price, order["code"], signal,
                                     p.realized_pnl / p.initial_cost * 100, days)
             state.positions.remove(p)
             state.consecutive_losses = state.consecutive_losses + 1 if closed.realized_return < 0 else 0
-        elif order["code"] == "next_day_limit_up_half":
-            p.took_profit_half = True
-        return Trade(day, code, p.name, side, price, qty, amount, cost_fee, pnl, state.cash,
-                     p.qty, order["code"], order["reason_text"], signal), closed
+        return Trade(day, code, p.name, side, price, fill["qty"], fill["amount"], fill["fee"],
+                     fill["pnl"], state.cash, p.qty, order["code"], order["reason_text"], signal), closed

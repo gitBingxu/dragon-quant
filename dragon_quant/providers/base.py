@@ -26,33 +26,39 @@ class StockProvider(ABC):
     # ─── 板块相关 ───
 
     @abstractmethod
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
         """
         获取板块涨跌幅排行。
         asc=False: 涨幅榜（领涨板块）
         asc=True: 跌幅榜（领跌板块）
+        category: hy 行业 / gn 概念 / dq 地区；默认 hy 保持历史行为
         """
         ...
 
     @abstractmethod
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
         """获取板块成分股列表（按涨跌幅降序）"""
         ...
 
     @abstractmethod
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         """获取板块 5 分钟 K 线"""
         ...
 
     # ─── scorers 新增（普通方法，默认未实现；仅 ths 覆写）───
 
-    def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
+    def get_sector_1min_kline(self, sector_code: str, bars: int = 240,
+                              category: str = "hy") -> list[KBar]:
         """获取板块当日 1 分钟分时 K 线（原始 1 分，不聚合）"""
         raise NotImplementedError(f"{self.name} 不提供板块当日 1 分 K")
 
-    def get_sector_5min_kline_history(self, sector_code: str, days: int = 10) -> list[KBar]:
+    def get_sector_5min_kline_history(self, sector_code: str, days: int = 10,
+                                      category: str = "hy") -> list[KBar]:
         """获取板块近 days 个交易日的 5 分钟历史 K 线（真实 OHLC）"""
         raise NotImplementedError(f"{self.name} 不提供板块历史 5 分 K")
 

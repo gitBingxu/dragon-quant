@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from dragon_quant.providers.ths import (
     _safe_float, _parse_jsonp, _parse_components_html,
+    _parse_region_ranking_html,
     _aggregate_5min, THSProvider, _INNER_CACHE,
 )
 
@@ -149,7 +150,7 @@ class TestInnerCode(unittest.TestCase):
         p = THSProvider()
         self.assertEqual(p._get_inner_code("881140"), "881140")
         mock_fetch.assert_not_called()
-        self.assertEqual(_INNER_CACHE["881140"], "881140")
+        self.assertEqual(_INNER_CACHE["hy:881140"], "881140")
 
     @patch("dragon_quant.providers.ths._fetch")
     def test_extract_and_cache(self, mock_fetch):
@@ -178,3 +179,48 @@ class TestNotImplemented(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRegionRanking(unittest.TestCase):
+
+    def test_parse_region_ranking(self):
+        html = ('<table><tbody>'
+                '<tr><td>1</td><td><a href="http://q.10jqka.com.cn/dy/detail/code/882001/">江苏</a></td>'
+                '<td>1.75%</td><td>8265</td></tr>'
+                '<tr><td>2</td><td><a href="http://q.10jqka.com.cn/dy/detail/code/882026/">浦东</a></td>'
+                '<td>-0.80%</td><td>1</td></tr>'
+                '</tbody></table>')
+        rows = _parse_region_ranking_html(html)
+        self.assertEqual([r.code for r in rows], ["882001", "882026"])
+        self.assertEqual(rows[0].name, "江苏")
+        self.assertAlmostEqual(rows[0].pct, 1.75)
+        self.assertEqual(rows[0].category, "dq")
+        self.assertEqual(rows[0].source, "ths")
+
+
+class TestComponentsMultiTbody(unittest.TestCase):
+
+    def test_concept_second_tbody_is_members(self):
+        html = ('<table><tbody><tr><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td></tr></tbody></table>'
+                '<table><tbody>'
+                '<tr><td>1</td><td>920096</td><td>嘉晨智能</td><td>35.77</td><td>29.98</td></tr>'
+                '</tbody></table>')
+        comps = _parse_components_html(html, "300816")
+        self.assertEqual([c.code for c in comps], ["920096"])
+
+
+class TestCategoryRouting(unittest.TestCase):
+
+    def test_unknown_category_raises(self):
+        with self.assertRaises(ValueError):
+            THSProvider().get_sector_ranking(category="xx")
+        with self.assertRaises(ValueError):
+            THSProvider().get_sector_components("1", category="xx")
+
+    @patch("dragon_quant.providers.ths._fetch", return_value="<input id='clid' value='885517'>")
+    def test_inner_code_keyed_by_category(self, _mock):
+        _INNER_CACHE.clear()
+        p = THSProvider()
+        self.assertEqual(p._get_inner_code("300816", "gn"), "885517")
+        self.assertIn("gn:300816", _INNER_CACHE)
+        _INNER_CACHE.clear()

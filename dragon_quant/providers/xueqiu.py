@@ -200,15 +200,18 @@ class XueqiuProvider(StockProvider):
 
     # ─── 未实现 ───
 
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
         raise NotImplementedError("雪球不提供板块排行")
 
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
         raise NotImplementedError("雪球不提供板块成分股")
 
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         raise NotImplementedError("雪球不提供板块 K 线")
 
     def get_quote(self, code: str) -> Optional[Quote]:

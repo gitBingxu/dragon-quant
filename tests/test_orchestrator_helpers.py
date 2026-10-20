@@ -210,11 +210,15 @@ class TestScanScoringIntegration(unittest.TestCase):
         self.ths, self.xq, self.tx = Mock(), Mock(), Mock()
         # tdx 主链路：mock 返回空，让板块链锚点/个股链全部回退到老链路
         self.tdx = Mock()
-        self.tdx.get_sector_ranking.return_value = []
+        self.tdx.get_sector_ranking.side_effect = lambda asc=False, category="hy", **kw: []
         self.tdx.get_kline.return_value = []
         self.tdx.get_minute_kline.return_value = []
         self.tdx.batch_get_quotes.return_value = []
-        self.ths.get_sector_ranking.return_value = [SectorPerformance("881001", "S", 2, 2)]
+        # 默认仅行业维度可用（gn/dq 为空 → degraded），保持既有测试语义
+        self.ths.get_sector_ranking.side_effect = (
+            lambda asc=False, category="hy", **kw: (
+                [SectorPerformance("881001", "S", 2, 2, 0.0, category, "ths")]
+                if category == "hy" else []))
         self.ths.get_sector_components.return_value = [StockInfo("600001", "Rejected", pct=10), StockInfo("600002", "Passed", pct=10)]
         self.ths.get_sector_5min_kline_history.return_value = []
         self.ths.get_sector_1min_kline.return_value = _min_bars(100, [0, 1])

@@ -87,6 +87,9 @@ def warn_if_unavailable() -> None:
 # 仓库指数别名 → TDX 代码（上证指数 SH000001 → 999999；000001 是平安银行不映射）
 _INDEX_ALIAS = {"SH000001": "999999"}
 
+# 板块维度 → easy_tdx.BoardType 属性名（运行时从 et.BoardType 取，避免导入期依赖）
+_BOARD_TYPE_BY_CATEGORY = {"hy": "HY", "gn": "GN", "dq": "DQ"}
+
 # ─── 代码/市场解析 ──────────────────────────────────────────────────────────
 
 
@@ -224,7 +227,7 @@ def _to_quote(r: dict) -> Optional[Quote]:
     )
 
 
-def _to_sector(r: dict) -> SectorPerformance:
+def _to_sector(r: dict, category: str = "", source: str = "tdx") -> SectorPerformance:
     """board_list 行 → SectorPerformance（涨跌幅由 price/pre_close 现算）。"""
     price = _f(r.get("price"))
     pre = _f(r.get("pre_close"))
@@ -233,6 +236,7 @@ def _to_sector(r: dict) -> SectorPerformance:
         code=str(r.get("code", "")),
         name=str(r.get("name", "")),
         pct=pct, amplitude=0.0, turnover_rate=0.0,
+        category=category, source=source,
     )
 
 
@@ -344,8 +348,16 @@ class TdxProvider(StockProvider):
 
     # ─── 板块 ───
 
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
-        """行业板块涨跌幅排行（通达信 BoardType.HY，按涨跌幅排序）。"""
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
+        """板块涨跌幅排行（通达信 board_list）。
+
+        category: hy 行业 / gn 概念 / dq 地区。未知维度抛 ValueError（编程错误，
+        不伪装成 api 失败），由 orchestrator 按维度降级（不中断扫描）。
+        """
+        board_name = _BOARD_TYPE_BY_CATEGORY.get(category)
+        if board_name is None:
+            raise ValueError(f"未知板块维度: {category!r}")
         t0 = time.time()
         try:
             et = _import_easytdx()
@@ -356,29 +368,36 @@ class TdxProvider(StockProvider):
                 return []
             with self._lock:
                 df = client.get_board_list(
-                    board_type=et.BoardType.HY,
+                    board_type=getattr(et.BoardType, board_name),
                     count=10000,
                     sort_column=et.BoardSortColumn.CHANGE_PCT,
                 )
-            rows = ([_to_sector(r) for r in df.to_dict("records")]
+            rows = ([_to_sector(r, category, "tdx") for r in df.to_dict("records")]
                     if not df.empty else [])
             rows.sort(key=lambda s: s.pct, reverse=not asc)
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_ranking", ok=bool(rows),
-                                 elapsed_ms=elapsed, note=f"n={len(rows)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(rows)}",
+                                 dimension=category)
             return rows
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_ranking", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e),
+                                 dimension=category)
             return []
 
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
-        """板块成分股（通达信 board_members，按涨跌幅降序）。"""
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
+        """板块成分股（通达信 board_members，按涨跌幅降序）。
+
+        TDX 以 code 路由，category 仅用于日志与接口一致性；code 冲突由
+        orchestrator 在 Phase A 提前剔除。
+        """
         t0 = time.time()
         try:
             et = _import_easytdx()
@@ -398,13 +417,14 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_components", ok=bool(rows),
-                                 elapsed_ms=elapsed, note=f"n={len(rows)}")
+                                 elapsed_ms=elapsed,
+                                 note=f"{category} n={len(rows)}", dimension=category)
             return rows
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_components", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
     def get_fg_boards(self, names: list[str]) -> dict[str, dict]:
@@ -483,40 +503,43 @@ class TdxProvider(StockProvider):
             return []
         return _to_kbars(df.to_dict("records"))
 
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         t0 = time.time()
         try:
             kbars = self._index_kline(sector_code, _import_easytdx().Period.MIN_5, bars)
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_kline", ok=bool(kbars),
-                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(kbars)}", dimension=category)
             return kbars[-bars:] if bars else kbars
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_kline", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
-    def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
+    def get_sector_1min_kline(self, sector_code: str, bars: int = 240,
+                              category: str = "hy") -> list[KBar]:
         t0 = time.time()
         try:
             kbars = self._index_kline(sector_code, _import_easytdx().Period.MIN_1, bars)
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_1min_kline", ok=bool(kbars),
-                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(kbars)}", dimension=category)
             return kbars[-bars:] if bars else kbars
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_1min_kline", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
     def get_sector_5min_kline_history(self, sector_code: str,
-                                      days: int = 10) -> list[KBar]:
+                                      days: int = 10,
+                                      category: str = "hy") -> list[KBar]:
         """板块近 days 个交易日的 5 分钟历史 K 线。"""
         t0 = time.time()
         try:
@@ -532,13 +555,13 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_history", ok=bool(kbars),
-                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(kbars)}", dimension=category)
             return kbars
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_history", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
     # ─── 个股 ───

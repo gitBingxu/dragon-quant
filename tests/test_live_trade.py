@@ -9,12 +9,17 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from dragon_quant.models.types import KBar
 from dragon_quant.live_trade.service import _make_config, _print_buy, _print_sell, run_buy, run_sell
+from dragon_quant.live_trade.shadow import build_shadow_state, position_as_of
 from dragon_quant.live_trade.signal_engine import SignalEngine
 from dragon_quant.live_trade.trader import LiveTrader
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
-from dragon_quant.review_account.market import SHANGHAI, at
+from dragon_quant.review_account.execution import (
+    apply_sell_fill, break_even_price, buy_quantity, notional_quantity,
+)
+from dragon_quant.review_account.market import SHANGHAI, at, bar_times, DataCoverageError, validate_bars
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
 from dragon_quant.storage import db
 from tests.test_review_account import CAND, DAY, FakeData, position, row
@@ -123,6 +128,20 @@ class TestPrintBuy(unittest.TestCase):
         self.assertIn("建议仓位 0%", render({**base, "sentiment_pct": 0.0}))
         self.assertIn("建议仓位 —", render({**base, "sentiment_pct": None}))
         self.assertIn("建议仓位 —", render(base))  # 无 key（向后兼容）
+
+    def test_separates_blocking_and_delevel_gates(self):
+        def render(gates):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                _print_buy(DAY, {"buys": [], "details": [], "reason_text": "x",
+                                 "fired_gate": gates})
+            return buf.getvalue()
+        soft = render(["streak_delevel"])
+        self.assertIn("仓位降级提示", soft)
+        self.assertNotIn("暂停开新仓", soft)
+        hard = render(["shadow_equity_floor"])
+        self.assertIn("暂停开新仓", hard)
+        self.assertNotIn("仓位降级提示", hard)
 
 
 class TestPrintSell(unittest.TestCase):
@@ -237,11 +256,13 @@ class TestSignalStorage(unittest.TestCase):
     def test_signal_roundtrip_idempotent_and_before_date(self):
         code = "600001"
         with self._connect():
-            i1 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
-                                  "buy_open_ma5_pullback", "开盘承接", {"a": 1})
-            i2 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
-                                  "buy_open_ma5_pullback", "开盘承接", {"a": 1})
+            i1, created1 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+                                            "buy_open_ma5_pullback", "开盘承接", {"a": 1})
+            i2, created2 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+                                            "buy_open_ma5_pullback", "开盘承接", {"a": 1})
             self.assertEqual(i1, i2)  # 幂等：同一 code 未平仓不重复记录
+            self.assertTrue(created1)
+            self.assertFalse(created2)
             self.assertEqual([s["code"] for s in db.list_open_signals(source="v2")], [code])
             # before_date：只取 entry_date < 目标日的持仓
             self.assertEqual([s["code"] for s in db.list_open_signals(before_date="2026-09-08", source="v2")], [code])
@@ -253,6 +274,473 @@ class TestSignalStorage(unittest.TestCase):
             self.assertAlmostEqual(row_sig["highest_price"], 10.85)
             # 平仓后不再出现在未平仓列表
             self.assertTrue(db.close_signal(code, "2026-09-08", 9.5, "hard_stop_loss", "止损", {}, 1))
+            self.assertEqual(db.list_open_signals(source="v2"), [])
+
+
+def signal(**kw) -> dict:
+    """一条未平仓信号的 DB 行形态（默认 entry 2026-09-04 @10，qty=1000）。"""
+    base = {
+        "id": 1, "code": "600001", "name": "样本", "source": "v2",
+        "entry_date": "2026-09-04", "entry_price": 10.0,
+        "entry_reason_code": "buy", "entry_reason_text": "买",
+        "entry_signal": {"fill_timestamp": at("2026-09-04", "10:00")},
+        "highest_return": 0.0, "highest_price": 0.0, "took_profit_half": False,
+        "status": "open", "exit_date": None, "exit_price": None,
+        "exit_reason_code": "", "exit_reason_text": "", "exit_signal": {},
+        "hold_days": None, "qty": 1000,
+        "half_exit_date": None, "half_exit_price": None, "half_exit_qty": None,
+        "half_exit_reason_code": "", "half_exit_reason_text": "", "half_exit_signal": {},
+    }
+    base.update(kw)
+    return base
+
+
+class MissingCodeData(FakeData):
+    """指定 code 缺5分钟K（用于验证 codes 全集参与数据分级）。"""
+
+    def __init__(self, missing_code, **kw):
+        super().__init__(**kw)
+        self.missing_code = missing_code
+
+    def intraday(self, code, day, until=None):
+        if code == self.missing_code:
+            raise DataCoverageError(f"{code} 无完整5分钟K")
+        return super().intraday(code, day, until)
+
+
+class RisingData(FakeData):
+    """当日分时走高，用于验证 buy 运行也会写回峰值。"""
+
+    def intraday(self, code, day, until=None):
+        if day in self.intraday_missing:
+            raise DataCoverageError(f"{day} 无完整5分钟K")
+        bars = [KBar(t, 10000, 10.5, 10.55, 10.45, 10.5, 0, 0, 1.0, 100000)
+                for t in bar_times(day)]
+        return validate_bars(bars, day, until)
+
+
+class TestNotionalQuantity(unittest.TestCase):
+    def test_matches_backtest_first_position_and_risk_cap(self):
+        for risk in (0.0, 1.0):
+            cfg = StrategyConfig(risk_per_trade_pct=risk)
+            self.assertEqual(notional_quantity(cfg, 10.0),
+                             buy_quantity(cfg.initial_cash, cfg.initial_cash, 10.0, cfg))
+
+    def test_break_even_parity_with_backtest_position(self):
+        cfg = StrategyConfig()
+        sig = SignalEngine(cfg)
+        acc = TradingEngine(cfg, AccountState(100000))
+        for event in historical_events(DAY, [CAND], {CAND["code"]}, FakeData()):
+            event.allow_buy = True
+            sig.step(copy.deepcopy(event))
+            acc.step(copy.deepcopy(event))
+        self.assertEqual(len(sig.positions), 1)
+        self.assertEqual(len(acc.state.positions), 1)
+        self.assertAlmostEqual(break_even_price(sig.positions[0], cfg),
+                               break_even_price(acc.state.positions[0], cfg), places=9)
+
+    def test_zero_qty_skips_buy_like_backtest(self):
+        cfg = StrategyConfig(initial_cash=1000)  # 一手 1000 + 费用 5 > 预算
+        engine = SignalEngine(cfg)
+        cands = [{**CAND, "code": "600001"}]
+        engine.step(MarketEvent(at(DAY, "09:30"), "open", {"600001": row()}, cands))
+        fill = row(timestamp=at(DAY, "09:30") + 1)
+        result = engine.step(MarketEvent(at(DAY, "09:30") + 1, "fill", {"600001": fill}, cands))
+        self.assertEqual(result["buys"], [])
+        self.assertTrue(any(d.get("reason_code") == "budget_insufficient" for d in result["details"]))
+        self.assertEqual(engine.positions, [])
+
+
+class TestShadowState(unittest.TestCase):
+    def test_equity_identity_after_buy_all(self):
+        """run 内买入扣影子现金：两票成交后 equity ≈ initial_cash − 费用，不膨胀。"""
+        cfg = StrategyConfig()
+        shadow = build_shadow_state([], cfg, DAY, as_of=at(DAY, "10:00"))
+        engine = SignalEngine(cfg, account=shadow, evaluate_sells=False)
+        cands = [{**CAND, "code": "600001"}, {**CAND, "code": "600002"}]
+        rows = {"600001": row(), "600002": row()}
+        engine.step(MarketEvent(at(DAY, "09:30"), "open", rows, cands))
+        fill = {"600001": row(timestamp=at(DAY, "09:30") + 1),
+                "600002": row(timestamp=at(DAY, "09:30") + 1)}
+        result = engine.step(MarketEvent(at(DAY, "09:30") + 1, "fill", fill, cands))
+        self.assertEqual(len(result["buys"]), 2)
+        equity = shadow.cash + sum(p.qty * p.entry_price for p in shadow.positions)
+        fees = sum(b["qty"] * b["entry_price"] * cfg.commission_rate for b in result["buys"])
+        self.assertLess(equity, cfg.initial_cash)
+        self.assertAlmostEqual(equity, cfg.initial_cash - fees, places=2)
+
+    def test_daily_loss_gate_blocks_buy(self):
+        """当日实现亏损超阈值 → 日级熔断真的拦住买单。"""
+        cfg = StrategyConfig(max_daily_loss_pct=5)
+        loss = signal(status="closed", exit_date=DAY, exit_price=4.0,
+                      exit_signal={"fill_timestamp": at(DAY, "10:00")})
+        shadow = build_shadow_state([loss], cfg, DAY, as_of=at(DAY, "11:00"))
+        self.assertLess(shadow.realized_today, 0)
+        engine = SignalEngine(cfg, account=shadow)
+        result = engine.step(MarketEvent(at(DAY, "11:00"), "bar", {"600001": row()}, [CAND]))
+        self.assertEqual(result["pending"], [])
+        self.assertIn("daily_loss_circuit_breaker", result["fired_gate"])
+
+    def test_equity_floor_blocks_buy_when_net_worth_negative(self):
+        """杠杆下净值转负：risk_governor 的 equity>0 守卫会跳过熔断，live 破产闸兜底。"""
+        cfg = StrategyConfig(max_daily_loss_pct=5)
+        wiped = signal(status="closed", exit_date="2026-09-04", exit_price=0.1,
+                       qty=100000, exit_signal={"fill_timestamp": at("2026-09-04", "10:00")})
+        shadow = build_shadow_state([wiped], cfg, DAY, as_of=at(DAY, "10:00"))
+        self.assertLessEqual(shadow.cash, 0)
+        engine = SignalEngine(cfg, account=shadow)
+        result = engine.step(MarketEvent(at(DAY, "10:00"), "bar", {"600001": row()}, [CAND]))
+        self.assertEqual(result["pending"], [])
+        self.assertIn("shadow_equity_floor", engine.fired_gate)
+
+    def test_streak_gate_and_pending_preserved(self):
+        """6 连亏 → 连亏熔断；风控不通过时 pending BUY 保留（continue），不清单。"""
+        cfg = StrategyConfig(streak_delevel_enabled=True)
+        losses = [signal(id=i, code=f"60000{i}", status="closed", exit_date=f"2026-08-{20 + i:02d}",
+                         exit_price=9.0, exit_signal={"fill_timestamp": at(f"2026-08-{20 + i:02d}", "10:00")})
+                  for i in range(6)]
+        shadow = build_shadow_state(losses, cfg, DAY, as_of=at(DAY, "10:00"))
+        self.assertEqual(shadow.consecutive_losses, 6)
+        engine = SignalEngine(cfg)
+        engine.step(MarketEvent(at(DAY, "09:30"), "open", {"600001": row()}, [CAND]))
+        self.assertEqual(len(engine.pending), 1)
+        engine.account = shadow  # 只从下一个事件起启用风控
+        result = engine.step(MarketEvent(at(DAY, "09:30") + 1, "fill",
+                                         {"600001": row(timestamp=at(DAY, "09:30") + 1)}, [CAND]))
+        self.assertIn("streak_circuit_breaker", result["fired_gate"])
+        self.assertEqual(result["buys"], [])
+        self.assertEqual(len(engine.pending), 1)  # continue 保留，等待风控恢复
+
+    def test_sold_today_blocks_new_and_drops_pending(self):
+        cfg = StrategyConfig()
+        sold = signal(took_profit_half=True, half_exit_date=DAY, half_exit_price=10.5,
+                      half_exit_qty=400, half_exit_signal={"fill_timestamp": at(DAY, "10:00")})
+        shadow = build_shadow_state([sold], cfg, DAY, as_of=at(DAY, "11:00"))
+        self.assertTrue(shadow.sold_today)
+        engine = SignalEngine(cfg, account=shadow)
+        result = engine.step(MarketEvent(at(DAY, "11:00"), "bar", {"600001": row()}, [CAND]))
+        self.assertEqual(result["pending"], [])
+        self.assertEqual(result["buys"], [])
+
+    def test_sold_today_removes_existing_pending_buy(self):
+        """当期已卖出：存量 pending BUY 被 remove（不是 continue 保留）。"""
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg)
+        engine.step(MarketEvent(at(DAY, "09:30"), "open", {"600001": row()}, [CAND]))
+        self.assertEqual(len(engine.pending), 1)
+        shadow = build_shadow_state([], cfg, DAY)
+        shadow.sold_today = True
+        engine.account = shadow
+        result = engine.step(MarketEvent(at(DAY, "09:30") + 1, "fill",
+                                         {"600001": row(timestamp=at(DAY, "09:30") + 1)}, [CAND]))
+        self.assertEqual(result["buys"], [])
+        self.assertEqual(engine.pending, [])
+
+    def test_pending_buy_expires_after_300s(self):
+        cfg = StrategyConfig()
+        engine = SignalEngine(cfg)
+        engine.step(MarketEvent(at(DAY, "09:30"), "open", {"600001": row()}, [CAND]))
+        self.assertEqual(len(engine.pending), 1)
+        late = row(timestamp=at(DAY, "09:30") + 301_000)
+        result = engine.step(MarketEvent(at(DAY, "09:30") + 301_000, "fill", {"600001": late}, [CAND]))
+        self.assertEqual(result["buys"], [])
+        self.assertEqual(engine.pending, [])
+
+    def test_as_of_excludes_same_day_future_entry(self):
+        future = signal(entry_date=DAY, entry_signal={"fill_timestamp": at(DAY, "14:00")})
+        self.assertIsNone(position_as_of(future, StrategyConfig(), DAY, at(DAY, "10:00")))
+        self.assertIsNotNone(position_as_of(future, StrategyConfig(), DAY, at(DAY, "15:00")))
+        self.assertEqual(build_shadow_state([future], StrategyConfig(), DAY,
+                                            at(DAY, "10:00")).positions, [])
+
+    def test_as_of_excludes_same_day_future_close(self):
+        closed = signal(status="closed", exit_date=DAY, exit_price=10.5,
+                        exit_signal={"fill_timestamp": at(DAY, "14:55")})
+        early = build_shadow_state([closed], StrategyConfig(), DAY, at(DAY, "10:00"))
+        late = build_shadow_state([closed], StrategyConfig(), DAY, at(DAY, "15:00"))
+        self.assertEqual([p.code for p in early.positions], ["600001"])
+        self.assertFalse(early.sold_today)
+        self.assertEqual(late.positions, [])
+        self.assertTrue(late.sold_today)
+
+    def test_half_projection_before_and_after_leg(self):
+        half = signal(took_profit_half=True, half_exit_date=DAY, half_exit_price=10.5,
+                      half_exit_qty=400, half_exit_signal={"fill_timestamp": at(DAY, "14:00")})
+        before = position_as_of(half, StrategyConfig(), DAY, at(DAY, "10:00"))
+        after = position_as_of(half, StrategyConfig(), DAY, at(DAY, "15:00"))
+        self.assertEqual(before.qty, 1000)
+        self.assertFalse(before.took_profit_half)
+        self.assertEqual(after.qty, 600)
+        self.assertTrue(after.took_profit_half)
+        self.assertAlmostEqual(after.cost, before.cost * 600 / 1000, places=9)
+
+    def test_legacy_signal_without_qty_uses_notional(self):
+        legacy = signal(qty=None)
+        pos = position_as_of(legacy, StrategyConfig(), DAY, at(DAY, "15:00"))
+        self.assertEqual(pos.qty, notional_quantity(StrategyConfig(), 10.0))
+
+    def test_dirty_signal_null_price_does_not_break_shadow(self):
+        """方案 §6：缺 exit_price / entry_price 的脏数据按 0 盈亏跳过，不中断命令。"""
+        bad_close = signal(status="closed", exit_date=DAY, exit_price=None,
+                           exit_signal={"fill_timestamp": at(DAY, "10:00")})
+        bad_entry = signal(id=2, code="600002", entry_price=None)
+        clean = signal(id=3, code="600003")
+        shadow = build_shadow_state([bad_close, bad_entry, clean], StrategyConfig(), DAY,
+                                    at(DAY, "15:00"))
+        self.assertEqual([p.code for p in shadow.positions], ["600003"])
+        self.assertEqual(shadow.realized_today, 0.0)
+        self.assertIsNone(position_as_of(bad_entry, StrategyConfig(), DAY, at(DAY, "15:00")))
+
+    def test_closed_signal_with_null_entry_price_has_zero_pnl(self):
+        """脏 entry_price + 已平仓 + qty 非空：不得把卖出金额当纯利润虚增净值/屏蔽熔断。"""
+        cfg = StrategyConfig()
+        dirty = signal(status="closed", entry_price=None, qty=1000, exit_date=DAY,
+                       exit_price=10.5, exit_signal={"fill_timestamp": at(DAY, "10:00")})
+        shadow = build_shadow_state([dirty], cfg, DAY, at(DAY, "15:00"))
+        self.assertEqual(shadow.realized_today, 0.0)
+        self.assertEqual(shadow.cash, cfg.initial_cash)
+        self.assertEqual(shadow.positions, [])
+
+    def test_half_leg_with_null_price_counts_zero_but_marks_sold(self):
+        cfg = StrategyConfig()
+        half = signal(took_profit_half=True, half_exit_date=DAY, half_exit_price=None,
+                      half_exit_qty=400,
+                      half_exit_signal={"fill_timestamp": at(DAY, "14:55")})
+        shadow = build_shadow_state([half], cfg, DAY, at(DAY, "15:00"))
+        self.assertEqual(shadow.realized_today, 0.0)
+        self.assertTrue(shadow.sold_today)
+        self.assertEqual([p.qty for p in shadow.positions], [600])
+
+    def test_realized_today_attributes_each_leg_to_its_own_day(self):
+        """平仓腿 D1、半仓腿 D2：各自只计入当日，不重复。"""
+        cfg = StrategyConfig()
+        s = signal(took_profit_half=True, half_exit_date="2026-09-08", half_exit_price=10.5,
+                   half_exit_qty=400,
+                   half_exit_signal={"fill_timestamp": at("2026-09-08", "14:55")},
+                   status="closed", exit_date=DAY, exit_price=11.0,
+                   exit_signal={"fill_timestamp": at(DAY, "10:00")})
+        day1 = build_shadow_state([s], cfg, DAY, at(DAY, "15:00"))
+        day2 = build_shadow_state([s], cfg, "2026-09-08", at("2026-09-08", "15:00"))
+        # D1 只有平仓腿（半仓腿尚未发生，全 1000 股）：11000 − 佣金 5 − 印花税 5.5 − 成本 10005
+        self.assertAlmostEqual(day1.realized_today, 984.5, places=2)
+        # D2 只有半仓腿（400 股，成本按 40% 摊）：4200 − 佣金 5 − 印花税 2.1 − 4002
+        self.assertAlmostEqual(day2.realized_today, 190.9, places=2)
+
+    def test_small_cash_half_leg_prorates_cost_like_backtest(self):
+        """最低佣金生效的小资金场景：半仓后剩余成本按比例摊，break_even 与回测一致。"""
+        from dragon_quant.review_account.models import Position
+        cfg = StrategyConfig(initial_cash=10000)
+        backtest_pos = Position("600001", "样本", 200, "2026-09-04", 10.0, 2005.0,
+                                "buy", "buy", highest_price=10.0)
+        apply_sell_fill(backtest_pos, 10.5, "next_day_limit_up_half", cfg)
+        shadow_pos = position_as_of(
+            signal(qty=200, took_profit_half=True, half_exit_date=DAY, half_exit_price=10.5,
+                   half_exit_qty=100, half_exit_signal={"fill_timestamp": at(DAY, "14:55")}),
+            cfg, DAY, at(DAY, "15:00"))
+        self.assertEqual(shadow_pos.qty, backtest_pos.qty)
+        self.assertAlmostEqual(shadow_pos.cost, backtest_pos.cost, places=9)
+        self.assertAlmostEqual(break_even_price(shadow_pos, cfg),
+                               break_even_price(backtest_pos, cfg), places=9)
+
+
+class TestHalfAccounting(unittest.TestCase):
+    def test_half_fill_keeps_position_and_parity_with_backtest(self):
+        cfg = StrategyConfig()
+        p = position()
+        sig = SignalEngine(cfg, positions=[copy.deepcopy(p)])
+        acc = TradingEngine(cfg, AccountState(100000, [copy.deepcopy(p)]))
+        r = row(phase="late", price=11, timestamp=at(DAY, "14:55"))
+        e1 = MarketEvent(at(DAY, "14:55"), "late", {p.code: r})
+        e1.allow_buy = False
+        self.assertEqual([o["code"] for o in sig.step(copy.deepcopy(e1))["pending"]],
+                         ["next_day_limit_up_half"])
+        self.assertEqual([o["code"] for o in acc.step(copy.deepcopy(e1))["pending"]],
+                         ["next_day_limit_up_half"])
+        r2 = row(phase="fill", price=11, timestamp=at(DAY, "14:55") + 1000)
+        e2 = MarketEvent(r2["observed_at"], "fill", {p.code: r2})
+        e2.allow_buy = False
+        s2 = sig.step(copy.deepcopy(e2))
+        a2 = acc.step(copy.deepcopy(e2))
+        self.assertTrue(s2["sells"][0]["partial"])
+        self.assertEqual(s2["sells"][0]["qty"], a2["trades"][0].qty)
+        self.assertEqual(sig.positions[0].qty, acc.state.positions[0].qty)
+        self.assertTrue(sig.positions[0].took_profit_half)
+        self.assertEqual(sig.positions[0].qty, 500)
+        self.assertAlmostEqual(sig.positions[0].cost, acc.state.positions[0].cost, places=9)
+        self.assertAlmostEqual(sig.positions[0].realized_pnl,
+                               acc.state.positions[0].realized_pnl, places=9)
+
+    def test_apply_sell_fill_is_the_shared_primitive(self):
+        cfg = StrategyConfig()
+        p = position()
+        fill = apply_sell_fill(p, 11.0, "next_day_limit_up_half", cfg)
+        self.assertTrue(fill["partial"])
+        self.assertEqual(fill["qty"], 500)
+        self.assertEqual(p.qty, 500)
+        self.assertTrue(p.took_profit_half)
+        self.assertGreater(fill["pnl"], 0)
+
+
+class TestLiveTraderAlignment(unittest.TestCase):
+    """trader 层：数据分级（codes 全集）、峰值写回、as-of、落库标注。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+        self._conn = sqlite3.connect(self._db_path)
+        self._patch = patch("dragon_quant.storage.db._connect",
+                            side_effect=lambda: sqlite3.connect(self._db_path))
+        self._patch.start()
+        db.init_db()
+
+    def tearDown(self):
+        self._patch.stop()
+        self._conn.close()
+        self._tmpdir.cleanup()
+
+    def _trader(self, data):
+        return LiveTrader(StrategyConfig(), source="v2", data=data)
+
+    def test_sell_coverage_includes_candidates(self):
+        """候选分时缺失 → 整日 daily_fallback（与回测 codes = candidates ∪ positions 一致）。"""
+        db.insert_signal("600001", "持仓", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        cand = {"code": "600002", "name": "候选", "rank": 1, "composite_score": 80,
+                "is_true_dragon": True, "trade_date": "2026-09-04"}
+        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[cand]):
+            result = self._trader(MissingCodeData("600002")).sell(DAY, "10:00")
+        self.assertEqual(result["data_quality"], "daily_fallback")
+
+    def test_buy_coverage_includes_positions(self):
+        """持仓分时缺失 → buy 同样整日 daily_fallback（codes 含 as-of 持仓）。"""
+        db.insert_signal("600002", "持仓", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[CAND]):
+            result = self._trader(MissingCodeData("600002")).buy(DAY, "10:00")
+        self.assertEqual(result["data_quality"], "daily_fallback")
+
+    def test_buy_updates_existing_position_peaks(self):
+        db.insert_signal(CAND["code"], "持仓", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[]):
+            self._trader(RisingData()).buy(DAY, "10:00")
+        row_sig = db.list_open_signals(source="v2")[0]
+        self.assertGreater(row_sig["highest_price"], 10.3)
+        self.assertGreater(row_sig["highest_return"], 3.0)
+
+    def test_buy_flags_unpersisted_when_row_already_open(self):
+        """回放到当日早盘：未来（09-08）的 open 行不参与 as-of，但写库命中幂等 → 标注未落库。"""
+        db.insert_signal(CAND["code"], "未来", "2026-09-08", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        db.update_signal_peaks(CAND["code"], 3.0, 9.9)  # 该未来行的既有峰值
+        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[CAND]):
+            result = self._trader(FakeData()).buy(DAY, "10:00")
+        self.assertEqual(len(result["buys"]), 1)
+        self.assertFalse(result["buys"][0]["persisted"])
+        # 未落库的买入不得把本次回放峰值写到那条无关 open 行上
+        row_sig = db.list_open_signals(source="v2")[0]
+        self.assertAlmostEqual(row_sig["highest_price"], 9.9)
+        self.assertAlmostEqual(row_sig["highest_return"], 3.0)
+
+    def test_buy_records_qty_for_break_even_parity(self):
+        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[CAND]):
+            result = self._trader(FakeData()).buy(DAY, "10:00")
+        b = result["buys"][0]
+        self.assertEqual(b["qty"], notional_quantity(StrategyConfig(), b["entry_price"]))
+        self.assertEqual(db.list_open_signals(source="v2")[0]["qty"], b["qty"])
+
+
+class TestSignalMigration(unittest.TestCase):
+    """旧 schema 迁移：幂等补列 + 旧行可读。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "legacy.db")
+        conn = sqlite3.connect(self._db_path)
+        conn.execute("""CREATE TABLE buy_sell_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL, name TEXT,
+            source TEXT NOT NULL DEFAULT 'v2', entry_date TEXT NOT NULL, entry_price REAL,
+            entry_reason_code TEXT, entry_reason_text TEXT, entry_signal_json TEXT,
+            highest_return REAL DEFAULT 0, highest_price REAL DEFAULT 0,
+            took_profit_half INTEGER DEFAULT 0, status TEXT NOT NULL DEFAULT 'open',
+            exit_date TEXT, exit_price REAL, exit_reason_code TEXT, exit_reason_text TEXT,
+            exit_signal_json TEXT, hold_days INTEGER, created_at TEXT, updated_at TEXT)""")
+        conn.execute("INSERT INTO buy_sell_signals(code, entry_date, entry_price, status) "
+                     "VALUES ('600001', '2026-09-04', 10, 'open')")
+        conn.commit()
+        conn.close()
+        self._patch = patch("dragon_quant.storage.db._connect",
+                            side_effect=lambda: sqlite3.connect(self._db_path))
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self._tmpdir.cleanup()
+
+    def test_adds_columns_and_reads_legacy_rows(self):
+        db.init_db()
+        conn = sqlite3.connect(self._db_path)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(buy_sell_signals)")}
+        conn.close()
+        for name in ("qty", "half_exit_date", "half_exit_price", "half_exit_qty",
+                     "half_exit_reason_code", "half_exit_reason_text", "half_exit_signal_json"):
+            self.assertIn(name, cols)
+        rows = db.list_all_signals(source="v2")
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["qty"])
+        self.assertFalse(rows[0]["took_profit_half"])
+
+
+class TestHalfSignalStorage(unittest.TestCase):
+    """半仓腿落库：冻结 qty/原因、保持 open、幂等、随后可全清。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "test.db")
+        self._conn = sqlite3.connect(self._db_path)
+        with self._connect():
+            db.init_db()
+
+    def tearDown(self):
+        self._conn.close()
+        self._tmpdir.cleanup()
+
+    def _connect(self):
+        return patch("dragon_quant.storage.db._connect",
+                     side_effect=lambda: sqlite3.connect(self._db_path))
+
+    def test_insert_signal_positional_source_and_qty_keyword(self):
+        """MAJOR #4 回归：位置传 source 仍兼容，qty 为 keyword-only。"""
+        with self._connect():
+            sid, created = db.insert_signal("600003", "样本", "2026-09-07", 10.0,
+                                            "buy", "买", {}, "v2", qty=300)
+            self.assertTrue(created)
+            s = db.list_open_signals(source="v2")[0]
+            self.assertEqual(s["id"], sid)
+            self.assertEqual(s["source"], "v2")
+            self.assertEqual(s["qty"], 300)
+
+    def test_half_close_freezes_leg_and_keeps_open(self):
+        with self._connect():
+            db.insert_signal("600001", "样本", "2026-09-07", 10.0, "buy", "买", {},
+                             "v2", qty=1000)
+            self.assertTrue(db.half_close_signal("600001", "2026-09-08", 10.5, 500,
+                                                 "next_day_limit_up_half", "减半", {"x": 1}))
+            self.assertFalse(db.half_close_signal("600001", "2026-09-08", 10.5, 500,
+                                                  "next_day_limit_up_half", "减半", {"x": 1}))
+            rows = db.list_open_signals(source="v2")
+            self.assertEqual(len(rows), 1)
+            s = rows[0]
+            self.assertEqual(s["status"], "open")
+            self.assertTrue(s["took_profit_half"])
+            self.assertEqual(s["qty"], 1000)
+            self.assertEqual(s["half_exit_qty"], 500)
+            self.assertAlmostEqual(s["half_exit_price"], 10.5)
+            self.assertEqual(s["half_exit_reason_code"], "next_day_limit_up_half")
+            self.assertEqual(s["half_exit_signal"], {"x": 1})
+            # 剩余半仓继续跟踪，随后可被全清
+            self.assertTrue(db.close_signal("600001", "2026-09-09", 11.0,
+                                            "trailing_take_profit", "移动止盈", {}, 2))
             self.assertEqual(db.list_open_signals(source="v2"), [])
 
 

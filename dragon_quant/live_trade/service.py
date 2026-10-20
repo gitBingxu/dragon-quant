@@ -33,6 +33,9 @@ def run_sell(trade_date: str, source: str = "v2", verbose: bool = True,
 
 # ─── 输出格式化 ───
 
+# 阻断开新仓的闸门；其余（streak_delevel 等）只降仓，live 无 sizing 时仅展示。
+_BLOCKING_GATES = {"daily_loss_circuit_breaker", "streak_circuit_breaker", "shadow_equity_floor"}
+
 def _print_buy(trade_date: str, result: dict):
     print(f"【买入建议 · {trade_date}】")
     sp = result.get("sentiment_pct")
@@ -41,7 +44,8 @@ def _print_buy(trade_date: str, result: dict):
     else:
         print(f"  建议仓位 {sp * 100:.0f}%（盘后复盘情绪温度，仅参考不代下单）")
     for b in result.get("buys", []):
-        print(f"  🟢 买入 {b['name'] or b['code']}（{b['code']}）@{b['entry_price']:.2f}")
+        mark = "" if b.get("persisted", True) else "（未落库：已有未平仓信号）"
+        print(f"  🟢 买入 {b['name'] or b['code']}（{b['code']}）@{b['entry_price']:.2f}{mark}")
         print(f"     {b['reason_text']}")
     if not result.get("buys"):
         print(f"  {result.get('reason_text', '')}")
@@ -60,16 +64,37 @@ def _print_buy(trade_date: str, result: dict):
         for d in rejected:
             label = d.get("name") or d.get("code") or "?"
             print(f"     - {label}（{d.get('code', '')}）：{d.get('reason_text', '')}")
+    _print_quality(result)
+    gates = result.get("fired_gate") or []
+    blocking = [g for g in gates if g in _BLOCKING_GATES]
+    soft = [g for g in gates if g not in _BLOCKING_GATES]
+    if blocking:
+        print(f"  风控闸门已触发：{', '.join(blocking)}（当日暂停开新仓）")
+    if soft:
+        print(f"  仓位降级提示：{', '.join(soft)}（live 无 sizing，仅展示不生效）")
 
 
 def _print_sell(trade_date: str, result: dict):
     print(f"【卖出建议 · {trade_date}】")
     for s in result.get("sells", []):
-        print(f"  🔴 卖出 {s['name'] or s['code']}（{s['code']}）@{s['exit_price']:.2f}"
-              f"，持有 {s['hold_days']} 天")
+        action = "减半仓" if s.get("partial") else "卖出"
+        mark = "" if s.get("persisted", True) else "（未落库：信号状态已变化）"
+        print(f"  🔴 {action} {s['name'] or s['code']}（{s['code']}）@{s['exit_price']:.2f}"
+              f"，持有 {s['hold_days']} 天{mark}")
         print(f"     理由：{s['reason_text']}")
     if not result.get("sells"):
         print(f"  {result.get('reason_text', '')}")
     for h in result.get("held", []):
-        print(f"  🟢 继续持有 {h['name'] or h['code']}（{h['code']}）"
+        half = "（已减半仓）" if h.get("took_profit_half") else ""
+        print(f"  🟢 继续持有 {h['name'] or h['code']}（{h['code']}）{half}"
               f"，当前最高 {h['highest_return']:+.1f}%")
+    _print_quality(result)
+
+
+def _print_quality(result: dict):
+    quality = result.get("data_quality")
+    if quality and quality != "strict_5min":
+        label = "日K兜底" if quality == "daily_fallback" else "混合（部分日K兜底）"
+        print(f"  ⚠️ 数据分级：{label}，成交价为保守近似")
+    for note in result.get("degraded") or []:
+        print(f"  ⚠️ {note}")

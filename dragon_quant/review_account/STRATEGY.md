@@ -56,8 +56,12 @@
 |------|------|------|----------------|
 | 情绪禁买 | 共享 `evaluate_buy`（`BuyRejected`） | 生效 | **自动跟随** ✓ |
 | 竞价/其它否决 `entry_veto` | 共享 `evaluate_buy` 顶部 | 生效 | **自动跟随** ✓ |
-| 情绪→仓位（sizing） | `buy_quantity` 的 `budget_scale` | 生效 | 不适用（SignalEngine 无账户/预算） |
-| 组合熔断 / 降仓 | engine 层 `RiskGovernor` | 生效 | **不跟随**（无账户/权益） |
+| 情绪→仓位（sizing） | `buy_quantity` 的 `budget_scale` | 生效 | 不适用（SignalEngine 无真实预算） |
+| 组合熔断 `allow_buy` | engine 层 `RiskGovernor` | 生效 | **跟随**：`live_trade/shadow.py` 从信号表按回放时点重建影子状态并调用同一 `risk_governor`；日级熔断分母为影子净值（buy-all 敞口可超 100%），`equity<=0` 额外触发破产闸 |
+| 组合降仓 `delevel` | `buy_quantity` 的 `budget_scale` | 生效 | **不适用**：无 sizing，`streak_delevel` 行为 no-op（fired_gate 仍展示），`drawdown_delevel` 不触发 |
+| 保本线口径 | `break_even_price`（依赖 qty/cost） | 首仓 `buy_quantity(initial_cash, initial_cash)` | **跟随**：`notional_quantity` 同口径落库冻结 |
+| 半仓规则 | 共享 `_rule_half` + `apply_sell_fill` | `p.qty` 减半、`took_profit_half=True` | **跟随**：`half_close_signal` 冻结半仓腿，`status` 仍 open 供剩余半仓续跟踪 |
+| 数据分级 | engine 外部 `codes = candidates ∪ positions` | 生效 | **跟随**：buy/sell 均纳入并集 |
 
 `sentiment_pct` 装载点：`AccountSimulator.run`（回测）与 `LiveTrader._run_buy`（实盘）各自经共享 `load_market_sentiment` 读取 T-1 prep 快照；engine 只读 `state.sentiment_pct`。快照缺失/回退旧逻辑时显式降级为 sizing 1.0、禁买不生效（等效现状）。
 

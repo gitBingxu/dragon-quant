@@ -336,22 +336,39 @@ def _prep_plan_hint(plan):
     print("；".join(parts), file=sys.stderr)
 
 
+def _emit_prep_error(payload: dict, as_json: bool):
+    """prep 错误输出：--json 保持原 JSON 到 stdout；默认人读一行到 stderr。"""
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"❌ 复盘失败：{payload.get('error', '未知错误')}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _emit_auction_error(payload: dict, as_json: bool):
+    """auction 错误输出：--json 保持原 JSON 到 stdout；默认人读一行到 stderr。"""
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"❌ 集合竞价失败：{payload.get('error', '未知错误')}", file=sys.stderr)
+    sys.exit(1)
+
+
 def _cmd_prep(args):
     """盘后复盘：增量采集数据资产 + 计算候选池/情绪快照，落 assets.db。
 
-    默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--verbose 输出完整 JSON。
+    默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--json 输出完整 JSON。
     """
     from dragon_quant.review_account.prep import PrepError, run_prep
     from dragon_quant.storage import db
 
+    as_json = getattr(args, "json", False)
     if args.date:
         trade_date = _normalize_cli_date(args.date)
     else:
         dates = db.list_dragon_trade_dates(source="v2")
         if not dates:
-            print(json.dumps({"error": "无 v2 龙头记录，无法确定复盘日"},
-                             ensure_ascii=False, indent=2))
-            sys.exit(1)
+            _emit_prep_error({"error": "无 v2 龙头记录，无法确定复盘日"}, as_json)
         trade_date = dates[-1]
 
     try:
@@ -359,17 +376,14 @@ def _cmd_prep(args):
                           force=getattr(args, "force", False),
                           on_plan=_prep_plan_hint)
     except PrepError as e:
-        print(json.dumps({"error": str(e)}, ensure_ascii=False, indent=2))
-        sys.exit(1)
-    except Exception as e:  # 与其它命令一致：输出 JSON 错误而非抛栈
-        print(json.dumps({"error": f"{type(e).__name__}: {e}"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
-    if getattr(args, "verbose", False):
+        _emit_prep_error({"error": str(e)}, as_json)
+    except Exception as e:  # 与其它命令一致：错误而非抛栈
+        _emit_prep_error({"error": f"{type(e).__name__}: {e}"}, as_json)
+    if as_json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
-    # 降级信息已并入理由行（details 见 prep_assets.collection_report / --verbose）
+    # 降级信息已并入理由行（details 见 prep_assets.collection_report / --json）
     from dragon_quant.review_account.advice import (
         format_advice_lines, format_candidate_lines,
     )
@@ -377,13 +391,13 @@ def _cmd_prep(args):
         lines = format_advice_lines(result)
     except Exception as e:  # 快照已落库：展示失败不应让 cron 误判整次复盘失败
         print(f"复盘已完成并落库，但摘要生成失败：{type(e).__name__}: {e}"
-              f"（可用 --verbose 查看完整结果）", file=sys.stderr)
+              f"（可用 --json 查看完整结果）", file=sys.stderr)
         return
     try:
         lines = lines + [""] + format_candidate_lines(result)
     except Exception as e:  # 清单失败仍打印 4 行摘要，不让整次输出丢失
         print(f"标的清单生成失败：{type(e).__name__}: {e}"
-              f"（可用 --verbose 查看完整结果）", file=sys.stderr)
+              f"（可用 --json 查看完整结果）", file=sys.stderr)
     print("\n".join(lines))
 
 
@@ -560,7 +574,7 @@ def _parse_auction_date(raw: str) -> str:
         ) from exc
 
 
-def _cmd_auction_recompute(raw_date: str):
+def _cmd_auction_recompute(raw_date: str, as_json: bool = False):
     """用已存原始资产重算某日竞价快照（不触网）。"""
     from dragon_quant.storage import assets_db
     from dragon_quant.auction.serialize import quote_from_payload
@@ -568,30 +582,24 @@ def _cmd_auction_recompute(raw_date: str):
     try:
         trade_date = _parse_auction_date(raw_date)
     except ValueError as exc:
-        print(json.dumps({"ok": False, "mode": "recompute",
-                          "trade_date": raw_date, "error": str(exc)},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error({"ok": False, "mode": "recompute",
+                             "trade_date": raw_date, "error": str(exc)}, as_json)
 
     today = _resolve_trade_date(None)
     if trade_date > today:
-        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
-                          "error": f"未来日期不可重算: {trade_date} > {today}"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error({"ok": False, "mode": "recompute", "trade_date": trade_date,
+                             "error": f"未来日期不可重算: {trade_date} > {today}"}, as_json)
 
     try:
         assets = assets_db.list_auction_assets(trade_date)
     except Exception as exc:
-        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
-                          "error": f"读取竞价原始资产失败: {type(exc).__name__}: {exc}"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error(
+            {"ok": False, "mode": "recompute", "trade_date": trade_date,
+             "error": f"读取竞价原始资产失败: {type(exc).__name__}: {exc}"}, as_json)
     if not assets:
-        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
-                          "error": f"{trade_date} 无竞价原始资产，无法重算"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error(
+            {"ok": False, "mode": "recompute", "trade_date": trade_date,
+             "error": f"{trade_date} 无竞价原始资产，无法重算"}, as_json)
 
     usable, skipped_empty, failed, quote_missing = [], [], [], []
     for asset in assets:
@@ -619,32 +627,29 @@ def _cmd_auction_recompute(raw_date: str):
         usable.append({"code": code, "items": asset["items"], "quote": quote})
 
     if not usable:
-        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
-                          "asset_count": len(assets), "skipped_empty": skipped_empty,
-                          "failed": failed,
-                          "error": "无可计算资产（items 全为空或行情 payload 全部损坏）"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error(
+            {"ok": False, "mode": "recompute", "trade_date": trade_date,
+             "asset_count": len(assets), "skipped_empty": skipped_empty,
+             "failed": failed,
+             "error": "无可计算资产（items 全为空或行情 payload 全部损坏）"}, as_json)
 
     payloads, score_failures, summaries = _score_auction_assets(usable)
     failed.extend(score_failures)
     if not payloads:
-        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
-                          "asset_count": len(assets), "usable_count": len(usable),
-                          "skipped_empty": skipped_empty, "quote_missing": quote_missing,
-                          "failed": failed, "error": "全部评分/序列化失败，快照未写入"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error(
+            {"ok": False, "mode": "recompute", "trade_date": trade_date,
+             "asset_count": len(assets), "usable_count": len(usable),
+             "skipped_empty": skipped_empty, "quote_missing": quote_missing,
+             "failed": failed, "error": "全部评分/序列化失败，快照未写入"}, as_json)
 
     try:
         saved = assets_db.replace_auction_snapshots(trade_date, payloads, source="v2")
     except Exception as exc:
-        print(json.dumps({"ok": False, "mode": "recompute", "trade_date": trade_date,
-                          "error": f"快照写入失败: {type(exc).__name__}: {exc}"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        _emit_auction_error(
+            {"ok": False, "mode": "recompute", "trade_date": trade_date,
+             "error": f"快照写入失败: {type(exc).__name__}: {exc}"}, as_json)
 
-    print(json.dumps({
+    payload = {
         "ok": not failed,
         "mode": "recompute",
         "trade_date": trade_date,
@@ -660,18 +665,37 @@ def _cmd_auction_recompute(raw_date: str):
         "snapshot_error": None,
         "failed": failed,
         "snapshots": [summaries[c] for c in sorted(summaries)],
-    }, ensure_ascii=False, indent=2))
+    }
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    from dragon_quant.auction.report import format_auction_report
+    names = {asset["code"]: (asset.get("name") or "") for asset in assets}
+    try:
+        print("\n".join(format_auction_report(
+            payload["snapshots"], trade_date=trade_date, mode="recompute",
+            failed_count=len(failed), empty_count=len(skipped_empty),
+            saved_count=len(payloads), names=names,
+        )))
+    except Exception as exc:  # 展示失败不应改变退出码（与 collect/prep 同策略）
+        print(f"⚠️ 人读摘要生成失败：{type(exc).__name__}: {exc}"
+              "（可用 --json 查看完整结果）", file=sys.stderr)
 
 
 def _cmd_auction(args):
-    """采集最近 N 日龙头的当日集合竞价盘口 + 行情，落原始资产并计算快照。"""
+    """采集最近 N 日龙头的当日集合竞价盘口 + 行情，落原始资产并计算快照。
+
+    默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。
+    """
     from dragon_quant.storage import db, assets_db
     from dragon_quant.data import get_auction
     from dragon_quant.auction.serialize import quote_to_payload, quote_from_payload
 
+    as_json = getattr(args, "json", False)
     recompute = getattr(args, "recompute", None)
     if recompute is not None:
-        _cmd_auction_recompute(recompute)
+        _cmd_auction_recompute(recompute, as_json)
         return
 
     source = "v2"
@@ -740,13 +764,11 @@ def _cmd_auction(args):
             if ctx.get("fallback_reason") is None and pool_mode == "prep":
                 ctx["fallback_reason"] = "pool_unavailable"
         elif pool_mode == "legacy":
-            print(json.dumps({"error": "最近 N 日无龙头，无需采集"},
-                             ensure_ascii=False, indent=2))
-            sys.exit(1)
+            _emit_auction_error({"error": "最近 N 日无龙头，无需采集"}, as_json)
 
     if not by_code:
         ignore_reasons = ctx.get("ignore_reasons") or []
-        print(json.dumps({
+        payload = {
             "ok": True, "mode": "collect", "trade_date": trade_date, "source": source,
             "pool_source": ctx.get("pool_source"),
             "fallback_reason": ctx.get("fallback_reason"),
@@ -759,7 +781,16 @@ def _cmd_auction(args):
             "prep_degraded": bool(ctx.get("prep_degraded")),
             "days_ignored": days_ignored,
             "message": "prep 与 legacy 均无可用候选，本次不采集竞价数据",
-        }, ensure_ascii=False, indent=2))
+        }
+        if as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            from dragon_quant.auction.report import format_auction_report
+            print("\n".join(format_auction_report(
+                [], trade_date=trade_date, pool_source=payload["pool_source"],
+                fallback_reason=payload["fallback_reason"],
+                candidate_count=0, empty_count=0,
+            )))
         if ctx.get("prep_degraded"):
             print("⚠️ 本次未采集竞价原始资产（不可再生），可能因 prep 数据降级，"
                   "请先补跑 prep", file=sys.stderr)
@@ -866,7 +897,7 @@ def _cmd_auction(args):
         print("⚠️ 竞价原始资产已写入，但快照未产出；请检查 failed/snapshot_error",
               file=sys.stderr)
 
-    print(json.dumps({
+    payload = {
         "ok": ok,
         "mode": "collect",
         "trade_date": trade_date,
@@ -892,10 +923,41 @@ def _cmd_auction(args):
         "snapshot_skipped": snapshot_skipped,
         "snapshot_error": snapshot_error,
         "snapshots": [summaries[c] for c in sorted(summaries)],
-    }, ensure_ascii=False, indent=2))
+    }
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        from dragon_quant.auction.report import format_auction_report
+        names: dict = {}
+        for item in ([*(persisted or []), *saved]):
+            code = item.get("code")
+            name = item.get("name") or ""
+            if code and name and not names.get(code):
+                names[code] = name
+        for code, name in by_code.items():
+            if code and name and not names.get(code):
+                names[code] = name
+        try:
+            print("\n".join(format_auction_report(
+                payload["snapshots"], trade_date=trade_date, mode="collect",
+                pool_source=payload["pool_source"],
+                candidate_count=len(codes),
+                fallback_reason=payload["fallback_reason"],
+                failed_count=len(failed), empty_count=len(empty),
+                saved_count=len(saved), names=names,
+            )))
+        except Exception as exc:  # 展示失败不应改变退出码（与 prep 同策略）
+            print(f"⚠️ 人读摘要生成失败：{type(exc).__name__}: {exc}"
+                  "（可用 --json 查看完整结果）", file=sys.stderr)
+
     if len(saved) == 0 and (failed or snapshot_error):
         # 原始资产一条都没写成功通常是系统性故障（schema/磁盘/权限），
         # 不能让定时任务把「一条都没写成功」当作成功。
+        if not as_json:
+            detail = f"候选 {len(codes)} 只，失败 {len(failed)} 条"
+            if snapshot_error:
+                detail += f"，快照错误：{snapshot_error}"
+            print(f"❌ 集合竞价失败：{detail}（详情加 --json）", file=sys.stderr)
         sys.exit(1)
 
 

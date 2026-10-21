@@ -1462,10 +1462,10 @@ class TestCmdPrepOutput(unittest.TestCase):
             "main_boards": [], "candidates": [],
         }
 
-    def _args(self, verbose=False, force=False):
+    def _args(self, json=False, force=False):
         from types import SimpleNamespace
         return SimpleNamespace(date="20261019", recompute=False,
-                               verbose=verbose, force=force)
+                               json=json, force=force)
 
     def test_default_prints_four_lines_and_empty_candidate_list(self):
         import io
@@ -1504,7 +1504,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         self.assertIn("- 质量维度：五维综合 82.0", lines)
         self.assertTrue(any(x.startswith("弱票-忽略：") for x in lines))
 
-    def test_verbose_prints_json(self):
+    def test_json_prints_json(self):
         import io
         import json
         from contextlib import redirect_stdout
@@ -1512,7 +1512,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         buf = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", return_value=self._result()), \
              redirect_stdout(buf):
-            cli._cmd_prep(self._args(verbose=True))
+            cli._cmd_prep(self._args(json=True))
         payload = json.loads(buf.getvalue())
         self.assertEqual(payload["version"], "0.5")
         self.assertIn("candidates", payload)
@@ -1529,7 +1529,7 @@ class TestCmdPrepOutput(unittest.TestCase):
             cli._cmd_prep(self._args())
         self.assertIn("摘要生成失败", err.getvalue())
 
-    def test_prep_help_lists_verbose(self):
+    def test_prep_help_lists_json_not_verbose(self):
         import io
         from contextlib import redirect_stdout
         from dragon_quant import cli
@@ -1537,7 +1537,53 @@ class TestCmdPrepOutput(unittest.TestCase):
         with patch("sys.argv", ["dragon-quant", "prep", "-h"]), \
              redirect_stdout(buf), self.assertRaises(SystemExit):
             cli.main()
-        self.assertIn("--verbose", buf.getvalue())
+        output = buf.getvalue()
+        self.assertIn("--json", output)
+        self.assertNotIn("--verbose", output)
+
+    def test_prep_verbose_is_rejected(self):
+        import io
+        from contextlib import redirect_stderr
+        from dragon_quant import cli
+        err = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "prep", "--verbose"]), \
+             redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            cli.main()
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("unrecognized arguments: --verbose", err.getvalue())
+
+    def test_default_error_prints_human_to_stderr(self):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from dragon_quant import cli
+        from dragon_quant.review_account.prep import PrepError
+        out, err = io.StringIO(), io.StringIO()
+        with patch("dragon_quant.review_account.prep.run_prep",
+                   side_effect=PrepError("boom")), \
+             redirect_stdout(out), redirect_stderr(err), \
+             self.assertRaises(SystemExit) as cm:
+            cli._cmd_prep(self._args())
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("❌ 复盘失败：boom", err.getvalue())
+
+    def test_json_error_prints_json_to_stdout(self):
+        import io
+        import json
+        from contextlib import redirect_stderr, redirect_stdout
+        from dragon_quant import cli
+        from dragon_quant.review_account.prep import PrepError
+        out, err = io.StringIO(), io.StringIO()
+        with patch("dragon_quant.review_account.prep.run_prep",
+                   side_effect=PrepError("boom")), \
+             redirect_stdout(out), redirect_stderr(err), \
+             self.assertRaises(SystemExit) as cm:
+            cli._cmd_prep(self._args(json=True))
+        self.assertEqual(cm.exception.code, 1)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(list(payload), ["error"])
+        self.assertEqual(payload, {"error": "boom"})
+        self.assertNotIn("❌", err.getvalue())
 
     def test_prep_help_lists_force_and_mutual_exclusion(self):
         import io

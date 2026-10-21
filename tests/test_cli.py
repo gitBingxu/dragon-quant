@@ -330,7 +330,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
              batch_side_effect=None, replace_side_effect=None,
              evaluate_side_effect=None, seed_assets=None,
              auction_items=None, list_side_effect=None,
-             quote_serialize_side_effect=None):
+             quote_serialize_side_effect=None, as_json=True):
         from contextlib import ExitStack
         from types import SimpleNamespace
         from dragon_quant import cli_commands
@@ -405,11 +405,13 @@ class TestCmdAuctionStorage(unittest.TestCase):
             try:
                 # 固定 legacy 池：用例只验证采集/落库契约，不依赖本地 assets.db 的
                 # prep 快照状态（prep 池行为由 tests/test_auction_pool.py 覆盖）。
-                cli_commands._cmd_auction(SimpleNamespace(days=3, pool="legacy"))
+                cli_commands._cmd_auction(
+                    SimpleNamespace(days=3, pool="legacy", json=as_json))
             except SystemExit as exc:
                 exit_code = exc.code
-        return (save, replace, batch, get_quote, json.loads(buf.getvalue()),
-                err.getvalue(), exit_code)
+        raw = buf.getvalue()
+        out = json.loads(raw) if as_json and raw.strip() else raw
+        return (save, replace, batch, get_quote, out, err.getvalue(), exit_code)
 
     def test_collect_writes_assets_and_contract_snapshot(self):
         dragon = {"code": "600172", "name": "黄河旋风"}
@@ -444,6 +446,72 @@ class TestCmdAuctionStorage(unittest.TestCase):
         for name in ("save_auction_snapshot", "get_auction_snapshot",
                      "list_auction_snapshots"):
             self.assertFalse(hasattr(db, name), f"db.{name} 应已移除")
+
+    def test_default_human_output(self):
+        dragon = {"code": "600172", "name": "黄河旋风"}
+        _, _, _, _, out, err, code = self._run([dragon], as_json=False)
+        self.assertIsNone(code)
+        self.assertIn("集合竞价强度", out)
+        self.assertIn("池来源 legacy", out)
+        self.assertIn("600172 黄河旋风", out)
+        self.assertIn("汇总：", out)
+        with self.assertRaises(ValueError):
+            json.loads(out)
+
+    def test_collect_json_top_level_key_order(self):
+        dragon = {"code": "600172", "name": "黄河旋风"}
+        _, _, _, _, out, _, code = self._run([dragon])
+        self.assertIsNone(code)
+        self.assertEqual(list(out), [
+            "ok", "mode", "trade_date", "source", "pool_source",
+            "fallback_reason", "prep_snapshot_date", "prep_unavailable_reason",
+            "recommended_count", "days_ignored", "lookback_dates",
+            "candidate_codes", "saved_count", "saved", "empty", "failed",
+            "quote", "quote_missing", "asset_read_error", "scored_count",
+            "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
+            "snapshot_error", "snapshots",
+        ])
+
+    def test_human_names_from_previously_persisted_assets(self):
+        dragon = {"code": "600172", "name": "黄河旋风"}
+        old_asset = {
+            "trade_date": "2026-10-20", "code": "600009", "name": "早前批次",
+            "items": [{"time": "09:25:00", "price": 10.0,
+                       "matched": 100, "unmatched": 0}],
+            "quote": _quote_payload("600009"),
+        }
+        _, _, _, _, out, _, code = self._run(
+            [dragon], seed_assets=[old_asset], as_json=False)
+        self.assertIsNone(code)
+        self.assertIn("600172 黄河旋风", out)
+        self.assertIn("600009 早前批次", out)
+
+    def test_human_all_empty_auction_data(self):
+        dragon = {"code": "600172", "name": "黄河旋风"}
+        _, _, _, _, out, err, code = self._run(
+            [dragon], auction_items=[], as_json=False)
+        self.assertIsNone(code)
+        self.assertIn("候选 1 只均无竞价盘口", out)
+        self.assertNotIn("失败 0 条", out)
+        self.assertNotIn("❌", err)
+
+    def test_human_collect_layer_all_failed_exits_nonzero(self):
+        _, _, _, _, out, err, code = self._run(
+            [{"code": "600001", "name": "A"}],
+            save_side_effect=[RuntimeError("disk full")], as_json=False)
+        self.assertEqual(code, 1)
+        self.assertIn("候选 1 只均未产出竞价强度判定", out)
+        self.assertNotIn("无参与", out)
+        self.assertIn("❌ 集合竞价失败", err)
+
+    def test_human_scoring_all_failed_exits_zero(self):
+        dragon = {"code": "600172", "name": "黄河旋风"}
+        _, _, _, _, out, err, code = self._run(
+            [dragon], evaluate_side_effect=RuntimeError("model bug"),
+            as_json=False)
+        self.assertIsNone(code)
+        self.assertIn("原始资产已写入", out)
+        self.assertNotIn("❌", err)
 
     def test_tdx_empty_falls_back_to_tencent_batch(self):
         dragon = {"code": "600172", "name": "黄河旋风"}
@@ -562,13 +630,14 @@ class TestCmdAuctionStorage(unittest.TestCase):
 
     def test_all_failed_exits_nonzero_and_skips_replace(self):
         """全部写入失败通常是系统性故障，必须让定时任务感知。"""
-        _, replace, _, _, out, _, code = self._run(
+        _, replace, _, _, out, err, code = self._run(
             [{"code": "600001", "name": "A"}],
             save_side_effect=[RuntimeError("disk full")])
         self.assertEqual(code, 1)
         replace.assert_not_called()
         self.assertEqual(out["snapshot_skipped"], "no_payloads")
         self.assertFalse(out["snapshot_ok"])
+        self.assertNotIn("❌", err)  # JSON 模式只输出 JSON，不额外打人读错误行
 
     def test_snapshot_write_failure_reported_without_exit(self):
         dragon = {"code": "600172", "name": "黄河旋风"}
@@ -612,7 +681,7 @@ class TestCmdAuctionRecompute(unittest.TestCase):
         }
 
     def _run(self, raw_date, assets, replace_side_effect=None,
-             today="2026-10-20"):
+             today="2026-10-20", as_json=True, list_side_effect=None):
         from types import SimpleNamespace
         from dragon_quant import cli_commands
         from dragon_quant.storage import assets_db
@@ -621,7 +690,9 @@ class TestCmdAuctionRecompute(unittest.TestCase):
             replace_side_effect = lambda trade_date, payloads, source="v2": len(payloads)
         buf, err = io.StringIO(), io.StringIO()
         exit_code = None
-        with patch.object(assets_db, "list_auction_assets", return_value=assets), \
+        list_kwargs = ({"side_effect": list_side_effect}
+                       if list_side_effect is not None else {"return_value": assets})
+        with patch.object(assets_db, "list_auction_assets", **list_kwargs), \
              patch.object(assets_db, "replace_auction_snapshots",
                           side_effect=replace_side_effect) as replace, \
              patch.object(cli_commands, "_resolve_trade_date", return_value=today), \
@@ -630,11 +701,65 @@ class TestCmdAuctionRecompute(unittest.TestCase):
              redirect_stdout(buf), redirect_stderr(err):
             try:
                 cli_commands._cmd_auction(
-                    SimpleNamespace(days=3, recompute=raw_date))
+                    SimpleNamespace(days=3, recompute=raw_date, json=as_json))
             except SystemExit as exc:
                 exit_code = exc.code
-        return (replace, get_auction, batch, json.loads(buf.getvalue()),
-                err.getvalue(), exit_code)
+        raw = buf.getvalue()
+        out = json.loads(raw) if as_json and raw.strip() else raw
+        return (replace, get_auction, batch, out, err.getvalue(), exit_code)
+
+    def test_recompute_default_human_output(self):
+        assets = [self._asset("600001"), self._asset("600002")]
+        _, _, _, out, err, code = self._run(
+            "20261020", assets, as_json=False)
+        self.assertIsNone(code)
+        self.assertIn("集合竞价强度（重算", out)
+        self.assertIn("600001", out)
+        self.assertIn("汇总：", out)
+        self.assertNotIn("❌", err)
+        with self.assertRaises(ValueError):
+            json.loads(out)
+
+    def test_recompute_json_top_level_key_order(self):
+        _, _, _, out, _, code = self._run("20261020", [self._asset("600001")])
+        self.assertIsNone(code)
+        self.assertEqual(list(out), [
+            "ok", "mode", "trade_date", "source", "asset_count",
+            "usable_count", "skipped_empty", "quote_missing", "scored_count",
+            "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
+            "snapshot_error", "failed", "snapshots",
+        ])
+
+    def test_invalid_date_human_error(self):
+        _, _, _, out, err, code = self._run(
+            "2026-13-40", [self._asset("600001")], as_json=False)
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("❌ 集合竞价失败：无效日期", err)
+
+    def test_read_assets_failure_human_error(self):
+        _, _, _, out, err, code = self._run(
+            "20261020", [], list_side_effect=RuntimeError("db down"),
+            as_json=False)
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("❌ 集合竞价失败：读取竞价原始资产失败", err)
+        self.assertIn("db down", err)
+
+    def test_invalid_date_json_top_level_key_order(self):
+        _, _, _, out, _, code = self._run("2026-13-40", [self._asset("600001")])
+        self.assertEqual(code, 1)
+        self.assertEqual(list(out), ["ok", "mode", "trade_date", "error"])
+
+    def test_human_format_failure_keeps_exit_zero(self):
+        with patch("dragon_quant.auction.report.format_auction_report",
+                   side_effect=RuntimeError("format boom")):
+            _, _, _, out, err, code = self._run(
+                "20261020", [self._asset("600001")], as_json=False)
+        self.assertIsNone(code)
+        self.assertEqual(out, "")
+        self.assertIn("人读摘要生成失败", err)
+        self.assertIn("format boom", err)
 
     def test_recompute_writes_snapshots_without_network(self):
         assets = [self._asset("600001"), self._asset("600002")]

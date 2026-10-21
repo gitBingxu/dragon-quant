@@ -343,16 +343,16 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     prep_p = sub.add_parser(
         "prep",
         help="盘后复盘，生成候选池+情绪温度快照（默认增量采集）",
-        usage="dragon-quant prep [--date YYYYMMDD] [--recompute | --force] [--verbose]",
+        usage="dragon-quant prep [--date YYYYMMDD] [--recompute | --force] [--json]",
         description="盘后执行复盘，采集原始数据资产（assets.db prep_assets）并计算候选池快照"
                     "（prep_snapshots），review-account 消费。默认增量：资产完好则跳过采集，"
-                    "仅补采缺失/不健康项；--verbose 输出完整复盘 JSON。",
+                    "仅补采缺失/不健康项；--json 输出完整复盘 JSON。",
         epilog="""Examples:
   dragon-quant prep
   dragon-quant prep --date 20260519
   dragon-quant prep --date 20260519 --recompute   # 用已存资产重算快照（算法升级重放）
   dragon-quant prep --date 20260519 --force       # 强制重采全部可采资产（不绕过 16:40 门禁）
-  dragon-quant prep --verbose                     # 输出完整复盘 JSON
+  dragon-quant prep --json                        # 输出完整复盘 JSON
 """,
     )
     prep_p.add_argument("--date", default=None,
@@ -363,23 +363,26 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     prep_mode.add_argument("--force", action="store_true",
                            help="强制重采全部可采资产（历史日 same_day_only 仍不采）；"
                                 "与 scan --force 不同：不绕过 16:40 与交易日校验")
-    prep_p.add_argument("--verbose", action="store_true",
+    prep_p.add_argument("--json", dest="json", action="store_true",
                         help="输出完整复盘 JSON（默认只输出买入建议摘要）")
 
     # auction 子命令（采集最近 N 日龙头的当日集合竞价盘口并落库；或重算已存快照）
     auction_p = sub.add_parser(
         "auction",
         help="采集最近 N 日龙头的当日集合竞价盘口（TDX），或重算已存快照",
-        usage="dragon-quant auction [--pool prep|legacy] [--days N] | dragon-quant auction --recompute DATE",
+        usage="dragon-quant auction [--pool prep|legacy] [--days N] [--json] | "
+              "dragon-quant auction --recompute DATE [--json]",
         description="默认读取严格 T-1 的 prep 快照，采集 verdict∈{strong,light} 的推荐标的；"
                     "推荐集为空/快照缺失时回退最近 N 个交易日的龙头并集。落库原始资产"
                     "（assets.db/auction_assets）并计算强度快照（auction_snapshots）。"
+                    "默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。"
                     "使用 --recompute 时不触网，用已存原始资产重算指定交易日快照。",
         epilog="""Examples:
   dragon-quant auction                        # 优先 prep 推荐，空则回退 legacy
   dragon-quant auction --pool legacy          # 强制旧口径
   dragon-quant auction --days 5               # 仅 legacy/回退路径生效
   dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
+  dragon-quant auction --json                 # 输出完整 JSON
 """,
     )
     auction_p.add_argument("--pool", choices=["prep", "legacy"], default="prep",
@@ -388,6 +391,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                            help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 3）")
     auction_p.add_argument("--recompute", metavar="DATE", default=None,
                            help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
+    auction_p.add_argument("--json", dest="json", action="store_true",
+                           help="输出完整 JSON（默认只展示参与竞价判断的标的强弱与汇总）")
 
     # assets 子命令（数据资产云端同步；M1 先提供 doctor）
     assets_p = sub.add_parser(

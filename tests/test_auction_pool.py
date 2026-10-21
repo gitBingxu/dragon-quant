@@ -15,7 +15,7 @@ ITEMS = [{"time": "09:25:00", "price": 10.0, "matched": 100, "unmatched": 0}]
 class TestAuctionPool(unittest.TestCase):
     def _run(self, *, pool="prep", days=None, snapshot=None,
              snapshot_error=None, calendar=None, calendar_error=None,
-             dragons=None, legacy_dates=None):
+             dragons=None, legacy_dates=None, as_json=True):
         # 先导入 cli：cli_commands 在模块底部反向引用 cli（既有循环规避设计），
         # 直接先导入 cli_commands 会在独立运行该测试文件时触发循环导入。
         from dragon_quant import cli  # noqa: F401
@@ -85,10 +85,12 @@ class TestAuctionPool(unittest.TestCase):
             stack.enter_context(redirect_stdout(buf))
             stack.enter_context(redirect_stderr(err))
             try:
-                cli_commands._cmd_auction(SimpleNamespace(pool=pool, days=days))
+                cli_commands._cmd_auction(
+                    SimpleNamespace(pool=pool, days=days, json=as_json))
             except SystemExit as exc:
                 exit_code = exc.code
-        out = json.loads(buf.getvalue()) if buf.getvalue().strip() else None
+        raw = buf.getvalue()
+        out = json.loads(raw) if as_json and raw.strip() else raw
         return out, err.getvalue(), exit_code, calls, saved
 
     def test_prep_pool_uses_recommended_codes(self):
@@ -138,6 +140,36 @@ class TestAuctionPool(unittest.TestCase):
         self.assertEqual(calls["auction"], [])
         self.assertEqual(calls["quotes"], 0)
         self.assertEqual(saved, [])
+
+    def test_empty_pool_default_human_output(self):
+        snapshot = {"candidates": [
+            {"code": "A", "composite_score": 80, "is_true_dragon": True,
+             "verdict": "ignore", "ignore_reason": "资金离场"},
+        ]}
+        out, err, code, calls, saved = self._run(
+            snapshot=snapshot, dragons=[], as_json=False)
+        self.assertIsNone(code)
+        self.assertIn("无参与集合竞价强度判断的标的", out)
+        self.assertIn("回退：all_ignored", out)
+        self.assertNotIn("pool_empty", out)
+        with self.assertRaises(ValueError):
+            json.loads(out)
+
+    def test_empty_pool_json_keeps_contract(self):
+        snapshot = {"candidates": [
+            {"code": "A", "composite_score": 80, "is_true_dragon": True,
+             "verdict": "ignore", "ignore_reason": "资金离场"},
+        ]}
+        out, _, code, _, _ = self._run(snapshot=snapshot, dragons=[])
+        self.assertIsNone(code)
+        self.assertTrue(out["pool_empty"])
+        self.assertEqual(list(out), [
+            "ok", "mode", "trade_date", "source", "pool_source",
+            "fallback_reason", "prep_snapshot_date", "prep_unavailable_reason",
+            "pool_empty", "candidate_codes", "recommended_count",
+            "ignore_reason_count", "ignore_reason_samples", "prep_degraded",
+            "days_ignored", "message",
+        ])
 
     def test_no_snapshot_falls_back(self):
         out, err, code, calls, saved = self._run(

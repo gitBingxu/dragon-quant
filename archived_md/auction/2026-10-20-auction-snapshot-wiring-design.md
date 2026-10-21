@@ -160,7 +160,7 @@ sequenceDiagram
     U->>S: evaluate(items, quote) × N
     U->>S: rank_auctions(verdicts)
     U->>A: replace_auction_snapshots(date, payloads) 单事务 DELETE+INSERT（payloads 空则跳过）
-    U->>U: 输出 JSON 报告 / exit code
+    U->>U: 输出人读摘要（默认）/ 完整 JSON（--json，逐字段同现状）/ exit code
 ```
 
 ### 4.3 重算模式时序
@@ -189,7 +189,7 @@ sequenceDiagram
     end
     U->>S: rank_auctions(verdicts)
     U->>A: replace_auction_snapshots(DATE, payloads)（payloads 空则跳过）
-    U->>U: 输出 JSON 报告
+    U->>U: 输出人读摘要（默认）/ 完整 JSON（--json）
 ```
 
 ### 4.4 快照集合一致性
@@ -405,9 +405,11 @@ def verdict_to_payload(verdict: AuctionVerdict) -> dict:
 ### 6.3 CLI
 
 ```
-dragon-quant auction [--days N]
-dragon-quant auction --recompute DATE
+dragon-quant auction [--days N] [--json]
+dragon-quant auction --recompute DATE [--json]
 ```
+
+- 输出模式（2026-10-21 起）：默认人读摘要（标题 + 逐只强弱 + 汇总）；`--json` 输出完整 JSON（字段/顺序与既有契约一致）。错误在默认模式写 stderr + 非零退出，`--json` 模式保持原 JSON error 到 stdout；退出码语义不变。
 
 - `--recompute` 取值为日期字符串，不是布尔开关；带该参数时忽略 `--days`，先于任何 dragon.db 读取执行。
 - 日期处理：复用 `_normalize_cli_date`（与 `prep`/`review` 一致，接受 `YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`），再以 `datetime.strptime(d, "%Y-%m-%d")` 做真实日期严格校验（该 helper 对未知格式静默透传，严格校验必须独立存在），输出统一 `YYYY-MM-DD`。
@@ -462,14 +464,14 @@ dragon-quant auction --recompute DATE
 
 | 场景 | 行为 | exit |
 |------|------|------|
-| 日期格式非法（含 `YYYY/MM/DD`） | JSON error，不触库 | 1 |
-| 未来日期 | JSON error，不触库 | 1 |
-| 该日无资产 | JSON error | 1 |
-| 有资产但全部 `items` 为空 | JSON error（无可计算资产） | 1 |
+| 日期格式非法（含 `YYYY/MM/DD`） | 错误输出（默认 stderr 人读 / `--json` JSON），不触库 | 1 |
+| 未来日期 | 错误输出（默认 stderr 人读 / `--json` JSON），不触库 | 1 |
+| 该日无资产 | 错误输出（默认 stderr 人读 / `--json` JSON） | 1 |
+| 有资产但全部 `items` 为空 | 错误输出（默认 stderr 人读 / `--json` JSON，无可计算资产） | 1 |
 | 单股 `quote_json` 损坏 | 记入 `failed[stage="quote"]`，该股不评分 | — |
 | 单股评分/序列化异常 | 记入 `failed`，继续 | — |
-| 全部评分失败（`payloads={}`） | 跳过 replace（保留旧快照），JSON error | 1 |
-| `replace_auction_snapshots` 异常 | JSON error，事务回滚 | 1 |
+| 全部评分失败（`payloads={}`） | 跳过 replace（保留旧快照），错误输出 | 1 |
+| `replace_auction_snapshots` 异常 | 错误输出（默认 stderr 人读 / `--json` JSON），事务回滚 | 1 |
 
 ### 7.4 JSON 安全
 
@@ -481,6 +483,8 @@ dragon-quant auction --recompute DATE
 ---
 
 ## 8. 报告格式
+
+> 输出模式（2026-10-21 起）：默认输出人读摘要（标题 + 逐只强弱 + 汇总）；加 `--json` 才输出下述完整 JSON，字段与顺序保持不变。错误在默认模式写 stderr，`--json` 模式保持原 JSON error 到 stdout。
 
 ### 8.1 采集模式（保留既有顶层键 + 新增统计）
 
@@ -627,3 +631,4 @@ def _norm_code(code) -> str:
 | C7 | `sanitize_json` + 存储层 NaN 拒绝 | T5、T6、T7 |
 | C8 | 全量 unittest | T15 |
 | C9 | AGENTS.md / README.md / assets_db docstring | 人工核对 |
+| C10 | `--json` 完整 JSON（collect 25 key / 空池 16 key / recompute 15 key，顺序不变）+ 默认人读摘要 + 错误通道 | `tests/test_cli.py` / `tests/test_auction_report.py` / `tests/test_auction_pool.py` |

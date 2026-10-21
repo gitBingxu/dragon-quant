@@ -103,6 +103,70 @@ class TestPrepAssets(AssetsDbTestBase):
                 conn.close()
             self.assertEqual(n, 1)
 
+    def test_partial_report_merge_keeps_existing(self):
+        """逐键合并：未出现在本次 report 的条目沿用存量。"""
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
+                                       {"dragons": {"status": "ok"}})
+            assets_db.save_prep_assets("2026-10-19", {"b": {"v": 2}},
+                                       {"market_breadth": {"status": "unavailable"}})
+            report = assets_db.get_prep_asset("2026-10-19", "collection_report")
+        self.assertEqual(report["dragons"], {"status": "ok"})
+        self.assertEqual(report["market_breadth"], {"status": "unavailable"})
+
+    def test_empty_report_leaves_report_untouched(self):
+        """report 为空 → 不触碰 report 行（整日零采集语义）。"""
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
+                                       {"dragons": {"status": "ok"}})
+            assets_db.save_prep_assets("2026-10-19", {"a": {"v": 2}}, {})
+            assets_db.save_prep_assets("2026-10-19", {"a": {"v": 3}}, None)
+            report = assets_db.get_prep_asset("2026-10-19", "collection_report")
+            payload = assets_db.get_prep_asset("2026-10-19", "a")
+        self.assertEqual(report, {"dragons": {"status": "ok"}})
+        self.assertEqual(payload, {"v": 3})
+
+    def test_malformed_report_is_reset_with_audit_key(self):
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
+                                       {"dragons": {"status": "ok"}})
+            conn = sqlite3.connect(self._db_path)
+            try:
+                conn.execute(
+                    "UPDATE prep_assets SET payload_json='[1,2]' "
+                    "WHERE trade_date=? AND asset_type='collection_report'",
+                    ("2026-10-19",))
+                conn.commit()
+            finally:
+                conn.close()
+            assets_db.save_prep_assets("2026-10-19", {"b": {"v": 2}},
+                                       {"market_breadth": {"status": "ok"}})
+            report = assets_db.get_prep_asset("2026-10-19", "collection_report")
+        self.assertEqual(report, {"market_breadth": {"status": "ok"},
+                                  "report_reset": "malformed"})
+
+    def test_noop_when_payloads_and_report_empty(self):
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.save_prep_assets("2026-10-19", {}, {})
+        self.assertFalse(Path(self._db_path).exists())
+
+    def test_rollback_covers_report_merge(self):
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
+                                       {"dragons": {"status": "ok"}})
+            with self.assertRaises(ValueError):
+                assets_db.save_prep_assets("2026-10-19",
+                                           {"bad": {"v": float("nan")}},
+                                           {"market_breadth": {"status": "ok"}})
+            self.assertEqual(
+                assets_db.get_prep_asset("2026-10-19", "collection_report"),
+                {"dragons": {"status": "ok"}})
+
     def test_single_transaction_rollback(self):
         """任一 payload 序列化失败 → 整批不落库（无部分新旧混合）。"""
         from dragon_quant.storage import assets_db

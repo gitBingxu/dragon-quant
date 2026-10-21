@@ -342,22 +342,27 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     # prep 子命令（盘后复盘：主线 + 情绪温度 + 候选池快照；固定 v2）
     prep_p = sub.add_parser(
         "prep",
-        help="盘后复盘，生成候选池+情绪温度快照",
-        usage="dragon-quant prep [--date YYYYMMDD] [--recompute] [--verbose]",
+        help="盘后复盘，生成候选池+情绪温度快照（默认增量采集）",
+        usage="dragon-quant prep [--date YYYYMMDD] [--recompute | --force] [--verbose]",
         description="盘后执行复盘，采集原始数据资产（assets.db prep_assets）并计算候选池快照"
-                    "（prep_snapshots），review-account 消费。默认输出 4 行市场摘要 + 标的清单，"
-                    "--verbose 输出完整复盘 JSON。",
+                    "（prep_snapshots），review-account 消费。默认增量：资产完好则跳过采集，"
+                    "仅补采缺失/不健康项；--verbose 输出完整复盘 JSON。",
         epilog="""Examples:
   dragon-quant prep
   dragon-quant prep --date 20260519
   dragon-quant prep --date 20260519 --recompute   # 用已存资产重算快照（算法升级重放）
+  dragon-quant prep --date 20260519 --force       # 强制重采全部可采资产（不绕过 15:30 门禁）
   dragon-quant prep --verbose                     # 输出完整复盘 JSON
 """,
     )
     prep_p.add_argument("--date", default=None,
                         help="复盘日 (YYYYMMDD / YYYY-MM-DD，默认最新有龙头数据的交易日)")
-    prep_p.add_argument("--recompute", action="store_true",
-                        help="跳过采集，用已存数据资产重算快照（无资产时报错）")
+    prep_mode = prep_p.add_mutually_exclusive_group()
+    prep_mode.add_argument("--recompute", action="store_true",
+                           help="跳过检测与采集，用已存数据资产重算快照（无资产时报错）")
+    prep_mode.add_argument("--force", action="store_true",
+                           help="强制重采全部可采资产（历史日 same_day_only 仍不采）；"
+                                "与 scan --force 不同：不绕过 15:30 与交易日校验")
     prep_p.add_argument("--verbose", action="store_true",
                         help="输出完整复盘 JSON（默认只输出买入建议摘要）")
 

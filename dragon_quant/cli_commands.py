@@ -317,8 +317,27 @@ def _cmd_dragons(args):
     }, ensure_ascii=False, indent=2))
 
 
+def _prep_plan_hint(plan):
+    """增量采集计划提示（stderr）。
+
+    走 stderr 是为了保持 stdout 的「4 行摘要 + 标的清单」契约不被污染；
+    cron 只按退出码判失败，stderr 输出不改变退出码。
+    """
+    collect = list(getattr(plan, "collect", None) or [])
+    repairs = sorted(getattr(plan, "repairs", None) or {})
+    parts = []
+    if collect:
+        parts.append(f"增量补采 {len(collect)} 项资产：{', '.join(collect)}")
+    if repairs:
+        prefix = "" if collect else "资产已就绪，"
+        parts.append(f"{prefix}修复 {len(repairs)} 项历史状态标记：{', '.join(repairs)}")
+    if not parts:
+        parts.append("资产已就绪（无需采集），直接重算快照")
+    print("；".join(parts), file=sys.stderr)
+
+
 def _cmd_prep(args):
-    """盘后复盘：采集数据资产 + 计算候选池/情绪快照，落 assets.db。
+    """盘后复盘：增量采集数据资产 + 计算候选池/情绪快照，落 assets.db。
 
     默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--verbose 输出完整 JSON。
     """
@@ -336,7 +355,9 @@ def _cmd_prep(args):
         trade_date = dates[-1]
 
     try:
-        result = run_prep(trade_date, recompute=args.recompute)
+        result = run_prep(trade_date, recompute=args.recompute,
+                          force=getattr(args, "force", False),
+                          on_plan=_prep_plan_hint)
     except PrepError as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False, indent=2))
         sys.exit(1)

@@ -403,7 +403,9 @@ class TestCmdAuctionStorage(unittest.TestCase):
             stack.enter_context(redirect_stdout(buf))
             stack.enter_context(redirect_stderr(err))
             try:
-                cli_commands._cmd_auction(SimpleNamespace(days=3))
+                # 固定 legacy 池：用例只验证采集/落库契约，不依赖本地 assets.db 的
+                # prep 快照状态（prep 池行为由 tests/test_auction_pool.py 覆盖）。
+                cli_commands._cmd_auction(SimpleNamespace(days=3, pool="legacy"))
             except SystemExit as exc:
                 exit_code = exc.code
         return (save, replace, batch, get_quote, json.loads(buf.getvalue()),

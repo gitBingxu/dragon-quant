@@ -2,14 +2,24 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from dragon_quant.review_account.execution import break_even_price
-from dragon_quant.review_account.models import Position, StrategyConfig
+from dragon_quant.review_account.models import (
+    BUY_SIGNAL_DIVERGENCE_BREAK, BUY_SIGNAL_DRAGON_COMEBACK,
+    BUY_SIGNAL_MA5_PULLBACK, BUY_SIGNAL_OPEN_TURN_STRONG,
+    Position, StrategyConfig,
+)
+from dragon_quant.review_account.priority import (
+    auction_state, auction_veto_reason, key_components, would_veto,
+)
 
 
 class BuyRejected(Exception):
-    """买入否决 / 禁买的早退异常，携带原因码供 explain 精确回显（而非落入 no_buy_pattern）。"""
+    """买入否决 / 禁买的早退异常，携带原因码供 explain 精确回显（而非落入 no_buy_pattern）。
 
-    def __init__(self, code: str, text: str):
-        self.code, self.text = code, text
+    ``signal`` 仅在「本可买入但被否决」时携带，供影子统计与决策记录使用。
+    """
+
+    def __init__(self, code: str, text: str, signal: Optional[dict] = None):
+        self.code, self.text, self.signal = code, text, signal
         super().__init__(text)
 
 
@@ -53,6 +63,15 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
         raise BuyRejected("vetoed", veto)
     if candidate.get("is_true_dragon") is False or (candidate.get("composite_score") or 0) < cfg.min_score:
         return None
+    signal = _compute_buy_signal(candidate, row, cfg, prev_row, hist_rows, intraday_bars)
+    return _apply_entry_priority_gate(cfg, candidate, signal)
+
+
+def _compute_buy_signal(candidate: dict, row: dict, cfg: StrategyConfig,
+                        prev_row: Optional[dict] = None,
+                        hist_rows: Optional[list] = None,
+                        intraday_bars: Optional[list] = None) -> Optional[dict]:
+    """买点模式识别（纯计算，不含优先级/否决后置闸门）。"""
     phase = row["phase"]
     if phase == "bar":
         # 突破前高需首根5分钟K带量确认；否则交给分歧买龙。
@@ -74,13 +93,34 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
         distance = (opening / ma5 - 1) * 100
         if not (cfg.require_rising_ma5 and ma5 <= (row.get("previous_ma5") or ma5)):
             if cfg.ma5_min_distance_pct <= distance <= 3 and -3 < gap <= cfg.max_open_gap:
-                return _buy(candidate, row, "buy_open_ma5_pullback", "开盘贴近上日MA5，回踩承接", 300)
+                return _buy(candidate, row, BUY_SIGNAL_MA5_PULLBACK, "开盘贴近上日MA5，回踩承接", 300)
     # 龙回头 / 二波买点：独立于 ma5/gap/量能前置（回调缩量恰是其特征）
     if cfg.dragon_comeback_enabled:
         comeback = _dragon_comeback_signal(candidate, row, cfg, hist_rows)
         if comeback:
             return comeback
     return None
+
+
+def _apply_entry_priority_gate(cfg: StrategyConfig, candidate: dict,
+                               signal: Optional[dict]) -> Optional[dict]:
+    """信号后置闸门：写入 P/A 证据；按 ``auction_veto_enabled`` 执行 D3 否决。
+
+    否决必须知道买点类型（豁免按类型配置），因此不能放在 ``entry_veto`` 前置位。
+    未开启否决时只记录证据/影子标记，不改变决策。
+    """
+    if signal is None:
+        return None
+    entry_priority = candidate.get("entry_priority")
+    if isinstance(entry_priority, dict):
+        signal["signal"]["entry_priority"] = entry_priority
+    signal["signal"]["priority_key"] = key_components(
+        signal, candidate, bool(getattr(cfg, "auction_ranking_enabled", False)))
+    if getattr(cfg, "auction_veto_enabled", False):
+        reason = auction_veto_reason(cfg, candidate, signal)
+        if reason:
+            raise BuyRejected("auction_veto", reason, signal=signal)
+    return signal
 
 
 def _turn_strong_signal(candidate: dict, row: dict, cfg: StrategyConfig,
@@ -110,7 +150,7 @@ def _turn_strong_signal(candidate: dict, row: dict, cfg: StrategyConfig,
             and cfg.strong_turnover_min <= turnover <= cfg.strong_turnover_max
             and amount >= 500_000_000
             and bar_turnover >= cfg.turn_strong_bar_turnover_min):
-        result = _buy(candidate, row, "buy_open_turn_strong",
+        result = _buy(candidate, row, BUY_SIGNAL_OPEN_TURN_STRONG,
                       f"开盘突破上日高点，首根5分钟K带量{bar_turnover:.2f}%，弱转强", 200)
         result["signal"]["first_bar_turnover"] = bar_turnover
         return result
@@ -146,7 +186,7 @@ def evaluate_divergence_buy(candidate: dict, row: dict, cfg: StrategyConfig,
         return None
     if min(b.low for b in bars) < row["prev_close"] or bars[-1].close < bars[0].open:
         return None
-    result = _buy(candidate, row, "buy_divergence_first_break", "连续缩量一字板断板，完整窗口未破昨收且企稳", 400)
+    result = _buy(candidate, row, BUY_SIGNAL_DIVERGENCE_BREAK, "连续缩量一字板断板，完整窗口未破昨收且企稳", 400)
     result["signal"].update({"divergence_window_bars": len(bars), "board_count": boards})
     return result
 
@@ -226,7 +266,7 @@ def _dragon_comeback_signal(candidate: dict, row: dict, cfg: StrategyConfig,
         and confirm["close"] > prev_close)
     if not confirmed:
         return None
-    return _buy(candidate, row, "buy_dragon_comeback",
+    return _buy(candidate, row, BUY_SIGNAL_DRAGON_COMEBACK,
                 f"龙回头：第一波涨幅{wave_rise:.0f}%后缩量回调{pullback_days}日，阳线吞没确认", 250)
 
 
@@ -312,6 +352,23 @@ def _no_pattern_reason(candidate: dict, row: dict, cfg: StrategyConfig,
     return "；".join(parts) if parts else "当前已知数据未触发买点"
 
 
+def _enrich_detail(detail: dict, candidate: dict, cfg: StrategyConfig) -> dict:
+    """为决策记录补 P/A 三值、证据来源、排序分量与影子否决标记。"""
+    entry_priority = candidate.get("entry_priority")
+    detail["entry_priority"] = entry_priority if isinstance(entry_priority, dict) else {}
+    # 否决分支的买点得分只存在于 vetoed_signal；用它保证 priority_key 与实际买点一致。
+    signal_payload = (detail.get("full_signal")
+                      or detail.get("vetoed_signal")
+                      or detail.get("signal") or {})
+    detail["priority_key"] = key_components(
+        signal_payload, candidate,
+        bool(getattr(cfg, "auction_ranking_enabled", False)))
+    block = detail["entry_priority"].get("auction")
+    if isinstance(block, dict) and block.get("loaded"):
+        detail["would_veto"] = would_veto(candidate)
+    return detail
+
+
 def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyConfig,
                           prev_row: Optional[dict] = None, hist_rows: Optional[list] = None,
                           intraday_bars: Optional[list] = None,
@@ -321,9 +378,13 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
         try:
             signal = evaluate_buy(candidate, row, cfg, prev_row, hist_rows, intraday_bars, sentiment_pct)
         except BuyRejected as exc:
-            return {"code": candidate["code"], "name": candidate.get("name", ""), "rank": candidate.get("rank"),
-                    "passed": False, "reason_code": exc.code, "reason_text": exc.text,
-                    "signal": {}, "full_signal": None}
+            detail = {"code": candidate["code"], "name": candidate.get("name", ""),
+                      "rank": candidate.get("rank"),
+                      "passed": False, "reason_code": exc.code, "reason_text": exc.text,
+                      "signal": {}, "full_signal": None}
+            if exc.signal is not None:
+                detail["vetoed_signal"] = exc.signal
+            return _enrich_detail(detail, candidate, cfg)
     if signal:
         reason, text = signal["code"], signal["reason_text"]
     elif row is None:
@@ -335,9 +396,11 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
     else:
         reason, text = "no_buy_pattern", _no_pattern_reason(
             candidate, row, cfg, prev_row, hist_rows, intraday_bars)
-    return {"code": candidate["code"], "name": candidate.get("name", ""), "rank": candidate.get("rank"),
-            "passed": signal is not None, "reason_code": reason, "reason_text": text,
-            "signal": signal["signal"] if signal else {}, "full_signal": signal}
+    detail = {"code": candidate["code"], "name": candidate.get("name", ""),
+              "rank": candidate.get("rank"),
+              "passed": signal is not None, "reason_code": reason, "reason_text": text,
+              "signal": signal["signal"] if signal else {}, "full_signal": signal}
+    return _enrich_detail(detail, candidate, cfg)
 
 
 @dataclass

@@ -55,7 +55,8 @@
 | 机制 | 落层 | 回测 | 实盘 `buy/sell` |
 |------|------|------|----------------|
 | 情绪禁买 | 共享 `evaluate_buy`（`BuyRejected`） | 生效 | **自动跟随** ✓ |
-| 竞价/其它否决 `entry_veto` | 共享 `evaluate_buy` 顶部 | 生效 | **自动跟随** ✓ |
+| 通用前置否决 `entry_veto` | 共享 `evaluate_buy` 顶部（当前无调用方） | 保留 | 保留 |
+| 竞价否决 `auction_veto_enabled` | 共享 `evaluate_buy` **信号后置闸门** | 生效（需竞价快照） | **自动跟随** ✓ |
 | 情绪→仓位（sizing） | `buy_quantity` 的 `budget_scale` | 生效 | 不适用（SignalEngine 无真实预算） |
 | 组合熔断 `allow_buy` | engine 层 `RiskGovernor` | 生效 | **跟随**：`live_trade/shadow.py` 从信号表按回放时点重建影子状态并调用同一 `risk_governor`；日级熔断分母为影子净值（buy-all 敞口可超 100%），`equity<=0` 额外触发破产闸 |
 | 组合降仓 `delevel` | `buy_quantity` 的 `budget_scale` | 生效 | **不适用**：无 sizing，`streak_delevel` 行为 no-op（fired_gate 仍展示），`drawdown_delevel` 不触发 |
@@ -72,3 +73,16 @@
 - `ablation(date_from, date_to, data, cfg, rule_names, metric)`：逐条关闭卖出规则，边际贡献。
 - `walk_forward(date_from, date_to, data, cfg, n_windows=4, metric)`：固定 cfg 滚动样本外评估，报告相邻窗口 OOS/IS 效率比，负值或 <0.5 判「样本外衰减」红旗（参数寻优由 plateau_scan/ablation 承担）。
 - `compare_strategies(..., variant_grid=None)`：声明式额外 variant 网格 + `trial_count`（试验次数账本；>20 时报告标注 `overfitting_risk`）。
+
+## 7. P/A 优先级与竞价否决（v4）
+
+三值语义（True / False / Unknown）与排序键唯一实现在 `review_account/priority.py`：
+
+- **P（prep 推荐）**：快照 `verdict ∈ {strong,light}` → True；`ignore/unrated` → False；缺 verdict（旧快照）→ Unknown。
+- **A（竞价）**：有行 ∧ `unverified=False` ∧ `is_weak=False` → True；有行 ∧ verified ∧ `is_weak=True` → False；无行/损坏/`unverified`/空 items 哨兵 → Unknown。
+- **排序**：`tier(A,P)`（True<Unknown<False）→ composite desc → priority desc → code。`TradingEngine` 与 `SignalEngine` 共用 `rank_key`；`buy` 的 buy-all 语义不变。
+- **候选池**：`prep_verdict_filter_enabled=True` 时 `ignore` 出池；推荐集为空/快照缺失/读取异常 → 回退 legacy，回退池不再应用 ignore 过滤；P 仍按快照如实标注。
+- **开关**：`auction_ranking_enabled`（A 参与排序）/ `auction_veto_enabled`（D3 否决）均默认 False；任一开启才读取 `auction_snapshots`，两者皆关时零读取/零否决/A 恒 Unknown（AC8'）。
+- **否决**：`auction_veto_enabled=True` 且 A=False → `BuyRejected("auction_veto")`；`auction_veto_exempt_signals` 按买点类型豁免。`entry_veto` 仍是无调用方的通用前置钩子。
+- **可观测**：detail 携带 `entry_priority` / `priority_key` / `would_veto` / `vetoed_signal`；`ranking_mode` ∈ {auction, auction_unverified, prep_only, legacy}；候选池回退输出 `fallback_reason`。`would_veto` 仅在已读取竞价数据时记录。
+- **回测边界**：历史日几乎无 `auction_snapshots` → A 恒 Unknown，回测不能验证 A；不得用回测结果宣称 A 有效。D6 排序不可独立消融，与旧回测对照须先重跑基线。

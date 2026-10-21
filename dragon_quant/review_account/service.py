@@ -4,6 +4,7 @@ import json
 from typing import Optional
 
 from dragon_quant.review_account.models import StrategyConfig
+from dragon_quant.review_account.priority import RANKING_MODE_LABELS
 from dragon_quant.review_account.simulator import AccountSimulator
 from dragon_quant.storage import db
 
@@ -82,4 +83,14 @@ def _print_summary(result: dict, source: str, strategy_name: str):
     else:
         print(f"胜率: {result['win_rate']:.1f}%")
     print(f"交割单: {result['trade_count']} 笔")
+    mode = result.get("ranking_mode")
+    if mode:
+        print(f"排序模式: {mode}（{RANKING_MODE_LABELS.get(mode, mode)}）")
+    fallbacks = {day: reason for day, reason in (result.get("fallback_reasons") or {}).items()
+                 if reason}
+    if fallbacks:
+        reasons = "、".join(sorted(set(fallbacks.values())))
+        print(f"候选池回退: {len(fallbacks)} 天（{reasons}）")
+    for note in result.get("priority_degraded") or []:
+        print(f"⚠️ {note}")
     print(f"run_id: {result['run_id']}")

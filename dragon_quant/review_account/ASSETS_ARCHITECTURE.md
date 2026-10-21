@@ -91,7 +91,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    START["review-account / buy 启动"] --> READ{"读 prep_snapshots /<br>auction_snapshots"}
+    START["review-account / buy / auction 启动"] --> READ{"读 T-1 prep_snapshots<br>+ 当日 auction_snapshots<br>(仅竞价开关开启时)"}
     READ -->|"有值"| RULES["结合内置规则判定<br>标的 + 仓位"]
     READ -->|"无值"| FALLBACK["从 prep_assets /<br>auction_assets 读原始资产"]
     FALLBACK --> COMPUTE["调用 prep/auction 计算段<br>重算快照"]
@@ -132,7 +132,9 @@ flowchart LR
 | 图中能力 | 状态 |
 |----------|------|
 | prep / auction 两段式（资产 → 快照纯函数、`--recompute`） | ✅ 已实现 |
-| review-account 读 `prep_snapshots`（候选池 + 情绪仓位） | ✅ 已实现（`market.collect_candidates` / `load_market_sentiment`） |
+| review-account / buy / auction 读 `prep_snapshots`（候选池 + 情绪仓位） | ✅ 已实现（`market.prep_snapshot_for` / `collect_candidates_ex` / `load_market_sentiment`）；严格 T-1，三路径共用 |
+| prep 推荐集为空时回退 legacy | ✅ 已实现（`fallback_reason=all_ignored`；回退池不再应用 ignore 出池；P 按快照 verdict 标注） |
 | 快照缺失时**读资产重算回写后继续**（图 3 的 ⑥ 路径） | ⚠️ 目标设计；当前实现是回退「3 日真龙并集」旧逻辑（`_legacy_candidates`），不会触发重算回写 |
-| review-account 消费 `auction_snapshots` | ⚠️ 预留：`entry_veto` 钩子为竞价强度一票否决预留口，默认放行 |
+| review-account / buy 消费 `auction_snapshots` | ✅ 已接线（`assets_db.list_auction_snapshots`）：`auction_ranking_enabled` / `auction_veto_enabled` 任一开启才读取；`SEMANTICS_VERIFIED=False` 期间 unverified → A 恒 Unknown |
+| `auction` 采集池改为 prep 推荐 | ✅ 默认 `--pool prep`；空推荐集/缺失回退 legacy；`--pool legacy` 可复现旧口径 |
 | assets 同步 push / pull / status / verify | ⚠️ M1 仅 `doctor`（连通性门槛）；push/pull 在 M2-M4 |

@@ -141,7 +141,7 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
    - THS dataapi：涨停池（涨停原因/板型/炸板次数/连板高度）、题材主线榜（题材涨停家数/最高板）；仍按 T 日口径采集
 2. **计算段**：只从 `prep_assets` 读回资产（快照 = 资产的纯函数）→ 计算 `sentiment` / `main_boards` / `macro` / `candidates` → 写入 `prep_snapshots`。
    - 候选池 = 三日真龙并集，同 code 去重保留综合分更优者，每只保留**真实入选日**（`trade_date`，下游 `candidate_trade_date` 血缘）。
-   - 每只候选新增 `facts` 块（今日是否在池、今日涨幅/换手/成交额、炸板/连板/封板率、资金/公告可用性、风险公告）与 `verdict`（强烈建议/轻仓博弈/忽略/未评级）+ 2-3 行维度明细 + 忽略原因；`in_pool_today` 与入选日解耦，T-2 入选、T 日再涨停的龙回头也能进买入组。verdict 仅展示，不过滤 review-account 候选。
+   - 每只候选新增 `facts` 块（今日是否在池、今日涨幅/换手/成交额、炸板/连板/封板率、资金/公告可用性、风险公告）与 `verdict`（强烈建议/轻仓博弈/忽略/未评级）+ 2-3 行维度明细 + 忽略原因；`in_pool_today` 与入选日解耦，T-2 入选、T 日再涨停的龙回头也能进买入组。默认 `prep_verdict_filter_enabled=True`：`ignore` 出池，`strong/light/unrated` 保留（unrated 仅 P=False 排序垫底）；推荐集为空时回退 legacy 且不再应用 ignore 过滤。
    - THS 入选日归因字段（涨停原因/板型/炸板次数等）保持既有契约：跨日候选为 `null`；今日封板事实在 `facts` 内按 T 日池口径提供。
    - 快照 `version=0.4`，新增顶层 `macro`（外围/美债/黄金，`available`/`session`/`degraded`/`instruments`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
 
@@ -165,7 +165,7 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
 
 **宏观时点语义**：`macro_global` 取「日 K 中日期 `< trade_date` 的最后一根已完成 bar」（T-1 口径），因此 15:30 与更晚运行得到同一值；`session_date` 为源端交易日，落后 >4 天标 `stale`；美债为两位小数日频快照，bp 变动标「近似」且只展示、不进仓位公式。
 
-`review-account` / `buy` / `sell` 优先消费该快照作为候选池与情绪仓位，快照缺失/空/异常时回退到「前 3 日真龙并集」旧逻辑。快照窗口与 `StrategyConfig.candidate_lookback_days` 无关（后者只作用于回退路径）；`auction --days N` 的口径是「最近 N 个有龙头数据的交易日」，与本命令的日历窗口不同。
+`review-account` / `buy` / `sell` / `auction` 统一消费**严格 T-1** 快照作为候选池（`prep_snapshot_for` 单一实现）；快照缺失/读取异常/推荐集为空时回退到「前 3 日真龙并集」旧逻辑，并输出 `fallback_reason`。快照窗口与 `StrategyConfig.candidate_lookback_days` 无关（后者只作用于回退路径）；`auction --days N` 也只在 legacy/回退路径生效。
 
 **时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日**不采集、不写 report**（不把当日数据写到历史日名下，compute 按缺失降级）；THS 涨停池/题材榜、cninfo 公告与 `macro_global`（日 K canonical）支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 15:30 收盘后。
 
@@ -174,14 +174,17 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
 ### `auction` — 采集集合竞价盘口与强度快照
 
 ```bash
-dragon-quant auction                        # 最近 3 个交易日的龙头并集
-dragon-quant auction --days 3               # 指定回溯交易日数
+dragon-quant auction                        # 优先 T-1 prep 推荐（strong/light），空则回退
+dragon-quant auction --days 5               # 仅 legacy/回退路径的回溯交易日数
+dragon-quant auction --pool legacy          # 强制旧口径：最近 N 日 dragons 并集
 dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
 ```
 
-从 `dragons_v2` 取最近 N 个有龙头数据的交易日，按 code 去重得到候选集，先**整批**获取行情（TDX 主、tencent 兜底，禁止逐股请求），再逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db/auction_assets`（`items_json` 盘口明细 + `quote_json` 行情快照，键 `trade_date+code`，同日重复采集幂等覆盖）。随后逐股评分、整批排名，并以单事务整日替换 `auction_snapshots`（`source="v2"`）。
+候选池默认取**严格 T-1 盘后复盘快照**中 eligible（真龙 + `min_score`）且 `verdict != ignore` 的标的（strong/light/unrated/缺 verdict 保留；推荐集为空则回退），与 `buy` / `review-account` 共用同一池语义（`collect_candidates_ex`），保证「竞价采的 code = 次日策略可能买的 code」。T-1 快照缺失/读取异常/无资格/推荐集为空时，自动回退最近 N 个有龙头数据的交易日 `dragons_v2` 并集（`--days` 在该路径生效），并在输出中回显 `pool_source="legacy"` 与 `fallback_reason`（`no_snapshot` / `snapshot_read_error` / `empty_snapshot` / `no_eligible` / `all_ignored` / `calendar`）；回退池不再应用 `ignore` 出池，P 仍按快照 verdict 标注。只有 legacy 也为空时才正常结束（exit 0）且不发起任何行情/盘口请求。
 
-输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）/ `failed`（逐 code 隔离，含 `stage`）/ `quote`（`source` 为实际生效来源 `tdx`/`tencent`/`none`，含 `matched`/`missing`/`degraded`/`reason`）/ `scored_count` / `snapshot_saved_count` / `snapshot_ok` / `snapshot_skipped` / `snapshot_error` / `snapshots`（每只判定摘要）。行情缺失时快照仍会写入（`unverified` 且大概率被保守否决），并在 `quote.degraded` 与 stderr 告警中显式标注。
+确定候选后先**整批**获取行情（TDX 主、tencent 兜底，禁止逐股请求），再逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db/auction_assets`（`items_json` 盘口明细 + `quote_json` 行情快照，键 `trade_date+code`，同日重复采集幂等覆盖）。随后逐股评分、整批排名，并以单事务整日替换 `auction_snapshots`（`source="v2"`）。
+
+输出 JSON：`trade_date`（竞价所属交易日 = 当日）/ `pool_source` / `fallback_reason` / `prep_snapshot_date` / `recommended_count` / `days_ignored` / `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）/ `failed`（逐 code 隔离，含 `stage`）/ `quote`（`source` 为实际生效来源 `tdx`/`tencent`/`none`，含 `matched`/`missing`/`degraded`/`reason`）/ `scored_count` / `snapshot_saved_count` / `snapshot_ok` / `snapshot_skipped` / `snapshot_error` / `snapshots`（每只判定摘要）。空池时额外输出 `pool_empty` / `ignore_reason_count` / `ignore_reason_samples` / `prep_degraded`。行情缺失时快照仍会写入（`unverified` 且大概率被保守否决），并在 `quote.degraded` 与 stderr 告警中显式标注。
 
 `--recompute DATE` 不触网：只读该日 `auction_assets`（`items` + `quote`）重算并覆盖 `auction_snapshots`；`DATE` 支持 `YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`，输出统一 `YYYY-MM-DD`。无原始资产、全部 `items` 为空或全部评分失败时以非零码退出；未来日期拒绝。空结果不会删除既有快照。
 
@@ -223,11 +226,11 @@ dragon-quant review-account --ui-only
 `review-account` 与 `buy/sell` 共用 `review_account` 策略与成交函数（`evaluate_buy`/`evaluate_sell`/`fill_price`/`fee`），统一候选、买卖规则与费用，因此后续只改 `review_account` + 回测即可同步调整 `buy/sell`。回测按开盘及完整 5 分钟 K 顺序重放，不能用当天最终数据决定早盘交易。候选池优先读**盘后复盘快照**（`prep_snapshots`）；快照缺失/空/异常时回退为**前 3 个真实交易日的全部真龙**并集（共享层过滤否决/低于 50 分），按 code 去重保留综合分更高者，不再截断前 N 只；空池不向更早日期补票，回测首日会加载区间前的候选日期。
 
 - 开盘 MA5 承接只用上日日 K 指标与量能；突破前高改为**首根 5 分钟 K 完成后确认**，需该根换手 ≥0.5% 带量（`turn_strong_bar_turnover_min`），日 K 兜底日不触发；分歧买龙等待完整 30 分钟承接窗口，不把瞬时触板当成保证成交。
-- 多候选择优：**买点得分越高越优先，同分看五维综合分**，再按代码稳定排序（不再参考真龙 rank）。
+- 多候选择优：**P/A 三值 tier → 五维综合分 → 买点得分 → 代码**（三值序 True < Unknown < False；不再参考真龙 rank）。`auction_ranking_enabled`（默认 False）控制 A 是否参与排序，`auction_veto_enabled`（默认 False）控制「verified ∧ is_weak 一票否决」；两者皆关时零竞价读取、零否决、A 恒 Unknown。排序键由 `review_account/priority.rank_key` 单一实现，`buy` 的 buy-all 语义不变。
 - 信号与成交分离：历史信号在下一可交易事件撮合，实时信号等待更晚的有效报价；跳空不补填成本线或止损价，封死涨跌停不假定能买卖。
 - T+1、当天卖出后不再买入；按事件顺序先卖后买，不用下午卖出结果阻止早上买入。止损、移动止盈、保本、高开窗口和尾盘规则共用一处实现；尾盘以 14:55 已知行情判断，15:00 只估值和更新峰值。
 - 默认仍保留原仓位基线；`--config params.json` 可统一设置风险预算、单票仓位上限、MA5 距离/趋势过滤、ATR 移动止盈。最低佣金默认每笔 5 元，双边滑点 0.2%，佣金 0.03%，卖出印花税 0.05%。
-- 择时与仓位改造（全部 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto` 竞价否决预留口、时间止损、分级移动止盈、龙回头买点，及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。
+- 择时与仓位改造（全部 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、时间止损、分级移动止盈、龙回头买点，及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。
 - 数据分级成交：当日所有相关个股都有完整 5 分钟 K 时走严格盘中撮合；任一缺失则整日**日K兜底**（开盘价买入、当日 OHLC 判止损止盈，分歧买龙/高开窗口等分时规则自动跳过）。雪球 5 分钟历史约仅保留 14 天，故多月回测多为兜底模式，成交价为保守近似，结果标注 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。日K本身缺失或预热不足仍报错、不保存部分回测；停牌/除权口径缺口需先解决。
 
 `/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
@@ -242,6 +245,7 @@ dragon-quant sell --date 20260908 --at 14:55  # 对已买入未卖出的信号�
 
 `buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
 
+- 与 `review-account` 共用 P/A 三值排序与否决；`buy` 输出 `ranking_mode`（`auction` / `auction_unverified` / `prep_only` / `legacy`）与 `fallback_reason`，被否决但本可买入的标的在 `details` 中带 `vetoed_signal`（含买点类型），便于影子对照。
 - `SignalEngine` 复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/仓位/次数限制；卖出数量用 `notional_quantity`（`initial_cash × max_position_pct`，与回测首仓同口径）落库冻结，保证 `break_even_price` 与回测精确一致；半仓规则只减半不平仓，`half_close_signal` 冻结半仓腿后剩余半仓继续跟踪。
 - 组合风控经 `live_trade/shadow.py` 从信号表按回放时点重建影子状态，逐事件调用同一个 `risk_governor`：日级熔断、连亏熔断与 `equity<=0` 破产闸跟随；delevel 降仓在无 sizing 场景不适用（详见 `review_account/STRATEGY.md` §5）。
 - 数据分级：`buy`/`sell` 的行情完整性判定都覆盖「候选 ∪ 持仓」，任一分时缺失即整日走日K兜底，输出带 `data_quality` 提示。
@@ -418,7 +422,7 @@ SQLite 表分为三类：
 - **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `macro_global` / `collection_report`；`collection_report` 按条合并，语义为该日期资产的当前最佳状态（未执行的键沿用存量，失败补采不覆盖健康状态）。
 - **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `macro` / `candidates`（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。当前版本 `version=0.4`（三日窗口 + 宏观 + 逐只判定）；`dragon_source.window_days`：`0` 表示 dragons 资产不可用（血缘未知）、`1` 表示旧版单日口径重算、`3` 表示三日窗口。
 - **`auction_assets`**：集合竞价原始资产（`auction` 命令），`items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`quote_json`（可空）存 `Quote` 行情快照（`prev_close` / `limit_down` / `float_market_cap` 等评分所需字段，非有限浮点清洗为 `null`；旧行为 `NULL`），`UNIQUE(trade_date, code)` 幂等覆盖；同日重采时 `items_json` 以本次为准，`quote_json` 若本次缺失则保留上次成功快照（`COALESCE`），避免瞬时行情故障抹掉不可再生上下文。`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。旧库首次**写入**时自动补 `quote_json` 列；读路径不执行列迁移（不 ALTER 既有表，缺列按 NULL 读取）。
-- **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。由 `auction` 采集与 `auction --recompute DATE` 写入（`source="v2"`）；同日重跑整日原子替换，空结果（无可用资产/全部评分失败）不会删除既有快照。写入者必须遵循该契约，不得另立字段。
+- **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。由 `auction` 采集与 `auction --recompute DATE` 写入（`source="v2"`）；同日重跑整日原子替换，空结果（无可用资产/全部评分失败）不会删除既有快照。写入者必须遵循该契约，不得另立字段。读接口为 `assets_db.list_auction_snapshots` / `get_auction_snapshot`（逐行 JSON 损坏隔离），供 `buy` / `review-account` 的 A 维度消费。
 
 `storage status` 会展示 `dragon.db` / `assets.db` 的存在性与体积；旧 `prep.db` 若仍存在，会以 `legacy_prep_db` 单独标注（不再读写，确认后可删除）。`storage clear --all` 只清理 cache/results/logs/shared，数据库文件列入 `protected_databases`，永不删除。
 

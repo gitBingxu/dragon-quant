@@ -1,5 +1,9 @@
 # prep 增量重跑与 collection_report 状态语义 — 技术方案（v2）
 
+> **口径变更（2026-10-21）**：本文中的「15:30 当日门禁」与「快照 version=0.4」已被
+> [2026-10-21-prep-macro-jp-a50-design.md](2026-10-21-prep-macro-jp-a50-design.md) 替代为
+> **16:40 门禁 / version=0.5**；增量与 report 语义本身不变。正文保留为历史记录。
+
 日期：2026-10-21 · 分支：feat/reviewa-account-op · 状态：待复审
 v2 修订：吸收 solution-reviewer 首轮 findings（1 CRITICAL / 6 MAJOR / 7 MINOR），逐条处理见 §13。
 

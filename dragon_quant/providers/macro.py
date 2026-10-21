@@ -1,12 +1,17 @@
-"""宏观扰动数据源门面：外围指数 / 美债 10Y / 黄金。
+"""宏观扰动数据源门面：日经225期指 / 富时A50期指 / 美债 10Y / 黄金。
 
-设计（见 docs/solutions/2026-10-20-prep-macro-candidate-verdict-design.md）：
+设计（见 docs/solutions/2026-10-21-prep-macro-jp-a50-design.md）：
 
-- ``MacroSpec`` 声明每个品种的取值口径与**每品种源优先级**（priority）。
+- ``MacroSpec`` 声明每个品种的**取值口径**与每品种源优先级（priority）。
+  - ``same_day_close=True``：取日 K 中日期 ``<= trade_date`` 的最后一根（同日收盘，
+    用于日经/A50 期指；夜盘归下一交易日 bar，故 T+1 bar 自然被排除）。
+  - ``same_day_close=False``：取日期 ``< trade_date`` 的最后一根（上一已完成 bar）。
 - ``collect_macro`` 按全局源顺序（tdx → tencent → yahoo → xueqiu）批次拉取，
   每个源只接收「priority 含该源且尚未满足」的品种；单源失败记 ``source_errors`` 后继续。
-- canonical 取值为「日 K 中日期 < trade_date 的最后一根已完成 bar」；quote 类回退源
-  必须自行校验 ``session_date < trade_date``，否则拒绝（防止把盘中值写进 T 日资产）。
+- quote 类回退源必须自行校验 ``session_date < trade_date``，否则拒绝
+  （防止把盘中值写进 T 日资产）；同日口径品种不支持 Yahoo（其日期换算固定纽约时区）。
+- 逐品种记录 ``caliber``（口径血缘）；**没有顶层聚合 caliber**（健康采集恒为 mixed，
+  会伪装成降级信号且无消费方）。
 - 所有数值归一为 native float；NaN/inf → None，保证 ``allow_nan=False`` 落库不炸。
 """
 
@@ -44,28 +49,35 @@ class MacroSpec:
     tencent: Optional[str] = None
     xueqiu: Optional[str] = None
     yahoo: Optional[str] = None
+    same_day_close: bool = False   # True: <= trade_date（同日）；False: < trade_date
 
 
 MACRO_SPECS: tuple[MacroSpec, ...] = (
-    MacroSpec("us_dji", "道指", "index", "points", "pct",
-              (("INTL_INDEX", "A_DJI"),), ("tdx", "tencent", "yahoo", "xueqiu"),
-              "usDJI", ".DJI", "^DJI"),
-    MacroSpec("us_ixic", "纳指", "index", "points", "pct",
-              (("INTL_INDEX", "A_IXIC"),), ("tdx", "tencent", "yahoo", "xueqiu"),
-              "usIXIC", ".IXIC", "^IXIC"),
-    MacroSpec("us_spx", "标普", "index", "points", "pct",
-              (("INTL_INDEX", "A_SPX"),), ("tdx", "tencent", "yahoo", "xueqiu"),
-              "usINX", ".INX", "^GSPC"),
-    MacroSpec("ust10y", "美债10Y", "yield", "pct", "bp",
-              (("MACRO_INDICATOR", "8_ATY"),), ("tdx", "yahoo"),
-              None, None, "^TNX"),
-    MacroSpec("gold", "COMEX金", "commodity", "usd_per_oz", "pct",
-              (("COMEX_FUTURES", "GC00W"), ("SH_GOLD", "Au99.99")), ("tdx", "yahoo"),
-              None, None, "GC=F"),
+    MacroSpec(key="jp_nikkei", label="日经225期指", kind="index",
+              price_unit="points", chg_unit="pct",
+              tdx=(("INTL_INDEX", "NK0Y"),), priority=("tdx",),
+              same_day_close=True),
+    MacroSpec(key="cn_a50", label="富时A50期指", kind="index",
+              price_unit="points", chg_unit="pct",
+              tdx=(("INTL_INDEX", "CNY0"),), priority=("tdx",),
+              same_day_close=True),
+    MacroSpec(key="ust10y", label="美债10Y", kind="yield", price_unit="pct",
+              chg_unit="bp", tdx=(("MACRO_INDICATOR", "8_ATY"),),
+              priority=("tdx", "yahoo"), yahoo="^TNX"),
+    MacroSpec(key="gold", label="COMEX金", kind="commodity",
+              price_unit="usd_per_oz", chg_unit="pct",
+              tdx=(("COMEX_FUTURES", "GC00W"), ("SH_GOLD", "Au99.99")),
+              priority=("tdx", "yahoo"), yahoo="GC=F"),
 )
 
 MACRO_KEYS: tuple[str, ...] = tuple(spec.key for spec in MACRO_SPECS)
 SPEC_BY_KEY: dict[str, MacroSpec] = {spec.key: spec for spec in MACRO_SPECS}
+# 外围指数组：由规格派生，prep / advice 一律引用此常量，不写 key 字面量
+MACRO_INDEX_KEYS: tuple[str, ...] = tuple(
+    spec.key for spec in MACRO_SPECS if spec.kind == "index")
+
+CALIBER_SAME_DAY = "same_day_daily_bar"
+CALIBER_PREVIOUS = "previous_daily_bar"
 
 
 def _num(value) -> Optional[float]:
@@ -117,6 +129,8 @@ def build_macro_record(spec: MacroSpec, *, price, prev_close, source: str, code:
         "kind": spec.kind,
         "price_unit": price_unit or spec.price_unit,
         "chg_unit": spec.chg_unit,
+        "caliber": (CALIBER_SAME_DAY if spec.same_day_close
+                    else CALIBER_PREVIOUS),
         "price": price,
         "prev_close": prev,
         "chg": chg,
@@ -140,6 +154,8 @@ def collect_macro(sources: dict, trade_date: str,
 
     ``sources`` 为 ``{source_name: source_obj}``；source_obj 需实现
     ``get_macro_quotes(specs, trade_date) -> {key: record}``。
+    ``trade_date`` 同时作为 canonical 锚点与 ``as_of``（不写采集时刻，保证可重放）。
+    口径血缘在每条记录的 ``caliber`` 上，不做顶层聚合。
     全部源都失败且无任何品种 → raise RuntimeError；部分缺失 → degraded 列表。
     """
     if not isinstance(sources, dict):
@@ -183,7 +199,6 @@ def collect_macro(sources: dict, trade_date: str,
         "trade_date": trade_date,
         # canonical 日 K 的归属日；不写采集时刻，保证 --recompute 可重放
         "as_of": as_of or trade_date,
-        "caliber": "last_completed_daily_bar_before_trade_date",
         "instruments": instruments,
         "degraded": degraded,
         "sources": chosen,
@@ -235,6 +250,9 @@ def _fetch_yahoo_chart(symbol: str) -> dict:
 
 def _record_from_yahoo(spec: MacroSpec, data: dict,
                        trade_date: str) -> Optional[dict]:
+    if spec.same_day_close:
+        # 日期换算固定纽约时区，无法表达「同日」口径；不做假装支持
+        return None
     result = ((data or {}).get("chart") or {}).get("result")
     if not isinstance(result, list) or not result:
         return None

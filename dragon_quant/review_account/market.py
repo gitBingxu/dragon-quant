@@ -152,10 +152,15 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
     pool: Optional[list[dict]] = None
     if isinstance(snap, dict):
         # 只要快照存在就记录降级状态（含 empty_snapshot 窄路径）。
+        # macro_same_day_missing 只影响复盘展示（外围期指休市/源延迟），重跑 prep 也修不好，
+        # 不触发 buy/auction 的「请先补跑 prep」提示。
         sentiment = snap.get("sentiment")
         if isinstance(sentiment, dict):
+            raw_degraded = sentiment.get("degraded")
+            raw_degraded = raw_degraded if isinstance(raw_degraded, list) else []
+            degraded = [d for d in raw_degraded if d != "macro_same_day_missing"]
             ctx["prep_degraded"] = bool(
-                sentiment.get("degraded") or sentiment.get("factor_errors"))
+                degraded or sentiment.get("factor_errors"))
     if isinstance(snap, dict) and isinstance(snap.get("candidates"), list) and snap["candidates"]:
         raw = [c for c in snap["candidates"] if isinstance(c, dict) and c.get("code")]
         verdict_map = {c["code"]: c for c in raw}

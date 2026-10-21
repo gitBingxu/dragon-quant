@@ -128,7 +128,7 @@ dragon-quant dragons --date 20260519 --true-only # 只输出真龙 (is_true_drag
 dragon-quant prep                             # 最新有龙头数据的交易日
 dragon-quant prep --date 20260519             # 指定复盘日
 dragon-quant prep --date 20260519 --recompute # 用已存资产重算快照（算法升级重放）
-dragon-quant prep --date 20260519 --force     # 强制重采全部可采资产（不绕过 15:30 门禁）
+dragon-quant prep --date 20260519 --force     # 强制重采全部可采资产（不绕过 16:40 门禁）
 dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认 4 行市场摘要 + 标的清单）
 ```
 
@@ -137,13 +137,13 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
 1. **采集段**：先读存量资产 + `collection_report` 做健康判定——资产完好则**零采集**直接进入计算段；否则只补采缺失/不健康且可采的资产（`dragons` 重采且候选 code 集合变化时级联补采 `fund_flow`/`cninfo_announcements`）。payload 与本次 report 条目单事务写入 **`assets.db`** 的 `prep_assets`。
    - **`collection_report` 语义**：该日期资产的**当前最佳状态**，不是本次运行的遭遇。只按键合并本次实际执行的 collector 条目；零采集时完全不动；补采失败不覆盖既有健康状态（记 `last_attempt`）。
    - **窗口**：复盘范围为含 T 的最近 3 个交易日 `[T-2, T-1, T]`（按交易日历，采集段解析并写入 `dragons` 资产）。窗口内某日无龙头记录（未跑 scan/无真龙）→ 跳过该日并标 `dragons_partial` 降级，不中断；三日并集为空才视为 `empty`。T 日尚未 scan 时仍可用前两日候选。
-   - tmdx：全 A 市场宽度（红盘率/涨停/炸板/跌停/成交额）、FG 板块（昨日涨停溢价/晋级交叉/龙虎榜名单）、并集候选股主力净额、cninfo 公告、**宏观扰动**（外围美股/美债 10Y/黄金；`MacExClient` 扩展行情日 K 为首选，腾讯/Yahoo/雪球回退）
+   - tmdx：全 A 市场宽度（红盘率/涨停/炸板/跌停/成交额）、FG 板块（昨日涨停溢价/晋级交叉/龙虎榜名单）、并集候选股主力净额、cninfo 公告、**宏观扰动**（日经225期指/A50期指同日口径，TDX 扩展行情单源；美债 10Y/黄金 T-1 口径，TDX 主链路 + Yahoo 回退）
    - THS dataapi：涨停池（涨停原因/板型/炸板次数/连板高度）、题材主线榜（题材涨停家数/最高板）；仍按 T 日口径采集
 2. **计算段**：只从 `prep_assets` 读回资产（快照 = 资产的纯函数）→ 计算 `sentiment` / `main_boards` / `macro` / `candidates` → 写入 `prep_snapshots`。
    - 候选池 = 三日真龙并集，同 code 去重保留综合分更优者，每只保留**真实入选日**（`trade_date`，下游 `candidate_trade_date` 血缘）。
    - 每只候选新增 `facts` 块（今日是否在池、今日涨幅/换手/成交额、炸板/连板/封板率、资金/公告可用性、风险公告）与 `verdict`（强烈建议/轻仓博弈/忽略/未评级）+ 2-3 行维度明细 + 忽略原因；`in_pool_today` 与入选日解耦，T-2 入选、T 日再涨停的龙回头也能进买入组。默认 `prep_verdict_filter_enabled=True`：`ignore` 出池，`strong/light/unrated` 保留（unrated 仅 P=False 排序垫底）；推荐集为空时回退 legacy 且不再应用 ignore 过滤。
    - THS 入选日归因字段（涨停原因/板型/炸板次数等）保持既有契约：跨日候选为 `null`；今日封板事实在 `facts` 内按 T 日池口径提供。
-   - 快照 `version=0.4`，新增顶层 `macro`（外围/美债/黄金，`available`/`session`/`degraded`/`instruments`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
+   - 快照 `version=0.5`，顶层 `macro`（日经/A50期指 + 美债/黄金；`available`/`session`/`instruments`/`degraded`/`sources`，口径血缘在逐品种 `caliber`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
 
 **默认输出**：4 行市场摘要（是否建议买入 / 建议仓位 / 建议等级 / 买入理由，理由内含外围/美债/黄金片段）+ 空行 + 逐只标的清单：
 
@@ -151,7 +151,7 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
 是否建议买入：是
 建议仓位：50%
 建议等级：一般
-买入理由：复盘日 2026-10-20；外围：道指 -0.07%、纳指 +1.11%、标普 +0.41%（隔夜收盘）；美债10Y 5.15%（较前值 +6bp，近似）；COMEX金 -0.63%；……
+买入理由：复盘日 2026-10-21；外围：日经225期指 +1.23%、富时A50期指 -0.87%（同日收盘）；美债10Y 5.15%（较前值 +6bp，近似）；COMEX金 -0.63%；……
 
 ✅ 科森科技-强烈建议
 - 质量维度：五维综合 82.0（排名 1）；题材：低空经济（今日主线第 2）
@@ -163,13 +163,13 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
 
 买入组（✅ strong/light）在前，组内综合分降序；忽略组在后、每只一句原因；未评级最后；候选为空显示「无参与复盘标的」。等级映射：0.8 强烈买入、0.5 一般、0.3 轻仓博弈、0.0 不建议买入、数据不足时「不建议买入（数据不足）」；降级信息并入理由。需要完整 JSON（含 `sentiment`/`macro`/`candidates`/`dragon_source`）时加 `--verbose`。
 
-**宏观时点语义**：`macro_global` 取「日 K 中日期 `< trade_date` 的最后一根已完成 bar」（T-1 口径），因此 15:30 与更晚运行得到同一值；`session_date` 为源端交易日，落后 >4 天标 `stale`；美债为两位小数日频快照，bp 变动标「近似」且只展示、不进仓位公式。
+**宏观时点语义**：`macro_global` 的品种与口径由 `MACRO_SPECS` 声明。`jp_nikkei`（日经225期指）与 `cn_a50`（富时A50期指）取「日 K 中日期 `<= trade_date` 的最后一根」（**同日收盘**，TDX 单源、无回退）；`ust10y` 与 `gold` 保持 `< trade_date`（上一已完成 bar，TDX 主链路 + Yahoo 回退）。夜盘归属下一交易日 bar，T+1 bar 被排除，因此 16:41 与更晚运行得到同一值（T 日 bar 的 TDX 发布延迟若发生，会标 `macro_same_day_missing` 降级）。`session` 描述外围指数组（`same_day`/`previous_session`/`mixed`），口径血缘在逐品种 `caliber`；`session_date` 为源端交易日，落后 >4 天标 `stale`。期指连续存在换月 roll 跳变，换月日涨跌幅可能失真；美债为两位小数日频快照，bp 变动标「近似」且只展示、不进仓位公式。
 
 `review-account` / `buy` / `sell` / `auction` 统一消费**严格 T-1** 快照作为候选池（`prep_snapshot_for` 单一实现）；快照缺失/读取异常/推荐集为空时回退到「前 3 日真龙并集」旧逻辑，并输出 `fallback_reason`。快照窗口与 `StrategyConfig.candidate_lookback_days` 无关（后者只作用于回退路径）；`auction --days N` 也只在 legacy/回退路径生效。
 
-**时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日**不采集、不写 report**（不把当日数据写到历史日名下，compute 按缺失降级）；THS 涨停池/题材榜、cninfo 公告与 `macro_global`（日 K canonical）支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 15:30 收盘后。
+**时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日**不采集、不写 report**（不把当日数据写到历史日名下，compute 按缺失降级）；THS 涨停池/题材榜、cninfo 公告与 `macro_global`（日 K canonical）支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 **16:40** 之后（A50 期指日盘 16:30 收盘 + 缓冲）。
 
-**增量与强制刷新**：默认增量意味着同一交易日盘后首次采集成功后，晚些时候重跑不会重新拉取数据（快照仍按存量资产重算，`collection_report` 不受影响）；需要最新数据时用 `--force` 重采全部可采资产——它**不绕过** 15:30 与交易日校验（与 `scan --force` 语义不同）。`--recompute` 零检测零采集，只用已存资产重算。采集决策提示（增量补采/修复项）输出到 stderr，stdout 仍是「4 行摘要 + 标的清单」。
+**增量与强制刷新**：默认增量意味着同一交易日盘后首次采集成功后，晚些时候重跑不会重新拉取数据（快照仍按存量资产重算，`collection_report` 不受影响）；需要最新数据时用 `--force` 重采全部可采资产——它**不绕过** 16:40 与交易日校验（与 `scan --force` 语义不同）。`--recompute` 零检测零采集，只用已存资产重算。采集决策提示（增量补采/修复项）输出到 stderr，stdout 仍是「4 行摘要 + 标的清单」。
 
 ### `auction` — 采集集合竞价盘口与强度快照
 
@@ -354,8 +354,8 @@ quote = get_quote("600172")
 | 通达信 TDX（首选）| 板块排行 / 成分股 / K线 / 分时 / 五档行情 | 无需 |
 | 同花顺（回退）| 行业/概念/地区板块排行 / 成分股 / 板块当日1分K / 历史5分K | 无需 |
 | 雪球（回退）| 个股日 K / 当日 1 分 K | 需要 |
-| 腾讯（回退）| 批量实时行情 + 收盘盘口（买一封单量）+ 宏观美股 quote 回退 | 无需 |
-| Yahoo chart（宏观 best-effort）| 外围指数 / 美债 ^TNX / 黄金 GC=F 日 K 回退 | 无需（可能 429 限频） |
+| 腾讯（回退）| 批量实时行情 + 收盘盘口（买一封单量）；宏观 quote 方法保留（当前规格未路由） | 无需 |
+| Yahoo chart（宏观 best-effort）| 美债 ^TNX / 黄金 GC=F 日 K 回退（新指数不路由） | 无需（可能 429 限频） |
 
 > 封单数据首选 TDX 五档盘口，回退腾讯 gtimg 收盘盘口（盘后仍保留收盘瞬间状态）。
 
@@ -420,7 +420,7 @@ SQLite 表分为三类：
 `prep` 与 `auction` 的数据落在**独立 SQLite 库** `assets.db`（与 `dragon.db` 同目录，随 `DQ_DATA_DIR` 覆盖），与可重算的扫描产物物理隔离——原始数据资产不可再生，避免被 `storage clear --all` 连带清理：
 
 - **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `macro_global` / `collection_report`；`collection_report` 按条合并，语义为该日期资产的当前最佳状态（未执行的键沿用存量，失败补采不覆盖健康状态）。
-- **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `macro` / `candidates`（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。当前版本 `version=0.4`（三日窗口 + 宏观 + 逐只判定）；`dragon_source.window_days`：`0` 表示 dragons 资产不可用（血缘未知）、`1` 表示旧版单日口径重算、`3` 表示三日窗口。
+- **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `macro` / `candidates`（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。当前版本 `version=0.5`（三日窗口 + 日经/A50 宏观口径 + 逐只判定）；`dragon_source.window_days`：`0` 表示 dragons 资产不可用（血缘未知）、`1` 表示旧版单日口径重算、`3` 表示三日窗口。
 - **`auction_assets`**：集合竞价原始资产（`auction` 命令），`items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`quote_json`（可空）存 `Quote` 行情快照（`prev_close` / `limit_down` / `float_market_cap` 等评分所需字段，非有限浮点清洗为 `null`；旧行为 `NULL`），`UNIQUE(trade_date, code)` 幂等覆盖；同日重采时 `items_json` 以本次为准，`quote_json` 若本次缺失则保留上次成功快照（`COALESCE`），避免瞬时行情故障抹掉不可再生上下文。`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。旧库首次**写入**时自动补 `quote_json` 列；读路径不执行列迁移（不 ALTER 既有表，缺列按 NULL 读取）。
 - **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。由 `auction` 采集与 `auction --recompute DATE` 写入（`source="v2"`）；同日重跑整日原子替换，空结果（无可用资产/全部评分失败）不会删除既有快照。写入者必须遵循该契约，不得另立字段。读接口为 `assets_db.list_auction_snapshots` / `get_auction_snapshot`（逐行 JSON 损坏隔离），供 `buy` / `review-account` 的 A 维度消费。
 

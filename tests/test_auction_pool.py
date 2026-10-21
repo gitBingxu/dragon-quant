@@ -220,5 +220,27 @@ class TestAuctionPool(unittest.TestCase):
         self.assertEqual(ctx["prep_snapshot_date"], out["prep_snapshot_date"])
 
 
+    def test_macro_same_day_missing_does_not_mark_prep_degraded(self):
+        """外围期指非同日只影响复盘展示，不应触发「请先补跑 prep」提示。"""
+        from dragon_quant.review_account.market import collect_candidates_ex
+        from dragon_quant.review_account.models import StrategyConfig
+
+        snap = {"candidates": [{"code": "A", "composite_score": 80,
+                                "is_true_dragon": True, "verdict": "strong"}],
+                "sentiment": {"degraded": ["macro_same_day_missing"]}}
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+                   return_value=snap):
+            _, ctx = collect_candidates_ex(
+                [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])
+        self.assertFalse(ctx["prep_degraded"])
+        snap["sentiment"]["degraded"] = ["macro_same_day_missing",
+                                         "ths_limit_up_pool"]
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+                   return_value=snap):
+            _, ctx = collect_candidates_ex(
+                [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])
+        self.assertTrue(ctx["prep_degraded"])
+
+
 if __name__ == "__main__":
     unittest.main()

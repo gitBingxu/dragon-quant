@@ -348,6 +348,50 @@ class TestCandidateLines(unittest.TestCase):
                          ["无参与复盘标的"])
 
     def test_macro_fragments_in_reason(self):
+        macro = {"available": True, "session": "same_day", "instruments": {
+            "jp_nikkei": {"label": "日经225期指", "pct": 1.23,
+                          "session_date": "2026-10-19", "stale": False},
+            "cn_a50": {"label": "富时A50期指", "pct": -0.87,
+                       "session_date": "2026-10-19", "stale": False},
+            "ust10y": {"price": 5.15, "chg_bp": 6.0, "chg_bp_approx": True},
+            "gold": {"label": "COMEX金", "pct": -0.63},
+        }}
+        text = build_advice_reason(
+            {"position_pct": 0.5, "position_advice": "正常", "degraded": []},
+            [], "2026-10-19", macro)
+        self.assertIn("外围：日经225期指 +1.23%、富时A50期指 -0.87%（同日收盘）", text)
+        self.assertIn("美债10Y 5.15%（较前值 +6bp，近似）", text)
+        self.assertIn("COMEX金 -0.63%", text)
+        for legacy in ("道指", "纳指", "标普", "隔夜"):
+            self.assertNotIn(legacy, text)
+
+    def test_macro_mixed_session_marks_each_instrument_date(self):
+        macro = {"available": True, "session": "mixed", "instruments": {
+            "jp_nikkei": {"label": "日经225期指", "pct": 1.23,
+                          "session_date": "2026-10-19", "stale": False},
+            "cn_a50": {"label": "富时A50期指", "pct": -0.87,
+                       "session_date": "2026-10-16", "stale": False},
+        }}
+        text = build_advice_reason(
+            {"position_pct": 0.5, "position_advice": "正常", "degraded": []},
+            [], "2026-10-19", macro)
+        self.assertIn("日经225期指 +1.23%（2026-10-19 收盘）", text)
+        self.assertIn("富时A50期指 -0.87%（2026-10-16 收盘）", text)
+
+    def test_macro_previous_session_suffix(self):
+        macro = {"available": True, "session": "previous_session", "instruments": {
+            "jp_nikkei": {"label": "日经225期指", "pct": 0.61,
+                          "session_date": "2026-10-16", "stale": False},
+            "cn_a50": {"label": "富时A50期指", "pct": -0.87,
+                       "session_date": "2026-10-16", "stale": False},
+        }}
+        text = build_advice_reason(
+            {"position_pct": 0.5, "position_advice": "正常", "degraded": []},
+            [], "2026-10-19", macro)
+        self.assertIn("（前一交易日收盘）", text)
+
+    def test_legacy_macro_snapshot_without_indices(self):
+        """0.4 快照只有 us_*：无外围片段，美债/黄金照常，不崩。"""
         macro = {"available": True, "session": "overnight", "instruments": {
             "us_dji": {"label": "道指", "pct": -0.07, "stale": False},
             "ust10y": {"price": 5.15, "chg_bp": 6.0, "chg_bp_approx": True},
@@ -356,8 +400,9 @@ class TestCandidateLines(unittest.TestCase):
         text = build_advice_reason(
             {"position_pct": 0.5, "position_advice": "正常", "degraded": []},
             [], "2026-10-19", macro)
-        self.assertIn("外围：道指 -0.07%（隔夜收盘）", text)
-        self.assertIn("美债10Y 5.15%（较前值 +6bp，近似）", text)
+        self.assertNotIn("外围：", text)
+        self.assertNotIn("道指", text)
+        self.assertIn("美债10Y 5.15%", text)
         self.assertIn("COMEX金 -0.63%", text)
 
 

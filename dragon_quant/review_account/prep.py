@@ -31,7 +31,8 @@ from dragon_quant.providers.tencent import TencentProvider
 from dragon_quant.utils.trading import tdx_trade_dates
 from dragon_quant.providers.xueqiu import XueqiuProvider
 from dragon_quant.providers.macro import (
-    MACRO_KEYS, SPEC_BY_KEY, YahooMacroSource, collect_macro,
+    CALIBER_PREVIOUS, CALIBER_SAME_DAY, MACRO_INDEX_KEYS, MACRO_KEYS,
+    SPEC_BY_KEY, YahooMacroSource, collect_macro,
 )
 from dragon_quant.review_account.verdicts import (
     evaluate_candidates, find_risk_announcement,
@@ -71,8 +72,8 @@ _DRAGON_DEPENDENTS = ("fund_flow", "cninfo_announcements")
 # code 覆盖校验：payload 键里应覆盖当前龙头并集 codes
 _CODE_COVERED_KEYS = {"fund_flow": "quotes", "cninfo_announcements": "items"}
 
-# 盘后运行门禁：当日 ≥15:30 才允许（TDX 盘后刷新缓冲）
-_AFTER_CLOSE = (15, 30)
+# 盘后运行门禁：当日 ≥16:40 才允许（A50 期指日盘 16:30 收盘 + 缓冲）
+_AFTER_CLOSE = (16, 40)
 
 
 class PrepError(ValueError):
@@ -320,16 +321,15 @@ def _collect_cninfo(ctx: PrepContext) -> dict:
 
 
 def _collect_macro(ctx: PrepContext) -> dict:
-    """宏观扰动：外围指数/美债/黄金（日 K canonical，源优先级见 MACRO_SPECS）。
+    """宏观扰动：日经/A50 期指（同日）、美债 10Y、黄金（T-1）。
 
-    源对象：tdx（扩展行情日 K）、tencent（美股指数 quote）、yahoo（best-effort）、
-    xueqiu（Cookie，最后备选）；全部失败由 collect_macro 抛 RuntimeError。
+    源对象：tdx（扩展行情日 K，主链路）、yahoo（仅美债/黄金回退）。
+    日经/A50 的 priority 只有 tdx，无回退；全部失败由 collect_macro 抛 RuntimeError。
+    腾讯/雪球 provider 的宏观方法保留历史契约，但当前 MACRO_SPECS 无该源路由。
     """
     sources = {
         "tdx": ctx.tdx,
-        "tencent": ctx.tencent,
         "yahoo": YahooMacroSource(),
-        "xueqiu": ctx.xueqiu,
     }
     return collect_macro(sources, ctx.trade_date, as_of=ctx.trade_date)
 
@@ -498,8 +498,9 @@ def _validate_trade_date(trade_date: str, tdx: TdxProvider,
     """prep 本地日期门禁（不依赖雪球日历），返回完整交易日列表。
 
     - T > 今日 → 报错；
-    - T == 今日：<15:30 报「盘中」（不查日历，雪球日历 15:05 前不含当日会误判）；
-      ≥15:30 用 TDX 指数日K校验当日确为交易日（排除周末/节假日盘后误跑）；
+    - T == 今日：<16:40 报「盘后数据尚未就绪」（A50 期指 16:30 收盘 + 缓冲；
+      不查日历，雪球日历盘中不含当日会误判）；
+      ≥16:40 用 TDX 指数日K校验当日确为交易日（排除周末/节假日盘后误跑）；
     - T < 今日：TDX 指数日K自建日历校验；日历不可用与非交易日报错严格区分。
     """
     now = now or datetime.now(SHANGHAI)
@@ -507,7 +508,7 @@ def _validate_trade_date(trade_date: str, tdx: TdxProvider,
     if trade_date > today:
         raise PrepError(f"复盘日 {trade_date} 是未来日期")
     if trade_date == today and (now.hour, now.minute) < _AFTER_CLOSE:
-        raise PrepError(f"{trade_date} 当日盘中，请 15:30 收盘后再运行 prep")
+        raise PrepError(f"{trade_date} 盘后数据尚未就绪，请 16:40 后运行 prep")
     dates = _trading_dates(tdx)
     if trade_date not in dates:
         raise PrepError(f"{trade_date} 非交易日")
@@ -1160,7 +1161,6 @@ def _empty_macro() -> dict:
         "available": False,
         "as_of": None,
         "session": None,
-        "caliber": None,
         "instruments": {},
         "degraded": ["macro_global"],
         "sources": {},
@@ -1176,21 +1176,33 @@ def _macro_stale(session_date, trade_date: str) -> bool:
         return False
 
 
-def _macro_session(instruments: dict, trade_date: str) -> Optional[str]:
-    dates = []
-    for key in ("us_dji", "us_ixic", "us_spx"):
-        rec = instruments.get(key)
-        if isinstance(rec, dict):
-            day = rec.get("session_date")
-            if isinstance(day, str) and len(day) >= 10:
-                dates.append(day[:10])
-    if not dates:
+def _macro_session_kind(session_date, trade_date: str) -> Optional[str]:
+    """逐品种收盘口径：同日 / 上一交易日 / 不可用。"""
+    if not isinstance(session_date, str) or len(session_date) < 10:
         return None
-    if any(day == trade_date for day in dates):
-        return "intraday"
-    if all(day < trade_date for day in dates):
-        return "overnight"
-    return "unknown"
+    day = session_date[:10]
+    if day == trade_date:
+        return "same_day"
+    if day < trade_date:
+        return "previous_session"
+    return None
+
+
+def _macro_session(instruments: dict) -> Optional[str]:
+    """外围指数组（日经/A50）的收盘口径聚合：same_day / previous_session / mixed。"""
+    kinds = []
+    for key in MACRO_INDEX_KEYS:
+        rec = instruments.get(key)
+        if not isinstance(rec, dict):
+            continue
+        kind = rec.get("session_kind")
+        if isinstance(kind, str) and kind:
+            kinds.append(kind)
+    if not kinds:
+        return None
+    if len(set(kinds)) > 1:
+        return "mixed"
+    return kinds[0]
 
 
 def _normalize_macro_record(rec: dict, key: str, trade_date: str) -> Optional[dict]:
@@ -1202,12 +1214,18 @@ def _normalize_macro_record(rec: dict, key: str, trade_date: str) -> Optional[di
         return None
     session_date = rec.get("session_date")
     session_date = session_date[:10] if isinstance(session_date, str) else None
+    # 缺失/未来日期视为不可用，不伪装成「上一交易日」
+    session_kind = _macro_session_kind(session_date, trade_date)
+    if session_kind is None:
+        return None
     return {
         "key": key,
         "label": str(rec.get("label") or spec.label),
         "kind": str(rec.get("kind") or spec.kind),
         "price_unit": str(rec.get("price_unit") or spec.price_unit),
         "chg_unit": str(rec.get("chg_unit") or spec.chg_unit),
+        "caliber": (CALIBER_SAME_DAY if spec.same_day_close
+                    else CALIBER_PREVIOUS),
         "price": price,
         "prev_close": _num_or_none(rec.get("prev_close")),
         "chg": _num_or_none(rec.get("chg")),
@@ -1221,6 +1239,7 @@ def _normalize_macro_record(rec: dict, key: str, trade_date: str) -> Optional[di
         "code": str(rec.get("code") or ""),
         "market": str(rec.get("market") or ""),
         "session_date": session_date,
+        "session_kind": session_kind,
         "raw_date": rec.get("raw_date"),
         "raw_time": rec.get("raw_time"),
         "stale": _macro_stale(session_date, trade_date),
@@ -1244,17 +1263,22 @@ def compute_macro(assets: dict, trade_date: str) -> dict:
         return _empty_macro()
 
     raw_degraded = payload.get("degraded")
-    degraded = {str(item) for item in raw_degraded if isinstance(item, str)} \
+    # 旧资产可能残留 us_* 等已下线 key：只保留当前 MACRO_KEYS，避免旧键泄漏到 CLI/JSON
+    degraded = {str(item) for item in raw_degraded
+                if isinstance(item, str) and item in MACRO_KEYS} \
         if isinstance(raw_degraded, list) else set()
     degraded |= {key for key in MACRO_KEYS if key not in instruments}
+    raw_sources = payload.get("sources")
+    sources = ({key: value for key, value in raw_sources.items()
+                if key in MACRO_KEYS}
+               if isinstance(raw_sources, dict) else {})
     return {
         "available": True,
         "as_of": payload.get("as_of"),
-        "session": _macro_session(instruments, trade_date),
-        "caliber": payload.get("caliber"),
+        "session": _macro_session(instruments),
         "instruments": instruments,
         "degraded": sorted(degraded),
-        "sources": payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
+        "sources": sources,
     }
 
 
@@ -1286,8 +1310,17 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
     macro_marks: list[str] = []
     if not macro.get("available"):
         macro_marks.append("macro_global")
-    elif macro.get("degraded"):
-        macro_marks.append("macro_partial")
+    else:
+        if macro.get("degraded"):
+            macro_marks.append("macro_partial")
+        # 预期同日但未拿到（源端延迟/品种休市）：显式降级，避免 AC2/AC3 静默失败
+        instruments = macro.get("instruments") or {}
+        same_day_ok = all(
+            isinstance(instruments.get(key), dict)
+            and instruments[key].get("session_kind") == "same_day"
+            for key in MACRO_INDEX_KEYS)
+        if not same_day_ok:
+            macro_marks.append("macro_same_day_missing")
 
     if errors:
         sentiment["factor_errors"] = {**sentiment.get("factor_errors", {}), **errors}
@@ -1295,7 +1328,7 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
         set(sentiment.get("degraded") or []) | set(degraded) | set(macro_marks))
     return {
         "trade_date": trade_date,
-        "version": "0.4",
+        "version": "0.5",
         "sentiment": sentiment,
         "main_boards": main_boards,
         "macro": macro,

@@ -4,6 +4,7 @@ from typing import Optional
 
 from dragon_quant.live_trade.trader import LiveTrader
 from dragon_quant.review_account.models import StrategyConfig
+from dragon_quant.review_account.priority import RANKING_MODE_LABELS
 
 
 def _make_config(source: str, strategy_params: Optional[dict]) -> StrategyConfig:
@@ -43,6 +44,12 @@ def _print_buy(trade_date: str, result: dict):
         print("  建议仓位 —（无有效情绪仓位数据，请人工判断）")
     else:
         print(f"  建议仓位 {sp * 100:.0f}%（盘后复盘情绪温度，仅参考不代下单）")
+    mode = result.get("ranking_mode")
+    if mode:
+        print(f"  排序模式 {mode}：{RANKING_MODE_LABELS.get(mode, mode)}")
+    if result.get("fallback_reason"):
+        print(f"  ⚠️ 候选池回退 {result.get('fallback_reason')}"
+              f"（pool_source={result.get('pool_source')}）")
     for b in result.get("buys", []):
         mark = "" if b.get("persisted", True) else "（未落库：已有未平仓信号）"
         print(f"  🟢 买入 {b['name'] or b['code']}（{b['code']}）@{b['entry_price']:.2f}{mark}")
@@ -59,6 +66,18 @@ def _print_buy(trade_date: str, result: dict):
             continue
         seen.add(code)
         rejected.append(d)
+    vetoed = [d for d in result.get("details", [])
+              if d.get("reason_code") == "auction_veto"]
+    if vetoed:
+        items = "、".join(
+            f"{d.get('name') or d.get('code')}"
+            f"（{(d.get('vetoed_signal') or {}).get('code') or '?'}）"
+            for d in vetoed[:5])
+        print(f"  ⛔ 竞价否决 {len(vetoed)} 只（本可买入）：{items}")
+    shadow = sum(1 for d in result.get("details", [])
+                 if d.get("would_veto") and d.get("reason_code") != "auction_veto")
+    if shadow:
+        print(f"  👁 影子否决（未开启）{shadow} 只，可对照 auction_veto_enabled 效果")
     if rejected:
         print(f"  候选未触发买点（{len(rejected)} 只）：")
         for d in rejected:

@@ -533,6 +533,62 @@ class TestAuctionSnapshotsReplace(AssetsDbTestBase):
         self.assertEqual(rows[0][0], "600001")
 
 
+class TestAuctionSnapshotRead(AssetsDbTestBase):
+    """竞价快照读接口：无库降级、摊平契约、逐行损坏隔离。"""
+
+    def _seed(self, payloads):
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            assets_db.replace_auction_snapshots("2026-10-20", payloads, source="v2")
+
+    def test_missing_db_returns_empty_and_none(self):
+        from dragon_quant.storage import assets_db
+        with patch("dragon_quant.storage.assets_db._connect", return_value=None):
+            self.assertEqual(assets_db.list_auction_snapshots("2026-10-20"), [])
+            self.assertIsNone(assets_db.get_auction_snapshot("2026-10-20", "600001"))
+
+    def test_hit_miss_and_flattened_contract(self):
+        payload = {"version": "1", "code": "600001", "is_weak": False,
+                   "strength": 72.5, "direction": "bull", "level": "强",
+                   "dims": {}, "reject_reason": None, "unverified": True, "rank": None}
+        self._seed({"600001": payload})
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            rows = assets_db.list_auction_snapshots("2026-10-20")
+            hit = assets_db.get_auction_snapshot("2026-10-20", "600001")
+            miss = assets_db.get_auction_snapshot("2026-10-20", "600002")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["code"], "600001")
+        self.assertIs(rows[0]["is_weak"], False)
+        self.assertEqual(rows[0]["strength"], 72.5)
+        self.assertIs(rows[0]["unverified"], True)
+        self.assertEqual(hit["level"], "强")
+        self.assertIsNone(miss)
+
+    def test_corrupt_analysis_row_isolated(self):
+        self._seed({"600001": {"version": "1", "code": "600001", "is_weak": False},
+                    "600002": {"version": "1", "code": "600002", "is_weak": True}})
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                "UPDATE auction_snapshots SET analysis_json='{bad' "
+                "WHERE trade_date=? AND code=?", ("2026-10-20", "600001"))
+            conn.commit()
+        finally:
+            conn.close()
+        from dragon_quant.storage import assets_db
+        with self._patch():
+            rows = assets_db.list_auction_snapshots("2026-10-20")
+            bad = assets_db.get_auction_snapshot("2026-10-20", "600001")
+            good = assets_db.get_auction_snapshot("2026-10-20", "600002")
+        self.assertEqual(len(rows), 2)
+        by_code = {r["code"]: r for r in rows}
+        self.assertIn("JSONDecodeError", by_code["600001"]["error"])
+        self.assertNotIn("error", by_code["600002"])
+        self.assertIn("JSONDecodeError", bad["error"])
+        self.assertIs(good["is_weak"], True)
+
+
 class TestAuctionCorruptJson(AssetsDbTestBase):
     """单行 JSON 损坏必须逐行隔离，不得打断整批读取。"""
 

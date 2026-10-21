@@ -5,6 +5,7 @@ from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import (
     AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade,
 )
+from dragon_quant.review_account.priority import TRI_LABELS, key_components, rank_key
 from dragon_quant.review_account.risk import risk_governor
 from dragon_quant.review_account.strategy import evaluate_sell, explain_buy_candidate
 
@@ -81,8 +82,9 @@ class TradingEngine:
                         state.pending.append(self._order(p.code, p.name, signals[0], event.timestamp))
                 # The current bar cannot activate protection retroactively within that same bar.
                 track_peak(p, row, entry_ts)
-            if (event.phase != "close" and event.allow_buy and risk_allow_buy
-                    and not state.sold_today and state.buys_today < cfg.max_daily_buys
+            buy_window = (event.phase != "close" and event.allow_buy and risk_allow_buy
+                          and not state.sold_today)
+            if (buy_window and state.buys_today < cfg.max_daily_buys
                     and len(state.positions) < cfg.max_positions
                     and not any(o["side"] == "BUY" for o in state.pending)):
                 signals = []
@@ -106,11 +108,27 @@ class TradingEngine:
                     result["details"].append(detail)
                     if detail["passed"] and detail.get("full_signal"):
                         signals.append((detail["full_signal"], cand))
-                # 择优：买点得分越高越优先，同分看五维综合分，再按代码稳定排序。
-                signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))
+                # 择优：P/A 三值 tier → 五维综合分 → 买点得分 → 代码（两引擎共用 key）。
+                signals.sort(key=lambda x: rank_key(x[0], x[1], cfg.auction_ranking_enabled))
                 if signals:
                     sig, cand = signals[0]
                     state.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))
+                    for position, (other_sig, other) in enumerate(signals[1:], start=2):
+                        result["details"].append(
+                            self._ranked_out_detail(other, other_sig, position, cfg))
+            elif (buy_window and state.buys_today >= cfg.max_daily_buys
+                    and len(state.positions) < cfg.max_positions):
+                # 当日买入次数已满：只记一次，避免在每个后续事件重复追加。
+                limit_key = f"limit:{day}"
+                if limit_key not in state.evaluated:
+                    state.evaluated[limit_key] = 1
+                    held = {p.code for p in state.positions}
+                    for cand in event.candidates:
+                        if cand["code"] in held:
+                            continue
+                        result["details"].append(
+                            self._unsignaled_detail(cand, "daily_buy_limit",
+                                                    f"当日买入次数已达上限 {cfg.max_daily_buys}", cfg))
         state.last_event = event.timestamp
         result["pending"] = list(state.pending)
         if state.pending:
@@ -121,6 +139,37 @@ class TradingEngine:
     def _order(code, name, signal, timestamp):
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
                 "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+
+    @staticmethod
+    def _detail_base(candidate, cfg, reason_code, reason_text, signal=None):
+        detail = {
+            "code": candidate.get("code"), "name": candidate.get("name", ""),
+            "rank": candidate.get("rank"), "passed": False,
+            "reason_code": reason_code, "reason_text": reason_text,
+            "signal": {}, "full_signal": None,
+            "entry_priority": candidate.get("entry_priority") or {},
+            "priority_key": key_components(signal or {}, candidate,
+                                           cfg.auction_ranking_enabled),
+        }
+        block = detail["entry_priority"].get("auction")
+        if isinstance(block, dict) and block.get("loaded"):
+            detail["would_veto"] = block.get("state") is False
+        return detail
+
+    @classmethod
+    def _ranked_out_detail(cls, candidate, signal, position, cfg):
+        entry = candidate.get("entry_priority") or {}
+        a_state = (entry.get("auction") or {}).get("state")
+        p_state = (entry.get("prep") or {}).get("state")
+        return cls._detail_base(
+            candidate, cfg, "ranked_out",
+            f"排序第 {position}（A={TRI_LABELS.get(a_state, '未知')}, "
+            f"P={TRI_LABELS.get(p_state, '未知')}），当日最多买入 {cfg.max_daily_buys} 只，未入选",
+            signal=signal)
+
+    @classmethod
+    def _unsignaled_detail(cls, candidate, reason_code, reason_text, cfg):
+        return cls._detail_base(candidate, cfg, reason_code, reason_text)
 
     def _equity(self) -> float:
         return self.state.cash + sum(p.qty * self.state.marks.get(p.code, p.entry_price)

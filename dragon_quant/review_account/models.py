@@ -7,6 +7,19 @@ from typing import Optional
 SELL_RULE_NAMES = ("hard_stop", "trailing", "breakeven", "high_open_clear",
                    "soft_time_stop", "weak_close", "hard_time_stop", "half", "volume_spike")
 
+# 买点类型的唯一来源：strategy._buy 的调用与 auction_veto_exempt_signals 校验共用。
+# 改动/新增买点时必须同步此处，否则配置里的豁免名会静默 fail-open。
+BUY_SIGNAL_MA5_PULLBACK = "buy_open_ma5_pullback"
+BUY_SIGNAL_OPEN_TURN_STRONG = "buy_open_turn_strong"
+BUY_SIGNAL_DIVERGENCE_BREAK = "buy_divergence_first_break"
+BUY_SIGNAL_DRAGON_COMEBACK = "buy_dragon_comeback"
+BUY_SIGNAL_CODES = (
+    BUY_SIGNAL_MA5_PULLBACK,
+    BUY_SIGNAL_OPEN_TURN_STRONG,
+    BUY_SIGNAL_DIVERGENCE_BREAK,
+    BUY_SIGNAL_DRAGON_COMEBACK,
+)
+
 
 @dataclass
 class StrategyConfig:
@@ -78,6 +91,11 @@ class StrategyConfig:
     dragon_comeback_pullback_days_max: int = 10
     dragon_comeback_volume_ratio: float = 0.333
     dragon_comeback_confirm_pct: float = 3.0
+    # ── P/A 优先级（默认关；见 docs/solutions/2026-10-21-auction-prep-buy-priority-design.md）──
+    auction_ranking_enabled: bool = False     # A 维度参与排序
+    auction_veto_enabled: bool = False        # D3 否决（verified ∧ is_weak）
+    prep_verdict_filter_enabled: bool = True  # D4：verdict=ignore 出池（消融可关）
+    auction_veto_exempt_signals: list = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, values: dict) -> "StrategyConfig":
@@ -109,6 +127,15 @@ class StrategyConfig:
                         raise ValueError(f"未知卖出规则开关: {k}")
                     if not isinstance(v, bool):
                         raise ValueError(f"卖出规则开关 {k} 必须是布尔值")
+            elif isinstance(default, list):
+                if not isinstance(value, list):
+                    raise ValueError(f"{name} 必须是数组")
+                bad = [v for v in value
+                       if not isinstance(v, str) or v not in BUY_SIGNAL_CODES]
+                if bad:
+                    raise ValueError(
+                        f"未知买点类型: {', '.join(map(str, bad))}；"
+                        f"合法值: {', '.join(BUY_SIGNAL_CODES)}")
         if cfg.source not in {"v1", "v2"}:
             raise ValueError("source 必须是 v1 或 v2")
         for name in ("initial_cash", "candidate_top_n", "candidate_lookback_days", "max_positions",
@@ -146,6 +173,7 @@ class StrategyConfig:
     def to_json_dict(self) -> dict:
         data = dict(self.__dict__)
         data["sell_rule_toggles"] = dict(self.sell_rule_toggles)
+        data["auction_veto_exempt_signals"] = list(self.auction_veto_exempt_signals)
         return data
 
 

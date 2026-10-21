@@ -460,6 +460,60 @@ def list_auction_assets(trade_date: str) -> list[dict]:
 # ─── auction 强度快照 ──────────────────────────────────────────────────────
 
 
+def _snapshot_row(trade_date: str, code: str, analysis, error) -> dict:
+    """把 analysis_json 摊平到行上，便于 `auction_state` 直接消费契约字段。"""
+    row = {"trade_date": trade_date, "code": code}
+    if isinstance(analysis, dict):
+        row.update(analysis)
+    else:
+        row["error"] = "analysis_json 不是对象"
+    if error:
+        row["error"] = error
+    return row
+
+
+def list_auction_snapshots(trade_date: str, source: str = "v2") -> list[dict]:
+    """列出某日竞价强度快照，按 code 排序；逐行 JSON 损坏只标 ``error``，不中断整批。"""
+    conn = _connect(create=False)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = conn.execute(
+            "SELECT trade_date, code, analysis_json FROM auction_snapshots "
+            "WHERE trade_date = ? AND source = ? ORDER BY code",
+            (trade_date, source),
+        ).fetchall()
+        result = []
+        for r in rows:
+            analysis, error = _load_json(r[2], {})
+            result.append(_snapshot_row(r[0], r[1], analysis, error))
+        return result
+    finally:
+        conn.close()
+
+
+def get_auction_snapshot(trade_date: str, code: str,
+                         source: str = "v2") -> Optional[dict]:
+    """读取单只竞价强度快照；无记录返回 None，损坏行返回带 ``error`` 的行。"""
+    conn = _connect(create=False)
+    if conn is None:
+        return None
+    try:
+        _ensure_schema(conn, migrate=False)
+        row = conn.execute(
+            "SELECT trade_date, code, analysis_json FROM auction_snapshots "
+            "WHERE trade_date = ? AND code = ? AND source = ?",
+            (trade_date, code, source),
+        ).fetchone()
+        if not row:
+            return None
+        analysis, error = _load_json(row[2], {})
+        return _snapshot_row(row[0], row[1], analysis, error)
+    finally:
+        conn.close()
+
+
 def replace_auction_snapshots(trade_date: str, payloads: dict[str, dict],
                               source: str = "v2") -> int:
     """整日原子替换竞价强度快照，返回写入行数。

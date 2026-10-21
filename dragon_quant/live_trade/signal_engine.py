@@ -21,6 +21,7 @@ from dragon_quant.review_account.execution import (
 )
 from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import AccountState, MarketEvent, Position, StrategyConfig
+from dragon_quant.review_account.priority import rank_key
 from dragon_quant.review_account.risk import risk_governor
 from dragon_quant.review_account.strategy import evaluate_sell, explain_buy_candidate
 
@@ -161,7 +162,8 @@ class SignalEngine:
                 result["details"].append(detail)
                 if detail["passed"] and detail.get("full_signal"):
                     signals.append((detail["full_signal"], cand))
-            signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))
+            # buy-all 语义不变；排序只决定 pending 顺序（两引擎共用同一 key）。
+            signals.sort(key=lambda x: rank_key(x[0], x[1], cfg.auction_ranking_enabled))
             for sig, cand in signals:
                 self.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))
         self.last_event = event.timestamp

@@ -1,6 +1,7 @@
 """逐只参与判定与 CLI 清单单测：规则分支 / 优先级 / 降级 / 排序 / 未评级。"""
 
 import unittest
+from unittest.mock import MagicMock
 
 from dragon_quant.review_account.advice import (
     build_advice_reason, format_candidate_lines,
@@ -192,11 +193,85 @@ class TestEvaluateCandidatesIsolation(unittest.TestCase):
 
 
 class TestSnapshotConsumption(unittest.TestCase):
-    def test_verdict_ignore_does_not_filter_candidates(self):
-        """verdict 仅展示：review-account 仍消费全部满足 min_score 的候选。"""
+    def test_verdict_ignore_is_dropped(self):
+        """D4：verdict=ignore 出池；strong/light 保留。"""
         from types import SimpleNamespace
         from unittest.mock import patch
-        from dragon_quant.review_account.market import collect_candidates
+        from dragon_quant.review_account.market import collect_candidates_ex
+
+        snap = {"candidates": [
+            {"code": "A", "composite_score": 80, "is_true_dragon": True,
+             "verdict": "ignore"},
+            {"code": "B", "composite_score": 70, "is_true_dragon": True,
+             "verdict": "strong"},
+            {"code": "C", "composite_score": 60, "is_true_dragon": True,
+             "verdict": "light"},
+        ]}
+        cfg = SimpleNamespace(source="v2", min_score=50)
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+                   return_value=snap):
+            out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
+                                             "2026-10-20", cfg, lambda *a, **k: [])
+        self.assertEqual([c["code"] for c in out], ["B", "C"])
+        self.assertEqual(ctx["pool_source"], "prep")
+        self.assertIsNone(ctx["fallback_reason"])
+
+    def test_all_ignored_falls_back_without_refilter(self):
+        """D7（裁决 2）：推荐集空 → 回退 legacy，且回退池不再应用 ignore 过滤。"""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dragon_quant.review_account.market import collect_candidates_ex
+
+        snap = {"candidates": [
+            {"code": "A", "composite_score": 80, "is_true_dragon": True,
+             "verdict": "ignore", "ignore_reason": "资金离场"},
+            {"code": "B", "composite_score": 70, "is_true_dragon": True,
+             "verdict": "ignore", "ignore_reason": "高位炸板"},
+        ]}
+        legacy = [{"code": "A", "name": "A", "composite_score": 80,
+                   "is_true_dragon": True},
+                  {"code": "X", "name": "X", "composite_score": 60,
+                   "is_true_dragon": True}]
+        cfg = SimpleNamespace(source="v2", min_score=50)
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+                   return_value=snap):
+            out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
+                                             "2026-10-20", cfg,
+                                             lambda *a, **k: legacy)
+        self.assertEqual(ctx["fallback_reason"], "all_ignored")
+        self.assertEqual(ctx["pool_source"], "legacy")
+        self.assertEqual([c["code"] for c in out], ["A", "X"])
+        by_code = {c["code"]: c for c in out}
+        # 回退后不因 ignore 再次剔除；快照内 ignore → P=False，快照外 → P=None
+        self.assertIs(by_code["A"]["entry_priority"]["prep"]["state"], False)
+        self.assertIsNone(by_code["X"]["entry_priority"]["prep"]["state"])
+
+    def test_old_snapshot_without_verdict_keeps_snapshot(self):
+        """C7：旧快照完全无 verdict → 用快照候选、P=Unknown、不回退。"""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dragon_quant.review_account.market import collect_candidates_ex
+
+        snap = {"candidates": [
+            {"code": "A", "composite_score": 80, "is_true_dragon": True},
+        ]}
+        loader = MagicMock(return_value=[])
+        cfg = SimpleNamespace(source="v2", min_score=50)
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+                   return_value=snap):
+            out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
+                                             "2026-10-20", cfg, loader)
+        self.assertEqual([c["code"] for c in out], ["A"])
+        self.assertEqual(ctx["pool_source"], "prep")
+        self.assertIsNone(ctx["fallback_reason"])
+        self.assertIsNone(out[0]["entry_priority"]["prep"]["state"])
+        loader.assert_not_called()
+
+    def test_filter_disabled_keeps_ignore(self):
+        """消融：prep_verdict_filter_enabled=False 复现旧候选池。"""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dragon_quant.review_account.market import collect_candidates_ex
 
         snap = {"candidates": [
             {"code": "A", "composite_score": 80, "is_true_dragon": True,
@@ -204,12 +279,35 @@ class TestSnapshotConsumption(unittest.TestCase):
             {"code": "B", "composite_score": 70, "is_true_dragon": True,
              "verdict": "strong"},
         ]}
+        cfg = SimpleNamespace(source="v2", min_score=50,
+                              prep_verdict_filter_enabled=False)
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+                   return_value=snap):
+            out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
+                                             "2026-10-20", cfg, lambda *a, **k: [])
+        self.assertEqual([c["code"] for c in out], ["A", "B"])
+        self.assertEqual(ctx["pool_source"], "prep")
+
+    def test_unrated_kept_with_false_state(self):
+        """C1：unrated 保留在池内但 P=False（不剔除）。"""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dragon_quant.review_account.market import collect_candidates_ex
+
+        snap = {"candidates": [
+            {"code": "A", "composite_score": 80, "is_true_dragon": True,
+             "verdict": "unrated"},
+            {"code": "B", "composite_score": 70, "is_true_dragon": True,
+             "verdict": "strong"},
+        ]}
         cfg = SimpleNamespace(source="v2", min_score=50)
         with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
                    return_value=snap):
-            out = collect_candidates(["2026-10-19", "2026-10-20"],
-                                     "2026-10-20", cfg, lambda *a, **k: [])
-        self.assertEqual([c["code"] for c in out], ["A", "B"])
+            out, _ = collect_candidates_ex(["2026-10-19", "2026-10-20"],
+                                           "2026-10-20", cfg, lambda *a, **k: [])
+        by_code = {c["code"]: c for c in out}
+        self.assertIn("A", by_code)
+        self.assertIs(by_code["A"]["entry_priority"]["prep"]["state"], False)
 
 
 class TestCandidateLines(unittest.TestCase):

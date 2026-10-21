@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 from dragon_quant.providers.tdx import TdxProvider
 from dragon_quant.providers.ths import THSProvider
 from dragon_quant.providers.tencent import TencentProvider
+from dragon_quant.utils.trading import tdx_trade_dates
 from dragon_quant.providers.xueqiu import XueqiuProvider
 from dragon_quant.providers.macro import (
     MACRO_KEYS, SPEC_BY_KEY, YahooMacroSource, collect_macro,
@@ -474,12 +475,11 @@ def _bar_date(b) -> str:
 
 
 def _trading_dates(tdx: TdxProvider) -> list[str]:
-    """TDX 指数日K → 升序交易日列表（不依赖雪球 Cookie）。"""
-    bars = tdx.get_kline("SH000001", days=120)
-    dates = sorted({_bar_date(b) for b in bars})
-    if not dates:
-        raise PrepError("交易日历数据源失败（TDX 指数日K为空），请稍后重试")
-    return dates
+    """TDX 指数日K → 升序交易日列表（共享 ``utils.trading.tdx_trade_dates``）。"""
+    try:
+        return tdx_trade_dates(tdx)
+    except ValueError as exc:
+        raise PrepError(str(exc)) from exc
 
 
 def resolve_window_dates(trade_date: str, calendar: list,

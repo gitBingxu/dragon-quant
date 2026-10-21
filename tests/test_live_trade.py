@@ -581,6 +581,13 @@ class TestHalfAccounting(unittest.TestCase):
         self.assertGreater(fill["pnl"], 0)
 
 
+def _pool_ctx():
+    """trader 现在消费 collect_candidates_ex 的 (candidates, ctx) 二元组。"""
+    return {"ranking_mode": "legacy", "pool_source": "legacy",
+            "fallback_reason": None, "pool_empty": False,
+            "prep_snapshot_date": None, "auction_rows": 0, "degraded": []}
+
+
 class TestLiveTraderAlignment(unittest.TestCase):
     """trader 层：数据分级（codes 全集）、峰值写回、as-of、落库标注。"""
 
@@ -607,7 +614,8 @@ class TestLiveTraderAlignment(unittest.TestCase):
                          "v2", qty=1000)
         cand = {"code": "600002", "name": "候选", "rank": 1, "composite_score": 80,
                 "is_true_dragon": True, "trade_date": "2026-09-04"}
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[cand]):
+        with patch("dragon_quant.live_trade.trader.collect_candidates",
+                   return_value=[cand]):
             result = self._trader(MissingCodeData("600002")).sell(DAY, "10:00")
         self.assertEqual(result["data_quality"], "daily_fallback")
 
@@ -615,14 +623,16 @@ class TestLiveTraderAlignment(unittest.TestCase):
         """持仓分时缺失 → buy 同样整日 daily_fallback（codes 含 as-of 持仓）。"""
         db.insert_signal("600002", "持仓", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[CAND]):
+        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                   return_value=([CAND], _pool_ctx())):
             result = self._trader(MissingCodeData("600002")).buy(DAY, "10:00")
         self.assertEqual(result["data_quality"], "daily_fallback")
 
     def test_buy_updates_existing_position_peaks(self):
         db.insert_signal(CAND["code"], "持仓", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[]):
+        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                   return_value=([], _pool_ctx())):
             self._trader(RisingData()).buy(DAY, "10:00")
         row_sig = db.list_open_signals(source="v2")[0]
         self.assertGreater(row_sig["highest_price"], 10.3)
@@ -633,7 +643,8 @@ class TestLiveTraderAlignment(unittest.TestCase):
         db.insert_signal(CAND["code"], "未来", "2026-09-08", 10.0, "buy", "买", {},
                          "v2", qty=1000)
         db.update_signal_peaks(CAND["code"], 3.0, 9.9)  # 该未来行的既有峰值
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[CAND]):
+        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                   return_value=([CAND], _pool_ctx())):
             result = self._trader(FakeData()).buy(DAY, "10:00")
         self.assertEqual(len(result["buys"]), 1)
         self.assertFalse(result["buys"][0]["persisted"])
@@ -643,7 +654,8 @@ class TestLiveTraderAlignment(unittest.TestCase):
         self.assertAlmostEqual(row_sig["highest_return"], 3.0)
 
     def test_buy_records_qty_for_break_even_parity(self):
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[CAND]):
+        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                   return_value=([CAND], _pool_ctx())):
             result = self._trader(FakeData()).buy(DAY, "10:00")
         b = result["buys"][0]
         self.assertEqual(b["qty"], notional_quantity(StrategyConfig(), b["entry_price"]))

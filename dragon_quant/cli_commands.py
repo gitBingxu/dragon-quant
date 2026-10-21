@@ -675,30 +675,96 @@ def _cmd_auction(args):
         return
 
     source = "v2"
-    dates = db.list_dragon_trade_dates(source=source)
-    if not dates:
-        print(json.dumps({"error": f"无 {source} 龙头记录，无法确定候选"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+    trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
+    pool_mode = getattr(args, "pool", "prep")
+    days_arg = getattr(args, "days", None)
+    days = days_arg or 3
 
-    recent_dates = dates[-args.days:]
-    # 最近 N 日龙头并集，按 code 去重（保留最近出现的非空 name）
+    ctx = {
+        "pool_source": "legacy",
+        "fallback_reason": None,
+        "prep_snapshot_date": None,
+        "prep_unavailable_reason": None,
+        "recommended_count": 0,
+        "ignore_reasons": [],
+        "degraded": [],
+    }
     by_code: dict = {}
-    for d in recent_dates:
-        for dr in db.get_dragons(d, source=source):
-            code = dr.get("code")
-            if not code:
-                continue
-            name = dr.get("name") or ""
-            if code not in by_code or name:
-                by_code[code] = name
+    recent_dates: list = []
+    days_ignored = False
+
+    if pool_mode == "prep":
+        calendar = None
+        try:
+            from dragon_quant.providers.tdx import TdxProvider
+            from dragon_quant.utils.trading import tdx_trade_dates
+            calendar = tdx_trade_dates(TdxProvider())
+        except Exception as exc:
+            ctx["fallback_reason"] = "calendar"
+            ctx["degraded"].append(f"T-1 交易日历不可用：{type(exc).__name__}: {exc}")
+            print(f"⚠️ T-1 交易日历不可用（{type(exc).__name__}: {exc}），回退 legacy 池",
+                  file=sys.stderr)
+        if calendar:
+            from dragon_quant.review_account.market import candidate_dates, collect_candidates_ex
+            from dragon_quant.review_account.models import StrategyConfig
+            cfg = StrategyConfig(source=source, candidate_lookback_days=days)
+            try:
+                candidates, ctx = collect_candidates_ex(
+                    calendar, trade_date, cfg, db.get_dragons_by_date)
+            except Exception as exc:
+                candidates = []
+                ctx = {**ctx, "fallback_reason": "candidate_pool_error",
+                       "degraded": [f"候选池构造失败：{type(exc).__name__}: {exc}"]}
+                print(f"⚠️ 候选池构造失败（{exc}），回退 legacy 池", file=sys.stderr)
+            by_code = {c["code"]: (c.get("name") or "")
+                       for c in (candidates or []) if c.get("code")}
+            if ctx.get("pool_source") == "legacy":
+                recent_dates = candidate_dates(calendar, trade_date, days)
+            elif days_arg is not None:
+                days_ignored = True
+                print("⚠️ --days 仅在 legacy 路径生效，本次已忽略", file=sys.stderr)
 
     if not by_code:
-        print(json.dumps({"error": "最近 N 日无龙头，无需采集"},
-                         ensure_ascii=False, indent=2))
-        sys.exit(1)
+        # 显式 legacy，或 prep 路径回退后仍无候选：走旧口径（最近 N 日龙头并集）。
+        dates = db.list_dragon_trade_dates(source=source)
+        if dates:
+            recent_dates = dates[-days:]
+            for d in recent_dates:
+                for dr in db.get_dragons(d, source=source):
+                    code = dr.get("code")
+                    if not code:
+                        continue
+                    name = dr.get("name") or ""
+                    if code not in by_code or name:
+                        by_code[code] = name
+            if ctx.get("fallback_reason") is None and pool_mode == "prep":
+                ctx["fallback_reason"] = "pool_unavailable"
+        elif pool_mode == "legacy":
+            print(json.dumps({"error": "最近 N 日无龙头，无需采集"},
+                             ensure_ascii=False, indent=2))
+            sys.exit(1)
 
-    trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
+    if not by_code:
+        ignore_reasons = ctx.get("ignore_reasons") or []
+        print(json.dumps({
+            "ok": True, "mode": "collect", "trade_date": trade_date, "source": source,
+            "pool_source": ctx.get("pool_source"),
+            "fallback_reason": ctx.get("fallback_reason"),
+            "prep_snapshot_date": ctx.get("prep_snapshot_date"),
+            "prep_unavailable_reason": ctx.get("prep_unavailable_reason"),
+            "pool_empty": True, "candidate_codes": 0,
+            "recommended_count": ctx.get("recommended_count", 0),
+            "ignore_reason_count": len(ignore_reasons),
+            "ignore_reason_samples": ignore_reasons[:3],
+            "prep_degraded": bool(ctx.get("prep_degraded")),
+            "days_ignored": days_ignored,
+            "message": "prep 与 legacy 均无可用候选，本次不采集竞价数据",
+        }, ensure_ascii=False, indent=2))
+        if ctx.get("prep_degraded"):
+            print("⚠️ 本次未采集竞价原始资产（不可再生），可能因 prep 数据降级，"
+                  "请先补跑 prep", file=sys.stderr)
+        return
+
     codes = sorted(by_code)
 
     # 行情整批获取（TDX 主、tencent 兜底），绝不逐股请求
@@ -805,6 +871,12 @@ def _cmd_auction(args):
         "mode": "collect",
         "trade_date": trade_date,
         "source": source,
+        "pool_source": ctx.get("pool_source"),
+        "fallback_reason": ctx.get("fallback_reason"),
+        "prep_snapshot_date": ctx.get("prep_snapshot_date"),
+        "prep_unavailable_reason": ctx.get("prep_unavailable_reason"),
+        "recommended_count": ctx.get("recommended_count", 0),
+        "days_ignored": days_ignored,
         "lookback_dates": recent_dates,
         "candidate_codes": len(codes),
         "saved_count": len(saved),

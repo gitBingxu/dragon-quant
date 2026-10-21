@@ -5,7 +5,10 @@ from datetime import datetime
 from dragon_quant.live_trade.shadow import build_shadow_state
 from dragon_quant.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.data import MarketData, historical_events
-from dragon_quant.review_account.market import SHANGHAI, at, bar_times, calendar_start, collect_candidates, load_market_sentiment
+from dragon_quant.review_account.market import (
+    SHANGHAI, at, bar_times, calendar_start, collect_candidates,
+    collect_candidates_ex, load_market_sentiment,
+)
 from dragon_quant.storage import db
 
 
@@ -85,7 +88,8 @@ class LiveTrader:
         shadow.sentiment_pct = sentiment
         positions = shadow.positions
         held_codes = {p.code for p in positions}
-        candidates = collect_candidates(calendar, day, self.cfg, db.get_dragons_by_date)
+        candidates, ctx = collect_candidates_ex(
+            calendar, day, self.cfg, db.get_dragons_by_date)
         candidate_codes = {c["code"] for c in candidates}
         degraded: list[str] = []
         usable_positions = self._usable(day, held_codes - candidate_codes, degraded, "持仓")
@@ -114,7 +118,15 @@ class LiveTrader:
                 db.update_signal_peaks(p.code, p.highest_return, p.highest_price)
         return {"action": "buy" if buys else "idle", "buys": buys, "details": details,
                 "sentiment_pct": sentiment, "data_quality": quality,
-                "degraded": degraded, "fired_gate": engine.fired_gate,
+                "degraded": degraded + list(ctx.get("degraded") or []),
+                "fired_gate": engine.fired_gate,
+                "ranking_mode": ctx["ranking_mode"],
+                "pool_source": ctx["pool_source"],
+                "fallback_reason": ctx["fallback_reason"],
+                "pool_empty": ctx["pool_empty"],
+                "prep_snapshot_date": ctx["prep_snapshot_date"],
+                "auction_rows": ctx["auction_rows"],
+                "priority_degraded": list(ctx.get("degraded") or []),
                 "reason_text": f"买入 {len(buys)} 只" if buys else "候选池暂无触发买点的标的"}
 
     def _run_sell(self, day, target, until, calendar):

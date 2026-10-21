@@ -2,12 +2,17 @@
 
 供 `prep` CLI 命令调用；review-account / buy-sell 经 `collect_candidates` 消费快照。
 
-架构（见 review_account/prep因子扩展技术方案.md）：
-  - collect 段：遍历 ASSET_COLLECTORS 注册表，逐 collector 隔离异常，
-    全部 payload 经 ``assets_db.save_prep_assets`` 单事务落库（含 collection_report）。
+架构（见 docs/solutions/2026-10-21-prep-incremental-rerun-design.md）：
+  - collect 段：默认**增量**——先读存量资产 + collection_report，逐资产做健康判定，
+    全健康则零采集直接 compute；否则只补采不健康且可采的 asset_type（dragons 重采且
+    code 集合变化时级联 fund_flow/cninfo），逐 collector 隔离异常，payload 与本次
+    report 条目经 ``assets_db.save_prep_assets`` 单事务落库。
   - compute 段：只从 prep_assets 读回（快照 = 资产的纯函数），逐因子错误隔离；
-    ``--recompute`` 时用已存资产重算快照（算法升级可重放历史口径）。
-  - same_day_only 资产（FG/实时行情类）补跑历史日时跳过，防止时点污染。
+    ``--recompute`` 时用已存资产重算快照（零检测零采集，算法升级可重放历史口径）。
+  - same_day_only 资产（FG/实时行情类）仅 ``trade_date == today`` 可采；历史日不采集、
+    不写 report，由 compute 按缺失降级，防止时点污染。
+  - collection_report 语义 = 「该日期资产当前最佳状态」：只合并本次实际执行的条目，
+    补采失败不覆盖既有健康状态（记 ``last_attempt``），零采集时完全不动。
 
 数据源：tmdx（MacClient）优先，THS dataapi 次之；排除东财。
 """
@@ -60,6 +65,11 @@ _MUST_NONEMPTY = {"market_breadth", "fg_boards", "macro_global"}
 # 其窗口正确性由采集阶段 [T-window, T] 过滤保证，不做 as_of 相等校验。
 _AS_OF_CHECKED = {"market_breadth", "fg_boards", "fund_flow"}
 
+# 依赖 dragons 候选 codes 的资产：dragons 重采且 code 集合变化时级联补采
+_DRAGON_DEPENDENTS = ("fund_flow", "cninfo_announcements")
+# code 覆盖校验：payload 键里应覆盖当前龙头并集 codes
+_CODE_COVERED_KEYS = {"fund_flow": "quotes", "cninfo_announcements": "items"}
+
 # 盘后运行门禁：当日 ≥15:30 才允许（TDX 盘后刷新缓冲）
 _AFTER_CLOSE = (15, 30)
 
@@ -97,6 +107,9 @@ class PrepContext:
     tdx: TdxProvider
     ths: THSProvider
     dragons_rows: list = field(default_factory=list)
+    # dragons 候选 codes 是否已就绪（成功采集或存量可用）：未就绪时不执行依赖采集器，
+    # 避免以空 codes 产出空 payload 覆盖健康存量。
+    dragons_ready: bool = False
     window_trade_dates: list = field(default_factory=list)
     window_days: int = WINDOW_TRADING_DAYS
     tencent: Optional[object] = None
@@ -151,6 +164,7 @@ def _collect_dragons(ctx: PrepContext) -> dict:
         raise RuntimeError("三日龙头读取失败：" + "；".join(errors))
 
     ctx.dragons_rows = rows_all
+    ctx.dragons_ready = True          # 含真空（窗口内无真龙）：codes 为空是确定事实
     all_scan_ids = sorted({d["scan_id"] for d in days if d.get("scan_id")})
     all_versions = sorted({d["version"] for d in days if d.get("version")})
     single_day = len(window) == 1
@@ -357,6 +371,104 @@ _EMPTY_KEYS = {
 }
 
 
+def _classify_payload(asset_type: str, payload: dict, spec: CollectorSpec) -> dict:
+    """payload → collection_report 条目（状态 + 可疑说明）。
+
+    **total**：分类器自身异常也落成 error 条目，绝不向上抛（否则会击穿采集段隔离）。
+    """
+    try:
+        check = _EMPTY_KEYS.get(asset_type, lambda p: not p)
+        status = "empty" if check(payload) else "ok"
+        note = spec.suspicious_check(payload) if spec.suspicious_check else None
+        entry: dict = {"status": status}
+        if note:
+            entry["note"] = note
+            if status == "ok":
+                entry["status"] = "empty_suspicious"
+        return entry
+    except Exception as e:  # 分类器缺陷不得击穿采集段
+        return {"status": "error", "error": f"classify: {type(e).__name__}: {e}"}
+
+
+def _report_status(report, asset_type: str) -> Optional[str]:
+    """从 collection_report 防御式读取单资产状态（条目非 dict → None）。"""
+    entry = report.get(asset_type) if isinstance(report, dict) else None
+    return entry.get("status") if isinstance(entry, dict) else None
+
+
+def asset_health(asset_type: str, payload, status, trade_date: str) -> Optional[str]:
+    """**可用性**谓词（compute 的唯一语义来源）：返回不可用原因，None = 可用。
+
+    与 ``_prepare_assets`` 的既有语义一致：payload 存在 + 状态非坏 + 必然非空资产非 empty
+    + 三类 as_of 匹配。非 dict payload / dragons.rows 非 list → ``malformed``（不进入 compute）。
+    report 条目非 dict 时调用方传 ``status=None``（等同无条目）。
+    """
+    if payload is None:
+        return "missing"
+    if not isinstance(payload, dict):
+        return "malformed"
+    if isinstance(status, str) and status in _BAD_STATUS:
+        return status
+    if status == "empty" and asset_type in _MUST_NONEMPTY:
+        return "empty"
+    if asset_type == "dragons":
+        rows = payload.get("rows")
+        if rows is not None and not isinstance(rows, list):
+            return "malformed"
+    if asset_type in _AS_OF_CHECKED:
+        as_of = payload.get("as_of")
+        if as_of and as_of != trade_date:
+            return "as_of_mismatch"
+    return None
+
+
+def collection_health(asset_type: str, payload, status, trade_date: str) -> Optional[str]:
+    """**采集**谓词 = 可用性 ∪ 窗口降级（仅 dragons）。
+
+    窗口降级是「可用但告警」：dragons 仍进入 compute，只是触发本地重读，
+    以便后来补跑 scan 时把新一天纳入窗口。
+    """
+    reason = asset_health(asset_type, payload, status, trade_date)
+    if reason is not None:
+        return reason
+    if asset_type == "dragons":
+        marks = _window_degradations(payload)
+        if marks:
+            return marks[0]
+    return None
+
+
+def is_collectable(asset_type: str, trade_date: str, today: str) -> bool:
+    """可采性矩阵：same_day_only 仅 ``trade_date == today`` 可采；未知类型不可采。"""
+    spec = ASSET_COLLECTORS.get(asset_type)
+    if spec is None:
+        return False
+    return not (spec.same_day_only and trade_date < today)
+
+
+def _asset_dragon_rows(payload) -> list:
+    """dragons payload → rows（防御式：非 dict / 非 list 一律空）。"""
+    if not isinstance(payload, dict):
+        return []
+    return _list_of_dicts(payload.get("rows"))
+
+
+def _asset_codes(payload) -> list[str]:
+    """dragons payload → 并集 codes（保持首次出现顺序）。"""
+    return _dragon_codes(_asset_dragon_rows(payload))
+
+
+@dataclass(frozen=True)
+class PrepPlan:
+    """增量采集计划：collect = 本次要跑的 collector；repairs = 只改 report 的修复项。"""
+
+    collect: list[str]
+    repairs: dict[str, dict]
+
+    def is_empty(self) -> bool:
+        return not self.collect and not self.repairs
+
+
 def _bar_date(b) -> str:
     return datetime.fromtimestamp(b.timestamp / 1000, SHANGHAI).strftime("%Y-%m-%d")
 
@@ -403,39 +515,63 @@ def _validate_trade_date(trade_date: str, tdx: TdxProvider,
 
 
 def _collect_all(trade_date: str, *, window_trade_dates: list,
+                 asset_types: list[str],
                  window_days: int = WINDOW_TRADING_DAYS,
-                 tdx: Optional[TdxProvider] = None) -> tuple[dict[str, dict], dict]:
-    """采集段：遍历注册表，逐 collector 隔离异常，返回 (payloads, report)。
+                 tdx: Optional[TdxProvider] = None,
+                 existing: Optional[dict] = None,
+                 now: Optional[datetime] = None) -> tuple[dict[str, dict], dict]:
+    """采集段：只执行 ``asset_types`` 指定的 collector，逐项隔离异常。
 
-    ``window_trade_dates`` 必填（由 ``resolve_window_dates`` 从已校验日历解析），
-    避免调用方遗漏时隐式退化为单日或隐式联网取日历。``window_days`` 是**请求**的
-    窗口长度，由调用方显式传入，避免与解析 size 漂移。
+    - 可采性由调用方（``plan_prep``）决定；入口对不可采/未知类型直接 ``ValueError``，
+      不做 same_day_only 跳过、也不为跳过项写 unavailable（report 只记本次真实执行结果）。
+    - dragons 不参与本次执行时，用 ``existing`` 的 dragons 预热候选 codes；仅当存量
+      dragons 经 ``asset_health`` 判定可用（rows 可解析）时置 ``dragons_ready``。
+      依赖 dragons codes 的采集器在未就绪时不执行（记 error），避免空 payload 覆盖存量。
+    - 每个 collector：payload 必须是 dict → 分类（total）→ 通过后才写入 payloads；
+      任何异常都不写 payload，保证「在 payloads 中 = 本次成功且 payload 与状态自洽」。
+    - ``window_trade_dates`` 必填（由 ``resolve_window_dates`` 从已校验日历解析）；
+      ``now`` 与 run_prep 的门禁共用同一实例（ctx.today / as_of 同源）。
     """
-    ctx = PrepContext(trade_date=trade_date,
-                      today=datetime.now(SHANGHAI).strftime("%Y-%m-%d"),
+    now = now or datetime.now(SHANGHAI)
+    today = now.strftime("%Y-%m-%d")
+    invalid = [t for t in asset_types if not is_collectable(t, trade_date, today)]
+    if invalid:
+        raise ValueError(
+            f"不可采资产被请求：{invalid}（trade_date={trade_date}, today={today}）")
+    ctx = PrepContext(trade_date=trade_date, today=today,
                       tdx=tdx or TdxProvider(), ths=THSProvider(),
                       tencent=TencentProvider(), xueqiu=XueqiuProvider(),
                       window_trade_dates=list(window_trade_dates),
                       window_days=window_days)
+    if "dragons" not in asset_types and existing:
+        stored_report = existing.get("collection_report")
+        stored_status = _report_status(stored_report, "dragons")
+        stored_dragons = existing.get("dragons")
+        if asset_health("dragons", stored_dragons, stored_status, trade_date) is None:
+            ctx.dragons_rows = _asset_dragon_rows(stored_dragons)
+            ctx.dragons_ready = True
     payloads: dict[str, dict] = {}
     report: dict[str, dict] = {}
-    for asset_type, spec in ASSET_COLLECTORS.items():
-        if spec.same_day_only and trade_date < ctx.today:
-            report[asset_type] = {"status": "unavailable", "note": "补跑历史日无该时点数据"}
+    for asset_type in asset_types:
+        spec = ASSET_COLLECTORS.get(asset_type)
+        if spec is None:
+            continue
+        if asset_type in _DRAGON_DEPENDENTS and not ctx.dragons_ready:
+            report[asset_type] = {"status": "error",
+                                  "error": "dragons 不可用，无法确定候选 codes"}
             continue
         try:
             payload = spec.collect(ctx)
+            if not isinstance(payload, dict):
+                raise TypeError(f"collector 返回 {type(payload).__name__}，预期 dict")
+            entry = _classify_payload(asset_type, payload, spec)
+            if entry.get("status") == "error":
+                # 分类异常 = 本次采集失败：不写 payload，交 merge 层保留存量健康状态
+                raise RuntimeError(entry.get("error") or "payload 分类失败")
             payloads[asset_type] = payload
-            check = _EMPTY_KEYS.get(asset_type, lambda p: not p)
-            status = "empty" if check(payload) else "ok"
-            note = spec.suspicious_check(payload) if spec.suspicious_check else None
-            entry: dict = {"status": status}
-            if note:
-                entry["note"] = note
-                if status == "ok":
-                    entry["status"] = "empty_suspicious"
             report[asset_type] = entry
-        except Exception as e:  # 单点失败不中断：记 error 继续下一个 collector
+        except Exception as e:  # 单点失败不中断：不写 payload，记 error 继续下一个
+            payloads.pop(asset_type, None)
             report[asset_type] = {"status": "error", "error": f"{type(e).__name__}: {e}"}
     return payloads, report
 
@@ -509,41 +645,43 @@ def _fg_board_rows(fg: dict, name: str) -> tuple[list, bool]:
     return _list_of_dicts(board.get("rows")), True
 
 
+# collection_report 内的审计键（不是资产类型，compute/增量检测都必须跳过）
+_REPORT_AUDIT_KEYS = {"report_reset"}
+
+
 def _prepare_assets(assets: dict, trade_date: str) -> tuple[dict[str, dict], list[str]]:
     """按 collection_report + as_of 过滤不可用资产，返回 (可用资产, 降级名单)。
 
+    可用性统一由 ``asset_health`` 判定（与增量采集共用唯一语义来源）：
     - status ∈ {error, unavailable, empty_suspicious} → 按缺失降级（不使用其值）；
     - status == empty 且资产正常交易日不可能为空（market_breadth/fg_boards）→ 同样降级；
-    - payload.as_of != trade_date → 时点不符，降级（防止跨日残留/外部导入污染）。
+    - payload.as_of != trade_date → 时点不符，降级（防止跨日残留/外部导入污染）；
+    - payload 非 dict / dragons.rows 非 list → malformed，降级。
+    **窗口降级不剔除 dragons**：可用的 dragons 额外把 ``_window_degradations`` 追加到
+    degraded（仅用于报告/CLI 理由），仍进入 compute。
+    遍历 ASSET_COLLECTORS 全集 ∪ assets 键 ∪ report 键：完全缺席的期望资产也必须在
+    degraded 中可见（历史日 same_day_only 不采集、不写 report 时尤其重要）。
     原始 payload 仍保留在 prep_assets 中供审计，仅 compute 不消费。
     """
-    report = assets.get("collection_report") or {}
+    report = assets.get("collection_report")
+    report = report if isinstance(report, dict) else {}
     usable: dict[str, dict] = {}
     degraded: list[str] = []
-    # 遍历 assets ∪ report：采集整体失败且无历史残留时资产不在 assets 中，
-    # 但必须在 degraded 里可见（否则 CLI 摘要完全静默）。
-    for asset_type in list(assets) + [k for k in report if k not in assets]:
-        if asset_type == "collection_report":
+    seen: set[str] = set()
+    dynamic_keys = [k for k in list(assets) + list(report)
+                    if k not in _REPORT_AUDIT_KEYS]
+    for asset_type in list(ASSET_COLLECTORS) + dynamic_keys:
+        if asset_type in seen or asset_type == "collection_report":
             continue
+        seen.add(asset_type)
         payload = assets.get(asset_type)
-        status = (report.get(asset_type) or {}).get("status")
-        if payload is None:
+        if asset_health(asset_type, payload, _report_status(report, asset_type),
+                        trade_date) is not None:
             degraded.append(asset_type)
             continue
-        reason = None
-        if status in _BAD_STATUS:
-            reason = status
-        elif status == "empty" and asset_type in _MUST_NONEMPTY:
-            reason = "empty"
-        elif (asset_type in _AS_OF_CHECKED and isinstance(payload, dict)
-              and payload.get("as_of") and payload["as_of"] != trade_date):
-            reason = "as_of_mismatch"
-        if reason:
-            degraded.append(asset_type)
-        else:
-            usable[asset_type] = payload
-            if asset_type == "dragons":
-                degraded.extend(_window_degradations(payload))
+        usable[asset_type] = payload
+        if asset_type == "dragons":
+            degraded.extend(_window_degradations(payload))
     return usable, sorted(set(degraded))
 
 
@@ -566,6 +704,131 @@ def _window_degradations(payload) -> list[str]:
            for day in _list_of_dicts(payload.get("days"))):
         marks.append("dragons_partial")
     return marks
+
+
+# ─── 增量采集计划（默认模式：只补采不健康项）─────────────────────────────────
+
+
+def plan_repairs(assets: dict, trade_date: str, today: str) -> dict[str, dict]:
+    """C3 窄口径存量修复：旧版本跳过采集时误写 ``unavailable`` 的 report 条目。
+
+    安全条件（全部满足才修复，不采集）：
+      status == "unavailable" ∧ same_day_only ∧ 历史日不可采 ∧ payload 是 dict
+      ∧ payload.as_of == trade_date ∧ ``_classify_payload`` 自检为 ok。
+
+    旧代码的 unavailable 分支只 ``continue``、从不写 payload，因此「同日 as_of 的完好
+    payload + unavailable」只可能是跳过覆写造成的污染。**不扩散**到 error /
+    empty_suspicious（它们可能对应真实坏数据）。
+    """
+    report = assets.get("collection_report")
+    if not isinstance(report, dict):
+        return {}
+    repairs: dict[str, dict] = {}
+    for asset_type, spec in ASSET_COLLECTORS.items():
+        if not spec.same_day_only:
+            continue
+        if is_collectable(asset_type, trade_date, today):
+            continue
+        if _report_status(report, asset_type) != "unavailable":
+            continue
+        payload = assets.get(asset_type)
+        if not isinstance(payload, dict) or payload.get("as_of") != trade_date:
+            continue
+        if _classify_payload(asset_type, payload, spec).get("status") != "ok":
+            continue
+        repairs[asset_type] = {"status": "ok", "restored": "legacy_unavailable"}
+    return repairs
+
+
+def _uncovered_assets(assets: dict, codes: list[str], selected: set[str]) -> list[str]:
+    """code 覆盖 diff：fund_flow/cninfo 的键未覆盖当前龙头并集 codes → 需补采。"""
+    wanted = set(codes)
+    if not wanted:
+        return []                      # 无候选：覆盖要求为空（vacuous）
+    missing: list[str] = []
+    for asset_type, key in _CODE_COVERED_KEYS.items():
+        if asset_type in selected:
+            continue
+        payload = assets.get(asset_type)
+        keys = payload.get(key) if isinstance(payload, dict) else None
+        keys = keys if isinstance(keys, dict) else {}
+        if not wanted <= set(keys):
+            missing.append(asset_type)
+    return missing
+
+
+def plan_prep(assets: dict, trade_date: str, today: str, *,
+              force: bool = False) -> PrepPlan:
+    """产出增量采集计划（按 ASSET_COLLECTORS 注册表顺序）。
+
+    - ``force``：collect = 全部可采资产；repairs 仍按 C3 计算（force 不抑制修复）。
+    - 默认：collect = collection_health 不健康且可采的资产；窗口降级的 dragons
+      会触发本地重读（零网络）。dragons 不在 collect 时，对 code 覆盖不足的
+      fund_flow/cninfo 追加补采。
+    - 历史日 same_day_only 且不可采、但满足 C3 的旧 unavailable → 进 repairs。
+    - dragons 重采成功后的依赖级联由 ``run_prep`` 依据 code 集合变化处理。
+    """
+    repairs = plan_repairs(assets, trade_date, today)
+    if force:
+        collect = [t for t in ASSET_COLLECTORS
+                   if is_collectable(t, trade_date, today)]
+        return PrepPlan(collect, repairs)
+    report = assets.get("collection_report")
+    selected: set[str] = set()
+    for asset_type in ASSET_COLLECTORS:
+        if collection_health(asset_type, assets.get(asset_type),
+                             _report_status(report, asset_type), trade_date) is None:
+            continue
+        if asset_type in repairs:      # 已判定可修复：视作就绪，不采集
+            continue
+        if is_collectable(asset_type, trade_date, today):
+            selected.add(asset_type)
+    if "dragons" not in selected:
+        codes = _asset_codes(assets.get("dragons"))
+        for asset_type in _uncovered_assets(assets, codes, selected):
+            if is_collectable(asset_type, trade_date, today):
+                selected.add(asset_type)
+    return PrepPlan([t for t in ASSET_COLLECTORS if t in selected], repairs)
+
+
+def _stored_asset_healthy(stored: dict, asset_type: str, status,
+                          trade_date: str) -> bool:
+    """存量资产是否「可用且质量自检通过」（失败补采的保留判据）。"""
+    spec = ASSET_COLLECTORS.get(asset_type)
+    if spec is None:
+        return False
+    payload = stored.get(asset_type)
+    if asset_health(asset_type, payload, status, trade_date) is not None:
+        return False
+    # D1 允许「非必然非空资产」的合法 empty（dragons/cninfo/fund_flow 的空是确定事实）：
+    # 补采失败时应保留该合法空状态，而不是写成 error。
+    return _classify_payload(asset_type, payload, spec).get("status") in ("ok", "empty")
+
+
+def merge_report_entries(stored: dict, report: dict, payloads: dict,
+                         trade_date: str, now: datetime) -> dict:
+    """本次执行结果 → 待落库 report：**失败补采不得把既有健康资产降级**。
+
+    - 成功（asset_type in payloads）：用新条目（payload 与状态自洽，含 empty_suspicious）；
+    - 失败（不在 payloads）：若存量资产可用且质量自检通过，保留存量条目并追加
+      ``last_attempt={status,error,at}``；存量条目缺失时新建仅含 ``last_attempt`` 的条目
+      （不含 status，``asset_health`` 读到 status=None 仍判可用）。
+    """
+    existing = stored.get("collection_report")
+    existing = existing if isinstance(existing, dict) else {}
+    merged: dict = dict(report)
+    stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    for asset_type, entry in report.items():
+        if asset_type in payloads:
+            continue
+        old = existing.get(asset_type)
+        status = _report_status(existing, asset_type)
+        if not _stored_asset_healthy(stored, asset_type, status, trade_date):
+            continue
+        base = dict(old) if isinstance(old, dict) else {}
+        base["last_attempt"] = {**entry, "at": stamp}
+        merged[asset_type] = base
+    return merged
 
 
 def compute_sentiment(assets: dict) -> dict:
@@ -1044,11 +1307,66 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
 # ─── 入口 ──────────────────────────────────────────────────────────────────
 
 
-def run_prep(trade_date: str, recompute: bool = False) -> dict:
+def _run_collection(trade_date: str, tdx: TdxProvider, calendar: list,
+                    stored: dict, plan: PrepPlan, today: str,
+                    now: datetime) -> dict:
+    """执行 plan.collect（dragons 两阶段 + code 变化级联），返回读回后的完整资产。
+
+    阶段 1 只采 dragons（若在计划内），成功后比较新旧 code 集合决定是否级联
+    fund_flow/cninfo；阶段 2 按注册表顺序采集其余项，existing 已含新 dragons。
+    两次 ``_collect_all`` 共用同一 ``now``（跨零点不产生不同 as_of）。
+    """
+    window = resolve_window_dates(trade_date, calendar, WINDOW_TRADING_DAYS)
+    payloads: dict[str, dict] = {}
+    report: dict[str, dict] = {}
+    to_run = set(plan.collect)
+    if "dragons" in to_run:
+        p, r = _collect_all(trade_date, window_trade_dates=window,
+                            window_days=WINDOW_TRADING_DAYS, tdx=tdx,
+                            asset_types=["dragons"], existing=stored, now=now)
+        payloads.update(p)
+        report.update(r)
+        to_run.discard("dragons")
+        if "dragons" in payloads:
+            # 级联条件 = dragons 候选 code 集合发生变化（窗口缺日本身不触发网络补采）
+            changed = (set(_asset_codes(payloads["dragons"]))
+                       != set(_asset_codes(stored.get("dragons"))))
+            if changed:
+                for dep in _DRAGON_DEPENDENTS:
+                    if (dep not in to_run and dep not in payloads
+                            and is_collectable(dep, trade_date, today)):
+                        to_run.add(dep)
+    targets = [t for t in ASSET_COLLECTORS if t in to_run]
+    if targets:
+        # 预热用「存量 + 本次已采 payload + 本次已产 report」：阶段 1 新 dragons 的
+        # report 尚未落库，必须一并覆盖，否则旧 error 状态会让依赖采集器误判未就绪。
+        base_report = stored.get("collection_report")
+        base_report = base_report if isinstance(base_report, dict) else {}
+        seed = {**stored, **payloads,
+                "collection_report": {**base_report, **report}}
+        p, r = _collect_all(trade_date, window_trade_dates=window,
+                            window_days=WINDOW_TRADING_DAYS, tdx=tdx,
+                            asset_types=targets, existing=seed, now=now)
+        payloads.update(p)
+        report.update(r)
+    merged = merge_report_entries(stored, report, payloads, trade_date, now)
+    merged.update(plan.repairs)          # 修复条目最后写入（与本次采集不重叠）
+    assets_db.save_prep_assets(trade_date, payloads, merged)
+    return assets_db.get_prep_assets(trade_date)   # 读回：快照 = 资产的纯函数
+
+
+def run_prep(trade_date: str, recompute: bool = False, *,
+             force: bool = False, now: Optional[datetime] = None,
+             on_plan: Optional[Callable[[PrepPlan], None]] = None) -> dict:
     """执行盘后复盘并落库，返回完整复盘结果 dict。
 
-    正常模式：日期门禁 → 采集（单事务落资产）→ 读回资产 → 计算 → 落快照。
-    recompute 模式：跳过采集，用已存资产重算（无资产时报错，不写空快照）。
+    正常模式（默认**增量**）：日期门禁 → 读存量资产 → 健康判定 → 只补采不健康且可采的
+    资产（dragons 重采且 code 集合变化时级联 fund_flow/cninfo）→ report 按键合并
+    （失败补采不降级 + 窄口径修复）→ 读回 → 计算 → 覆盖快照。
+    资产完好且无可修复项时零采集（含 dragons 本地读取），report 完全不动。
+    ``force=True`` 只影响 collect（重采全部可采资产），repairs 仍按 C3 计算。
+
+    recompute 模式：零检测零采集，用已存资产重算（无资产时报错，不写空快照）。
     recompute 只读本地已存资产、不触网采集，故不做交易日/时点门禁（仅拒绝未来日期），
     计算段的 as_of 校验仍会拦下时点不符的资产。
     """
@@ -1059,13 +1377,19 @@ def run_prep(trade_date: str, recompute: bool = False) -> dict:
         if not assets:
             raise PrepError(f"{trade_date} 无可重算资产（请先正常采集 prep）")
     else:
+        now = now or datetime.now(SHANGHAI)
+        today = now.strftime("%Y-%m-%d")
         tdx = TdxProvider()
-        calendar = _validate_trade_date(trade_date, tdx)   # 复用同一 provider，避免二次握手
-        window = resolve_window_dates(trade_date, calendar, WINDOW_TRADING_DAYS)
-        payloads, report = _collect_all(trade_date, window_trade_dates=window,
-                                        window_days=WINDOW_TRADING_DAYS, tdx=tdx)
-        assets_db.save_prep_assets(trade_date, payloads, report)
-        assets = assets_db.get_prep_assets(trade_date)  # 读回：快照 = 资产的纯函数
+        calendar = _validate_trade_date(trade_date, tdx, now)  # 与采集共用同一时钟
+        stored = assets_db.get_prep_assets(trade_date)
+        plan = plan_prep(stored, trade_date, today, force=force)
+        if on_plan is not None:
+            on_plan(plan)
+        if plan.is_empty():
+            assets = stored                    # 零采集零写入（AC1）
+        else:
+            assets = _run_collection(trade_date, tdx, calendar, stored, plan,
+                                     today, now)
     result = _compute_all(trade_date, assets)
     assets_db.save_prep_snapshot(trade_date, result, source="v2")
     return result

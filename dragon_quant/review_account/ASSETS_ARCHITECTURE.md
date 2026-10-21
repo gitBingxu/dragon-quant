@@ -81,6 +81,12 @@ flowchart LR
     RAW --> F1 --> F2 --> F3 --> SNAP
 ```
 
+`prep` 默认**增量采集**：先读存量资产 + `collection_report` 做健康判定——全部健康则零采集
+（含 dragons 本地读取）直接进入计算段；否则只补采缺失/不健康且可采的资产（`dragons` 重采且
+候选 code 集合变化时级联补采 `fund_flow`/`cninfo_announcements`）。`collection_report` 的语义是
+「该日期资产的当前最佳已知状态」：只按键合并本次实际执行的 collector 条目，零采集时完全不动，
+补采失败不覆盖既有健康状态（记 `last_attempt`）。`--recompute` 保持零检测零采集，直接用存量资产重放计算段。
+
 ## 3. review-account / buy 消费流（含快照缺失回退）
 
 ```mermaid

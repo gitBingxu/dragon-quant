@@ -197,26 +197,60 @@ def _dumps(payload) -> str:
 # ─── prep 资产 / 快照 ──────────────────────────────────────────────────────
 
 
-def save_prep_assets(trade_date: str, payloads: dict[str, dict], report: dict) -> None:
-    """单事务 UPSERT 整日全部资产 + collection_report。
+def _upsert_prep_asset(conn: sqlite3.Connection, trade_date: str,
+                       asset_type: str, payload) -> None:
+    conn.execute(
+        "INSERT INTO prep_assets(trade_date, asset_type, payload_json) VALUES (?, ?, ?) "
+        "ON CONFLICT(trade_date, asset_type) DO UPDATE SET "
+        "payload_json=excluded.payload_json, "
+        "created_at=datetime('now','localtime')",
+        (trade_date, asset_type, _dumps(payload)),
+    )
 
-    payloads: {asset_type: payload}；report 以 asset_type="collection_report" 落库。
-    任一写入失败 → 整体回滚（不留「部分新部分旧」的混合状态）。
+
+def save_prep_assets(trade_date: str, payloads: dict[str, dict],
+                     report: Optional[dict] = None) -> None:
+    """单事务（BEGIN IMMEDIATE）UPSERT 资产 + 逐条合并 collection_report。
+
+    payloads: {asset_type: payload}（可为部分资产）。
+    report:   {asset_type: entry}，**仅本次实际执行的 collector 条目**。非空时在同一事务内
+              先读存量 collection_report 再按键合并（未出现的键沿用存量）；空/None → 不触碰
+              report 行（整日零采集时原样保留，语义 = 该日期资产当前最佳状态）。
+              存量 report 非 dict（畸形 JSON/手工改库）→ 视为空 dict 重建，并写
+              ``report_reset="malformed"`` 审计键。
+    payloads 与 report 皆空 → 直接 no-op（不开启事务）。
+    任一序列化/写入失败 → 整体回滚（不留「部分新部分旧」的混合状态）。
     """
+    if not payloads and not report:
+        return
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            items = list(payloads.items()) + [("collection_report", report)]
-            conn.execute("BEGIN")
-            for asset_type, payload in items:
-                conn.execute(
-                    "INSERT INTO prep_assets(trade_date, asset_type, payload_json) VALUES (?, ?, ?) "
-                    "ON CONFLICT(trade_date, asset_type) DO UPDATE SET "
-                    "payload_json=excluded.payload_json, "
-                    "created_at=datetime('now','localtime')",
-                    (trade_date, asset_type, _dumps(payload)),
-                )
+            conn.execute("BEGIN IMMEDIATE")
+            for asset_type, payload in payloads.items():
+                _upsert_prep_asset(conn, trade_date, asset_type, payload)
+            if report:
+                row = conn.execute(
+                    "SELECT payload_json FROM prep_assets "
+                    "WHERE trade_date = ? AND asset_type = 'collection_report'",
+                    (trade_date,),
+                ).fetchone()
+                merged: dict = {}
+                reset = False
+                if row:
+                    try:
+                        old = json.loads(row[0])
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        old = None
+                    if isinstance(old, dict):
+                        merged = old
+                    else:
+                        reset = True
+                merged.update(report)
+                if reset:
+                    merged["report_reset"] = "malformed"
+                _upsert_prep_asset(conn, trade_date, "collection_report", merged)
             conn.commit()
         except Exception:
             conn.rollback()

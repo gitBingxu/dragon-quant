@@ -128,12 +128,14 @@ dragon-quant dragons --date 20260519 --true-only # 只输出真龙 (is_true_drag
 dragon-quant prep                             # 最新有龙头数据的交易日
 dragon-quant prep --date 20260519             # 指定复盘日
 dragon-quant prep --date 20260519 --recompute # 用已存资产重算快照（算法升级重放）
+dragon-quant prep --date 20260519 --force     # 强制重采全部可采资产（不绕过 15:30 门禁）
 dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认 4 行市场摘要 + 标的清单）
 ```
 
-盘后执行复盘，分**两段式流水线**（固定 `source=v2`）：
+盘后执行复盘，分**两段式流水线**（固定 `source=v2`），默认**增量采集**：
 
-1. **采集段**：按资产注册表逐类采集原始数据 → 单事务写入 **`assets.db`** 的 `prep_assets`（含 `collection_report` 记录每类资产的 `ok/empty/unavailable/error` 状态）。
+1. **采集段**：先读存量资产 + `collection_report` 做健康判定——资产完好则**零采集**直接进入计算段；否则只补采缺失/不健康且可采的资产（`dragons` 重采且候选 code 集合变化时级联补采 `fund_flow`/`cninfo_announcements`）。payload 与本次 report 条目单事务写入 **`assets.db`** 的 `prep_assets`。
+   - **`collection_report` 语义**：该日期资产的**当前最佳状态**，不是本次运行的遭遇。只按键合并本次实际执行的 collector 条目；零采集时完全不动；补采失败不覆盖既有健康状态（记 `last_attempt`）。
    - **窗口**：复盘范围为含 T 的最近 3 个交易日 `[T-2, T-1, T]`（按交易日历，采集段解析并写入 `dragons` 资产）。窗口内某日无龙头记录（未跑 scan/无真龙）→ 跳过该日并标 `dragons_partial` 降级，不中断；三日并集为空才视为 `empty`。T 日尚未 scan 时仍可用前两日候选。
    - tmdx：全 A 市场宽度（红盘率/涨停/炸板/跌停/成交额）、FG 板块（昨日涨停溢价/晋级交叉/龙虎榜名单）、并集候选股主力净额、cninfo 公告、**宏观扰动**（外围美股/美债 10Y/黄金；`MacExClient` 扩展行情日 K 为首选，腾讯/Yahoo/雪球回退）
    - THS dataapi：涨停池（涨停原因/板型/炸板次数/连板高度）、题材主线榜（题材涨停家数/最高板）；仍按 T 日口径采集
@@ -165,7 +167,9 @@ dragon-quant prep --verbose                   # 输出完整复盘 JSON（默认
 
 `review-account` / `buy` / `sell` 优先消费该快照作为候选池与情绪仓位，快照缺失/空/异常时回退到「前 3 日真龙并集」旧逻辑。快照窗口与 `StrategyConfig.candidate_lookback_days` 无关（后者只作用于回退路径）；`auction --days N` 的口径是「最近 N 个有龙头数据的交易日」，与本命令的日历窗口不同。
 
-**时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日时自动跳过并标记 `unavailable`，不会把当日数据写到历史日名下；THS 涨停池/题材榜、cninfo 公告与 `macro_global`（日 K canonical）支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 15:30 收盘后。
+**时点约束**：FG 板块与实时行情类资产为「当日快照」（`same_day_only`），补跑历史日**不采集、不写 report**（不把当日数据写到历史日名下，compute 按缺失降级）；THS 涨停池/题材榜、cninfo 公告与 `macro_global`（日 K canonical）支持历史补采（THS 实测 ≥4.5 个月）。当日运行须在 15:30 收盘后。
+
+**增量与强制刷新**：默认增量意味着同一交易日盘后首次采集成功后，晚些时候重跑不会重新拉取数据（快照仍按存量资产重算，`collection_report` 不受影响）；需要最新数据时用 `--force` 重采全部可采资产——它**不绕过** 15:30 与交易日校验（与 `scan --force` 语义不同）。`--recompute` 零检测零采集，只用已存资产重算。采集决策提示（增量补采/修复项）输出到 stderr，stdout 仍是「4 行摘要 + 标的清单」。
 
 ### `auction` — 采集集合竞价盘口与强度快照
 
@@ -411,7 +415,7 @@ SQLite 表分为三类：
 
 `prep` 与 `auction` 的数据落在**独立 SQLite 库** `assets.db`（与 `dragon.db` 同目录，随 `DQ_DATA_DIR` 覆盖），与可重算的扫描产物物理隔离——原始数据资产不可再生，避免被 `storage clear --all` 连带清理：
 
-- **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `macro_global` / `collection_report`。
+- **`prep_assets`**：盘后复盘原始数据资产，`UNIQUE(trade_date, asset_type)`。每日采集一次即永久留档（时间换历史），支持 `--recompute` 重放历史口径。资产类型：`dragons` / `ths_limit_up_pool` / `ths_block_top` / `market_breadth` / `fg_boards` / `fund_flow` / `cninfo_announcements` / `macro_global` / `collection_report`；`collection_report` 按条合并，语义为该日期资产的当前最佳状态（未执行的键沿用存量，失败补采不覆盖健康状态）。
 - **`prep_snapshots`**：复盘计算结果，单列 `result_json`（`sentiment` / `main_boards` / `macro` / `candidates`（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） / `dragon_source`），`UNIQUE(trade_date, source)`，`source` 固定写 `v2`；后续新增字段直接加 JSON key，无需改表。当前版本 `version=0.4`（三日窗口 + 宏观 + 逐只判定）；`dragon_source.window_days`：`0` 表示 dragons 资产不可用（血缘未知）、`1` 表示旧版单日口径重算、`3` 表示三日窗口。
 - **`auction_assets`**：集合竞价原始资产（`auction` 命令），`items_json` 存 `time`/`price`/`matched`/`unmatched` 数组，`quote_json`（可空）存 `Quote` 行情快照（`prev_close` / `limit_down` / `float_market_cap` 等评分所需字段，非有限浮点清洗为 `null`；旧行为 `NULL`），`UNIQUE(trade_date, code)` 幂等覆盖；同日重采时 `items_json` 以本次为准，`quote_json` 若本次缺失则保留上次成功快照（`COALESCE`），避免瞬时行情故障抹掉不可再生上下文。`trade_date` 为竞价所属交易日（= 当日），因 TDX `get_auction` 无日期参数、仅返回当日数据，故只能逐日积累、无法事后回补。旧库首次**写入**时自动补 `quote_json` 列；读路径不执行列迁移（不 ALTER 既有表，缺列按 NULL 读取）。
 - **`auction_snapshots`**：竞价强度计算结果，单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version` / `code` / `is_weak` / `strength` / `direction` / `level` / `dims` / `reject_reason` / `unverified` / `rank`），`UNIQUE(trade_date, code, source)`。由 `auction` 采集与 `auction --recompute DATE` 写入（`source="v2"`）；同日重跑整日原子替换，空结果（无可用资产/全部评分失败）不会删除既有快照。写入者必须遵循该契约，不得另立字段。

@@ -351,7 +351,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
   dragon-quant prep
   dragon-quant prep --date 20260519
   dragon-quant prep --date 20260519 --recompute   # 用已存资产重算快照（算法升级重放）
-  dragon-quant prep --date 20260519 --force       # 强制重采全部可采资产（不绕过 15:30 门禁）
+  dragon-quant prep --date 20260519 --force       # 强制重采全部可采资产（不绕过 16:40 门禁）
   dragon-quant prep --verbose                     # 输出完整复盘 JSON
 """,
     )
@@ -362,7 +362,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                            help="跳过检测与采集，用已存数据资产重算快照（无资产时报错）")
     prep_mode.add_argument("--force", action="store_true",
                            help="强制重采全部可采资产（历史日 same_day_only 仍不采）；"
-                                "与 scan --force 不同：不绕过 15:30 与交易日校验")
+                                "与 scan --force 不同：不绕过 16:40 与交易日校验")
     prep_p.add_argument("--verbose", action="store_true",
                         help="输出完整复盘 JSON（默认只输出买入建议摘要）")
 

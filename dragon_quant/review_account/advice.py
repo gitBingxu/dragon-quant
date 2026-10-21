@@ -11,6 +11,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
+from dragon_quant.providers.macro import MACRO_INDEX_KEYS
 from dragon_quant.review_account.verdicts import (
     VERDICT_IGNORE, VERDICT_LABELS, VERDICT_LIGHT, VERDICT_STRONG,
 )
@@ -32,6 +33,7 @@ DEGRADED_LABELS = {
     "cninfo_announcements": "公告数据缺失",
     "macro_global": "宏观数据缺失",
     "macro_partial": "宏观部分品种缺失",
+    "macro_same_day_missing": "外围期指同日数据缺失",
     "position_input_fg_t1": "涨停/跌停采用 FG T-1 口径",
     "compute_error": "复盘计算异常",
 }
@@ -85,8 +87,18 @@ def format_position(pct) -> str:
     return f"{round(value * 100)}%"
 
 
+_SESSION_SUFFIX = {
+    "same_day": "（同日收盘）",
+    "previous_session": "（前一交易日收盘）",
+}
+
+
 def build_macro_fragments(macro, trade_date: Optional[str] = None) -> list[str]:
-    """宏观快照 → 「外围/美债/黄金」中文片段（纯函数）。"""
+    """宏观快照 → 「外围/美债/黄金」中文片段（纯函数）。
+
+    外围只展示 ``MACRO_INDEX_KEYS``（日经/A50 期指）；session 为指数组聚合口径：
+    ``same_day`` / ``previous_session`` / ``mixed``（mixed 时逐品种标收盘日）。
+    """
     if not isinstance(macro, dict) or not macro.get("available"):
         return []
     instruments = macro.get("instruments")
@@ -94,23 +106,26 @@ def build_macro_fragments(macro, trade_date: Optional[str] = None) -> list[str]:
         return []
     parts: list[str] = []
 
+    session = macro.get("session")
     indices: list[str] = []
-    for key in ("us_dji", "us_ixic", "us_spx"):
+    for key in MACRO_INDEX_KEYS:
         rec = instruments.get(key)
         if not isinstance(rec, dict):
             continue
         pct = _number(rec.get("pct"))
         if pct is None:
             continue
-        indices.append(f"{_clean(rec.get('label') or key)} {pct:+.2f}%")
+        text = f"{_clean(rec.get('label') or key)} {pct:+.2f}%"
+        if session == "mixed":
+            day = rec.get("session_date")
+            if isinstance(day, str) and len(day) >= 10:
+                text += f"（{_clean(day[:10])} 收盘）"
+        indices.append(text)
     if indices:
-        suffix = {
-            "overnight": "（隔夜收盘）",
-            "intraday": "（盘中）",
-        }.get(macro.get("session"), "")
+        suffix = "" if session == "mixed" else _SESSION_SUFFIX.get(session or "", "")
         text = "外围：" + "、".join(indices) + suffix
         stale_days: list[int] = []
-        for key in ("us_dji", "us_ixic", "us_spx"):
+        for key in MACRO_INDEX_KEYS:
             rec = instruments.get(key)
             if not isinstance(rec, dict) or not rec.get("stale"):
                 continue

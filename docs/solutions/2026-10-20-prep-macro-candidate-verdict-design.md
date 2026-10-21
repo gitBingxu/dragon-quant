@@ -1,6 +1,11 @@
 # prep 宏观扰动采集 + 近三日龙头逐只参与判定 — 技术方案
 
-日期：2026-10-20 · 分支：feat/reviewa-account-op · 状态：待 solution-reviewer 审查
+> **口径已变更（2026-10-21）**：宏观资产的外围部分已由「美股三大指数」改为「日经225期指 + 富时A50期指」
+> （同日口径、TDX 单源），prep 当日门禁改为 16:40，快照 `version=0.5`。
+> 现行方案见 [2026-10-21-prep-macro-jp-a50-design.md](2026-10-21-prep-macro-jp-a50-design.md)；
+> 本文正文保留为历史记录，不再代表当前实现。
+
+日期：2026-10-20 · 分支：feat/reviewa-account-op · 状态：历史方案（宏观口径已被 2026-10-21 方案替代）
 上游调研：[docs/research/2026-10-20-prep-macro-sources.md](../research/2026-10-20-prep-macro-sources.md)
 前置方案：[docs/solutions/2026-10-20-prep-3day-window-design.md](2026-10-20-prep-3day-window-design.md)
 

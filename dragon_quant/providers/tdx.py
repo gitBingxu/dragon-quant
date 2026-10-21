@@ -300,9 +300,14 @@ def _ex_enums():
 
 def _macro_record_from_kline(spec, df, trade_date: str,
                              market_name: str, code: str):
-    """扩展市场日 K DataFrame → 归一宏观记录（取 < trade_date 的最后一根）。"""
+    """扩展市场日 K DataFrame → 归一宏观记录。
+
+    口径由 ``spec.same_day_close`` 决定：True 排除 ``day > trade_date``（同日收盘，
+    夜盘归下一交易日 bar）；False 排除 ``day >= trade_date``（上一已完成 bar）。
+    """
     from dragon_quant.providers.macro import build_macro_record
 
+    same_day = spec.same_day_close
     records = df.to_dict("records") if df is not None and not df.empty else []
     rows: list[tuple[str, float]] = []
     for r in records:
@@ -311,7 +316,9 @@ def _macro_record_from_kline(spec, df, trade_date: str,
             day = dt.strftime("%Y-%m-%d")
         else:
             day = str(dt or "")[:10]
-        if len(day) != 10 or day >= trade_date:   # 排除盘中/未来 bar
+        if len(day) != 10:
+            continue
+        if (day > trade_date) if same_day else (day >= trade_date):
             continue
         close = _f(r.get("close"))
         if close <= 0:
@@ -829,11 +836,12 @@ class TdxProvider(StockProvider):
     # ─── 宏观扰动（扩展行情日 K；错误契约：失败抛异常）────────────────────────
 
     def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
-        """扩展行情日 K → 宏观记录（外围指数/美债/COMEX 金/沪金）。
+        """扩展行情日 K → 宏观记录（日经/A50 期指、美债、COMEX 金/沪金）。
 
-        canonical：取每个 code 日 K 中日期 ``< trade_date`` 的最后一根已完成 bar，
-        与运行时刻解耦；`GC00W` 无数据时自动尝试 `SH_GOLD/Au99.99`。
-        transport/解析失败抛 RuntimeError（由 providers.macro 门面回退）。
+        口径由 spec 声明：``same_day_close=True`` 取 ``<= trade_date`` 的最后一根
+        （同日收盘，夜盘归下一交易日 bar）；否则取 ``< trade_date`` 的最后一根。
+        与运行时刻解耦，`--recompute` 可重放；`GC00W` 无数据时自动尝试
+        `SH_GOLD/Au99.99`。transport/解析失败抛 RuntimeError（由门面回退）。
         """
         t0 = time.time()
         client = self._get_macro_client()
@@ -870,7 +878,7 @@ class TdxProvider(StockProvider):
         elapsed = (time.time() - t0) * 1000
         if self._logger:
             self._logger.api("tdx", "macro_quotes", ok=bool(out), elapsed_ms=elapsed,
-                             note=f"n={len(out)}")
+                             note=f"n={len(out)} errs={len(errors)}")
         if not out and errors:
             raise RuntimeError("tdx 宏观日 K 全部失败：" + "；".join(errors))
         return out

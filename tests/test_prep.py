@@ -46,29 +46,27 @@ def _assets(trade_date: str = "2026-10-19", **overrides):
                                  "truncated_codes": []},
         "macro_global": {
             "trade_date": trade_date, "as_of": trade_date,
-            "caliber": "last_completed_daily_bar_before_trade_date",
             "instruments": {
-                "us_dji": {"key": "us_dji", "label": "道指", "kind": "index",
-                           "price_unit": "points", "chg_unit": "pct",
-                           "price": 51966.03, "prev_close": 52002.41,
-                           "chg": -36.38, "pct": -0.07, "chg_bp": None,
+                "jp_nikkei": {"key": "jp_nikkei", "label": "日经225期指",
+                              "kind": "index", "price_unit": "points",
+                              "chg_unit": "pct", "price": 64750.0,
+                              "prev_close": 64360.0, "chg": 390.0,
+                              "pct": 0.61, "chg_bp": None,
+                              "chg_bp_approx": None, "source": "tdx_ex",
+                              "code": "NK0Y", "market": "INTL_INDEX",
+                              "caliber": "same_day_daily_bar",
+                              "session_date": trade_date,
+                              "raw_date": trade_date.replace("-", "")},
+                "cn_a50": {"key": "cn_a50", "label": "富时A50期指",
+                           "kind": "index", "price_unit": "points",
+                           "chg_unit": "pct", "price": 13164.0,
+                           "prev_close": 13279.0, "chg": -115.0,
+                           "pct": -0.87, "chg_bp": None,
                            "chg_bp_approx": None, "source": "tdx_ex",
-                           "code": "A_DJI", "market": "INTL_INDEX",
-                           "session_date": "2026-10-15", "raw_date": "20261015"},
-                "us_ixic": {"key": "us_ixic", "label": "纳指", "kind": "index",
-                            "price_unit": "points", "chg_unit": "pct",
-                            "price": 26430.89, "prev_close": 26140.03,
-                            "chg": 290.85, "pct": 1.11, "chg_bp": None,
-                            "chg_bp_approx": None, "source": "tdx_ex",
-                            "code": "A_IXIC", "market": "INTL_INDEX",
-                            "session_date": "2026-10-15", "raw_date": "20261015"},
-                "us_spx": {"key": "us_spx", "label": "标普", "kind": "index",
-                           "price_unit": "points", "chg_unit": "pct",
-                           "price": 7690.73, "prev_close": 7659.44,
-                           "chg": 31.29, "pct": 0.41, "chg_bp": None,
-                           "chg_bp_approx": None, "source": "tdx_ex",
-                           "code": "A_SPX", "market": "INTL_INDEX",
-                           "session_date": "2026-10-15", "raw_date": "20261015"},
+                           "code": "CNY0", "market": "INTL_INDEX",
+                           "caliber": "same_day_daily_bar",
+                           "session_date": trade_date,
+                           "raw_date": trade_date.replace("-", "")},
                 "ust10y": {"key": "ust10y", "label": "美债10Y", "kind": "yield",
                            "price_unit": "pct", "chg_unit": "bp",
                            "price": 5.15, "prev_close": 5.09, "chg": 0.06,
@@ -76,19 +74,20 @@ def _assets(trade_date: str = "2026-10-19", **overrides):
                            "precision_note": "TDX 两位小数日频快照，bp 为近似值",
                            "source": "tdx_ex", "code": "8_ATY",
                            "market": "MACRO_INDICATOR",
-                           "session_date": "2026-10-15", "raw_date": "20261015"},
+                           "caliber": "previous_daily_bar",
+                           "session_date": "2026-10-16", "raw_date": "20261016"},
                 "gold": {"key": "gold", "label": "COMEX金", "kind": "commodity",
                          "price_unit": "usd_per_oz", "chg_unit": "pct",
                          "price": 4160.30, "prev_close": 4186.70,
                          "chg": -26.40, "pct": -0.63, "chg_bp": None,
                          "chg_bp_approx": None, "source": "tdx_ex",
                          "code": "GC00W", "market": "COMEX_FUTURES",
-                         "session_date": "2026-10-15", "raw_date": "20261015"},
+                         "caliber": "previous_daily_bar",
+                         "session_date": "2026-10-16", "raw_date": "20261016"},
             },
             "degraded": [],
-            "sources": {"us_dji": "tdx_ex", "us_ixic": "tdx_ex",
-                        "us_spx": "tdx_ex", "ust10y": "tdx_ex",
-                        "gold": "tdx_ex"},
+            "sources": {"jp_nikkei": "tdx_ex", "cn_a50": "tdx_ex",
+                        "ust10y": "tdx_ex", "gold": "tdx_ex"},
         },
         "collection_report": {},
     }
@@ -212,7 +211,7 @@ class TestComputeErrorIsolation(unittest.TestCase):
     def test_output_contract_keys(self):
         from dragon_quant.review_account.prep import _compute_all
         out = _compute_all("2026-10-19", _assets())
-        self.assertEqual(out["version"], "0.4")
+        self.assertEqual(out["version"], "0.5")
         self.assertEqual(out["dragon_source"]["scan_id"], "v2_20261019_top25")
         for k in ("sentiment", "main_boards", "candidates"):
             self.assertIn(k, out)
@@ -478,7 +477,7 @@ class TestRunPrepIntegration(unittest.TestCase):
         # 快照已落库，且由资产计算而来
         self.assertEqual(snap["sentiment"]["limit_up_cnt"], 10)
         self.assertEqual(snap["candidates"][0]["code"], "600001")
-        self.assertEqual(out["version"], "0.4")
+        self.assertEqual(out["version"], "0.5")
         # run_prep → resolve_window_dates → PrepContext 的窗口透传不能断链
         self.assertEqual(captured["window"], ["2026-10-15", "2026-10-16"])
         self.assertEqual(captured["window_days"], 3)
@@ -681,8 +680,26 @@ class TestValidateTradeDate(unittest.TestCase):
         tdx = self._tdx([])
         with self.assertRaises(PrepError) as cm:
             _validate_trade_date("2026-10-19", tdx, now)
-        self.assertIn("盘中", str(cm.exception))            # 不误报「非交易日」
+        self.assertIn("16:40", str(cm.exception))            # 不误报「非交易日」
         tdx.get_kline.assert_not_called()
+
+    def test_after_close_boundary_1640(self):
+        """15:31 / 16:39 拒绝，16:40 放行（A50 期指 16:30 收盘 + 缓冲）。"""
+        from datetime import datetime
+        from dragon_quant.review_account.prep import PrepError, SHANGHAI, _validate_trade_date
+        for hour, minute in ((15, 31), (16, 39)):
+            tdx = self._tdx([])
+            with self.assertRaises(PrepError) as cm:
+                _validate_trade_date("2026-10-19", tdx,
+                                     datetime(2026, 10, 19, hour, minute,
+                                              tzinfo=SHANGHAI))
+            self.assertIn("16:40", str(cm.exception))
+            tdx.get_kline.assert_not_called()
+        tdx = self._tdx(["2026-10-15", "2026-10-19"])
+        self.assertEqual(
+            _validate_trade_date("2026-10-19", tdx,
+                                 datetime(2026, 10, 19, 16, 40, tzinfo=SHANGHAI)),
+            ["2026-10-15", "2026-10-19"])
 
     def test_calendar_unavailable_distinct_from_non_trading_day(self):
         from datetime import datetime
@@ -700,6 +717,23 @@ class TestValidateTradeDate(unittest.TestCase):
         from dragon_quant.review_account.prep import SHANGHAI, _validate_trade_date
         now = datetime(2026, 10, 19, 16, 0, tzinfo=SHANGHAI)
         _validate_trade_date("2026-10-16", self._tdx(["2026-10-15", "2026-10-16"]), now)
+
+
+class TestCollectMacroSources(unittest.TestCase):
+    def test_only_tdx_and_yahoo_injected(self):
+        """腾讯/雪球不再参与宏观采集（当前规格无该源路由）。"""
+        from dragon_quant.review_account import prep
+        ctx = prep.PrepContext(trade_date="2026-10-21", today="2026-10-21",
+                               tdx=MagicMock(), ths=MagicMock(),
+                               tencent=MagicMock(), xueqiu=MagicMock(),
+                               window_trade_dates=["2026-10-21"], window_days=3)
+        with patch.object(prep, "collect_macro", return_value={}) as cm, \
+             patch.object(prep, "YahooMacroSource") as yahoo_cls:
+            prep._collect_macro(ctx)
+        sources = cm.call_args.args[0]
+        self.assertEqual(set(sources), {"tdx", "yahoo"})
+        self.assertIs(sources["tdx"], ctx.tdx)
+        self.assertIs(sources["yahoo"], yahoo_cls.return_value)
 
 
 class TestRunPrepRecompute(unittest.TestCase):
@@ -739,7 +773,7 @@ class TestRunPrepRecompute(unittest.TestCase):
              patch("dragon_quant.review_account.prep.TdxProvider"), \
              patch("dragon_quant.review_account.prep.THSProvider"):
             out = run_prep(day, recompute=True)
-        self.assertEqual(out["version"], "0.4")
+        self.assertEqual(out["version"], "0.5")
         self.assertFalse(out["macro"]["available"])
         self.assertIn("macro_global", out["sentiment"]["degraded"])
         self.assertTrue(out["candidates"])
@@ -1422,7 +1456,7 @@ class TestAdviceLines(unittest.TestCase):
 class TestCmdPrepOutput(unittest.TestCase):
     def _result(self):
         return {
-            "trade_date": "2026-10-19", "version": "0.4",
+            "trade_date": "2026-10-19", "version": "0.5",
             "sentiment": {"position_pct": 0.5, "position_advice": "正常",
                           "limit_up_cnt": 59, "limit_down_cnt": 1, "degraded": []},
             "main_boards": [], "candidates": [],
@@ -1480,7 +1514,7 @@ class TestCmdPrepOutput(unittest.TestCase):
              redirect_stdout(buf):
             cli._cmd_prep(self._args(verbose=True))
         payload = json.loads(buf.getvalue())
-        self.assertEqual(payload["version"], "0.4")
+        self.assertEqual(payload["version"], "0.5")
         self.assertIn("candidates", payload)
 
     def test_format_failure_still_exits_zero(self):
@@ -1869,7 +1903,7 @@ class TestRunPrepIncremental(unittest.TestCase):
             self.assertEqual(assets_db.get_prep_assets(self.day), before)
             self.assertEqual(snap1, snap2)          # 快照覆盖写且内容一致
             self.assertTrue(plans[0].is_empty())
-            self.assertEqual(out1["version"], "0.4")
+            self.assertEqual(out1["version"], "0.5")
             self.assertTrue(snap1 and snap2)        # 零采集 ≠ 零 compute
 
     def test_partial_unhealthy_collects_only_that_type(self):
@@ -1955,7 +1989,7 @@ class TestRunPrepIncremental(unittest.TestCase):
         save_snap.assert_called_once()
         tdx_cls.assert_not_called()
         ths_cls.assert_not_called()
-        self.assertEqual(out["version"], "0.4")
+        self.assertEqual(out["version"], "0.5")
 
     def test_force_recollects_all_collectable(self):
         import tempfile

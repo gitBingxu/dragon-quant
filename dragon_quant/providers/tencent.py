@@ -224,18 +224,22 @@ class TencentProvider(StockProvider):
 
         return result[-bars:]
 
-    # ─── 宏观扰动（仅美股指数 quote 回退；错误契约：失败抛异常）──────────────
+    # ─── 宏观 quote（历史契约；当前 MACRO_SPECS 无该源路由）──────────────────
 
     def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
-        """腾讯 gtimg 美股指数 quote 回退。
+        """腾讯 gtimg 境外指数 quote（历史契约；当前规格未路由）。
 
-        只接受 ``session_date < trade_date`` 的已完成 session；不做日 K
-        （实测 ``fqkline`` 对 usDJI 只返回 1 根）。美债/黄金不在此源覆盖。
+        当前 ``MACRO_SPECS`` 没有任何品种声明 ``tencent``，故 prep 不会调用本方法；
+        方法保留以维持 provider 契约与测试覆盖。若未来启用，只接受
+        ``session_date < trade_date`` 的已完成 session；不做日 K。
         HTTP/解析失败抛 RuntimeError，由 providers.macro 门面回退。
         """
         from dragon_quant.providers.macro import build_macro_record
 
-        wanted = [s for s in (specs or []) if getattr(s, "tencent", None)]
+        # 同日口径（<= trade_date）无法用 T-1 quote 表达，跳过以防 caliber 失真
+        wanted = [s for s in (specs or [])
+                  if getattr(s, "tencent", None)
+                  and not getattr(s, "same_day_close", False)]
         if not wanted:
             return {}
         codes = [s.tencent for s in wanted]

@@ -230,18 +230,22 @@ class XueqiuProvider(StockProvider):
                               category: str = "hy") -> list[KBar]:
         raise NotImplementedError("雪球不提供板块 K 线")
 
-    # ─── 宏观扰动（仅美股指数，Cookie 最后备选）──────────────────────────────
+    # ─── 宏观 quote（历史契约；当前 MACRO_SPECS 无该源路由）──────────────────
 
     def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
-        """雪球全球指数 quote 回退（.DJI/.IXIC/.INX）。
+        """雪球全球指数 quote（历史契约；当前规格未路由）。
 
-        三态：无 Cookie → 返回 {}（配置缺失，不算 transport 失败）；
-        HTTP/解析失败 → 抛 RuntimeError；符号无数据 → 跳过。
-        只接受 ``session_date < trade_date`` 的已完成 session。
+        当前 ``MACRO_SPECS`` 没有任何品种声明 ``xueqiu``，故 prep 不会调用本方法；
+        方法保留以维持 provider 契约与测试覆盖。若未来启用：
+        无 Cookie → 返回 {}（配置缺失，不算 transport 失败）；HTTP/解析失败 →
+        抛 RuntimeError；只接受 ``session_date < trade_date`` 的已完成 session。
         """
         from dragon_quant.providers.macro import build_macro_record
 
-        wanted = [s for s in (specs or []) if getattr(s, "xueqiu", None)]
+        # 同日口径（<= trade_date）无法用 T-1 quote 表达，跳过以防 caliber 失真
+        wanted = [s for s in (specs or [])
+                  if getattr(s, "xueqiu", None)
+                  and not getattr(s, "same_day_close", False)]
         if not wanted:
             return {}
         cookie = get_xq()

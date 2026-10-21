@@ -75,6 +75,8 @@ dragon-quant review --ui-only
 dragon-quant buy                              # 盘中：候选池内触发买点的标的全部记入买入信号
 dragon-quant sell                             # 盘中：对已买入未卖出的信号判定是否卖出
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
+dragon-quant buy --force                      # 非交易时段强制跑当日回放（09:30 前仍拒绝）
+dragon-quant sell --force                     # 同上，卖出建议
 ```
 
 > 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。自动获取（`data cookie-fetch`）首次运行会自动下载 chromium 内核（约 150MB，走国内镜像，仅一次），无需手动 `playwright install`。
@@ -242,6 +244,7 @@ dragon-quant review-account --ui-only
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 dragon-quant buy                              # 实时：回放截至当前已完成5分钟K
 dragon-quant sell --date 20260908 --at 14:55  # 对已买入未卖出的信号判定卖出
+dragon-quant buy --force                      # 午休/收盘后强制跑当日回放（09:30 前仍拒绝）
 ```
 
 `buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
@@ -251,6 +254,7 @@ dragon-quant sell --date 20260908 --at 14:55  # 对已买入未卖出的信号�
 - 组合风控经 `live_trade/shadow.py` 从信号表按回放时点重建影子状态，逐事件调用同一个 `risk_governor`：日级熔断、连亏熔断与 `equity<=0` 破产闸跟随；delevel 降仓在无 sizing 场景不适用（详见 `review_account/STRATEGY.md` §5）。
 - 数据分级：`buy`/`sell` 的行情完整性判定都覆盖「候选 ∪ 持仓」，任一分时缺失即整日走日K兜底，输出带 `data_quality` 提示。
 - 历史回放必须显式指定 `--date YYYYMMDD --at HH:MM`，仅用历史数据；实时运行不指定 `--at`，回放截至当前已完成的5分钟K。
+- `--force`（`buy`/`sell` 均支持）：放行午间休市（11:30–13:00）与已收盘（≥15:06）的时段闸门，**09:30 前仍拒绝**；15:00–15:06 属既有收盘宽限窗口（本来就不拦截），`--force` 在该窗口不生效、日K兜底仍按收盘价成交。不解除任何数据/日期校验（非交易日、历史缺 `--at`、无完整5分钟K 照常报错），与 `--at` 同给时 `--at` 优先。强制模式仍用最后一个已完成5分钟K回放（午休=11:30、收盘=15:00），不伪造收盘价成交；信号照常落库并在 `signal_json` 中带 `"forced": true`，人读输出打印一行强制模式提示。
 - 信号表 `buy_sell_signals`：同一未平仓 code 幂等去重，峰值跨日写回供移动止盈/保本判定；历史重放可能命中既有行，输出标注「未落库」。
 - `buy/sell` 仍不接券商。数据齐全、参数和事件一致时，两条路径的买点/卖点/成交价与回测一致，不代表真实市场必然成交。
 - `buy` 输出首行显示**建议仓位**（盘后复盘快照 `sentiment.position_pct`，缺失显示 `—`），**仅供人工参考、不代下单**（`SignalEngine` 不维护真实账户）；该值另外用于禁买判定。

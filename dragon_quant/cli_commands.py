@@ -967,7 +967,8 @@ def _cmd_buy(args):
     trade_date = _resolve_trade_date(args.date)
     try:
         run_buy(trade_date, source=args.source, verbose=True,
-                as_of=args.at, strategy_params=_strategy_params(args.config))
+                as_of=args.at, strategy_params=_strategy_params(args.config),
+                force=getattr(args, "force", False))
     except ValueError as e:
         print(f"⏸ 暂不执行买入：{e}", file=sys.stderr)
         sys.exit(1)
@@ -979,7 +980,8 @@ def _cmd_sell(args):
     trade_date = _resolve_trade_date(args.date)
     try:
         run_sell(trade_date, source=args.source, verbose=True,
-                 as_of=args.at, strategy_params=_strategy_params(args.config))
+                 as_of=args.at, strategy_params=_strategy_params(args.config),
+                 force=getattr(args, "force", False))
     except ValueError as e:
         print(f"⏸ 暂不执行卖出：{e}", file=sys.stderr)
         sys.exit(1)

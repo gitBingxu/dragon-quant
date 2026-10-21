@@ -423,11 +423,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     buy_p = sub.add_parser(
         "buy",
         help="实盘辅助：给出今日买入建议并记账（纯信号）",
-        usage="dragon-quant buy [--config FILE] [--date YYYYMMDD --at HH:MM]",
+        usage="dragon-quant buy [--config FILE] [--date YYYYMMDD --at HH:MM] [--force]",
         description="回放当日分时，复用 review-account 共享买点，候选池内所有触发买点的标的均记入买入信号。",
         epilog="""Examples:
   dragon-quant buy
   dragon-quant buy --date 20260907 --at 10:00
+  dragon-quant buy --force
 """,
     )
     buy_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
@@ -438,11 +439,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     sell_p = sub.add_parser(
         "sell",
         help="实盘辅助：给出今日卖出建议并记账（纯信号）",
-        usage="dragon-quant sell [--config FILE] [--date YYYYMMDD --at HH:MM]",
+        usage="dragon-quant sell [--config FILE] [--date YYYYMMDD --at HH:MM] [--force]",
         description="对已买入未卖出的信号回放当日分时，复用 review-account 共享卖出策略，触发即平。",
         epilog="""Examples:
   dragon-quant sell
   dragon-quant sell --date 20260908 --at 14:55
+  dragon-quant sell --force
 """,
     )
     sell_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
@@ -452,6 +454,9 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     for trade_parser in (buy_p, sell_p):
         trade_parser.add_argument("--at", help="历史回放截止时刻 HH:MM，仅与 --date 配合")
         trade_parser.add_argument("--config", help="共享策略参数 JSON 文件")
+        trade_parser.add_argument(
+            "--force", action="store_true",
+            help="非交易时段仍强制跑当日回放（09:30 前仍拒绝；15:00–15:06 宽限窗口无需 --force）")
 
     # vpa 子命令
     vpa_p = sub.add_parser(

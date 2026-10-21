@@ -21,13 +21,14 @@ class LiveTrader:
         self.source = source
         self.data = data or MarketData()
 
-    def buy(self, trade_date: str, as_of: str | None = None) -> dict:
-        return self._run(trade_date, as_of, "buy")
+    def buy(self, trade_date: str, as_of: str | None = None, force: bool = False) -> dict:
+        return self._run(trade_date, as_of, "buy", force=force)
 
-    def sell(self, trade_date: str, as_of: str | None = None) -> dict:
-        return self._run(trade_date, as_of, "sell")
+    def sell(self, trade_date: str, as_of: str | None = None, force: bool = False) -> dict:
+        return self._run(trade_date, as_of, "sell", force=force)
 
-    def _run(self, day, clock, command):
+    def _run(self, day, clock, command, force=False):
+        forced = False
         datetime.strptime(day, "%Y-%m-%d")
         if clock:
             datetime.strptime(clock, "%H:%M")
@@ -39,6 +40,7 @@ class LiveTrader:
 
         if day < today or (day == today and clock is not None):
             # 历史（或今日回放）：必须指定 --at，只取对应时点及之前的行情。
+            # 该路径 --force 静默无效（forced 恒为 False），--at 优先。
             if not clock:
                 raise ValueError("历史日期必须提供 --at HH:MM，且仅使用对应历史行情")
             target = at(day, clock)
@@ -46,21 +48,34 @@ class LiveTrader:
         else:
             # 实时今日：回放截至当前已完成的5分钟K。
             time = now.strftime("%H:%M:%S")
-            if not ("09:30:00" <= time < "11:30:01" or "13:00:00" <= time < "15:06:00"):
+            in_session = ("09:30:00" <= time < "11:30:01"
+                          or "13:00:00" <= time < "15:06:00")
+            if not in_session:
                 if time < "09:30:00":
+                    # 无完整5分钟K，强制无意义：--force 也不放行。
                     raise ValueError("当前尚未开盘（09:30 开始），请开盘后执行")
-                if "11:30:01" <= time < "13:00:00":
-                    raise ValueError("当前午间休市（11:30–13:00），请 13:00 后执行")
-                raise ValueError("当前已收盘，请在交易时段执行，或用 --date/--at 回放历史")
+                if not force:
+                    if "11:30:01" <= time < "13:00:00":
+                        raise ValueError("当前午间休市（11:30–13:00），请 13:00 后执行")
+                    raise ValueError("当前已收盘，请在交易时段执行，或用 --date/--at 回放历史")
+            forced = force and not in_session
             target = int(now.timestamp() * 1000)
             completed = [t for t in bar_times(day) if t <= target]
             if not completed:
                 raise ValueError("尚无完整5分钟K（09:35 首根），请稍后执行")
             until = completed[-1]
 
+        # cutoff 只截断事件流（强制模式下钳到最后一根已完成K，避免日K兜底路径
+        # 以当日收盘价补成交）；target 仍作影子状态 as-of，保持真实当前时点，
+        # 使同日在 cutoff 之后的既有平仓腿（如 15:00:00.001）仍参与 sold_today/风控。
+        cutoff = min(target, until) if forced else target
+
         if command == "buy":
-            return self._run_buy(day, target, until, calendar)
-        return self._run_sell(day, target, until, calendar)
+            result = self._run_buy(day, target, until, calendar, cutoff, forced)
+        else:
+            result = self._run_sell(day, target, until, calendar, cutoff, forced)
+        result["forced"] = forced
+        return result
 
     # ── 数据分级：候选缺日K是买入前提缺失（抛错），持仓缺失则降级剔除 ──
 
@@ -81,7 +96,7 @@ class LiveTrader:
             return current
         return next(iter(events_rows.values())).get("data_quality", current)
 
-    def _run_buy(self, day, target, until, calendar):
+    def _run_buy(self, day, target, until, calendar, cutoff, forced):
         signals = db.list_all_signals(source=self.source)
         shadow = build_shadow_state(signals, self.cfg, day, as_of=target)
         sentiment = load_market_sentiment(calendar, day, self.cfg)
@@ -99,13 +114,18 @@ class LiveTrader:
         buys, details = [], []
         quality = "strict_5min"
         for event in historical_events(day, candidates, codes, self.data, until=until):
-            if event.timestamp > target:
+            if event.timestamp > cutoff:
                 break
             event.allow_buy = True
             quality = self._quality(event.rows, quality)
             result = engine.step(event)
             buys.extend(result["buys"])
             details.extend(result["details"])
+        if forced:
+            # 强制模式落库可追溯：复用既有 entry_signal_json，无 schema 变更。
+            for b in buys:
+                if isinstance(b.get("signal"), dict):
+                    b["signal"]["forced"] = True
         for b in buys:
             _, created = db.insert_signal(b["code"], b["name"], b["entry_date"], b["entry_price"],
                                           b["reason_code"], b["reason_text"], b["signal"],
@@ -129,7 +149,7 @@ class LiveTrader:
                 "priority_degraded": list(ctx.get("degraded") or []),
                 "reason_text": f"买入 {len(buys)} 只" if buys else "候选池暂无触发买点的标的"}
 
-    def _run_sell(self, day, target, until, calendar):
+    def _run_sell(self, day, target, until, calendar, cutoff, forced):
         signals = db.list_all_signals(source=self.source)
         shadow = build_shadow_state(signals, self.cfg, day, as_of=target)
         positions = shadow.positions
@@ -147,12 +167,17 @@ class LiveTrader:
         sells = []
         quality = "strict_5min"
         for event in historical_events(day, candidates, codes, self.data, until=until):
-            if event.timestamp > target:
+            if event.timestamp > cutoff:
                 break
             event.allow_buy = False
             quality = self._quality(event.rows, quality)
             result = engine.step(event)
             sells.extend(result["sells"])
+        if forced:
+            # 强制模式落库可追溯：复用既有 exit/half_exit_signal_json，无 schema 变更。
+            for s in sells:
+                if isinstance(s.get("signal"), dict):
+                    s["signal"]["forced"] = True
         for s in sells:
             if s["partial"]:
                 s["persisted"] = db.half_close_signal(

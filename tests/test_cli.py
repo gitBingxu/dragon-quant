@@ -26,6 +26,24 @@ class TestCliHelp(unittest.TestCase):
         self.assertNotIn("scan_v2", output)
         self.assertIn("Use \"dragon-quant <command> -h\"", output)
 
+    def test_buy_help_mentions_force(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "buy", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("--force", buf.getvalue())
+        self.assertIn("buy --force", buf.getvalue())
+
+    def test_sell_help_mentions_force(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "sell", "-h"]):
+            with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+                cli.main()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("--force", buf.getvalue())
+        self.assertIn("sell --force", buf.getvalue())
+
     def test_scan_help_does_not_run_scan(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "scan", "-h"]), \
@@ -143,6 +161,24 @@ class TestCliSourceArgs(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["as_of"], "10:00")
         self.assertNotIn("account_name", run.call_args.kwargs)
         self.assertNotIn("capital", run.call_args.kwargs)
+
+    def test_buy_passes_force_kwarg(self):
+        with patch("sys.argv", ["dragon-quant", "buy", "--force"]), \
+             patch("dragon_quant.live_trade.run_buy") as run:
+            cli.main()
+        self.assertTrue(run.call_args.kwargs["force"])
+
+    def test_buy_without_force_passes_false(self):
+        with patch("sys.argv", ["dragon-quant", "buy"]), \
+             patch("dragon_quant.live_trade.run_buy") as run:
+            cli.main()
+        self.assertFalse(run.call_args.kwargs["force"])
+
+    def test_sell_passes_force_kwarg(self):
+        with patch("sys.argv", ["dragon-quant", "sell", "--force"]), \
+             patch("dragon_quant.live_trade.run_sell") as run:
+            cli.main()
+        self.assertTrue(run.call_args.kwargs["force"])
 
     def test_review_account_passes_shared_config(self):
         with patch("sys.argv", ["dragon-quant", "review-account", "--from", "20260907", "--to", "20260911", "--config", "params.json"]), \

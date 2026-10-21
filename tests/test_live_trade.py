@@ -22,7 +22,16 @@ from dragon_quant.review_account.execution import (
 from dragon_quant.review_account.market import SHANGHAI, at, bar_times, DataCoverageError, validate_bars
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
 from dragon_quant.storage import db
-from tests.test_review_account import CAND, DAY, FakeData, position, row
+from tests.test_review_account import CAND, DAY, FakeData, bars, history, position, row
+
+
+def _mock_datetime(day, hour, minute, second=0):
+    """构造可 patch 到 trader.datetime 的假 datetime（strptime 保留真实实现）。"""
+    fake = MagicMock()
+    fake.strptime = datetime.datetime.strptime
+    fake.now.return_value = datetime.datetime.fromisoformat(day).replace(
+        hour=hour, minute=minute, second=second, tzinfo=SHANGHAI)
+    return fake
 
 
 class TestSignalEngine(unittest.TestCase):
@@ -166,17 +175,24 @@ class TestPrintSell(unittest.TestCase):
 class TestLiveTraderRun(unittest.TestCase):
     """LiveTrader._run 的日期/时段校验（编排层入口，此前零覆盖）。"""
 
-    def _fake_now(self, hour, minute):
-        fake = MagicMock()
-        fake.strptime = datetime.datetime.strptime
-        fake.now.return_value = datetime.datetime(2026, 10, 9, hour, minute, tzinfo=SHANGHAI)
-        return fake
+    def _fake_now(self, hour, minute, second=0):
+        return _mock_datetime("2026-10-09", hour, minute, second)
 
     @staticmethod
     def _trader():
         return LiveTrader(StrategyConfig(), source="v2",
                           data=FakeData(days=["2026-09-04", "2026-09-07",
                                               "2026-09-08", "2026-10-09"]))
+
+    def _run_patched(self, hour, minute, force, command="buy", day="2026-10-09",
+                     second=0, **kw):
+        """patch 掉 _run_buy/_run_sell，只看闸门判定与传给引擎的截断点。"""
+        method = "_run_buy" if command == "buy" else "_run_sell"
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   self._fake_now(hour, minute, second)), \
+                patch.object(LiveTrader, method, return_value={}) as run:
+            result = getattr(self._trader(), command)(day, force=force, **kw)
+        return result, run
 
     def test_historical_requires_at(self):
         with self.assertRaises(ValueError):
@@ -201,6 +217,69 @@ class TestLiveTraderRun(unittest.TestCase):
                 self.assertRaises(ValueError):
             self._trader().buy("2026-10-09")
 
+    # ── --force：仅放行午休/收盘，09:30 前与数据校验照旧 ──
+
+    def test_force_after_close_replays_last_completed_bar(self):
+        result, run = self._run_patched(15, 30, force=True)
+        self.assertTrue(result["forced"])
+        day, target, until, _calendar, cutoff, forced = run.call_args.args
+        self.assertEqual(until, bar_times("2026-10-09")[-1])   # 收盘后：15:00 那根
+        self.assertEqual(cutoff, until)                         # 事件流截断到最后完整K
+        self.assertGreater(target, cutoff)                      # shadow as-of 仍是真实 now
+        self.assertTrue(forced)
+
+    def test_force_allows_noon_break(self):
+        result, run = self._run_patched(12, 0, force=True)
+        self.assertTrue(result["forced"])
+        day, target, until, _calendar, cutoff, _forced = run.call_args.args
+        self.assertEqual(until, at("2026-10-09", "11:30"))
+        self.assertEqual(cutoff, until)
+
+    def test_force_before_open_still_rejected(self):
+        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(9, 0)), \
+                self.assertRaises(ValueError) as cm:
+            self._trader().buy("2026-10-09", force=True)
+        self.assertIn("尚未开盘", str(cm.exception))
+
+    def test_force_before_first_bar_still_rejected(self):
+        """09:30–09:35：属于交易时段但没有完整5分钟K，force 不放行。"""
+        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(9, 32)), \
+                self.assertRaises(ValueError) as cm:
+            self._trader().buy("2026-10-09", force=True)
+        self.assertIn("尚无完整5分钟K", str(cm.exception))
+
+    def test_force_within_session_not_flagged(self):
+        result, run = self._run_patched(10, 0, force=True)
+        self.assertFalse(result["forced"])
+        day, target, until, _calendar, cutoff, _forced = run.call_args.args
+        self.assertEqual(cutoff, target)   # 未触发 force 放行 → 截断点等于原 target
+
+    def test_force_noon_break_boundaries(self):
+        """11:30:00 仍属交易时段（不标记）；11:30:01 起算午休（force 放行）。"""
+        result, _run = self._run_patched(11, 30, force=True)
+        self.assertFalse(result["forced"])
+        result, run = self._run_patched(11, 30, force=True, second=1)
+        self.assertTrue(result["forced"])
+        self.assertEqual(run.call_args.args[2], at("2026-10-09", "11:30"))
+
+    def test_force_close_boundaries(self):
+        """15:05:59 仍属交易时段（不标记）；15:06:00 起算收盘（force 放行）。"""
+        result, _run = self._run_patched(15, 5, force=True, second=59)
+        self.assertFalse(result["forced"])
+        result, run = self._run_patched(15, 6, force=True)
+        self.assertTrue(result["forced"])
+        self.assertEqual(run.call_args.args[2], bar_times("2026-10-09")[-1])
+
+    def test_force_with_as_of_is_silently_ignored(self):
+        """--at 路径优先：force 静默无效、不报错。"""
+        result, run = self._run_patched(10, 0, force=True, as_of="10:00")
+        self.assertFalse(result["forced"])
+        self.assertEqual(run.call_args.args[1], at("2026-10-09", "10:00"))
+
+    def test_historical_replay_reports_not_forced(self):
+        result, _run = self._run_patched(10, 0, force=True, day="2026-09-07", as_of="10:00")
+        self.assertFalse(result["forced"])
+
 
 class TestServiceRun(unittest.TestCase):
     """service 层 run_buy/run_sell/_make_config 的装配与打印接线。"""
@@ -220,7 +299,8 @@ class TestServiceRun(unittest.TestCase):
                 out = run_buy(DAY, source="v2", as_of="10:00")
         self.assertIs(out, result)
         self.assertIn("买入建议", buf.getvalue())
-        Trader.return_value.buy.assert_called_once_with(DAY, "10:00")
+        self.assertNotIn("强制模式", buf.getvalue())
+        Trader.return_value.buy.assert_called_once_with(DAY, "10:00", force=False)
 
     def test_run_sell_wires_trader_and_print(self):
         result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号"}
@@ -231,7 +311,54 @@ class TestServiceRun(unittest.TestCase):
                 out = run_sell(DAY, source="v2", as_of="10:00")
         self.assertIs(out, result)
         self.assertIn("卖出建议", buf.getvalue())
-        Trader.return_value.sell.assert_called_once_with(DAY, "10:00")
+        self.assertNotIn("强制模式", buf.getvalue())
+        Trader.return_value.sell.assert_called_once_with(DAY, "10:00", force=False)
+
+    def test_run_buy_force_passes_through_and_prints_hint(self):
+        result = {"buys": [], "details": [], "reason_text": "候选池暂无触发买点的标的",
+                  "forced": True}
+        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+            Trader.return_value.buy.return_value = result
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                out = run_buy(DAY, source="v2", as_of="10:00", force=True)
+        self.assertIs(out, result)
+        Trader.return_value.buy.assert_called_once_with(DAY, "10:00", force=True)
+        self.assertIn("强制模式", buf.getvalue())
+
+    def test_run_sell_force_passes_through_and_prints_hint(self):
+        result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号",
+                  "forced": True}
+        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+            Trader.return_value.sell.return_value = result
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                out = run_sell(DAY, source="v2", as_of="10:00", force=True)
+        self.assertIs(out, result)
+        Trader.return_value.sell.assert_called_once_with(DAY, "10:00", force=True)
+        self.assertIn("强制模式", buf.getvalue())
+
+    def test_forced_hint_uses_strict_wording(self):
+        result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号",
+                  "forced": True, "data_quality": "strict_5min"}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_sell(DAY, result)
+        out = buf.getvalue()
+        self.assertIn("最后一个完整 5 分钟 K", out)
+        self.assertNotIn("日K兜底", out)
+
+    def test_forced_hint_uses_fallback_wording(self):
+        """日K兜底没有 5 分钟 K，提示不能声称「最后一个完整 5 分钟 K」。"""
+        result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号",
+                  "forced": True, "data_quality": "daily_fallback"}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_sell(DAY, result)
+        out = buf.getvalue()
+        self.assertIn("强制模式", out)
+        self.assertIn("日K兜底", out)
+        self.assertNotIn("最后一个完整 5 分钟 K", out)
 
 
 class TestSignalStorage(unittest.TestCase):
@@ -588,6 +715,26 @@ def _pool_ctx():
             "prep_snapshot_date": None, "auction_rows": 0, "degraded": []}
 
 
+class _CrashCloseData(FakeData):
+    """日K兜底：当日开盘 10.0、收盘 9.0（触发 -3.5% 首日止损），分时缺失。"""
+
+    def daily(self, code, start, refresh=False):
+        out = []
+        for bar in history("2026-09-09", price=10.0):
+            if bar.timestamp == at(DAY, "15:00"):
+                bar = KBar(bar.timestamp, bar.volume, 10.0, 10.2, 8.9, 9.0,
+                           0, -10.0, 12, 1_000_000_000)
+            out.append(bar)
+        return out
+
+
+class _CrashIntradayData(FakeData):
+    """严格盘中：全天 5 分钟 K 都是 9.5（触发 -3.5% 首日止损且未封死跌停，可成交）。"""
+
+    def intraday(self, code, day, until=None):
+        return validate_bars(bars(day, price=9.5), day, until)
+
+
 class TestLiveTraderAlignment(unittest.TestCase):
     """trader 层：数据分级（codes 全集）、峰值写回、as-of、落库标注。"""
 
@@ -618,6 +765,11 @@ class TestLiveTraderAlignment(unittest.TestCase):
                    return_value=[cand]):
             result = self._trader(MissingCodeData("600002")).sell(DAY, "10:00")
         self.assertEqual(result["data_quality"], "daily_fallback")
+        # 非强制运行不打标（卖出路径独立于买入路径的 mutation）。
+        for s in result["sells"]:
+            self.assertNotIn("forced", s["signal"])
+        self.assertNotIn(
+            "forced", db.list_all_signals(source="v2")[0]["exit_signal"])
 
     def test_buy_coverage_includes_positions(self):
         """持仓分时缺失 → buy 同样整日 daily_fallback（codes 含 as-of 持仓）。"""
@@ -659,7 +811,110 @@ class TestLiveTraderAlignment(unittest.TestCase):
             result = self._trader(FakeData()).buy(DAY, "10:00")
         b = result["buys"][0]
         self.assertEqual(b["qty"], notional_quantity(StrategyConfig(), b["entry_price"]))
-        self.assertEqual(db.list_open_signals(source="v2")[0]["qty"], b["qty"])
+        row_sig = db.list_open_signals(source="v2")[0]
+        self.assertEqual(row_sig["qty"], b["qty"])
+        self.assertNotIn("forced", row_sig["entry_signal"])  # 非强制运行不打标
+
+    def test_forced_buy_persists_forced_marker(self):
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   _mock_datetime(DAY, 15, 30)), \
+                patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                      return_value=([CAND], _pool_ctx())):
+            result = self._trader(FakeData()).buy(DAY, force=True)
+        self.assertTrue(result["forced"])
+        self.assertTrue(result["buys"])
+        self.assertIs(db.list_open_signals(source="v2")[0]["entry_signal"]["forced"], True)
+
+    def test_forced_sell_persists_forced_marker(self):
+        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        trader = self._trader(_CrashIntradayData())
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   _mock_datetime(DAY, 15, 30)), \
+                patch("dragon_quant.live_trade.trader.collect_candidates",
+                      return_value=[]), \
+                patch("dragon_quant.live_trade.trader.db.close_signal",
+                      wraps=db.close_signal) as close:
+            result = trader.sell(DAY, force=True)
+        self.assertTrue(result["forced"])
+        self.assertEqual(len(result["sells"]), 1)
+        self.assertFalse(result["sells"][0]["partial"])
+        self.assertIs(close.call_args.args[5]["forced"], True)
+        self.assertIs(db.list_all_signals(source="v2")[0]["exit_signal"]["forced"], True)
+
+    def test_forced_half_close_persists_forced_marker(self):
+        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+
+        class _HalfEngine:
+            positions = []
+
+            def __init__(self, *args, **kwargs):
+                self._fired = False
+
+            def step(self, event):
+                if self._fired:
+                    return {"sells": []}
+                self._fired = True
+                return {"sells": [{
+                    "code": "600001", "name": "样本", "exit_date": DAY,
+                    "exit_price": 10.5, "qty": 500, "partial": True,
+                    "reason_code": "next_day_limit_up_half",
+                    "reason_text": "次日涨停减半", "hold_days": 1,
+                    "signal": {"kind": "half"}}]}
+
+        trader = self._trader(FakeData())
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   _mock_datetime(DAY, 15, 30)), \
+                patch("dragon_quant.live_trade.trader.collect_candidates",
+                      return_value=[]), \
+                patch("dragon_quant.live_trade.trader.SignalEngine", _HalfEngine), \
+                patch("dragon_quant.live_trade.trader.db.half_close_signal",
+                      return_value=True) as half:
+            result = trader.sell(DAY, force=True)
+        self.assertTrue(result["forced"])
+        self.assertEqual(len(result["sells"]), 1)
+        self.assertIs(half.call_args.args[6]["forced"], True)
+
+        # 非强制（10:00 盘中）同一半仓腿不得打标。
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   _mock_datetime(DAY, 10, 0)), \
+                patch("dragon_quant.live_trade.trader.collect_candidates",
+                      return_value=[]), \
+                patch("dragon_quant.live_trade.trader.SignalEngine", _HalfEngine), \
+                patch("dragon_quant.live_trade.trader.db.half_close_signal",
+                      return_value=True) as half_normal:
+            result_normal = trader.sell(DAY)
+        self.assertFalse(result_normal["forced"])
+        self.assertNotIn("forced", half_normal.call_args.args[6])
+
+    def test_force_after_close_daily_fallback_does_not_fill_at_close(self):
+        """强制盘后 + 日K兜底：收盘价成交腿（15:00:00.001）必须被截断，不伪造成交。"""
+        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        trader = self._trader(_CrashCloseData(intraday_missing=[DAY]))
+
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   _mock_datetime(DAY, 15, 30)), \
+                patch("dragon_quant.live_trade.trader.collect_candidates",
+                      return_value=[]):
+            forced = trader.sell(DAY, force=True)
+        self.assertTrue(forced["forced"])
+        self.assertEqual(forced["data_quality"], "daily_fallback")
+        self.assertEqual(forced["sells"], [])
+        # 15:00 的 late 决策事件仍执行（更新峰值），只是 15:00:00.001 的成交腿被截断。
+        self.assertEqual(len(forced["held"]), 1)
+        self.assertGreater(forced["held"][0]["highest_return"], 0)
+
+        # 对照：同为日K兜底，盘中 15:05（未强制）会以收盘价成交 → 证明确有可触发的平仓腿。
+        with patch("dragon_quant.live_trade.trader.datetime",
+                   _mock_datetime(DAY, 15, 5)), \
+                patch("dragon_quant.live_trade.trader.collect_candidates",
+                      return_value=[]):
+            control = trader.sell(DAY)
+        self.assertFalse(control["forced"])
+        self.assertEqual(len(control["sells"]), 1)
+        self.assertLess(control["sells"][0]["exit_price"], 10.0)
 
 
 class TestSignalMigration(unittest.TestCase):

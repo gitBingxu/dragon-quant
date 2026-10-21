@@ -15,18 +15,20 @@ def _make_config(source: str, strategy_params: Optional[dict]) -> StrategyConfig
 
 
 def run_buy(trade_date: str, source: str = "v2", verbose: bool = True,
-            as_of: Optional[str] = None, strategy_params: Optional[dict] = None) -> dict:
+            as_of: Optional[str] = None, strategy_params: Optional[dict] = None,
+            force: bool = False) -> dict:
     cfg = _make_config(source, strategy_params)
-    result = LiveTrader(cfg, source=source).buy(trade_date, as_of)
+    result = LiveTrader(cfg, source=source).buy(trade_date, as_of, force=force)
     if verbose:
         _print_buy(trade_date, result)
     return result
 
 
 def run_sell(trade_date: str, source: str = "v2", verbose: bool = True,
-             as_of: Optional[str] = None, strategy_params: Optional[dict] = None) -> dict:
+             as_of: Optional[str] = None, strategy_params: Optional[dict] = None,
+             force: bool = False) -> dict:
     cfg = _make_config(source, strategy_params)
-    result = LiveTrader(cfg, source=source).sell(trade_date, as_of)
+    result = LiveTrader(cfg, source=source).sell(trade_date, as_of, force=force)
     if verbose:
         _print_sell(trade_date, result)
     return result
@@ -39,6 +41,7 @@ _BLOCKING_GATES = {"daily_loss_circuit_breaker", "streak_circuit_breaker", "shad
 
 def _print_buy(trade_date: str, result: dict):
     print(f"【买入建议 · {trade_date}】")
+    _print_forced(result)
     sp = result.get("sentiment_pct")
     if sp is None:
         print("  建议仓位 —（无有效情绪仓位数据，请人工判断）")
@@ -95,6 +98,7 @@ def _print_buy(trade_date: str, result: dict):
 
 def _print_sell(trade_date: str, result: dict):
     print(f"【卖出建议 · {trade_date}】")
+    _print_forced(result)
     for s in result.get("sells", []):
         action = "减半仓" if s.get("partial") else "卖出"
         mark = "" if s.get("persisted", True) else "（未落库：信号状态已变化）"
@@ -108,6 +112,17 @@ def _print_sell(trade_date: str, result: dict):
         print(f"  🟢 继续持有 {h['name'] or h['code']}（{h['code']}）{half}"
               f"，当前最高 {h['highest_return']:+.1f}%")
     _print_quality(result)
+
+
+def _print_forced(result: dict):
+    if not result.get("forced"):
+        return
+    quality = result.get("data_quality")
+    if quality and quality != "strict_5min":
+        print("  ⚠️ 强制模式：当前非交易时段，已回放至最后一个已完成时点"
+              "（日K兜底，不按收盘价补成交）")
+    else:
+        print("  ⚠️ 强制模式：当前非交易时段，已回放至最后一个完整 5 分钟 K")
 
 
 def _print_quality(result: dict):

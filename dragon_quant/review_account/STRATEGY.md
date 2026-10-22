@@ -23,7 +23,7 @@
 
 ### 1.1 首日止损 `first_day_stop`（新增，默认关）
 
-方案：`docs/solutions/2026-10-22-first-day-stoploss-redesign.md`（D3「首日浮亏减半」）。
+方案：`archived_md/review_account/2026-10-22-first-day-stoploss-redesign.md`（D3「首日浮亏减半」）。
 
 - **触发**：仅 `hold_days == 1`。盘中 `bar_low` 触及 `first_day_stop_loss_pct`（默认 -3.5%）→ 卖出**一半**（`first_day_stop_half`）；剩余半仓从 T+2 起回到既有 -5% 硬止损 / 弱势 / 移动止盈。
 - **灾难线**：`first_day_disaster_stop_pct`（默认 `0` = 关闭，取值须 `<= first_day_stop_loss_pct`）。**灾难段优先且不带半仓守卫**——首次击穿即整仓退出，已减半后再次击穿则清掉剩余半仓（`first_day_disaster_stop`）。

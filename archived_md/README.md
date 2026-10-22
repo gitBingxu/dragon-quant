@@ -30,6 +30,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-22 | 首日止损改造技术方案（D3 首日浮亏减半 `first_day_stop`，默认关） | [2026-10-22-first-day-stoploss-redesign.md](review_account/2026-10-22-first-day-stoploss-redesign.md) | `docs/solutions/2026-10-22-first-day-stoploss-redesign.md` |
+| 2026-10-22 | 仓位分散回测验证（结论：维持满仓 100/1，分散配置收益归零） | [2026-10-22-position-sizing-backtest.md](review_account/2026-10-22-position-sizing-backtest.md) | `docs/research/2026-10-22-position-sizing-backtest.md` |
 | 2026-10-18 | 盘后复盘因子扩展技术方案（独立资产库 + THS 涨停原因/题材主线） | [复盘因子扩展技术方案.md](review_account/复盘因子扩展技术方案.md) | — |
 | 2026-10-14 | 择时与仓位调研 | [择时与仓位调研.md](review_account/择时与仓位调研.md) | — |
 | 2026-10-14 | 择时与仓位技术方案 | [择时与仓位技术方案.md](review_account/择时与仓位技术方案.md) | — |

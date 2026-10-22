@@ -307,7 +307,7 @@ class _FallbackDaily:
 class TestFirstDayStopRedesign(unittest.TestCase):
     """首日止损改造（D3 首日浮亏减半）——方案 §7 测试清单。
 
-    方案：docs/solutions/2026-10-22-first-day-stoploss-redesign.md
+    方案：archived_md/review_account/2026-10-22-first-day-stoploss-redesign.md
     """
 
     @staticmethod

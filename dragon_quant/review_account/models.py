@@ -283,6 +283,10 @@ class ClosedPosition:
     realized_return: float
     hold_days: int
     status: str = "closed"
+    # 清仓后窗口指标（事后评估，不参与任何交易决策）；旧记录为 None/0。
+    post_exit_max_return: Optional[float] = None
+    post_exit_max_drawdown: Optional[float] = None
+    post_exit_window_days: int = 0
 
 
 @dataclass

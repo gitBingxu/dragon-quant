@@ -238,6 +238,9 @@ dragon-quant review-account --ui-only
 
 `/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
 
+- **买点统计**：`/account` 新增「买点统计」卡片，按四类买点（开盘回踩MA5 / 弱转强 / 分歧买龙 / 龙回头）+ 未知 code + 合计，展示笔数、盈利笔数、胜率、平均每笔收益、累计贡献收益；胜率与顶部 KPI 同源。基于已落库的 `entry_reason_code` / `realized_return` 实时聚合，旧 run 也可用；累计贡献按 `Σ已实现盈亏 / 初始资金` 估算（忽略买入佣金）。
+- **清仓后窗口指标**：「单票收益汇总」新增「清仓5日内最高盈利」「清仓5日内最大回撤」两列。窗口为卖出日之后的 5 根有效日K（停牌不计入、不足按实际、无 bar 显示 `—`），可越出回测区间（事后评估，不影响交易）；旧 run 不回溯，显示 `—`。最高盈利 =（窗口最高−卖出）/卖出×100，最大回撤 = min(0,（窗口最低−卖出）/卖出×100)。`GET /api/account/positions` 同时返回 `stats` 买点聚合（只增键）。
+
 ### `buy` / `sell` — 实盘辅助交易
 
 ```bash
@@ -419,7 +422,7 @@ SQLite 表分为三类：
 
 `scan_stocks_v2` 填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` 等五维识别字段。
 
-`review_account_*` 表用于账户级模拟交易：`runs` 保存 UI 记录名称、策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益和退出原因，`events` 保存买入、卖出、持仓和空仓原因时间线。
+`review_account_*` 表用于账户级模拟交易：`runs` 保存 UI 记录名称、策略参数与汇总，`snapshots` 保存每日权益/现金/持仓快照，`trades` 保存交割单及买卖逻辑，`positions` 保存已平仓持仓的收益、退出原因与清仓后 5 日窗口指标（`post_exit_max_return` / `post_exit_max_drawdown` / `post_exit_window_days`；事后评估、不参与决策，旧记录为 NULL 不回溯），`events` 保存买入、卖出、持仓和空仓原因时间线。
 
 `buy_sell_signals` 表用于实盘辅助交易（`buy` / `sell`）：记录买入（code/name/entry_date/entry_price/`qty`/买入原因与信号）与卖出（exit_date/exit_price/卖出原因/持有天数），半仓规则通过 `took_profit_half` + `half_exit_date/price/qty/reason_code/reason_text/signal_json` 冻结半仓腿（`status` 仍为 `open`），并保存最高浮盈/价（`highest_return`/`highest_price`）供跨日移动止盈/保本判定；未平仓 code 由部分唯一索引 `idx_buy_sell_open` 保证幂等去重。
 

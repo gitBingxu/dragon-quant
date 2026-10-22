@@ -249,7 +249,7 @@ dragon_quant/
 | `review_account_runs` | 账户级 review 批次 | 保存 UI 记录名称、策略参数、区间、初始资金、最终权益、收益率、最大回撤 |
 | `review_account_snapshots` | 账户每日快照 | 保存现金、市值、总权益、收益曲线、当前持仓 |
 | `review_account_trades` | 账户交割单 | 每笔买卖含 `reason_code` / `reason_text` / `signal_json` |
-| `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益 |
+| `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益；`post_exit_max_return` / `post_exit_max_drawdown` / `post_exit_window_days` 为清仓后 5 个交易日的窗口指标（事后评估，不参与交易决策；窗口可越出回测区间；旧记录三列为 NULL，不回溯重算） |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 | `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、`qty`（买入日冻结）、半仓腿（`half_exit_date/price/qty/reason_*/signal_json`）、平仓原因与持有天数 |
 | **`assets.db`（独立库）** | 数据资产仓（prep + auction） | 与 dragon.db 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示 dragon.db / assets.db / 旧 prep.db 体积 |
@@ -298,6 +298,9 @@ python -m dragon_quant review-account --ui-only --source v2
 - 择时与仓位改造（除龙回头默认开启外，其余 default-off，向后兼容）：`sentiment_sizing_enabled`/`sentiment_ban_enabled` 消费盘后复盘快照 `sentiment.position_pct`（情绪→仓位→禁买；历史快照为补跑时点近似，以前向验证为主）；`risk.py` 组合风控（日级熔断/净值回撤降仓/连续亏损降仓）；`entry_veto` 为**当前无调用方的通用前置买入否决钩子**（默认放行）；竞价否决实现在 `evaluate_buy` 信号后置闸门（`reason_code=auction_veto`，可按买点豁免、detail 带 `vetoed_signal` 供影子统计）；龙回头买点 `dragon_comeback_enabled`（**默认开启**；显式 `false` 可复现旧基线，默认开启后历史回测结果不可直接与旧基线比较）；验证基建 `plateau_scan`/`ablation`/`drawdown_decomposition`/`trial_count`。分叉声明见 `review_account/STRATEGY.md`。
 - 数据分级：历史交易日按 code 三态判定——有完整48根5分钟K → 严格盘中撮合；无分时但当日日K有效 → 整日**日K兜底**（开盘价买、当日OHLC判卖，分时相关规则自然跳过）；当日日K缺行或 `volume`/`amount` 双零且无分时 → **停牌**，不进 `rows`、不评估买卖、按最近可得收盘价估值。剔除停牌 code 后再判断整日兜底；分时可用但当日日K缺行的标的在兜底日记 `daily_unavailable`（不建行、不静默消失）。日K完全无历史/预热不足/无效OHLC仍报 DataCoverageError，不持久化部分结果。当日（盘中与收盘后）不做停牌分类（日K缓存按写入日命名、不校验新鲜度），保持旧契约硬报错。兜底成交价保守近似，结果标 `data_quality`（strict_5min/mixed/daily_fallback）、`fallback_days` 与 `suspended_days`/`suspended_codes`/`suspended_days_count`/`unavailable_days`/`data_degraded`；停牌候选仍在 `details` 中带 `reason_code=suspended`。行情按日期/周期/不复权口径隔离缓存；SH000001用于交易日历，个股000001仍是平安银行。
 - `/account` 生成/删除和历史批次查询保持不变；API可传 `strategy_params`，快照增量补 `positions_json` 存全部持仓（查询返回 `positions`），旧数据仍可读取；已平仓表保持原语义。完整规则见 `review_account/STRATEGY.md`。
+- **清仓后窗口指标**：回测结束后由 `service.run_review_account` 调用 `simulator.annotate_post_exit`（**不在 `AccountSimulator.run()` 内**，回测核心保持纯 as-of），对每条已平仓记录按 code 取一次日K计算 `post_exit_max_return` / `post_exit_max_drawdown` / `post_exit_window_days`，失败逐条降级为 NULL/0、不中断回测。窗口为清仓日**之后**的 5 根有效日K（停牌占位行不计入、不足按实际、无 bar 为 NULL/0 天），允许越出 `date_to`（事后评估）；最高盈利 =（窗口最高−卖出）/卖出×100，最大回撤 = min(0,（窗口最低−卖出）/卖出×100)。旧 run 不回溯，三列为 NULL。
+- **买点统计**：`evaluation.entry_reason_stats(positions, initial_cash)` 按 `BUY_SIGNAL_CODES` 四类（开盘回踩MA5/弱转强/分歧买龙/龙回头，0 笔也输出）+ 未知 code + 合计行，输出笔数/盈利笔数/胜率/平均每笔收益/累计贡献；胜率与 `_result()["win_rate"]` 同源（`realized_return > 0`）。累计贡献为近似值 `Σ(realized_return/100×entry_price×qty)/initial_cash×100`（忽略买入佣金）。`GET /api/account/positions` 返回 `{"data": [...], "stats": {...}}`（只增键），旧 run 也可实时聚合。
+- `/account` 前端：`AccountStats` 之后新增「买点统计」卡片；「单票收益汇总」新增「清仓5日内最高盈利」「清仓5日内最大回撤」两列（NULL 显示 `—`，窗口不足 5 根标注实际天数，表头提示可能含回测区间外数据）。
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。

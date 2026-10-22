@@ -4,26 +4,57 @@
 
 ## 1. 卖出规则链（顺序即优先级，命中即短路）
 
-`strategy.evaluate_sell` 实现为 9 条 `SellRule` 的有序责任链（`strategy.py` `_SELL_RULES`）。`late_only=True` 的规则仅在 `phase == "late"` 评估（等价于原 `if phase != late: return []` 的阶段门）。
+`strategy.evaluate_sell` 实现为 10 条 `SellRule` 的有序责任链（`strategy.py` `_SELL_RULES`）。`late_only=True` 的规则仅在 `phase == "late"` 评估（等价于原 `if phase != late: return []` 的阶段门）。
 
 | # | name | reason_code | late_only | 默认 | 触发 |
 |---|------|-------------|:---:|:---:|------|
-| 1 | `hard_stop` | first_day_stop_loss / hard_stop_loss | ✗ | 开 | 已完成 K 最低触及止损线（首日 -3.5%，此后 -5%） |
-| 2 | `trailing` | trailing_take_profit | ✗ | 开 | 峰值浮盈 ≥ 8% 后回撤 ≥ 3.5%（可分级/ATR 化），或 14:55 失守 MA5 |
-| 3 | `breakeven` | profit_back_to_cost_take_profit | ✗ | 开 | 峰值浮盈 ≥ 6% 后最低触及完整成本线 |
-| 4 | `high_open_clear` | high_open_7pct/5pct_no_limit_* | ✗ | 开 | 高开 ≥7%/5% 的 5/30 分钟窗口未封板 |
-| 5 | `soft_time_stop` | soft_time_stop | ✓ | **关** | 买入后 N 日未创新高且未脱离成本区（逻辑证伪） |
-| 6 | `weak_close` | next_day_close_below_open / close_below_open_stop / break_intraday_ma_stop | ✓ | 开 | 14:55 弱势（收<开且跌>1% 或破 MA5 或破昨收） |
-| 7 | `hard_time_stop` | hard_time_stop | ✓ | **关** | 持有达 `max_hold_days` 仍退出，封板豁免 |
-| 8 | `half` | next_day_limit_up_half | ✓ | 开 | 首个可卖日 14:55 仍封板 → 减半仓 |
-| 9 | `volume_spike` | volume_spike_take_profit | ✓ | 开 | 14:55 累计量 ≥ 上日全天 ×1.3 且未封板 |
+| 1 | `first_day_stop` | first_day_stop_half / first_day_disaster_stop | ✗ | **关** | 首日（`hold_days==1`）盘中浮亏达 -3.5% 先减半；灾难线（默认 0=关）优先整清 |
+| 2 | `hard_stop` | first_day_stop_loss / hard_stop_loss | ✗ | 开 | 已完成 K 最低触及止损线（首日 -3.5%，此后 -5%）；`first_day_stop` 开启时让位、只处理 `hold_days>=2` |
+| 3 | `trailing` | trailing_take_profit | ✗ | 开 | 峰值浮盈 ≥ 8% 后回撤 ≥ 3.5%（可分级/ATR 化），或 14:55 失守 MA5 |
+| 4 | `breakeven` | profit_back_to_cost_take_profit | ✗ | 开 | 峰值浮盈 ≥ 6% 后最低触及完整成本线 |
+| 5 | `high_open_clear` | high_open_7pct/5pct_no_limit_* | ✗ | 开 | 高开 ≥7%/5% 的 5/30 分钟窗口未封板 |
+| 6 | `soft_time_stop` | soft_time_stop | ✓ | **关** | 买入后 N 日未创新高且未脱离成本区（逻辑证伪） |
+| 7 | `weak_close` | next_day_close_below_open / close_below_open_stop / break_intraday_ma_stop | ✓ | 开 | 14:55 弱势（收<开且跌>1% 或破 MA5 或破昨收） |
+| 8 | `hard_time_stop` | hard_time_stop | ✓ | **关** | 持有达 `max_hold_days` 仍退出，封板豁免 |
+| 9 | `half` | next_day_limit_up_half | ✓ | 开 | 首个可卖日 14:55 仍封板 → 减半仓 |
+| 10 | `volume_spike` | volume_spike_take_profit | ✓ | 开 | 14:55 累计量 ≥ 上日全天 ×1.3 且未封板 |
 
 顺序要点：软时间止损（逻辑证伪）先于当日弱势；弱势先于硬时间止损（更具体归因）；硬时间止损封板豁免交由半仓规则。
+
+### 1.1 首日止损 `first_day_stop`（新增，默认关）
+
+方案：`docs/solutions/2026-10-22-first-day-stoploss-redesign.md`（D3「首日浮亏减半」）。
+
+- **触发**：仅 `hold_days == 1`。盘中 `bar_low` 触及 `first_day_stop_loss_pct`（默认 -3.5%）→ 卖出**一半**（`first_day_stop_half`）；剩余半仓从 T+2 起回到既有 -5% 硬止损 / 弱势 / 移动止盈。
+- **灾难线**：`first_day_disaster_stop_pct`（默认 `0` = 关闭，取值须 `<= first_day_stop_loss_pct`）。**灾难段优先且不带半仓守卫**——首次击穿即整仓退出，已减半后再次击穿则清掉剩余半仓（`first_day_disaster_stop`）。
+- **不变量**：首日止损由本规则负责；`hard_stop` 在规则开启时只处理 `hold_days >= 2`（让位判定收在 `StrategyConfig.first_day_stop_enabled()`，规则之间不互相读 toggle）。
+- **半仓腿唯一性**：`took_profit_half` 语义为「该信号已完成一条半仓腿（**不分盈亏**）」，`first_day_stop_half` 与 `next_day_limit_up_half` 共用 → 首日已减半的标的，次日即使封板也不再执行「次日涨停减半」；`half_exit_reason_code` 区分止盈减半与止损减半。
+- **成交价**：盘中 → 下一可执行价（跳空则开盘价）；日K兜底日 → 开盘价（若开盘已破线）或止损线/灾难线（与 `hard_stop_loss` 同一近似），**绝不补填不存在的价**。
+- **兜底日两腿**：兜底日只有 `open` / `late` 两帧，每帧最多产出一条腿且都在当日成交；`late` 帧减半会短路同帧 `weak_close`，剩余半仓留到 T+2（这是 D3 单笔尾部更差 -10.42% vs -8.43% 的来源之一）。灾难线在兜底日**无法提前退出**（不是真「盘中止损」）。
+- **跨日 pending**：跌停封死导致 SELL 无法成交时 pending 跨日保留，T+2 成交价与数量均按 **T+2 自己的行/持仓** 重算，不沿用 T+1 的止损线。
+- **风险预算口径**：`risk_per_trade_pct > 0` 时首日风险距离改用 `StrategyConfig.first_day_risk_distance_pct()` = `(half + (disaster or stop_loss_pct)) / 2` 的**保守上界**（开启后风险预算不再按单条 -3.5% 低估；默认关时逐分不变）。
+- **消融**：`first_day_stop=off`（默认，逐笔 = 旧基线）→ `on` + disaster=0（推荐起点，纯减半）→ `on` + disaster=-8/-6（加保险）。全部经 `sell_rule_toggles` / `--config` 表达，不改默认值。
+- **减半不等于更安全**：它只把**单次错杀成本**减半，剩余半仓仍暴露在 -5%~-10% 区间；风险优先应选确认式（方案 §2 D5，未落地，仅作消融记录）。
+- **实测（阶段 3，仅记录不改默认）**：全区间 2026-06-26→2026-10-22，基线 +23.53% / -14.22% / 27 笔 / 胜率 44.44%；D3 开启 +33.81% / -13.66% / 24 笔 / 胜率 54.17% / 最差 -10.42%。多区间不一致（06-20→08-14 支持，08-17→10-22 不支持），未达 `compare_strategies` 门槛，**默认保持关**。逐笔与多区间明细见方案 §12。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Held: T 日买入（T+0 不评估卖出）
+    Held --> HalfSold: T+1 盘中 low ≤ -3.5%，卖出半仓
+    Held --> HeldToT2: T+1 全天未击穿
+    HalfSold --> HalfSold: 同一信号只允许一条半仓腿
+    HalfSold --> DisasterHit: 剩余半仓 low ≤ disaster（仅灾难线开启）
+    HalfSold --> HoldRemainder: 收盘前未到灾难线
+    HoldRemainder --> [*]: T+2 起按 -5% 硬止损 / 弱势 / 移动止盈
+    HalfSold --> [*]: 剩余半仓由后续规则退出
+    HeldToT2 --> [*]: T+2 起按 -5% 硬止损 / 其它规则
+    DisasterHit --> [*]: 下一可执行价清掉剩余半仓
+```
 
 ## 2. 卖出规则开关（`sell_rule_toggles`）
 
 - `StrategyConfig.sell_rule_toggles: dict[str, bool]`，键为规则 `name`，值为是否启用。
-- **空 dict = 各规则默认值：存量规则（#1-#4/#6/#8/#9）开，新增规则（`soft_time_stop`/`hard_time_stop`）关**。
+- **空 dict = 各规则默认值：存量规则（#2-#5/#7/#9/#10）开，新增规则（`first_day_stop`/`soft_time_stop`/`hard_time_stop`）关**。
 - 显式键覆盖对应规则。消融实验通过关闭单条规则实现。
 - 未知键在 `StrategyConfig.from_dict` 校验期拒绝（`models.SELL_RULE_NAMES`）。
 
@@ -39,6 +70,12 @@
 | `soft_time_stop_days` / `soft_time_stop_floor_pct` | 0 / 0 | 软时间止损天数与「未脱离成本区」阈值 |
 | `tiered_trailing_enabled` + `trailing_tier2/3_*` | False | 分级移动止盈：浮盈 ≥15%→容忍 5%、≥25%→容忍 8% |
 | `dragon_comeback_*` | — | 龙回头/二波买点（`dragon_comeback_enabled=True` **默认开启**；显式 false 复现旧基线） |
+| `first_day_stop_loss_pct` | -3.5 | 首日止损线；D3 下是「盘中触发减半」的线（`first_day_stop` 开启时才生效） |
+| `first_day_disaster_stop_pct` | 0 | 首日灾难线（0=关闭）；非 0 时必须 `<= first_day_stop_loss_pct` **且须开启 `sell_rule_toggles["first_day_stop"]`**（否则静默失效，校验在 `StrategyConfig.from_dict` 直接报错） |
+
+`StrategyConfig` 新增两个首日止损真值方法（`strategy` 与 `execution` 共用，避免循环依赖，**不得反向 import strategy**）：
+`first_day_stop_enabled()`（读 `sell_rule_toggles["first_day_stop"]`）与 `first_day_risk_distance_pct()`（风险预算下单价口径）。
+`Position` **不加字段**：D3 复用既有 `took_profit_half` 作为半仓腿唯一性守卫（live 从 `buy_sell_signals` 重建，天然一致）。
 
 `AccountState` 新增：`realized_today`、`consecutive_losses`、`sentiment_pct`、`peak_equity`。
 
@@ -61,10 +98,14 @@
 | 组合熔断 `allow_buy` | engine 层 `RiskGovernor` | 生效 | **跟随**：`live_trade/shadow.py` 从信号表按回放时点重建影子状态并调用同一 `risk_governor`；日级熔断分母为影子净值（buy-all 敞口可超 100%），`equity<=0` 额外触发破产闸 |
 | 组合降仓 `delevel` | `buy_quantity` 的 `budget_scale` | 生效 | **不适用**：无 sizing，`streak_delevel` 行为 no-op（fired_gate 仍展示），`drawdown_delevel` 不触发 |
 | 保本线口径 | `break_even_price`（依赖 qty/cost） | 首仓 `buy_quantity(initial_cash, initial_cash)` | **跟随**：`notional_quantity` 同口径落库冻结 |
-| 半仓规则 | 共享 `_rule_half` + `apply_sell_fill` | `p.qty` 减半、`took_profit_half=True` | **跟随**：`half_close_signal` 冻结半仓腿，`status` 仍 open 供剩余半仓续跟踪 |
+| 半仓规则 | 共享 `_rule_half` + `apply_sell_fill` | `p.qty` 减半、`took_profit_half=True` | **跟随**：`half_close_signal` 冻结半仓腿，`status` 仍 open 供剩余半仓续跟踪；**同一信号仅一条半仓腿**（`next_day_limit_up_half` 与 `first_day_stop_half` 共用 `took_profit_half`，首日已减半则次日封板不再减半） |
+| 首日止损 `first_day_stop` | 共享 `evaluate_sell` 链首规则 + `sell_quantity` / `apply_sell_fill` | 半仓腿后剩余半仓 T+2 回归 -5% 硬止损 | **跟随**：partial 走 `half_close_signal`（`half_exit_reason_code=first_day_stop_half`）；影子状态按 `took_profit_half` 重建，不会重复减半 |
+| 首日风险距离 `first_day_risk_distance_pct()` | `buy_quantity` 风险预算 | 开启后按 `(half+tail)/2` 保守上界 | **跟随（间接）**：`SignalEngine` 无动态仓位，但买入数量经 `notional_quantity → buy_quantity` 落库冻结，故 `risk_per_trade_pct>0` 时实盘 qty 会继承本口径；`risk_per_trade_pct=0`（默认）时无影响 |
 | 数据分级 | engine 外部 `codes = candidates ∪ positions`；`data.historical_events` 按 code 三态判定（intraday / daily / suspended） | 生效 | **跟随**：buy/sell 均纳入并集；停牌 code 跳过并进 `degraded`/`suspended_codes` |
 
 `sentiment_pct` 装载点：`AccountSimulator.run`（回测）与 `LiveTrader._run_buy`（实盘）各自经共享 `load_market_sentiment` 读取 T-1 prep 快照；engine 只读 `state.sentiment_pct`。快照缺失/回退旧逻辑时显式降级为 sizing 1.0、禁买不生效（等效现状）。
+
+**运维契约（`first_day_stop` 开启后）**：`buy` 命令 `evaluate_sells=False`，只有 `sell` 评估卖出。T+1 **必须至少运行一次 `sell`**，否则首日止损窗口被静默错过（T+2 起只剩 -5% 硬止损）。该契约与「峰值新鲜度依赖每个交易日至少运行一次 buy/sell」同源。
 
 **停牌与不可用（`MarketEvent.unavailable`）**：仅对历史交易日（`day < today`）启用。当日日K缺行或 `volume`/`amount` 双零且无分时 → `suspended`：不进 `rows`、不评估买卖、复牌日自动恢复；停牌持仓按 `MarketEvent.last_closes` 保持上一交易日收盘估值（回测 marks 幂等，live 影子账户不回落成本价），且不更新峰值。剔除停牌 code 后再判断「是否全员有分时」：剩余可用 code 都有分时则走严格撮合，否则整日兜底。兜底日「分时可用但当日日K缺行」记 `daily_unavailable`（不建行，估值取当日最后一根5分钟K收盘）。停牌/不可用候选保留在 `candidates`，detail 在买窗闸门外每 code 每日产出一条（`reason_code=suspended|daily_unavailable`）。当日（盘中与收盘后）不做停牌分类，保持旧契约（缺当日日K硬报错）。
 

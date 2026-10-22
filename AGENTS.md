@@ -295,7 +295,7 @@ python -m dragon_quant review-account --ui-only --source v2
 - 卖出为 9 条 `SellRule` 责任链（`strategy.py` `_SELL_RULES`，顺序即优先级、命中短路，`late_only` 承载「phase!=late 即跳过」阶段门）：首个可卖日-3.5%/以后-5%止损 → 已有峰值8%后回撤3.5%移动止盈（可选分级/ATR 化）→ 已有峰值6%后完整成本保护 → 高开7%/5%的5/30分钟窗口 → 14:55弱势/MA5 → 次日涨停半仓 → 放量；新增 `soft_time_stop`（N日未创新高）与 `hard_time_stop`（持有超 `max_hold_days` 封板豁免）两条时间止损，默认关。`sell_rule_toggles` 逐条开关（空=存量开/新增关）供消融实验。15:00只估值与更新峰值，不以最终收盘价补成交。
 - 当天卖出后不买入；不因下午卖出而取消早上交易。默认每日最多买一次，仓位基线仍使用可用现金；共享配置可开启单票25%/风险1%、MA5距离/趋势、ATR移动止盈实验，未验证参数不自动推广。
 - `--config` JSON 原样传给共享 StrategyConfig；滑点0.2%、佣金0.03%、卖出印花税0.05%、每笔最低佣金5元。`evaluation.compare_strategies` 按60/20/20时间划分、最少交易数与双倍滑点验证，不自动换默认参数。
-- 择时与仓位改造（全部 default-off，向后兼容）：`sentiment_sizing_enabled`/`sentiment_ban_enabled` 消费盘后复盘快照 `sentiment.position_pct`（情绪→仓位→禁买；历史快照为补跑时点近似，以前向验证为主）；`risk.py` 组合风控（日级熔断/净值回撤降仓/连续亏损降仓）；`entry_veto` 为**当前无调用方的通用前置买入否决钩子**（默认放行）；竞价否决实现在 `evaluate_buy` 信号后置闸门（`reason_code=auction_veto`，可按买点豁免、detail 带 `vetoed_signal` 供影子统计）；龙回头买点 `dragon_comeback_enabled`；验证基建 `plateau_scan`/`ablation`/`drawdown_decomposition`/`trial_count`。分叉声明见 `review_account/STRATEGY.md`。
+- 择时与仓位改造（除龙回头默认开启外，其余 default-off，向后兼容）：`sentiment_sizing_enabled`/`sentiment_ban_enabled` 消费盘后复盘快照 `sentiment.position_pct`（情绪→仓位→禁买；历史快照为补跑时点近似，以前向验证为主）；`risk.py` 组合风控（日级熔断/净值回撤降仓/连续亏损降仓）；`entry_veto` 为**当前无调用方的通用前置买入否决钩子**（默认放行）；竞价否决实现在 `evaluate_buy` 信号后置闸门（`reason_code=auction_veto`，可按买点豁免、detail 带 `vetoed_signal` 供影子统计）；龙回头买点 `dragon_comeback_enabled`（**默认开启**；显式 `false` 可复现旧基线，默认开启后历史回测结果不可直接与旧基线比较）；验证基建 `plateau_scan`/`ablation`/`drawdown_decomposition`/`trial_count`。分叉声明见 `review_account/STRATEGY.md`。
 - 数据分级：当日所有相关个股都有完整48根5分钟K → 严格盘中撮合；任一缺失 → 整日**日K兜底**（开盘价买、当日OHLC判卖，分时相关规则自然跳过），因雪球5分钟仅约14天，多月回测常见。日K本身缺失/预热不足/无效OHLC仍报 DataCoverageError，不持久化部分结果。兜底成交价保守近似，结果标 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。行情按日期/周期/不复权口径隔离缓存；SH000001用于交易日历，个股000001仍是平安银行。
 - `/account` 生成/删除和历史批次查询保持不变；API可传 `strategy_params`，快照增量补 `positions_json` 存全部持仓（查询返回 `positions`），旧数据仍可读取；已平仓表保持原语义。完整规则见 `review_account/STRATEGY.md`。
 
@@ -305,12 +305,14 @@ python -m dragon_quant review-account --ui-only --source v2
 ### 实盘辅助交易（buy / sell）
 ```bash
 python -m dragon_quant buy --date 20260907 --at 10:00
+python -m dragon_quant buy --json        # 完整 JSON（details[].checks 含四类买点诊断）
 python -m dragon_quant sell --date 20260908 --at 14:55
 python -m dragon_quant buy --force      # 非交易时段强制跑当日回放（09:30 前仍拒绝）
 python -m dragon_quant sell --force
 ```
 `buy/sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数（`evaluate_buy`/`evaluate_sell`/`fill_price`/`fee`/`apply_sell_fill`/`track_peak` 等），只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从 `buy_sell_signals` 筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。`buy` 与 `review-account` 共用 P/A 三值排序与否决；输出 `ranking_mode`（`auction`/`auction_unverified`/`prep_only`/`legacy`）、`fallback_reason`，被否决但本可买入的标的在 `details` 中带 `vetoed_signal`。
 
+- **四类买点诊断（checks）**：`buy` 对每个候选（买入与未买入）逐条输出 ① 开盘回踩MA5 / ② 弱转强 / ③ 分歧买龙 / ④ 龙回头 的状态与带数值原因；同一 code 只输出一次，取最后一条带 checks 的 detail（买入标的的命中买点用 `buys[].reason_code` 回填）。状态枚举 `passed`/`failed`/`pending`/`window_closed`/`unavailable`/`skipped`：09:30 的 ②③ 为 `pending`，窗口已过未通过为 `window_closed`，日K兜底 ②③ 为 `unavailable`，情绪禁买/综合分不足/非真龙为 `skipped`（不伪造失败）。决策与诊断共用 `strategy._rule_*`（阈值只有一份）；`checks` 为 detail 的只增字段，不写入 `buy_sell_signals`。`buy --json` 的 `details[].checks` 每项含 `rule`/`label`/`window`/`status`/`selected`/`reason`，detail 另带 `observed_at`/`phase`。风控/已卖出导致买点未评估时，输出 `buy_eval_skipped` + 四条 `skipped`；买点命中但未成交（不可成交价/超时/预算不足/回放结束）仍展示四类并标 `selected`。
 - `SignalEngine`（`live_trade/signal_engine.py`）复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/仓位/次数限制；卖出数量用 `notional_quantity`（`initial_cash × max_position_pct`，与回测首仓同口径）落库冻结，保证 `break_even_price` 与回测精确一致；买入不足一手时与回测一样不建仓。卖出/半仓的仓位记账经共享 `apply_sell_fill`，峰值经共享 `track_peak`，两引擎不复制规则。
 - **半仓记账**：`next_day_limit_up_half` 触发时 `half_close_signal` 冻结 `half_exit_qty/price/reason_*` 且保持 `status='open'`，剩余半仓继续跟踪；后续规则可再次触发 `close_signal` 全清。
 - **影子风控**：`live_trade/shadow.py` 从 `buy_sell_signals` 全量记录按回放时点（`as_of=target`）重建 `AccountState`，逐事件调用同一 `risk_governor`；日级熔断/连亏熔断跟随，`equity<=0` 额外触发破产闸；delevel 降仓在无 sizing 场景不适用。`build_shadow_state` 的 `cash` 是净值轧差项（不是现金主张），run 内买入同步扣减。

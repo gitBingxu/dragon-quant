@@ -964,13 +964,23 @@ def _cmd_auction(args):
 def _cmd_buy(args):
     """执行当前时点的买入信号（纯信号记账，非模拟账户）。"""
     from dragon_quant.live_trade import run_buy
-    trade_date = _resolve_trade_date(args.date)
+    as_json = getattr(args, "json", False)
+    raw_date = getattr(args, "date", None)
+    trade_date = raw_date
     try:
-        run_buy(trade_date, source=args.source, verbose=True,
-                as_of=args.at, strategy_params=_strategy_params(args.config),
-                force=getattr(args, "force", False))
+        trade_date = _resolve_trade_date(raw_date)
+        result = run_buy(trade_date, source=args.source, verbose=not as_json,
+                         as_of=args.at, strategy_params=_strategy_params(args.config),
+                         force=getattr(args, "force", False))
+        if as_json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
     except ValueError as e:
-        print(f"⏸ 暂不执行买入：{e}", file=sys.stderr)
+        if as_json:
+            print(json.dumps({"ok": False, "mode": "buy",
+                              "trade_date": trade_date or _resolve_trade_date(None),
+                              "error": str(e)}, ensure_ascii=False, indent=2))
+        else:
+            print(f"⏸ 暂不执行买入：{e}", file=sys.stderr)
         sys.exit(1)
 
 

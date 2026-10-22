@@ -7,7 +7,9 @@ from dragon_quant.review_account.models import (
 )
 from dragon_quant.review_account.priority import TRI_LABELS, key_components, rank_key
 from dragon_quant.review_account.risk import risk_governor
-from dragon_quant.review_account.strategy import evaluate_sell, explain_buy_candidate
+from dragon_quant.review_account.strategy import (
+    evaluate_sell, explain_buy_candidate, explain_buy_checks,
+)
 
 
 class TradingEngine:
@@ -90,12 +92,20 @@ class TradingEngine:
                 signals = []
                 held = {p.code for p in state.positions}
                 for cand in event.candidates:
-                    if cand["code"] in held:
-                        result["details"].append({"code": cand["code"], "name": cand.get("name", ""),
-                                                  "passed": False, "rank": cand.get("rank"),
-                                                  "reason_code": "already_holding", "reason_text": "已持仓"})
-                        continue
                     row = event.rows.get(cand["code"])
+                    if cand["code"] in held:
+                        checks = (explain_buy_checks(
+                            cand, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+                            row.get("intraday_bars")) if row else [])
+                        result["details"].append({
+                            "code": cand["code"], "name": cand.get("name", ""),
+                            "passed": False, "rank": cand.get("rank"),
+                            "reason_code": "already_holding", "reason_text": "已持仓",
+                            "signal": {}, "full_signal": None,
+                            "observed_at": row.get("observed_at") if row else None,
+                            "phase": row.get("phase") if row else None,
+                            "checks": checks})
+                        continue
                     key = f"buy:{cand['code']}"
                     if row and state.evaluated.get(key, 0) >= row["bar_timestamp"]:
                         continue
@@ -115,7 +125,9 @@ class TradingEngine:
                     state.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))
                     for position, (other_sig, other) in enumerate(signals[1:], start=2):
                         result["details"].append(
-                            self._ranked_out_detail(other, other_sig, position, cfg))
+                            self._ranked_out_detail(
+                                other, other_sig, position, cfg,
+                                row=event.rows.get(other["code"])))
             elif (buy_window and state.buys_today >= cfg.max_daily_buys
                     and len(state.positions) < cfg.max_positions):
                 # 当日买入次数已满：只记一次，避免在每个后续事件重复追加。
@@ -126,9 +138,15 @@ class TradingEngine:
                     for cand in event.candidates:
                         if cand["code"] in held:
                             continue
+                        row = event.rows.get(cand["code"])
+                        checks = (explain_buy_checks(
+                            cand, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+                            row.get("intraday_bars")) if row else [])
                         result["details"].append(
-                            self._unsignaled_detail(cand, "daily_buy_limit",
-                                                    f"当日买入次数已达上限 {cfg.max_daily_buys}", cfg))
+                            self._unsignaled_detail(
+                                cand, "daily_buy_limit",
+                                f"当日买入次数已达上限 {cfg.max_daily_buys}", cfg,
+                                row=row, checks=checks))
         state.last_event = event.timestamp
         result["pending"] = list(state.pending)
         if state.pending:
@@ -141,12 +159,16 @@ class TradingEngine:
                 "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
 
     @staticmethod
-    def _detail_base(candidate, cfg, reason_code, reason_text, signal=None):
+    def _detail_base(candidate, cfg, reason_code, reason_text, signal=None,
+                     row=None, checks=None):
         detail = {
             "code": candidate.get("code"), "name": candidate.get("name", ""),
             "rank": candidate.get("rank"), "passed": False,
             "reason_code": reason_code, "reason_text": reason_text,
             "signal": {}, "full_signal": None,
+            "observed_at": row.get("observed_at") if row else None,
+            "phase": row.get("phase") if row else None,
+            "checks": checks or [],
             "entry_priority": candidate.get("entry_priority") or {},
             "priority_key": key_components(signal or {}, candidate,
                                            cfg.auction_ranking_enabled),
@@ -157,19 +179,24 @@ class TradingEngine:
         return detail
 
     @classmethod
-    def _ranked_out_detail(cls, candidate, signal, position, cfg):
+    def _ranked_out_detail(cls, candidate, signal, position, cfg, row=None):
         entry = candidate.get("entry_priority") or {}
         a_state = (entry.get("auction") or {}).get("state")
         p_state = (entry.get("prep") or {}).get("state")
+        checks = (explain_buy_checks(
+            candidate, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+            row.get("intraday_bars"), selected_rule=signal.get("code")) if row else [])
         return cls._detail_base(
             candidate, cfg, "ranked_out",
             f"排序第 {position}（A={TRI_LABELS.get(a_state, '未知')}, "
             f"P={TRI_LABELS.get(p_state, '未知')}），当日最多买入 {cfg.max_daily_buys} 只，未入选",
-            signal=signal)
+            signal=signal, row=row, checks=checks)
 
     @classmethod
-    def _unsignaled_detail(cls, candidate, reason_code, reason_text, cfg):
-        return cls._detail_base(candidate, cfg, reason_code, reason_text)
+    def _unsignaled_detail(cls, candidate, reason_code, reason_text, cfg,
+                           row=None, checks=None):
+        return cls._detail_base(candidate, cfg, reason_code, reason_text,
+                                row=row, checks=checks)
 
     def _equity(self) -> float:
         return self.state.cash + sum(p.qty * self.state.marks.get(p.code, p.entry_price)

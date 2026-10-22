@@ -113,14 +113,24 @@ class LiveTrader:
                               sentiment_pct=sentiment, account=shadow, evaluate_sells=False)
         buys, details = [], []
         quality = "strict_5min"
+        last_rows = {}
         for event in historical_events(day, candidates, codes, self.data, until=until):
             if event.timestamp > cutoff:
                 break
             event.allow_buy = True
             quality = self._quality(event.rows, quality)
+            last_rows = event.rows
             result = engine.step(event)
             buys.extend(result["buys"])
             details.extend(result["details"])
+        # 回放结束时仍未成交的 pending BUY：保留「命中但未成交」诊断（--force 截断常见）。
+        for order in engine.pending:
+            if order["side"] != "BUY":
+                continue
+            row = last_rows.get(order["stock_code"])
+            if row:
+                details.append(SignalEngine._unfilled_detail(
+                    order, row, "buy_pending_unfilled", "买点命中但回放结束时仍未成交"))
         if forced:
             # 强制模式落库可追溯：复用既有 entry_signal_json，无 schema 变更。
             for b in buys:
@@ -136,10 +146,12 @@ class LiveTrader:
         for p in engine.positions:
             if p.code not in skipped_peaks:
                 db.update_signal_peaks(p.code, p.highest_return, p.highest_price)
-        return {"action": "buy" if buys else "idle", "buys": buys, "details": details,
+        return {"ok": True, "mode": "buy",
+                "action": "buy" if buys else "idle", "buys": buys, "details": details,
                 "sentiment_pct": sentiment, "data_quality": quality,
                 "degraded": degraded + list(ctx.get("degraded") or []),
                 "fired_gate": engine.fired_gate,
+                "buy_eval_skipped": list(engine.buy_eval_skipped),
                 "ranking_mode": ctx["ranking_mode"],
                 "pool_source": ctx["pool_source"],
                 "fallback_reason": ctx["fallback_reason"],

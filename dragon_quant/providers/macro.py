@@ -1,6 +1,6 @@
 """宏观扰动数据源门面：日经225期指 / 富时A50期指 / 美债 10Y / 黄金。
 
-设计（见 docs/solutions/2026-10-21-prep-macro-jp-a50-design.md）：
+设计（见 archived_md/prep/2026-10-21-prep-macro-jp-a50-design.md）：
 
 - ``MacroSpec`` 声明每个品种的**取值口径**与每品种源优先级（priority）。
   - ``same_day_close=True``：取日 K 中日期 ``<= trade_date`` 的最后一根（同日收盘，

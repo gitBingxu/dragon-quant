@@ -388,7 +388,7 @@ python -m dragon_quant assets verify [--from D --to D | --samples N] [--deep] [-
 - 进程锁：`<DQ_DATA_DIR>/assets_sync.lock`（并发 push/restore 第二个进程退出码 1）。退出码：0 成功/无差异、1 部分失败/收缩被拒/冲突、2 配置/网络/manifest 不可读/参数错误。
 - 凭据：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），`default_profile + profiles{r2,b2}`；环境变量 `DQ_ASSETS_*` 只覆盖当前 profile。凭据不进入仓库、日志、manifest、state。
 - 当前里程碑：M1 `doctor`、M2 数据层、M3 同步层、M4 CLI 已完成；**M5（launchd / `assets_daily.sh` / 门槛 B）待做**。门槛 A 的 R2 通道已实测通过，B2 profile 未配置（v1 以 R2 为主通道，B2 待补验）。
-- 方案与风险记录：`docs/solutions/2026-10-18-assets-cloud-sync-design.md`、`docs/solutions/2026-10-22-assets-sync-m2-m4-implementation.md`、`docs/research/2026-10-18-assets-cloud-storage.md`、`docs/research/2026-10-22-assets-sync-m2-m4-reality-check.md`；配置样例 `docs/assets_sync.example.json`。
+- 方案与风险记录：`docs/solutions/2026-10-18-assets-cloud-sync-design.md`（M5 待做，未归档）、`archived_md/assets_sync/2026-10-22-assets-sync-m2-m4-implementation.md`、`archived_md/assets_sync/2026-10-18-assets-cloud-storage.md`、`archived_md/assets_sync/2026-10-22-assets-sync-m2-m4-reality-check.md`；配置样例 `docs/assets_sync.example.json`。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：

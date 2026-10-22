@@ -1,6 +1,6 @@
 """近三日龙头的逐只参与判定（纯函数 + 有序规则链）。
 
-设计（见 docs/solutions/2026-10-20-prep-macro-candidate-verdict-design.md）：
+设计（见 archived_md/prep/2026-10-20-prep-macro-candidate-verdict-design.md）：
 
 - ``compute_candidates`` 为每只候选写 ``cand["facts"]``（今日池/资金/公告事实）；
   本模块只读 facts，不猜缺失的顶层字段。

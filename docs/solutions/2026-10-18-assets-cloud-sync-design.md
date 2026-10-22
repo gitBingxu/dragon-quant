@@ -708,7 +708,7 @@ dragon-quant assets doctor [--profile NAME] [--samples 50]
 
 ### 实现偏离（相对本设计 v3）
 
-完整说明见 `docs/solutions/2026-10-22-assets-sync-m2-m4-implementation.md` §11。摘要：
+完整说明见 `archived_md/assets_sync/2026-10-22-assets-sync-m2-m4-implementation.md` §11。摘要：
 
 | 编号 | 偏离 | 原因 |
 |---|---|---|

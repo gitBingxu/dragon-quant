@@ -1,6 +1,6 @@
 """P/A 优先级：三值语义、排序键与否决的唯一来源。
 
-设计约束（见 docs/solutions/2026-10-21-auction-prep-buy-priority-design.md）：
+设计约束（见 archived_md/auction/2026-10-21-auction-prep-buy-priority-design.md）：
 
 - 三值统一为 ``True`` / ``False`` / ``None(Unknown)``，排序序为 True < Unknown < False；
 - ``prep_state`` 只把 strong/light 视为 True，ignore/unrated 视为 False，其余（旧快照缺

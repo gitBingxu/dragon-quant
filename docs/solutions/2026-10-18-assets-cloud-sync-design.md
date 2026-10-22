@@ -690,3 +690,45 @@ dragon-quant assets doctor [--profile NAME] [--samples 50]
 4. **M3 同步层**：每日 manifest（覆盖写）、manifest_id、state 增量、push/pull/status/verify + 故障注入集成测试。
 5. **M4 CLI 与凭据**：`assets` 子命令、日期规范化、配置样例、脱敏、退出码。
 6. **M5 调度与文档**：launchd plist、`assets_daily.sh`、`AGENTS.md`/`README.md`、门槛 B 记录。
+
+---
+
+## 15. 实现状态与偏离（M2-M4，2026-10-22）
+
+### 里程碑状态
+
+| 里程碑 | 状态 | 说明 |
+|---|---|---|
+| M1 基础与连通性 | 完成 | `codec` / `signer` / `S3Backend` / `LocalDirBackend` / `doctor` |
+| M1.5 门槛 A | **R2 通过；B2 未验证** | 2026-10-22 `assets doctor --profile r2 --samples 3`：`ok=true`、`metadata_roundtrip=true`、`success_rate=1.0`、`errors=[]`；`load_config(profile="b2")` 返回「profile 不存在或为空」，B2 凭据未配置，v1 以 R2 为主通道（需用户豁免） |
+| M2 数据层 | 完成 | `sources.py` + `assets_db` 导出/水位/恢复事务 |
+| M3 同步层 | 完成 | `manifest.py` / `state.py` / `service.py` + 故障注入集成测试 |
+| M4 CLI | 完成 | `assets push/pull/status/verify` + 日期校验 + 退出码 + 配置样例 |
+| M5 调度与文档 | 未开始 | launchd / `assets_daily.sh` / 门槛 B 记录 |
+
+### 实现偏离（相对本设计 v3）
+
+完整说明见 `docs/solutions/2026-10-22-assets-sync-m2-m4-implementation.md` §11。摘要：
+
+| 编号 | 偏离 | 原因 |
+|---|---|---|
+| D1 | auction payload 增加 `quote`；逐 code `created_at` 放 manifest `created_at_map` | `quote_json` 不可再生；采集时间不能进入内容身份 |
+| D2 | restore 新插入行还原源端 `created_at`；AC3 比对口径为「解析语义 + 内容 sha256」 | 任务 AC3；已存在行仍保留本地时间 |
+| D3 | pull 新增 `--target-dir` | AC3 的隔离恢复与 `--to <DATE>` 日期语义冲突 |
+| D4 | `watermarks()` / 按日期 `local_index()`；注册表改 `build_sources(db_path)` 工厂 | 调用期路径注入，支持隔离恢复 |
+| D5 | `read_date()` 返回 `ShardBatch(shards, failed)` | 落实「单分片失败、该日不写 manifest」；源级异常直接抛 |
+| D6 | state `<DQ_DATA_DIR>/assets_sync/state.json`；锁 `<DQ_DATA_DIR>/assets_sync.lock` | 设计未固定路径 |
+| D7 | prep / auction 在 `assets.db` 内**各自独立事务** | 2026-10-20 存储层重构后两表同库 |
+| D8 | auction `items_error` / `quote_error` 判为分片失败 | 存储层逐行隔离会回落空 payload，必须拦截 |
+| D9 | manifest 扩展 `created_at` / `created_at_map`；解析期校验 blob 指针 | AC3 需要；默认 verify 覆盖指针篡改 |
+| D10 | 仅采集时间变化时重写 manifest body（0 blob PUT） | 兼顾 AC1 与 AC3 |
+| D11 | pull 永不读/写 state | 隔离恢复写主 state 会污染 push 水位 |
+| D12 | 水位 token 含 `max_created_at/row_count/bytes` | 降低同秒重采漏检 |
+| D13 | 整日缺失用「state 曾推送日期 − 本地日期」检测；`--all` 仍只扫本地日期 | 避免把「本地是远端子集」误判为失败（保持调研 I6） |
+| D14 | service 统一返回 dict + `fatal` 判据 | 消除两套报告形状与退出码歧义 |
+
+### 验证证据（2026-10-22）
+
+- 全量单测：`.venv/bin/python -m pytest tests/ -x -q` → **1040 passed, 14 subtests passed**（2026-10-22，含代码审查修复后的最终实测）。
+- 真实 R2（只读）：`assets push --dry-run --profile r2` → 3 个日期（2026-10-20/21/22）、分片 9/10/9，0 上传；`assets status --profile r2` → 正确报告 3 个 `remote_missing`（桶为空）。
+- 真实上传 / 下载冒烟留待 main 终审执行（按要求不在测试中打真实 R2）。

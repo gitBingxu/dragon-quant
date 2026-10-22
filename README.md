@@ -196,14 +196,40 @@ dragon-quant auction --json                 # 输出完整 JSON（默认人读�
 ### `assets` — 数据资产云端同步
 
 ```bash
+# 连通性门槛（PUT/HEAD/GET/LIST/DELETE + 元数据回环）
 dragon-quant assets doctor --profile r2 --samples 50
+
+# 推送（默认增量：state 水位 + manifest-id 一致即跳过，无变化零上传）
+dragon-quant assets push
+dragon-quant assets push --from 20261020 --to 20261022
+dragon-quant assets push --dry-run            # 只输出计划，不写远端
+dragon-quant assets push --all                # 忽略水位，重算全部本地日期
+dragon-quant assets push --allow-shrink       # 允许新 manifest 成为远端严格子集
+
+# 拉取（默认 dry-run；--apply 下载 + 校验 + 落库）
+dragon-quant assets pull --from 20261020 --to 20261022
+dragon-quant assets pull --from 20261020 --to 20261022 --apply
+dragon-quant assets pull --from 20261020 --to 20261022 --apply --force
+dragon-quant assets pull --from 20261020 --to 20261022 --apply --target-dir /tmp/restore
+
+# 差异与校验
+dragon-quant assets status
+dragon-quant assets status --orphans
+dragon-quant assets verify --from 20261020 --to 20261022
+dragon-quant assets verify --deep --samples 20
 ```
 
-把 `prep` / `auction` 产出的原始数据资产备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选），本地始终是权威副本。当前版本提供 `doctor`（门槛 A：PUT / HEAD / GET / LIST / DELETE + 元数据回环）；`push` / `pull` / `status` / `verify` 在后续里程碑提供。
-
-凭据文件：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），结构为 `default_profile + profiles{r2,b2}`；也可用 `DQ_ASSETS_*` 环境变量覆盖当前 profile。
-
-云端布局：`blobs/<date>/<source>_<type>.<sha256>.json.gz` + `manifests/<date>.json`。设计依据见 `docs/solutions/2026-10-18-assets-cloud-sync-design.md`。
+- 上传单元：`prep_assets`（按 `trade_date + asset_type`）与 `auction_assets`（按日聚合，含 `quote_json`）；`prep_snapshots` / `auction_snapshots` 不同步。
+- 云端布局：`blobs/<date>/<source>_<type>.<sha256>.json.gz` + `manifests/<date>.json`（每日覆盖写）。
+- 幂等：`state.json` 水位 + `x-amz-meta-manifest-id` 一致 → 零远端 PUT；仅采集时间变化时只重写 manifest（0 blob PUT）。
+- 恢复：默认只补本地缺失，哈希不一致只报告；`--force` 才覆盖（本地权威）。`created_at` 在新插入行还原，已存在行保留本地时间；auction 的 `quote_json` 在远端为 `null` 时不会被抹掉。
+- 校验：`verify` 的 `--from/--to` 必须成对（单边退出码 2）；`--deep` 才下载校验 blob。`status --orphans` 在远端 manifest 缺失的日期把 `orphan_blobs` 置 `null` 并附 `orphan_reason`。
+- `--target-dir DIR` 恢复到隔离目录（`DIR/assets.db`），不读写主 `state.json`。
+- 进程锁：`<DQ_DATA_DIR>/assets_sync.lock`；并发 push/restore 的第二个进程退出码 1。
+- 退出码：`0` 成功/无差异；`1` 部分失败、收缩被拒、pull 冲突；`2` 配置/网络/manifest 不可读/参数错误。
+- 配置样例：`docs/assets_sync.example.json`（占位符，凭据建议用 `${ENV}` 注入）。
+- 凭据文件：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），结构为 `default_profile + profiles{r2,b2}`；也可用 `DQ_ASSETS_*` 环境变量覆盖当前 profile。凭据不进入仓库、日志、manifest 或 state。
+- 当前里程碑：M2 数据层 / M3 同步层 / M4 CLI 已完成；M5（launchd / `assets_daily.sh` / 门槛 B）待做。B2 通道尚未验证，v1 以 R2 为主通道。
 
 ### `review` — 龙头回测
 
@@ -389,7 +415,7 @@ dragon_quant/
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
 ├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/shadow/trader/service，复用 review_account 策略）
-├── assets_sync/          # 数据资产云端同步（codec/models/credentials/doctor/backends）
+├── assets_sync/          # 数据资产云端同步（codec/models/credentials/doctor/sources/manifest/state/service/backends）
 ├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
 └── models/types.py      # 数据模型
 ```

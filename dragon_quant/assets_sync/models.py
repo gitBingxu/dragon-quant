@@ -16,6 +16,9 @@ class AssetShard:
     sha256: str
     md5: str
     schema: int = 1
+    # 采集时间只作旁路传输，绝不进入 sha256 / manifest_id。
+    created_at: str = ""
+    created_at_map: dict = field(default_factory=dict)   # auction: code -> created_at
 
     @property
     def key_token(self) -> str:
@@ -35,9 +38,11 @@ class ManifestEntry:
     blob_sha256: str
     blob_size: int
     schema: int = 1
+    created_at: str = ""
+    created_at_map: dict = field(default_factory=dict)
 
     def identity(self) -> dict:
-        """参与 manifest_id 计算的逻辑身份字段。"""
+        """参与 manifest_id 计算的逻辑身份字段（不含采集时间）。"""
         return {
             "source": self.source,
             "asset_type": self.asset_type,
@@ -75,20 +80,37 @@ class ObjectMeta:
     metadata: dict[str, str] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class SyncReport:
     pushed: int = 0
     skipped: int = 0
-    shrunk: list[dict] = field(default_factory=list)
-    failed: list[dict] = field(default_factory=list)
+    shrunk: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
     bytes_uploaded: int = 0
+    blobs_uploaded: int = 0
+    manifests_uploaded: int = 0
+    dates: list = field(default_factory=list)
+    dry_run: bool = False
+    metadata_supported: bool = True
+    local_empty_remote_present: list = field(default_factory=list)
 
 
-@dataclass(frozen=True)
+@dataclass
 class RestoreReport:
     restored: int = 0
     skipped: int = 0
-    conflicts: list[dict] = field(default_factory=list)
-    failed: list[dict] = field(default_factory=list)
+    conflicts: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
     manifest_source: str = "remote"   # remote / rebuilt
     degraded: bool = False
+    dates: list = field(default_factory=list)
+    bytes_downloaded: int = 0
+    unsupported: list = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ShardBatch:
+    """单日读取结果：成功分片 + 逐分片失败（源级异常直接抛）。"""
+
+    shards: list
+    failed: list = field(default_factory=list)

@@ -76,6 +76,11 @@ python -m dragon_quant auction --recompute 20260519
 
 # 数据资产云端同步（门槛 A：R2/B2 连通性与元数据回环）
 python -m dragon_quant assets doctor --profile r2 --samples 50
+# 推送 / 拉取 / 差异 / 校验
+python -m dragon_quant assets push
+python -m dragon_quant assets pull --from 20261020 --to 20261022 --apply
+python -m dragon_quant assets status
+python -m dragon_quant assets verify --from 20261020 --to 20261022 --deep
 ```
 
 ### 前置条件
@@ -368,13 +373,22 @@ python -m dragon_quant prep --json                        # 完整复盘 JSON（
 ### 数据资产云端同步（`assets`）
 ```bash
 python -m dragon_quant assets doctor --profile r2 --samples 50
+python -m dragon_quant assets push [--from D] [--to D] [--all] [--dry-run] [--allow-shrink]
+python -m dragon_quant assets pull --from D --to D [--apply] [--force] [--pick latest] [--target-dir DIR]
+python -m dragon_quant assets status [--all] [--orphans]
+python -m dragon_quant assets verify [--from D --to D | --samples N] [--deep] [--md5]
 ```
-- 目标：把 `assets.db/prep_assets` 与 `assets.db/auction_assets` 的**原始数据资产**备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选）；算法快照、行情缓存、Cookie 不同步。旧 `prep.db` 与 dragon.db 遗留竞价表不自动纳入备份（需先按 README 手工迁移）。
+- 目标：把 `assets.db/prep_assets` 与 `assets.db/auction_assets` 的**原始数据资产**备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选）；`prep_snapshots` / `auction_snapshots`、行情缓存、Cookie 不同步。旧 `prep.db` 与 dragon.db 遗留竞价表不自动纳入备份（需先按 README 手工迁移）。
+- **status / verify**：`status` 逐日比较本地与云端；`verify` 默认以 HEAD `manifest-id` 为锚点 + body 自洽校验，`--deep` 下载解压校验 blob；`--samples` 抽样。**verify 的 `--from/--to` 必须成对**（单边退出码 2）。`status --orphans` 在远端 manifest 缺失的日期把 `orphan_blobs` 置 `null` 并附 `orphan_reason={reason:"manifest_missing",dates:[...]}`。
 - 本地是权威副本；云端只作异地备份。资产不可再生（`same_day_only` 与 `auction` 仅当日可取）。
-- 云端布局：`blobs/<date>/<source>_<type>.<content_sha256>.json.gz` + `manifests/<date>.json`（每日一份，重采覆盖）。哈希身份用**未压缩规范化 JSON** 的 sha256/md5，压缩字节另算传输哈希。
-- 凭据：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），`default_profile + profiles{r2,b2}`；环境变量 `DQ_ASSETS_*` 只覆盖当前 profile。
-- 当前里程碑：M1 提供 `doctor`（门槛 A：PUT/GET/HEAD/LIST/DELETE + 元数据回环）；`push` / `pull` / `status` / `verify` 在 M2-M4 提供。门槛 A 未通过前不得进入 M2。
-- 方案与风险记录：`docs/solutions/2026-10-18-assets-cloud-sync-design.md`、`docs/research/2026-10-18-assets-cloud-storage.md`。
+- 云端布局：`blobs/<date>/<source>_<type>.<content_sha256>.json.gz` + `manifests/<date>.json`（每日一份，重采覆盖）。哈希身份用**未压缩规范化 JSON** 的 sha256/md5，压缩字节另算传输哈希；`created_at` / `created_at_map` 是旁路字段，**不进入 manifest_id**。
+- 上传单元：prep 按 `(trade_date, asset_type)`；auction 按日聚合为 `{trade_date, items:[{code,name,items,quote}]}`（`quote` 来自 `quote_json`，不可再生）。
+- **push 幂等**：`state.json` 水位（`max(created_at)|行数|字节数`）+ `x-amz-meta-manifest-id` 一致 → 零远端 PUT；仅采集时间变化 → 只重写 manifest（0 blob PUT）；严格子集需 `--allow-shrink`；本地整日丢失（state 曾记录）报 `local_empty_remote_present`。
+- **pull 恢复**：默认 dry-run；`--apply` 全量下载并校验后才写库；默认只补缺失，哈希不一致报告冲突，`--force` 才覆盖。新插入行还原源端 `created_at`，已存在行保留本地时间；auction `quote_json` 远端为 `null` 时不会被抹掉（`COALESCE`）。`--target-dir` 写入 `<DIR>/assets.db`，不读写主 state。
+- 进程锁：`<DQ_DATA_DIR>/assets_sync.lock`（并发 push/restore 第二个进程退出码 1）。退出码：0 成功/无差异、1 部分失败/收缩被拒/冲突、2 配置/网络/manifest 不可读/参数错误。
+- 凭据：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），`default_profile + profiles{r2,b2}`；环境变量 `DQ_ASSETS_*` 只覆盖当前 profile。凭据不进入仓库、日志、manifest、state。
+- 当前里程碑：M1 `doctor`、M2 数据层、M3 同步层、M4 CLI 已完成；**M5（launchd / `assets_daily.sh` / 门槛 B）待做**。门槛 A 的 R2 通道已实测通过，B2 profile 未配置（v1 以 R2 为主通道，B2 待补验）。
+- 方案与风险记录：`docs/solutions/2026-10-18-assets-cloud-sync-design.md`、`docs/solutions/2026-10-22-assets-sync-m2-m4-implementation.md`、`docs/research/2026-10-18-assets-cloud-storage.md`、`docs/research/2026-10-22-assets-sync-m2-m4-reality-check.md`；配置样例 `docs/assets_sync.example.json`。
 
 ### 评分器接口约定
 评分器统一签名，是 **cache 消费者**（只读 `cache.get(key)`，不发请求）：
@@ -421,6 +435,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 - 五维「识别真龙」评分器 `scorers/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
 - 集合竞价强度评分器 `auction/`（方向/供需/量价/末段抢筹四维加权 + 否决闸门，纯函数）；`auction` 采集与 `auction --recompute DATE` 已接线，结果写 `assets.db/auction_snapshots`（原始资产含 `items_json` + `quote_json`，快照 = 原始资产纯函数）
 - 数据资产独立库 `assets.db`（`prep_assets`/`auction_assets` 原始资产 + `prep_snapshots`/`auction_snapshots` 结果），与 dragon.db 物理隔离
+- 数据资产云端同步 M1-M4：`assets doctor`（门槛 A）+ `assets push/pull/status/verify`（增量水位、manifest 覆盖写、逐片校验、隔离恢复 `--target-dir`、进程锁）；集成测试全部走 `LocalDirBackend`
 - prep 宏观扰动 `macro_global`（日经225期指/A50期指同日 + 美债10Y/黄金 T-1，TDX 扩展行情日 K canonical + Yahoo 仅美债/黄金回退）与近三日龙头逐只参与判定（`facts` → `strong/light/ignore/unrated` + CLI 标的清单），快照 `version=0.5`
 - 3 个 Provider（同花顺/雪球/腾讯）含完整反爬；同花顺**行业/概念/地区板块**数据源（排行 HTTP GET+多页+本地排序+403退避、成分股、当日1分K、历史5分K）
 - 封单数据走腾讯 gtimg 收盘盘口（`Quote.bid1_volume`）
@@ -432,6 +447,7 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ### ⚠️ 待完成/观察
 - 同花顺数据网关 403 频控：高频访问会临时封 IP（已加退避重试，正常每日一两次扫描不触发）
+- 数据资产同步 M5：launchd / `assets_daily.sh` 调度与门槛 B 记录待做；B2 profile 未配置，v1 以 R2 为主通道（需用户豁免 B2 补验）
 
 ### 📝 已知修复
 - 同花顺排行字段 `tradezdf`→`zdf`，修复领跌榜全为正值的 bug

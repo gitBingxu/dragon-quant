@@ -23,3 +23,7 @@ class IntegrityError(AssetsSyncError):
 
 class AmbiguousError(AssetsSyncError):
     """manifest 重建出现同日多候选，需要显式 --pick。"""
+
+
+class LockBusyError(AssetsSyncError):
+    """进程锁被占用（退出码 1，区别于配置/网络错误的 2）。"""

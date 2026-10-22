@@ -5,7 +5,9 @@ from dragon_quant.review_account.engine import TradingEngine
 from dragon_quant.review_account.market import (
     calendar_start, collect_candidates_ex, load_market_sentiment,
 )
-from dragon_quant.review_account.models import AccountState, Snapshot, StrategyConfig, TimelineEvent
+from dragon_quant.review_account.models import (
+    AccountState, Snapshot, StrategyConfig, TimelineEvent, UNAVAILABLE_SUSPENDED,
+)
 from dragon_quant.storage import db
 
 
@@ -25,6 +27,9 @@ class AccountSimulator:
         self._prep_snapshot_dates = {}
         self._auction_rows = {}
         self._priority_degraded = []
+        self._suspended_days = {}
+        self._unavailable_days = {}
+        self._data_degraded = []
 
     def run(self, date_from: str, date_to: str) -> dict:
         if date_from > date_to:
@@ -50,7 +55,10 @@ class AccountSimulator:
             day_trades = []
             details = {}
             day_fired = []
+            day_suspended, day_unavailable = set(), {}
             for event in historical_events(day, candidates, codes, self.data):
+                day_unavailable.update(event.unavailable)
+                day_suspended |= event.suspended
                 if event.rows:
                     self._day_quality[day] = next(iter(event.rows.values())).get("data_quality", "strict_5min")
                 result = self.engine.step(event)
@@ -65,11 +73,32 @@ class AccountSimulator:
                     self.events.append(TimelineEvent(day, trade.side, f"{trade.side} {trade.name or trade.code}",
                                                      trade.reason_text, trade.reason_code, trade.code, trade.name,
                                                      self.state.cash, signal=trade.signal))
+            if day_unavailable:
+                self._unavailable_days[day] = dict(sorted(day_unavailable.items()))
+                if day_suspended:
+                    self._suspended_days[day] = sorted(day_suspended)
+                    self._data_degraded.append(
+                        f"{day} 停牌跳过 {len(day_suspended)} 只："
+                        f"{'、'.join(sorted(day_suspended))}")
+                others = sorted(c for c, r in day_unavailable.items()
+                                if r != UNAVAILABLE_SUSPENDED)
+                if others:
+                    self._data_degraded.append(
+                        f"{day} 日K不可用跳过 {len(others)} 只：{'、'.join(others)}")
             day_fired = list(dict.fromkeys(day_fired))  # 同一闸门逐事件去重
             snapshot = self._snapshot(day)
             if not day_trades:
+                if not day_unavailable:
+                    hold_text = "未出现可成交的新信号"
+                elif len(day_unavailable) >= len(codes):
+                    hold_text = "当日全部标的停牌/无行情，跳过评估"
+                else:
+                    hold_text = (f"当日 {len(day_unavailable)} 只停牌/无行情标的跳过，"
+                                 "其余标的未出现可成交的新信号")
                 self.events.append(TimelineEvent(day, "HOLD" if self.state.positions else "IDLE",
-                    "继续持有" if self.state.positions else "空仓", "未出现可成交的新信号", "no_execution",
+                    "继续持有" if self.state.positions else "空仓",
+                    hold_text,
+                    "no_execution",
                     cash=self.state.cash, total_equity=snapshot.total_equity, signal={}))
             # 决策记录：无论当日是否有成交，details 统一合并到该日第一条事件（M4）。
             first = next((e for e in self.events if e.event_date == day), None)
@@ -127,6 +156,16 @@ class AccountSimulator:
                 "prep_snapshot_dates": dict(self._prep_snapshot_dates),
                 "auction_rows": dict(self._auction_rows),
                 "priority_degraded": list(self._priority_degraded),
+                "suspended_days": {d: list(c) for d, c in self._suspended_days.items()},
+                "suspended_codes": sorted({c for codes in self._suspended_days.values()
+                                           for c in codes}),
+                "suspended_days_count": len(self._suspended_days),
+                "unavailable_days": {
+                    d: {c: r for c, r in m.items() if r != UNAVAILABLE_SUSPENDED}
+                    for d, m in self._unavailable_days.items()
+                    if any(r != UNAVAILABLE_SUSPENDED for r in m.values())
+                },
+                "data_degraded": list(self._data_degraded),
                 "final_equity": final, "total_return": (final / self.cfg.initial_cash - 1) * 100,
                 "max_drawdown": min(s.drawdown for s in self.snapshots), "trade_count": len(self.trades),
                 "win_rate": sum(p.realized_return > 0 for p in self.closed_positions) / count * 100 if count else None,

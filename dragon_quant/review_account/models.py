@@ -20,6 +20,20 @@ BUY_SIGNAL_CODES = (
     BUY_SIGNAL_DRAGON_COMEBACK,
 )
 
+# 当日行情不可用的稳定原因名（MarketEvent.unavailable 的 value）
+UNAVAILABLE_SUSPENDED = "suspended"              # 停牌：无分时且当日日K缺行/有价无量
+UNAVAILABLE_DAILY_MISSING = "daily_unavailable"  # 日K兜底模式下当日日K不可用（分时可用）
+
+_UNAVAILABLE_TEXT = {
+    UNAVAILABLE_SUSPENDED: "当日停牌无行情（无分时且日K缺行或有价无量），当日跳过评估",
+    UNAVAILABLE_DAILY_MISSING: "当日日K不可用（日K兜底模式无法建行），当日跳过评估",
+}
+
+
+def unavailable_text(reason: str) -> str:
+    """不可用原因的中文可读文案（未知原因有兜底）。"""
+    return _UNAVAILABLE_TEXT.get(reason, "当日行情不可用，跳过评估")
+
 
 @dataclass
 class StrategyConfig:
@@ -278,6 +292,17 @@ class MarketEvent:
     rows: dict[str, dict]
     candidates: list[dict] = field(default_factory=list)
     allow_buy: bool = True
+    # 当日不可用（停牌/日K缺失）的 code → 原因；rows 中不含这些 code。
+    unavailable: dict[str, str] = field(default_factory=dict)
+    # 不可用 code 的估值价（停牌=前收，daily_unavailable=当日末根5分钟K收盘）；
+    # 只用于 marks 估值，不参与买卖评估、不更新峰值。
+    last_closes: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def suspended(self) -> set[str]:
+        """停牌子集（从 unavailable 派生，单一事实来源）。"""
+        return {code for code, reason in self.unavailable.items()
+                if reason == UNAVAILABLE_SUSPENDED}
 
 
 @dataclass

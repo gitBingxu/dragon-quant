@@ -5,9 +5,12 @@ from datetime import datetime
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.providers.xueqiu import XueqiuProvider
 from dragon_quant.review_account.market import (
-    SHANGHAI, DataCoverageError, at, build_daily_row, build_row, event_date, validate_bars,
+    SHANGHAI, DataCoverageError, at, build_daily_row, build_row, daily_bar, event_date,
+    is_tradable_daily_bar, last_close, validate_bars,
 )
-from dragon_quant.review_account.models import MarketEvent
+from dragon_quant.review_account.models import (
+    MarketEvent, UNAVAILABLE_DAILY_MISSING, UNAVAILABLE_SUSPENDED,
+)
 
 
 class MarketData:
@@ -81,29 +84,94 @@ class MarketData:
             return None
 
 
+def historical_day(day: str, now: datetime | None = None) -> bool:
+    """day 是否早于当前自然日（历史交易日）。
+
+    停牌分类只对历史交易日启用：当日日K可能尚未生成，且 `MarketData.daily` 的缓存
+    按写入当日命名空间存放、不校验新鲜度，同日盘中写入的缓存会缺少当日行；此时
+    「日K缺行」不能等价为停牌。当日一律沿用旧契约（缺当日日K仍硬报错）。
+    """
+    now = now or datetime.now(SHANGHAI)
+    return day < now.strftime("%Y-%m-%d")
+
+
 def historical_events(day: str, candidates: list[dict], codes: set[str], data: MarketData,
                       until: int | None = None):
-    """生成当日事件流。
+    """生成当日事件流（按 code 三态可用性分类）。
 
-    仅当**所有**相关个股（候选 + 持仓）当日都有完整5分钟K时，走严格盘中撮合
-    （open→各fill→bar→late→close）；只要有任一缺失，则整日降级为日K兜底
-    （开盘事件按开盘价成交，收盘事件按当日OHLC判定止损止盈），保证多月回测
-    在分时历史已过期时仍能运行。`until` 用于盘中（实时今日）只取到最新已完成
-    的5分钟K，从而支持部分当日回放。买卖决策始终复用同一 evaluate_buy/evaluate_sell。
+    - 历史交易日：`intraday`（有完整5分钟K）/ `daily`（无分时但当日日K有效）/
+      `suspended`（两者皆无）。剔除停牌 code 后再判断「是否全员有完整分时」：
+      剩余可用 code 都有分时 → 严格盘中撮合；否则整日降级日K兜底（只为日K有效的
+      code 建行，分时可用但日K缺行者记为 `daily_unavailable`）。
+    - 当日（盘中/收盘后）：不做停牌判定，保持旧契约——全员有分时走严格撮合，
+      否则整日兜底，当日日K未生成时由 `build_daily_row` 抛 `DataCoverageError`。
+    - 停牌/不可用的 code 不进 rows，由 `MarketEvent.unavailable` 显式标记；它们的
+      估值价放入 `last_closes`（仅用于 marks，不参与买卖评估）。
+
+    `until` 用于盘中（实时今日）只取到最新已完成的5分钟K。买卖决策始终复用同一
+    evaluate_buy/evaluate_sell，本函数只决定数据可用性与成交口径。
     """
-    for code in sorted(codes):
-        data.daily(code, day)  # 校验日K/预热，缺失即抛错
-    intraday = {code: data.try_intraday(code, day, until) for code in sorted(codes)}
-    if codes and all(intraday[c] is not None for c in codes):
-        yield from _intraday_events(day, candidates, sorted(codes), data, intraday)
-    else:
-        yield from _daily_events(day, candidates, sorted(codes), data)
-
-
-def _intraday_events(day, candidates, codes, data, intraday):
+    codes = sorted(codes)
+    if not codes:
+        yield from _daily_events(day, candidates, [], {}, {})
+        return
+    # 无日K历史仍抛错（数据源故障，不是停牌）；有历史但当日缺行由可用性判定处理。
     histories = {code: data.daily(code, day) for code in codes}
+    intraday = {code: data.try_intraday(code, day, until) for code in codes}
+
+    if not historical_day(day):
+        if all(intraday[code] is not None for code in codes):
+            yield from _intraday_events(day, candidates, codes, histories, intraday, {})
+        else:
+            yield from _daily_events(day, candidates, codes, histories, {})
+        return
+
+    has_daily = {code: is_tradable_daily_bar(daily_bar(histories[code], day)) for code in codes}
+    unavailable = {code: UNAVAILABLE_SUSPENDED for code in codes
+                   if intraday[code] is None and not has_daily[code]}
+    active = [code for code in codes if code not in unavailable]
+
+    if not active:  # 全部停牌：一条空白占位事件，净值不变、推进引擎换日
+        yield MarketEvent(at(day, "15:00"), "late", {}, candidates,
+                          unavailable=dict(unavailable),
+                          last_closes=_valuations(day, unavailable, histories, intraday))
+        return
+
+    if any(intraday[code] is None for code in active):  # 混合日 → 整日日K兜底
+        usable = [code for code in active if has_daily[code]]
+        if not usable:  # 不可达：无分时且无日K者已被判停牌
+            raise DataCoverageError(f"{day} 无可建行标的，数据可用性判定异常")
+        unavailable |= {code: UNAVAILABLE_DAILY_MISSING
+                        for code in active if not has_daily[code]}
+        yield from _daily_events(day, candidates, usable, histories, unavailable,
+                                 _valuations(day, unavailable, histories, intraday))
+        return
+
+    yield from _intraday_events(day, candidates, active, histories, intraday, unavailable,
+                                _valuations(day, unavailable, histories, intraday))
+
+
+def _valuations(day, unavailable, histories, intraday) -> dict[str, float]:
+    """不可用 code 的估值价：停牌用前收；日K缺行（有分时）用当日末根5分钟K收盘。"""
+    values = {}
+    for code, reason in unavailable.items():
+        price = None
+        if reason == UNAVAILABLE_DAILY_MISSING and intraday.get(code):
+            price = intraday[code][-1].close
+        if price is None:
+            price = last_close(histories.get(code, []), day)
+        if price is not None:
+            values[code] = price
+    return values
+
+
+def _intraday_events(day, candidates, codes, histories, intraday, unavailable,
+                     last_closes=None):
     # 以实际取得的5分钟K时点为准（实时今日为部分当日），而非固定48根 bar_times。
     times = sorted({b.timestamp for b in intraday[codes[0]]}) if codes else []
+    marked = dict(unavailable)
+    valuations = dict(last_closes or {})
+
     def make(ts, phase, prices=None):
         rows = {}
         for code in codes:
@@ -111,7 +179,8 @@ def _intraday_events(day, candidates, codes, data, intraday):
                             execution_price=(prices or {}).get(code))
             row["phase"] = phase
             rows[code] = row
-        return MarketEvent(ts, phase, rows, candidates)
+        return MarketEvent(ts, phase, rows, candidates,
+                           unavailable=dict(marked), last_closes=dict(valuations))
     yield make(at(day, "09:30"), "open")
     for i, timestamp in enumerate(times):
         opening_ts = at(day, "09:30") if i == 0 else timestamp - 300_000
@@ -120,26 +189,33 @@ def _intraday_events(day, candidates, codes, data, intraday):
         yield make(timestamp, phase)
 
 
-def _daily_events(day, candidates, codes, data):
-    histories = {code: data.daily(code, day) for code in codes}
+def _daily_events(day, candidates, codes, histories, unavailable, last_closes=None):
+    marked = dict(unavailable)
+    valuations = dict(last_closes or {})
+
     def row(code, phase, ts, price=None):
         return build_daily_row(histories[code], day, phase, ts, execution_price=price)
+
+    def event(ts, phase, rows):
+        return MarketEvent(ts, phase, rows, candidates,
+                           unavailable=dict(marked), last_closes=dict(valuations))
+
     open_ts, close_ts = at(day, "09:30"), at(day, "15:00")
     # 开盘：判定开盘买点（不成交）→ 开盘价成交
-    yield MarketEvent(open_ts, "open", {c: row(c, "open", open_ts) for c in codes}, candidates)
-    yield MarketEvent(open_ts + 1, "fill",
-                      {c: row(c, "open", open_ts + 1, histories_open(histories[c], day)) for c in codes}, candidates)
+    yield event(open_ts, "open", {c: row(c, "open", open_ts) for c in codes})
+    yield event(open_ts + 1, "fill",
+                {c: row(c, "open", open_ts + 1, histories_open(histories[c], day)) for c in codes})
     # 收盘：按当日OHLC判定卖出（不成交）→ 收盘价成交（卖价按原因在引擎侧近似）
-    yield MarketEvent(close_ts, "late", {c: row(c, "late", close_ts) for c in codes}, candidates)
-    yield MarketEvent(close_ts + 1, "fill",
-                      {c: row(c, "late", close_ts + 1, histories_close(histories[c], day)) for c in codes}, candidates)
+    yield event(close_ts, "late", {c: row(c, "late", close_ts) for c in codes})
+    yield event(close_ts + 1, "fill",
+                {c: row(c, "late", close_ts + 1, histories_close(histories[c], day)) for c in codes})
 
 
 def histories_open(history, day):
-    bar = next((b for b in history if event_date(b.timestamp) == day), None)
+    bar = daily_bar(history, day)
     return bar.open if bar else None
 
 
 def histories_close(history, day):
-    bar = next((b for b in history if event_date(b.timestamp) == day), None)
+    bar = daily_bar(history, day)
     return bar.close if bar else None

@@ -26,6 +26,26 @@ def event_date(timestamp: int) -> str:
     return datetime.fromtimestamp(timestamp / 1000, SHANGHAI).strftime("%Y-%m-%d")
 
 
+def daily_bar(history: list[KBar], day: str) -> Optional[KBar]:
+    """day 当日日K行（无行 → None）。"""
+    return next((b for b in history if event_date(b.timestamp) == day), None)
+
+
+def is_tradable_daily_bar(bar: Optional[KBar]) -> bool:
+    """当日日K是否代表真实成交。
+
+    停牌日的数据源形态有两种：整行缺失，或保留占位行但 `volume<=0 且 amount<=0`。
+    两者都不能用来构造兜底成交价，故按「有量或有额」判定可交易。
+    """
+    return bool(bar is not None and ((bar.volume or 0) > 0 or (bar.amount or 0) > 0))
+
+
+def last_close(history: list[KBar], day: str) -> Optional[float]:
+    """day 之前最后一根日K的收盘价（停牌持仓估值用；无历史 → None）。"""
+    prior = [b for b in history if event_date(b.timestamp) < day]
+    return prior[-1].close if prior else None
+
+
 def bar_times(day: str) -> list[int]:
     return [at(day, start) + i * 300_000 for start, count in (("09:35", 24), ("13:05", 24))
             for i in range(count)]
@@ -360,7 +380,7 @@ def build_daily_row(history: list[KBar], day: str, phase: str, timestamp: int,
     依赖分时的规则（分歧买龙、高开未封板窗口、同根K保本排序）在 evaluate_* 内自然
     跳过；买卖决策仍复用同一 evaluate_buy/evaluate_sell。
     """
-    today = next((b for b in history if event_date(b.timestamp) == day), None)
+    today = daily_bar(history, day)
     if today is None:
         raise DataCoverageError(f"{day} 缺少当日日K，无法兜底回测")
     if not (all(math.isfinite(v) for v in (today.open, today.high, today.low, today.close,

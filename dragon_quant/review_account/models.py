@@ -110,7 +110,7 @@ class StrategyConfig:
     dragon_comeback_pullback_days_max: int = 10
     dragon_comeback_volume_ratio: float = 0.333
     dragon_comeback_confirm_pct: float = 3.0
-    # ── P/A 优先级（默认关；见 docs/solutions/2026-10-21-auction-prep-buy-priority-design.md）──
+    # ── P/A 优先级（默认关；见 archived_md/auction/2026-10-21-auction-prep-buy-priority-design.md）──
     auction_ranking_enabled: bool = False     # A 维度参与排序
     auction_veto_enabled: bool = False        # D3 否决（verified ∧ is_weak）
     prep_verdict_filter_enabled: bool = True  # D4：verdict=ignore 出池（消融可关）

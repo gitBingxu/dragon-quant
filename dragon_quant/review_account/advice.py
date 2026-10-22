@@ -2,7 +2,7 @@
 
 CLI 默认输出的 4 行摘要由此组装；快照本身不持久化展示文本，保证
 「快照 = 资产的纯函数」与文案演化解耦。设计见
-``docs/solutions/2026-10-20-prep-3day-window-design.md``。
+``archived_md/prep/2026-10-20-prep-3day-window-design.md``。
 """
 
 from __future__ import annotations

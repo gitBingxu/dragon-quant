@@ -6,7 +6,7 @@
 > 本文正文保留为历史记录，不再代表当前实现。
 
 日期：2026-10-20 · 分支：feat/reviewa-account-op · 状态：历史方案（宏观口径已被 2026-10-21 方案替代）
-上游调研：[docs/research/2026-10-20-prep-macro-sources.md](../research/2026-10-20-prep-macro-sources.md)
+上游调研：[2026-10-20-prep-macro-sources.md](2026-10-20-prep-macro-sources.md)（已同目录归档）
 前置方案：[docs/solutions/2026-10-20-prep-3day-window-design.md](2026-10-20-prep-3day-window-design.md)
 
 ## 1. 背景与目标

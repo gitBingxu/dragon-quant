@@ -15,7 +15,7 @@ from dragon_quant.review_account.priority import (
 
 
 # ── 买点诊断（checks）：状态枚举、展示元数据与数据结构 ──
-# 状态语义见 docs/solutions/2026-10-21-buy-checks-and-dragon-comeback.md §4.3。
+# 状态语义见 archived_md/live_trade/2026-10-21-buy-checks-and-dragon-comeback.md §4.3。
 BUY_CHECK_PASSED = "passed"                  # 通过
 BUY_CHECK_FAILED = "failed"                  # 未通过（判定时点就在当前事件）
 BUY_CHECK_PENDING = "pending"                # 待确认（确认时点未到）

@@ -2,7 +2,7 @@
 
 供 `prep` CLI 命令调用；review-account / buy-sell 经 `collect_candidates` 消费快照。
 
-架构（见 docs/solutions/2026-10-21-prep-incremental-rerun-design.md）：
+架构（见 archived_md/prep/2026-10-21-prep-incremental-rerun-design.md）：
   - collect 段：默认**增量**——先读存量资产 + collection_report，逐资产做健康判定，
     全健康则零采集直接 compute；否则只补采不健康且可采的 asset_type（dragons 重采且
     code 集合变化时级联 fund_flow/cninfo），逐 collector 隔离异常，payload 与本次

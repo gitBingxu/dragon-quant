@@ -884,5 +884,40 @@ class TestCmdAuctionRecompute(unittest.TestCase):
         self.assertIn("快照写入失败", out["error"])
 
 
+class TestBuyJson(unittest.TestCase):
+    def test_buy_json_prints_result(self):
+        checks = [{"rule": "buy_open_ma5_pullback", "label": "开盘回踩MA5",
+                   "window": "09:30 开盘", "status": "passed",
+                   "selected": True, "reason": "r"}]
+        result = {"ok": True, "mode": "buy", "buys": [],
+                  "details": [{"code": "600001", "name": "a", "checks": checks}],
+                  "reason_text": "候选池暂无触发买点的标的"}
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "buy", "--json"]), \
+             patch("dragon_quant.live_trade.run_buy", return_value=result) as run, \
+             redirect_stdout(buf):
+            cli.main()
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "buy")
+        self.assertEqual(payload["details"][0]["checks"][0]["rule"],
+                         "buy_open_ma5_pullback")
+        self.assertFalse(run.call_args.kwargs["verbose"])
+
+    def test_buy_json_error_envelope(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "buy", "--json", "--date", "20260907"]), \
+             patch("dragon_quant.live_trade.run_buy", side_effect=ValueError("bad date")), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["mode"], "buy")
+        self.assertEqual(payload["trade_date"], "2026-09-07")
+        self.assertIn("bad date", payload["error"])
+        self.assertEqual(cm.exception.code, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -38,7 +38,7 @@
 | `streak_delevel_enabled` | False | 连续亏损降仓：4-5 连亏×0.5，6+ 连亏停开新仓 |
 | `soft_time_stop_days` / `soft_time_stop_floor_pct` | 0 / 0 | 软时间止损天数与「未脱离成本区」阈值 |
 | `tiered_trailing_enabled` + `trailing_tier2/3_*` | False | 分级移动止盈：浮盈 ≥15%→容忍 5%、≥25%→容忍 8% |
-| `dragon_comeback_*` | — | 龙回头/二波买点（`dragon_comeback_enabled=False` 默认） |
+| `dragon_comeback_*` | — | 龙回头/二波买点（`dragon_comeback_enabled=True` **默认开启**；显式 false 复现旧基线） |
 
 `AccountState` 新增：`realized_today`、`consecutive_losses`、`sentiment_pct`、`peak_equity`。
 
@@ -86,3 +86,29 @@
 - **否决**：`auction_veto_enabled=True` 且 A=False → `BuyRejected("auction_veto")`；`auction_veto_exempt_signals` 按买点类型豁免。`entry_veto` 仍是无调用方的通用前置钩子。
 - **可观测**：detail 携带 `entry_priority` / `priority_key` / `would_veto` / `vetoed_signal`；`ranking_mode` ∈ {auction, auction_unverified, prep_only, legacy}；候选池回退输出 `fallback_reason`。`would_veto` 仅在已读取竞价数据时记录。
 - **回测边界**：历史日几乎无 `auction_snapshots` → A 恒 Unknown，回测不能验证 A；不得用回测结果宣称 A 有效。D6 排序不可独立消融，与旧回测对照须先重跑基线。
+
+## 8. 买点诊断（`checks`）
+
+`buy` 对每个候选（买入与未买入）输出四类买点的逐条诊断；决策与诊断共用 `strategy.py` 的 `_rule_*`，阈值只有一份。
+
+| # | rule | 判定窗口 | 说明 |
+|---|------|----------|------|
+| ① | `buy_open_ma5_pullback` | 09:30 开盘 | 开盘回踩 MA5（量能/质量/涨跌停/MA5 上行/距离/缺口） |
+| ② | `buy_open_turn_strong` | 09:35 首根5分钟K | 高开突破上日高点 + 首根K带量 |
+| ③ | `buy_divergence_first_break` | 前 `divergence_confirm_bars` 根（默认 6 → 10:00） | 连续缩量一字板断板后未破昨收且企稳 |
+| ④ | `buy_dragon_comeback` | 09:30 开盘（日K形态） | 第一波大涨→缩量回调→阳线吞没；默认开启 |
+
+**状态语义**（`checks[].status`）：
+
+- `passed`：形态通过（`selected=true` 表示该规则产生了本次决策信号，可能随后被否决/排序淘汰/未成交）。
+- `failed`：该规则判定时点就在当前事件且未通过。
+- `pending`：确认时点未到（09:30 的 ②③；`reason` 会附带已知不满足项）。
+- `window_closed`：窗口已过，最终判定未通过（`reason` 保留窗口帧的原因）。
+- `unavailable`：日K兜底/数据缺失，不可判定（②③ 在日K兜底日）。
+- `skipped`：前置闸门早退（情绪禁买/综合分不足/非真龙/规则关闭），未进入形态判断。
+
+**取帧与去重**：同一 code 人读只输出一次，取最后一条带 `checks` 的 detail；买入标的的四行取最后帧，`selected` 由 `buys[].reason_code` 回填（`already_holding` 帧不承载命中语义）。事件级闸门（风控/已卖出）输出 `buy_eval_skipped` + 四条 `skipped`；买点命中但未成交（不可成交价/超时/预算不足/回放结束）仍展示四类并标 `selected`。
+
+**JSON**：`buy --json` 的 `details[].checks[]` 字段为 `rule` / `label` / `window` / `status` / `selected` / `reason`；detail 另带 `observed_at` / `phase`。`checks` 只进 detail JSON，不写 `buy_sell_signals`。
+
+**window_closed 的一致性**：③ 诊断固定传 `intraday_bars[:N]`，因此 14:55（`late`）重算出的原因与 10:00 判定一致；①/②/④ 的输入为时间不变量（open/prev_row/hist_rows/first_bar）。`_no_pattern_reason` 为 phase 无关的四规则摘要，Web UI 的 `reason_text` 在 `late` 帧不再退化为兜底文案。

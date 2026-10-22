@@ -135,8 +135,14 @@ class TestDragonComeback(unittest.TestCase):
         self.assertIsNotNone(sig)
         self.assertEqual(sig["code"], "buy_dragon_comeback")
 
-    def test_dragon_comeback_disabled_by_default(self):
-        self.assertIsNone(self._buy(StrategyConfig(), _dragon_hist()))
+    def test_dragon_comeback_enabled_by_default(self):
+        self.assertTrue(StrategyConfig().dragon_comeback_enabled)
+        sig = self._buy(StrategyConfig(), _dragon_hist())
+        self.assertIsNotNone(sig)
+        self.assertEqual(sig["code"], "buy_dragon_comeback")
+
+    def test_dragon_comeback_can_be_disabled(self):
+        self.assertIsNone(self._buy(StrategyConfig(dragon_comeback_enabled=False), _dragon_hist()))
 
     def test_dragon_comeback_rejects_unshrinking_volume(self):
         hist = _dragon_hist()

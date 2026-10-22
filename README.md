@@ -233,7 +233,7 @@ dragon-quant review-account --ui-only
 - 信号与成交分离：历史信号在下一可交易事件撮合，实时信号等待更晚的有效报价；跳空不补填成本线或止损价，封死涨跌停不假定能买卖。
 - T+1、当天卖出后不再买入；按事件顺序先卖后买，不用下午卖出结果阻止早上买入。止损、移动止盈、保本、高开窗口和尾盘规则共用一处实现；尾盘以 14:55 已知行情判断，15:00 只估值和更新峰值。
 - 默认仍保留原仓位基线；`--config params.json` 可统一设置风险预算、单票仓位上限、MA5 距离/趋势过滤、ATR 移动止盈。最低佣金默认每笔 5 元，双边滑点 0.2%，佣金 0.03%，卖出印花税 0.05%。
-- 择时与仓位改造（全部 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、时间止损、分级移动止盈、龙回头买点，及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。
+- 择时与仓位改造（除龙回头默认开启外，其余 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、时间止损、分级移动止盈、龙回头买点（**默认开启**，显式 false 可复现旧基线），及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。
 - 数据分级成交：当日所有相关个股都有完整 5 分钟 K 时走严格盘中撮合；任一缺失则整日**日K兜底**（开盘价买入、当日 OHLC 判止损止盈，分歧买龙/高开窗口等分时规则自动跳过）。雪球 5 分钟历史约仅保留 14 天，故多月回测多为兜底模式，成交价为保守近似，结果标注 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。日K本身缺失或预热不足仍报错、不保存部分回测；停牌/除权口径缺口需先解决。
 
 `/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
@@ -243,6 +243,7 @@ dragon-quant review-account --ui-only
 ```bash
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 dragon-quant buy                              # 实时：回放截至当前已完成5分钟K
+dragon-quant buy --json                       # 完整 JSON（details[].checks 含四类买点诊断）
 dragon-quant sell --date 20260908 --at 14:55  # 对已买入未卖出的信号判定卖出
 dragon-quant buy --force                      # 午休/收盘后强制跑当日回放（09:30 前仍拒绝）
 ```
@@ -250,6 +251,8 @@ dragon-quant buy --force                      # 午休/收盘后强制跑当日�
 `buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
 
 - 与 `review-account` 共用 P/A 三值排序与否决；`buy` 输出 `ranking_mode`（`auction` / `auction_unverified` / `prep_only` / `legacy`）与 `fallback_reason`，被否决但本可买入的标的在 `details` 中带 `vetoed_signal`（含买点类型），便于影子对照。
+- **四类买点诊断**：`buy` 对每个候选（买入与未买入）逐条输出 ① 开盘回踩MA5 / ② 弱转强 / ③ 分歧买龙 / ④ 龙回头 的状态与带数值原因；同一 code 只输出一次，取最后一条带 `checks` 的 detail。状态：`passed`（通过）、`failed`（未通过）、`pending`（待确认，09:30 的 ②③）、`window_closed`（窗口已过未通过）、`unavailable`（日K兜底/数据缺失）、`skipped`（情绪禁买/综合分不足/非真龙等前置闸门，不伪造失败）。决策与诊断共用 `review_account/strategy.py` 的 `_rule_*`，阈值只有一份。`buy --json` 的 `details[].checks` 每项含 `rule`/`label`/`window`/`status`/`selected`/`reason`，detail 另带 `observed_at`/`phase`；`checks` 只进 JSON，不写 `buy_sell_signals`。
+- **龙回头默认开启**：`StrategyConfig.dragon_comeback_enabled=True`（`buy` / `review-account` 共享策略同时生效）；显式 `--config '{"dragon_comeback_enabled": false}'` 可复现旧基线。默认开启后历史回测结果不可直接与旧基线比较，历史快照不重算。
 - `SignalEngine` 复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/仓位/次数限制；卖出数量用 `notional_quantity`（`initial_cash × max_position_pct`，与回测首仓同口径）落库冻结，保证 `break_even_price` 与回测精确一致；半仓规则只减半不平仓，`half_close_signal` 冻结半仓腿后剩余半仓继续跟踪。
 - 组合风控经 `live_trade/shadow.py` 从信号表按回放时点重建影子状态，逐事件调用同一个 `risk_governor`：日级熔断、连亏熔断与 `equity<=0` 破产闸跟随；delevel 降仓在无 sizing 场景不适用（详见 `review_account/STRATEGY.md` §5）。
 - 数据分级：`buy`/`sell` 的行情完整性判定都覆盖「候选 ∪ 持仓」，任一分时缺失即整日走日K兜底，输出带 `data_quality` 提示。

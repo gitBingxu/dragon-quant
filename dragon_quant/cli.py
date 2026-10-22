@@ -423,17 +423,21 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     buy_p = sub.add_parser(
         "buy",
         help="实盘辅助：给出今日买入建议并记账（纯信号）",
-        usage="dragon-quant buy [--config FILE] [--date YYYYMMDD --at HH:MM] [--force]",
-        description="回放当日分时，复用 review-account 共享买点，候选池内所有触发买点的标的均记入买入信号。",
+        usage="dragon-quant buy [--config FILE] [--date YYYYMMDD --at HH:MM] [--force] [--json]",
+        description="回放当日分时，复用 review-account 共享买点，候选池内所有触发买点的标的均记入买入信号。"
+                    "默认输出四类买点逐条诊断；--json 输出完整结果（details[].checks）。",
         epilog="""Examples:
   dragon-quant buy
   dragon-quant buy --date 20260907 --at 10:00
   dragon-quant buy --force
+  dragon-quant buy --json
 """,
     )
     buy_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
     buy_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                        help="候选数据来源体系 (默认 v2)")
+    buy_p.add_argument("--json", dest="json", action="store_true",
+                       help="输出完整 JSON（details[].checks 含四类买点诊断）")
 
     # sell 子命令
     sell_p = sub.add_parser(

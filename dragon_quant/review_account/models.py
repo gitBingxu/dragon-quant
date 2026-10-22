@@ -84,7 +84,7 @@ class StrategyConfig:
     trailing_tier2_drawdown_pct: float = 5.0
     trailing_tier3_activate_pct: float = 25.0
     trailing_tier3_drawdown_pct: float = 8.0
-    dragon_comeback_enabled: bool = False
+    dragon_comeback_enabled: bool = True
     dragon_comeback_min_rise_pct: float = 30.0
     dragon_comeback_min_boards: int = 2
     dragon_comeback_pullback_days_min: int = 3

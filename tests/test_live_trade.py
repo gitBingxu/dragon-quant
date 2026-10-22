@@ -19,7 +19,9 @@ from dragon_quant.review_account.engine import TradingEngine
 from dragon_quant.review_account.execution import (
     apply_sell_fill, break_even_price, buy_quantity, notional_quantity,
 )
-from dragon_quant.review_account.market import SHANGHAI, at, bar_times, DataCoverageError, validate_bars
+from dragon_quant.review_account.market import (
+    SHANGHAI, at, bar_times, build_row, DataCoverageError, validate_bars,
+)
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
 from dragon_quant.storage import db
 from tests.test_review_account import CAND, DAY, FakeData, bars, history, position, row
@@ -106,6 +108,11 @@ class TestSignalEngine(unittest.TestCase):
         self.assertEqual(engine.step(event)["reason_code"], "already_processed")
 
 
+def _chk(rule, label, status, reason, selected=False):
+    return {"rule": rule, "label": label, "window": "w", "status": status,
+            "selected": selected, "reason": reason}
+
+
 class TestPrintBuy(unittest.TestCase):
     """buy 命令输出按 code 去重：未触发候选只列一次。"""
 
@@ -120,9 +127,96 @@ class TestPrintBuy(unittest.TestCase):
         with redirect_stdout(buf):
             _print_buy(DAY, result)
         out = buf.getvalue()
-        self.assertIn("候选未触发买点（2 只）", out)
+        self.assertIn("其他候选（2 只）", out)
         self.assertEqual(out.count("（600001）"), 1)
         self.assertEqual(out.count("（600002）"), 1)
+        # 无 checks 的旧 detail：同 code 取最后一条（last-wins）
+        self.assertIn("r3", out)
+
+    def test_last_wins_with_checks(self):
+        """同 code 两条带 checks：取最后一条（14:55 终态），不是 09:30 的 pending 帧。"""
+        details = [
+            {"code": "600001", "name": "a", "passed": False, "reason_code": "no_buy_pattern",
+             "checks": [_chk("buy_open_turn_strong", "弱转强", "pending", "OPEN_PENDING")]},
+            {"code": "600001", "name": "a", "passed": False, "reason_code": "no_buy_pattern",
+             "checks": [_chk("buy_open_turn_strong", "弱转强", "window_closed", "LATE_FINAL")]},
+        ]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_buy(DAY, {"buys": [], "details": details, "reason_text": "x"})
+        out = buf.getvalue()
+        self.assertEqual(out.count("（600001）"), 1)
+        self.assertIn("LATE_FINAL", out)
+        self.assertNotIn("OPEN_PENDING", out)
+
+    def test_bought_code_not_in_other_list(self):
+        """买入代码只在 🟢 段出现；selected 由 buys.reason_code 回填。"""
+        checks = [
+            _chk("buy_open_ma5_pullback", "开盘回踩MA5", "passed", "hit"),
+            _chk("buy_open_turn_strong", "弱转强", "window_closed", "fail"),
+            _chk("buy_divergence_first_break", "分歧买龙", "window_closed", "fail"),
+            _chk("buy_dragon_comeback", "龙回头", "window_closed", "fail"),
+        ]
+        result = {
+            "buys": [{"code": "600001", "name": "a", "entry_price": 10.0,
+                      "reason_code": "buy_open_ma5_pullback", "reason_text": "hit",
+                      "persisted": True}],
+            "details": [
+                {"code": "600001", "name": "a", "passed": False,
+                 "reason_code": "already_holding", "reason_text": "已买入", "checks": checks},
+                {"code": "600002", "name": "b", "passed": False,
+                 "reason_code": "no_buy_pattern", "reason_text": "x",
+                 "checks": [_chk("buy_open_ma5_pullback", "开盘回踩MA5",
+                                 "window_closed", "no")]},
+            ],
+            "reason_text": "买入 1 只",
+        }
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_buy(DAY, result)
+        out = buf.getvalue()
+        self.assertEqual(out.count("（600001）"), 1)
+        self.assertIn("其他候选（1 只）", out)
+        self.assertIn("通过，命中买点", out)
+        self.assertIn("（600002）", out)
+
+    def test_four_checks_for_rejected(self):
+        checks = [
+            _chk("buy_open_ma5_pullback", "开盘回踩MA5", "window_closed", "距MA5 +5.4% > 3%"),
+            _chk("buy_open_turn_strong", "弱转强", "window_closed", "未突破上日高点"),
+            _chk("buy_divergence_first_break", "分歧买龙", "window_closed", "连续一字板0 < 2"),
+            _chk("buy_dragon_comeback", "龙回头", "window_closed", "回调天数0 < 3"),
+        ]
+        result = {"buys": [], "details": [
+            {"code": "600001", "name": "a", "passed": False,
+             "reason_code": "no_buy_pattern", "reason_text": "x", "checks": checks}],
+            "reason_text": "x"}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_buy(DAY, result)
+        out = buf.getvalue()
+        for text in ("开盘回踩MA5", "弱转强", "分歧买龙", "龙回头",
+                     "窗口已过（未通过）", "距MA5", "未突破上日高点"):
+            self.assertIn(text, out)
+
+    def test_summary_suppressed_for_no_pattern(self):
+        result = {"buys": [], "details": [
+            {"code": "600001", "name": "a", "passed": False,
+             "reason_code": "no_buy_pattern", "reason_text": "SHOULD_NOT_PRINT",
+             "checks": [_chk("buy_open_ma5_pullback", "开盘回踩MA5", "failed", "r")]}],
+            "reason_text": "x"}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_buy(DAY, result)
+        self.assertNotIn("SHOULD_NOT_PRINT", buf.getvalue())
+
+    def test_event_gate_note(self):
+        result = {"buys": [], "details": [], "reason_text": "x",
+                  "buy_eval_skipped": ["组合风控闸门（当日暂停开新仓）"]}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _print_buy(DAY, result)
+        self.assertIn("本轮买点未评估：组合风控闸门", buf.getvalue())
 
     def test_suggested_position_line(self):
         """建议仓位展示：有值按百分比，缺失/无 key 显示占位；0.0 不落入缺失分支。"""
@@ -814,6 +908,31 @@ class TestLiveTraderAlignment(unittest.TestCase):
         row_sig = db.list_open_signals(source="v2")[0]
         self.assertEqual(row_sig["qty"], b["qty"])
         self.assertNotIn("forced", row_sig["entry_signal"])  # 非强制运行不打标
+
+    def test_buy_pending_unfilled_detail(self):
+        """回放结束仍有 pending BUY：保留「命中但未成交」诊断（--force 截断场景）。
+
+        用 open + bar 两帧，让末帧 phase 与决策帧不同；断言 unfilled detail 的
+        observed_at/phase 仍取决策帧（W2 回归）。
+        """
+        open_row = row()
+        bar_row = build_row(history(DAY), DAY, 10, [], at(DAY, "09:35"))
+        bar_row["phase"] = "bar"
+        events = [
+            MarketEvent(at(DAY, "09:30"), "open", {"600001": open_row}, [CAND]),
+            MarketEvent(at(DAY, "09:35"), "bar", {"600001": bar_row}, [CAND]),
+        ]
+        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                   return_value=([CAND], _pool_ctx())), \
+                patch("dragon_quant.live_trade.trader.historical_events",
+                      return_value=iter(events)):
+            result = self._trader(FakeData()).buy(DAY, "10:00")
+        unfilled = [d for d in result["details"]
+                    if d.get("reason_code") == "buy_pending_unfilled"]
+        self.assertEqual(len(unfilled), 1)
+        self.assertEqual(len(unfilled[0]["checks"]), 4)
+        self.assertEqual(unfilled[0]["phase"], "open")
+        self.assertEqual(unfilled[0]["observed_at"], open_row["observed_at"])
 
     def test_forced_buy_persists_forced_marker(self):
         with patch("dragon_quant.live_trade.trader.datetime",

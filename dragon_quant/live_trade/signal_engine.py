@@ -23,7 +23,10 @@ from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import AccountState, MarketEvent, Position, StrategyConfig
 from dragon_quant.review_account.priority import rank_key
 from dragon_quant.review_account.risk import risk_governor
-from dragon_quant.review_account.strategy import evaluate_sell, explain_buy_candidate
+from dragon_quant.review_account.strategy import (
+    BUY_CHECK_SKIPPED, buy_check_placeholders, evaluate_sell, explain_buy_candidate,
+    explain_buy_checks,
+)
 
 # pending BUY 从决策到成交的最大等待（严格大于即丢弃，与 TradingEngine 一致）。
 PENDING_BUY_TTL_MS = 300_000
@@ -50,6 +53,8 @@ class SignalEngine:
         self.trade_date = ""
         self.evaluated: dict[str, int] = {}
         self.fired_gate: list[str] = []
+        # 事件级闸门（风控/已卖出）导致买点未评估时，记录原因供输出/JSON 使用。
+        self.buy_eval_skipped: list[str] = []
 
     def step(self, event: MarketEvent) -> dict:
         cfg = self.cfg
@@ -88,7 +93,14 @@ class SignalEngine:
                 if not event.allow_buy or not risk_allow_buy:
                     continue
                 # 当日已卖出 / 超过 300s 未成交：丢弃（与 TradingEngine 的 remove 同位）。
-                if self._sold_today() or event.timestamp - order["created_at"] > PENDING_BUY_TTL_MS:
+                if self._sold_today():
+                    result["details"].append(self._unfilled_detail(
+                        order, row, "buy_pending_expired", "买点命中但当日已卖出，未成交"))
+                    self.pending.remove(order)
+                    continue
+                if event.timestamp - order["created_at"] > PENDING_BUY_TTL_MS:
+                    result["details"].append(self._unfilled_detail(
+                        order, row, "buy_pending_expired", "买点命中但超过300秒未成交"))
                     self.pending.remove(order)
                     continue
             price = fill_price(row, order["side"], cfg, raw=self._raw_fill_price(order, row))
@@ -97,15 +109,16 @@ class SignalEngine:
                     continue
                 result["reason_code"] = "untradable_price"
                 if order["side"] == "BUY":
+                    result["details"].append(self._unfilled_detail(
+                        order, row, "untradable_price", "买点命中但价格不可成交（涨跌停/无效价）"))
                     self.pending.remove(order)
                 continue
             if order["side"] == "BUY":
                 filled = self._fill_buy(order, row, price, day)
                 if filled is None:
-                    result["details"].append({
-                        "code": order["stock_code"], "name": order["name"], "passed": False,
-                        "rank": None, "reason_code": "budget_insufficient",
-                        "reason_text": "预算不足（不足一手），回测同样不会建仓"})
+                    result["details"].append(self._unfilled_detail(
+                        order, row, "budget_insufficient",
+                        "预算不足（不足一手），回测同样不会建仓"))
                 else:
                     result["buys"].append(filled)
             else:
@@ -138,18 +151,17 @@ class SignalEngine:
                 # 同一根 K 的高点不能反向激活该根 K 内的保护。
                 track_peak(p, row, entry_ts)
         # ── 买入评估（buy-all，无仓位/数量/次数限制） ──
-        if (event.phase != "close" and event.allow_buy and risk_allow_buy
-                and not self._sold_today()
-                and not any(o["side"] == "BUY" for o in self.pending)):
+        base_window = event.phase != "close" and event.allow_buy
+        buy_window = base_window and risk_allow_buy and not self._sold_today()
+        has_pending_buy = any(o["side"] == "BUY" for o in self.pending)
+        if buy_window and not has_pending_buy:
             held = {p.code for p in self.positions} | self.held_codes
             signals = []
             for cand in event.candidates:
-                if cand["code"] in held:
-                    result["details"].append({"code": cand["code"], "name": cand.get("name", ""),
-                                              "passed": False, "rank": cand.get("rank"),
-                                              "reason_code": "already_holding", "reason_text": "已买入"})
-                    continue
                 row = event.rows.get(cand["code"])
+                if cand["code"] in held:
+                    result["details"].append(self._already_holding_detail(cand, row, cfg))
+                    continue
                 key = f"buy:{cand['code']}"
                 if row and self.evaluated.get(key, 0) >= row["bar_timestamp"]:
                     continue
@@ -165,12 +177,76 @@ class SignalEngine:
             # buy-all 语义不变；排序只决定 pending 顺序（两引擎共用同一 key）。
             signals.sort(key=lambda x: rank_key(x[0], x[1], cfg.auction_ranking_enabled))
             for sig, cand in signals:
-                self.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))
+                order = self._order(cand["code"], cand.get("name", ""), sig, event.timestamp)
+                order["checks"] = next(
+                    (d.get("checks") for d in result["details"]
+                     if d.get("code") == cand["code"] and d.get("passed")), [])
+                # 成交失败时展示的诊断必须与决策帧一致（而不是成交失败帧）。
+                decision_row = event.rows.get(cand["code"])
+                order["decision_observed_at"] = (decision_row.get("observed_at")
+                                                 if decision_row else None)
+                order["decision_phase"] = decision_row.get("phase") if decision_row else None
+                self.pending.append(order)
+        elif base_window and not has_pending_buy:
+            # 事件级闸门：买点整段未评估。只对 buy 命令输出诊断，pending 单存在时不追加。
+            if not risk_allow_buy:
+                gate = "组合风控闸门（当日暂停开新仓）"
+            else:
+                gate = "当日已卖出，暂停开新仓"
+            if gate not in self.buy_eval_skipped:
+                self.buy_eval_skipped.append(gate)
+            held = {p.code for p in self.positions} | self.held_codes
+            for cand in event.candidates:
+                row = event.rows.get(cand["code"])
+                key = f"buy_gate:{cand['code']}"
+                observation = row["bar_timestamp"] if row else event.timestamp
+                if self.evaluated.get(key, 0) >= observation:
+                    continue
+                self.evaluated[key] = observation
+                if cand["code"] in held:
+                    result["details"].append(self._already_holding_detail(cand, row, cfg))
+                else:
+                    result["details"].append({
+                        "code": cand["code"], "name": cand.get("name", ""),
+                        "rank": cand.get("rank"), "passed": False,
+                        "reason_code": "buy_eval_skipped",
+                        "reason_text": f"本轮买点未评估（{gate}）",
+                        "signal": {}, "full_signal": None,
+                        "observed_at": row.get("observed_at") if row else None,
+                        "phase": row.get("phase") if row else None,
+                        "checks": buy_check_placeholders(
+                            cfg, BUY_CHECK_SKIPPED, f"前置闸门：{gate}",
+                            date=row.get("date") if row else None),
+                    })
         self.last_event = event.timestamp
         result["pending"] = list(self.pending)
+        result["buy_eval_skipped"] = list(self.buy_eval_skipped)
         if self.pending:
             result["reason_code"] = "pending_execution"
         return result
+
+    def _already_holding_detail(self, cand: dict, row: Optional[dict], cfg) -> dict:
+        checks = (explain_buy_checks(cand, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+                                     row.get("intraday_bars"))
+                  if row else [])
+        return {"code": cand["code"], "name": cand.get("name", ""),
+                "passed": False, "rank": cand.get("rank"),
+                "reason_code": "already_holding", "reason_text": "已买入",
+                "signal": {}, "full_signal": None,
+                "observed_at": row.get("observed_at") if row else None,
+                "phase": row.get("phase") if row else None,
+                "checks": checks}
+
+    @staticmethod
+    def _unfilled_detail(order: dict, row: dict, reason_code: str, reason_text: str) -> dict:
+        return {"code": order["stock_code"], "name": order.get("name", ""),
+                "passed": False, "rank": None,
+                "reason_code": reason_code, "reason_text": reason_text,
+                "signal": order.get("signal") or {}, "full_signal": None,
+                # checks 来自决策帧，observed_at/phase 必须同帧，避免 pending 帧被误读为终态。
+                "observed_at": order.get("decision_observed_at", row.get("observed_at")),
+                "phase": order.get("decision_phase", row.get("phase")),
+                "checks": order.get("checks") or []}
 
     def _sold_today(self) -> bool:
         """实时读影子状态（与 TradingEngine 在 pending/买点两处实时读 state.sold_today 同构）。"""

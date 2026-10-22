@@ -3,7 +3,7 @@
 - 日期：2026-10-22 · 分支：`feat/reviewa-account-op` · 状态：v3（第 2 轮 solution-reviewer 复审 APPROVE，可进入方案确认点）
 v2 修订摘要：灾难段改为「灾难优先、不带半仓守卫」；`first_day_disaster_stop_pct` 默认改为 0；开关收敛到 `StrategyConfig`（消除跨规则读 toggle 与循环依赖）；兜底日两腿同日/跨日语义显式化并给实测证据；风险口径改为上界；验证门槛分两级；测试补 12–16 与引擎级兜底日用例。
 - 范围：`review_account/strategy.py` 卖出责任链中的首日止损（`hard_stop` 的 `hold_days==1` 分支）及其成交价口径、配置开关、回测/实盘一致性
-- 输入：run #6（2026-06-26 → 2026-10-22，10 万本金）回测分析；`docs/research/2026-10-22-position-sizing-backtest.md`（仓位分散无效的结论）
+- 输入：run #6（2026-06-26 → 2026-10-22，10 万本金）回测分析；`archived_md/review_account/2026-10-22-position-sizing-backtest.md`（仓位分散无效的结论）
 - 非目标：不改仓位/风控参数、不改止盈类规则（trailing / breakeven / volume_spike）、不改买点、不引入新数据源
 
 ---

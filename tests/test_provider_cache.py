@@ -28,6 +28,10 @@ class TestTypeRegistry(unittest.TestCase):
         self.assertIs(_resolve_type("sector:components:881101")[0], StockInfo)
         self.assertIs(_resolve_type("quotes:batch")[0], Quote)
         self.assertIs(_resolve_type("sector:ranking")[0], SectorPerformance)
+        self.assertIs(_resolve_type("sector:ranking:tdx:gn")[0], SectorPerformance)
+        self.assertIs(_resolve_type("sector:components:tdx:gn:880683")[0], StockInfo)
+        self.assertIs(_resolve_type("kline:1min:sector:ths:dq:882001")[0], KBar)
+        self.assertIs(_resolve_type("kline:5min:sector:tdx:hy:881001")[0], KBar)
 
     def test_unregistered_returns_none(self):
         self.assertIsNone(_resolve_type("__meta__:candidates"))

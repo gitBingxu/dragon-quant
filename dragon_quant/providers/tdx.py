@@ -2,8 +2,8 @@
 通达信 TDX Provider — 首选数据链路（tmdx / easy_tdx，TCP 协议，无 Cookie 无反爬）
 
 设计要点（见 providers/TDX_PROVIDER_技术方案.md）：
-  - 惰性依赖：easy_tdx（tmdx 包）是默认依赖（`pip install dragon-quant` 在
-    Python ≥3.10 时自动安装；3.9 因 tmdx 自身要求被跳过），导入放在首次调用
+  - 惰性依赖：easy_tdx（tmdx 包）是默认依赖，随 `pip install dragon-quant`
+    自动安装，导入放在首次调用
     （避免 import 开销，并在缺失时优雅降级返回空/None，由 orchestrator 回退到
     老链路兜底）。缺失时的控制台提示见 `warn_if_unavailable()`。
   - 连接模型：单个共享 ``MacClient``（MAC 拓展行情，含板块/复权K线/换手市值PE），
@@ -38,7 +38,7 @@ _easytdx: Any = None  # easy_tdx 模块；False=已尝试但不可用
 
 
 def _import_easytdx() -> Any:
-    """惰性导入 easy_tdx（tmdx 条件默认依赖，仅 Python≥3.10 自动安装）。缺失时返回 None 触发兜底回退。"""
+    """惰性导入 easy_tdx（tmdx 默认依赖）。缺失时返回 None 触发兜底回退。"""
     global _easytdx
     if _easytdx is None:
         try:
@@ -75,14 +75,7 @@ def warn_if_unavailable() -> None:
     """
     if _easy_tdx_installed():
         return
-    if sys.version_info < (3, 10):
-        advice = (
-            f"当前 Python {sys.version_info.major}.{sys.version_info.minor} "
-            "无法安装 tmdx（要求 ≥3.10），建议升级 Python 后重新安装 "
-            "dragon-quant，会自动带上 tmdx。"
-        )
-    else:
-        advice = "请执行 `pip install tmdx`（或 `pip install dragon-quant`）补装。"
+    advice = "请执行 `pip install tmdx`（或 `pip install dragon-quant`）补装。"
     print(
         "⚠️ 未安装 tmdx（通达信 TDX 首选数据链路），tdx 主链路不可用时将回退到同花顺/雪球/腾讯老链路。\n"
         f"【建议】{advice}\n"
@@ -93,6 +86,9 @@ def warn_if_unavailable() -> None:
 
 # 仓库指数别名 → TDX 代码（上证指数 SH000001 → 999999；000001 是平安银行不映射）
 _INDEX_ALIAS = {"SH000001": "999999"}
+
+# 板块维度 → easy_tdx.BoardType 属性名（运行时从 et.BoardType 取，避免导入期依赖）
+_BOARD_TYPE_BY_CATEGORY = {"hy": "HY", "gn": "GN", "dq": "DQ"}
 
 # ─── 代码/市场解析 ──────────────────────────────────────────────────────────
 
@@ -226,10 +222,12 @@ def _to_quote(r: dict) -> Optional[Quote]:
         bid1_volume=_f(r.get("bid_volume")),
         ask1_volume=_f(r.get("ask_volume")),
         timestamp=0,
+        # 存在性检查：字段缺失保持 None（未知），不被 _f 误置为 0.0（无流入）
+        main_net_amount=_f(r["main_net_amount"]) if "main_net_amount" in r else None,
     )
 
 
-def _to_sector(r: dict) -> SectorPerformance:
+def _to_sector(r: dict, category: str = "", source: str = "tdx") -> SectorPerformance:
     """board_list 行 → SectorPerformance（涨跌幅由 price/pre_close 现算）。"""
     price = _f(r.get("price"))
     pre = _f(r.get("pre_close"))
@@ -238,6 +236,7 @@ def _to_sector(r: dict) -> SectorPerformance:
         code=str(r.get("code", "")),
         name=str(r.get("name", "")),
         pct=pct, amplitude=0.0, turnover_rate=0.0,
+        category=category, source=source,
     )
 
 
@@ -253,6 +252,115 @@ def _to_stockinfo(r: dict, sector_code: str) -> StockInfo:
         pct=pct, price=close,
     )
 
+
+def _to_auction_items(records: list[dict]) -> list[dict]:
+    """MAC get_auction DataFrame(records) → list[{'time','price','matched','unmatched'}]。
+
+    records 键：time(datetime.time) / price / matched / unmatched。time 统一序列化为
+    "HH:MM:SS" 字符串，便于 JSON 落库。
+    """
+    items: list[dict] = []
+    for r in records:
+        t = r.get("time")
+        ts = t.strftime("%H:%M:%S") if hasattr(t, "strftime") else str(t or "")
+        items.append({
+            "time": ts,
+            "price": _f(r.get("price")),
+            "matched": int(_f(r.get("matched"))),
+            "unmatched": int(_f(r.get("unmatched"))),
+        })
+    return items
+
+
+def _normalize_value(v):
+    """DataFrame 标量 → native Python 类型；NaN/inf → None（numpy 标量经 item() 还原）。"""
+    if v is None:
+        return None
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, (int, str, bool)):
+        return v
+    item = getattr(v, "item", None)
+    if callable(item):  # numpy 标量
+        try:
+            return _normalize_value(item())
+        except Exception:
+            return None
+    return v
+
+
+# ─── 宏观日 K 转换（纯函数，可单测）──────────────────────────────────────────
+
+
+def _ex_enums():
+    """惰性导入扩展行情枚举（测试可 patch 此函数，避免依赖真实 easy_tdx）。"""
+    from easy_tdx.mac.enums import ExMarket, Period
+    return ExMarket, Period
+
+
+def _macro_record_from_kline(spec, df, trade_date: str,
+                             market_name: str, code: str):
+    """扩展市场日 K DataFrame → 归一宏观记录。
+
+    口径由 ``spec.same_day_close`` 决定：True 排除 ``day > trade_date``（同日收盘，
+    夜盘归下一交易日 bar）；False 排除 ``day >= trade_date``（上一已完成 bar）。
+    """
+    from dragon_quant.providers.macro import build_macro_record
+
+    same_day = spec.same_day_close
+    records = df.to_dict("records") if df is not None and not df.empty else []
+    rows: list[tuple[str, float]] = []
+    for r in records:
+        dt = r.get("datetime")
+        if hasattr(dt, "strftime"):
+            day = dt.strftime("%Y-%m-%d")
+        else:
+            day = str(dt or "")[:10]
+        if len(day) != 10:
+            continue
+        if (day > trade_date) if same_day else (day >= trade_date):
+            continue
+        close = _f(r.get("close"))
+        if close <= 0:
+            continue
+        rows.append((day, close))
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item[0])
+    session_date, price = rows[-1]
+    prev_close = rows[-2][1] if len(rows) >= 2 else None
+
+    label = price_unit = None
+    if market_name == "SH_GOLD":       # 沪金口径（元/克），与 COMEX 美元金区分
+        label, price_unit = "沪金", "cny_per_g"
+    return build_macro_record(
+        spec, price=price, prev_close=prev_close, source="tdx_ex",
+        code=code, market=market_name, session_date=session_date,
+        chg_bp_approx=True if spec.kind == "yield" else None,
+        precision_note=("TDX 两位小数日频快照，bp 为近似值"
+                        if spec.kind == "yield" else None),
+        label=label, price_unit=price_unit,
+    )
+
+
+# 市场宽度行保留字段（datetime 类字段不入资产，避免序列化歧义）
+_BREADTH_KEYS = ("code", "name", "close", "pre_close", "open", "high", "low",
+                 "vol", "amount", "buy_price_limit", "sell_price_limit")
+
+# FG 板块成员字段映射（值=源字段名；market_cap 取 total_market_cap_ab）。
+# 保持与存量 get_fg_board_members 完全一致的 13 个键，向后兼容。
+_FG_MEMBER_FIELDS = {
+    "code": "code", "name": "name", "close": "close", "pre_close": "pre_close",
+    "open": "open", "high": "high", "low": "low", "turnover": "turnover",
+    "amount": "amount", "market_cap": "total_market_cap_ab",
+    "main_net_amount": "main_net_amount",
+    "buy_price_limit": "buy_price_limit", "sell_price_limit": "sell_price_limit",
+}
+
+
+def _fg_member_row(r: dict) -> dict:
+    return {k: _normalize_value(r.get(src)) for k, src in _FG_MEMBER_FIELDS.items()}
+
 # ─── Provider ──────────────────────────────────────────────────────────────
 
 
@@ -262,6 +370,8 @@ class TdxProvider(StockProvider):
         super().__init__()
         self._lock = threading.Lock()
         self._client: Any = None  # MacClient；False=永久不可用
+        self._macro_client: Any = None  # MacExClient（扩展行情）；False=永久不可用
+        self._macro_error: Optional[str] = None  # 首次失败根因（供 RuntimeError 诊断）
         self._preset: Any = None  # easy_tdx PresetField
 
     @property
@@ -288,14 +398,45 @@ class TdxProvider(StockProvider):
                 return None
         return self._client or None
 
+    def _get_macro_client(self):
+        """惰性创建 MacExClient（扩展行情，端口 7727）。不可用 → None。
+
+        失败时抛出的异常由 ``get_macro_quotes`` 统一转 RuntimeError（provider 契约：
+        transport/解析/写盘失败必须抛出，由 providers.macro 门面逐源回退）。
+        """
+        if self._macro_client is None:
+            et = _import_easytdx()
+            if et is None:
+                self._macro_error = "easy_tdx 不可用"
+                self._macro_client = False
+                return None
+            try:
+                from easy_tdx.ex.mac_client import MacExClient
+                client = MacExClient.from_best_host(timeout=8, ping_timeout=2)
+                client.connect()
+                self._macro_client = client
+            except Exception as exc:
+                self._macro_error = f"{type(exc).__name__}: {exc}"
+                self._macro_client = False
+                return None
+        return self._macro_client or None
+
     def _quote_fields(self):
         """完整 Quote 字段集：COMMON（换手/量比/市值/PE/涨跌停）+ QUOTE（买一卖一）。"""
         return self._preset.COMMON + self._preset.QUOTE
 
     # ─── 板块 ───
 
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
-        """行业板块涨跌幅排行（通达信 BoardType.HY，按涨跌幅排序）。"""
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
+        """板块涨跌幅排行（通达信 board_list）。
+
+        category: hy 行业 / gn 概念 / dq 地区。未知维度抛 ValueError（编程错误，
+        不伪装成 api 失败），由 orchestrator 按维度降级（不中断扫描）。
+        """
+        board_name = _BOARD_TYPE_BY_CATEGORY.get(category)
+        if board_name is None:
+            raise ValueError(f"未知板块维度: {category!r}")
         t0 = time.time()
         try:
             et = _import_easytdx()
@@ -306,29 +447,36 @@ class TdxProvider(StockProvider):
                 return []
             with self._lock:
                 df = client.get_board_list(
-                    board_type=et.BoardType.HY,
+                    board_type=getattr(et.BoardType, board_name),
                     count=10000,
                     sort_column=et.BoardSortColumn.CHANGE_PCT,
                 )
-            rows = ([_to_sector(r) for r in df.to_dict("records")]
+            rows = ([_to_sector(r, category, "tdx") for r in df.to_dict("records")]
                     if not df.empty else [])
             rows.sort(key=lambda s: s.pct, reverse=not asc)
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_ranking", ok=bool(rows),
-                                 elapsed_ms=elapsed, note=f"n={len(rows)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(rows)}",
+                                 dimension=category)
             return rows
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_ranking", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e),
+                                 dimension=category)
             return []
 
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
-        """板块成分股（通达信 board_members，按涨跌幅降序）。"""
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
+        """板块成分股（通达信 board_members，按涨跌幅降序）。
+
+        TDX 以 code 路由，category 仅用于日志与接口一致性；code 冲突由
+        orchestrator 在 Phase A 提前剔除。
+        """
         t0 = time.time()
         try:
             et = _import_easytdx()
@@ -348,12 +496,71 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_components", ok=bool(rows),
-                                 elapsed_ms=elapsed, note=f"n={len(rows)}")
+                                 elapsed_ms=elapsed,
+                                 note=f"{category} n={len(rows)}", dimension=category)
             return rows
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_components", ok=False,
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
+            return []
+
+    def get_fg_boards(self, names: list[str]) -> dict[str, dict]:
+        """FG(风格)板块批量成员：一次板块列表解析 + 逐板块成员。
+
+        返回 {name: {'rows': [...], 'status': 'ok'|'missing'}}。
+        错误契约（prep 采集）：transport/连接失败抛异常；板块名不存在记 missing。
+        """
+        t0 = time.time()
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("tdx 连接不可用")
+        with self._lock:
+            boards = client.get_board_list(
+                board_type=et.BoardType.FG, count=10000,
+                sort_column=et.BoardSortColumn.CHANGE_PCT,
+            )
+            code_by_name = {}
+            for r in boards.to_dict("records"):
+                code_by_name[str(r.get("name", "")).strip()] = str(r.get("code", "")).strip()
+            out: dict[str, dict] = {}
+            for name in names:
+                target = name.strip()
+                code = code_by_name.get(target)
+                if not code:
+                    out[name] = {"rows": [], "status": "missing"}
+                    continue
+                df = client.get_board_members(
+                    board_symbol=code,
+                    sort_type=et.SortType.CHANGE_PCT,
+                    sort_order=et.SortOrder.DESC,
+                )
+                rows = [_fg_member_row(r)
+                        for r in (df.to_dict("records") if not df.empty else [])]
+                out[name] = {"rows": rows, "status": "ok"}
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "fg_boards", ok=True, elapsed_ms=elapsed,
+                             note=f"names={len(names)}")
+        return out
+
+    def get_fg_board_members(self, board_name: str) -> list[dict]:
+        """取通达信 FG(风格)统计板块成分（如「昨日涨停」「昨日跌停」「最近多板」）。
+
+        返回原始成员 dict（含完整行情字段），供盘后复盘的情绪温度/主线识别使用。
+        board_name 需与通达信板块名精确匹配；未找到或失败返回空列表（存量契约）。
+        """
+        t0 = time.time()
+        try:
+            return self.get_fg_boards([board_name]).get(board_name, {}).get("rows", [])
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "fg_board_members", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []
 
@@ -375,40 +582,43 @@ class TdxProvider(StockProvider):
             return []
         return _to_kbars(df.to_dict("records"))
 
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         t0 = time.time()
         try:
             kbars = self._index_kline(sector_code, _import_easytdx().Period.MIN_5, bars)
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_kline", ok=bool(kbars),
-                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(kbars)}", dimension=category)
             return kbars[-bars:] if bars else kbars
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_kline", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
-    def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
+    def get_sector_1min_kline(self, sector_code: str, bars: int = 240,
+                              category: str = "hy") -> list[KBar]:
         t0 = time.time()
         try:
             kbars = self._index_kline(sector_code, _import_easytdx().Period.MIN_1, bars)
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_1min_kline", ok=bool(kbars),
-                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(kbars)}", dimension=category)
             return kbars[-bars:] if bars else kbars
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_1min_kline", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
     def get_sector_5min_kline_history(self, sector_code: str,
-                                      days: int = 10) -> list[KBar]:
+                                      days: int = 10,
+                                      category: str = "hy") -> list[KBar]:
         """板块近 days 个交易日的 5 分钟历史 K 线。"""
         t0 = time.time()
         try:
@@ -424,13 +634,13 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_history", ok=bool(kbars),
-                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+                                 elapsed_ms=elapsed, note=f"{category} n={len(kbars)}", dimension=category)
             return kbars
         except Exception as e:
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "sector_5min_history", ok=False,
-                                 elapsed_ms=elapsed, error=str(e))
+                                 elapsed_ms=elapsed, error=str(e), dimension=category)
             return []
 
     # ─── 个股 ───
@@ -558,5 +768,148 @@ class TdxProvider(StockProvider):
             elapsed = (time.time() - t0) * 1000
             if self._logger:
                 self._logger.api("tdx", "batch_quotes", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            return []
+
+    # ─── prep 盘后复盘采集（错误契约：transport 失败抛异常，由采集器捕获记 error）───
+
+    def get_market_breadth_rows(self, count: int = 6000) -> list[dict]:
+        """全 A 实时行情行（市场宽度五合一原始素材）。
+
+        get_stock_quotes_list 内部自动分页（多次串行请求，复用 _lock）；
+        **必须显式传 count≈6000**（默认只回 80 条）。返回行已归一化
+        （numpy 标量 → native，NaN → None），仅保留 _BREADTH_KEYS 字段。
+        """
+        t0 = time.time()
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("tdx 连接不可用")
+        with self._lock:
+            df = client.get_stock_quotes_list(
+                category=et.Category.A, start=0, count=count,
+                fields=self._preset.COMMON,
+            )
+        rows = [{k: _normalize_value(r.get(k)) for k in _BREADTH_KEYS}
+                for r in (df.to_dict("records") if df is not None and not df.empty else [])]
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "market_breadth_rows", ok=bool(rows),
+                             elapsed_ms=elapsed, note=f"n={len(rows)}")
+        # 空结果不上抛：由 prep 采集器按 sample_n 判定 empty_suspicious（契约：
+        # provider 只在 transport 失败时抛异常，不替上层判定数据充分性）
+        return rows
+
+    def get_announcements(self, code: str, count: int = 30, page: int = 1) -> list[dict]:
+        """cninfo 个股公告单页（title/type/date/url），最新在前。
+
+        独立于 MacClient 的 HTTP 客户端（巨潮，无反爬）。失败抛异常（采集契约）。
+        date 统一序列化为 "YYYY-MM-DD" 字符串，便于 JSON 落库与窗口过滤。
+        """
+        _import_easytdx()  # 确保 easy_tdx 可用（CninfoClient 随包分发）
+        from easy_tdx.cninfo import CninfoClient
+        c = code.upper()
+        if c.startswith(("SH", "SZ", "BJ")):
+            c = c[2:]
+        t0 = time.time()
+        try:
+            df = CninfoClient().get_announcements(c, count=count, page=page)
+        except Exception as e:
+            raise RuntimeError(f"cninfo 公告拉取失败 {c} page={page}: {e}") from e
+        out: list[dict] = []
+        for r in (df.to_dict("records") if df is not None and not df.empty else []):
+            d = r.get("date")
+            out.append({
+                "title": str(r.get("title", "")),
+                "type": str(r.get("type", "") or ""),
+                "date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or ""),
+                "url": str(r.get("url", "") or r.get("pdf_url", "") or ""),
+            })
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "announcements", ok=True,
+                             elapsed_ms=elapsed, note=f"{c} p{page} n={len(out)}")
+        return out
+
+    # ─── 宏观扰动（扩展行情日 K；错误契约：失败抛异常）────────────────────────
+
+    def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
+        """扩展行情日 K → 宏观记录（日经/A50 期指、美债、COMEX 金/沪金）。
+
+        口径由 spec 声明：``same_day_close=True`` 取 ``<= trade_date`` 的最后一根
+        （同日收盘，夜盘归下一交易日 bar）；否则取 ``< trade_date`` 的最后一根。
+        与运行时刻解耦，`--recompute` 可重放；`GC00W` 无数据时自动尝试
+        `SH_GOLD/Au99.99`。transport/解析失败抛 RuntimeError（由门面回退）。
+        """
+        t0 = time.time()
+        client = self._get_macro_client()
+        if client is None:
+            detail = f": {self._macro_error}" if self._macro_error else ""
+            raise RuntimeError(f"tdx 扩展行情不可用{detail}")
+        ExMarket, Period = _ex_enums()
+        wanted: list[tuple] = []
+        for spec in specs or []:
+            for market_name, code in getattr(spec, "tdx", ()) or ():
+                try:
+                    market = int(getattr(ExMarket, market_name))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+                wanted.append((spec, market_name, market, code))
+        if not wanted:
+            return {}
+
+        out: dict[str, dict] = {}
+        errors: list[str] = []
+        with self._lock:
+            for spec, market_name, market, code in wanted:
+                if spec.key in out:          # 前序候选已命中（COMEX 优先于沪金）
+                    continue
+                try:
+                    df = client.goods_kline(market, code, Period.DAILY, 0, 10)
+                except Exception as exc:
+                    errors.append(f"{market_name}/{code}: {type(exc).__name__}: {exc}")
+                    continue
+                rec = _macro_record_from_kline(
+                    spec, df, trade_date, market_name, code)
+                if rec:
+                    out[spec.key] = rec
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "macro_quotes", ok=bool(out), elapsed_ms=elapsed,
+                             note=f"n={len(out)} errs={len(errors)}")
+        if not out and errors:
+            raise RuntimeError("tdx 宏观日 K 全部失败：" + "；".join(errors))
+        return out
+
+    # ─── 集合竞价 ───
+
+    def get_auction(self, code: str) -> list[dict]:
+        """个股当日集合竞价盘口（仅当日 9:25 后可用，盘后仍可拉取，无历史回看）。
+
+        返回 [{'time','price','matched','unmatched'}, ...]；非交易时段/失败返回 []。
+        """
+        t0 = time.time()
+        try:
+            et = _import_easytdx()
+            if et is None:
+                return []
+            client = self._get_client()
+            if client is None:
+                return []
+            market, c = _resolve(code)
+            with self._lock:
+                df = client.get_auction(market=market, code=c)
+            items = _to_auction_items(df.to_dict("records")) if not df.empty else []
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "auction", ok=bool(items),
+                                 elapsed_ms=elapsed, note=f"{code} n={len(items)}")
+            return items
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "auction", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []

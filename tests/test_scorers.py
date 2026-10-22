@@ -584,3 +584,40 @@ class TestAbsorptionAggregation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNamespacedSectorKeys(unittest.TestCase):
+    """评分器用 primary_sector_key 读取规范化缓存键，缺省回退裸 code。"""
+
+    def setUp(self):
+        from dragon_quant.cache.data_cache import DataCache
+        self.cache = DataCache(cache_dir="")
+
+    def test_liquidity_reads_namespaced_components(self):
+        from dragon_quant.scorers import liquidity
+        self.cache.set("quotes:batch", [_quote("600001", 10, 11, bid1=50000),
+                                        _quote("600002", 10, 11, bid1=50000)])
+        self.cache.set("kline:1min:600001", _min_bars(10, [0] * 9 + [10]))
+        self.cache.set("sector:components:tdx:gn:X",
+                       [StockInfo("600002", "B", pct=5.0)])
+        r = liquidity.score("600001", self.cache, primary_sector="X",
+                            primary_sector_key="tdx:gn:X")
+        self.assertFalse(r.details.get("degraded"))
+        # 旧式裸键（无命名空间）仍走原路径：components 缺失 → degraded
+        r2 = liquidity.score("600001", self.cache, primary_sector="X")
+        self.assertTrue(r2.details.get("degraded"))
+
+
+class TestBareCodeSectorKeys(unittest.TestCase):
+    """不传 primary_sector_key 时，仍读取旧式裸 code 键（向后兼容）。"""
+
+    def test_liquidity_reads_bare_code_key(self):
+        from dragon_quant.cache.data_cache import DataCache
+        from dragon_quant.scorers import liquidity
+        cache = DataCache(cache_dir="")
+        cache.set("quotes:batch", [_quote("600001", 10, 11, bid1=50000),
+                                   _quote("600002", 10, 11, bid1=50000)])
+        cache.set("kline:1min:600001", _min_bars(10, [0] * 9 + [10]))
+        cache.set("sector:components:881001", [StockInfo("600002", "B", pct=5.0)])
+        r = liquidity.score("600001", cache, primary_sector="881001")
+        self.assertFalse(r.details.get("degraded"))

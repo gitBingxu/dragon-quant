@@ -8,6 +8,7 @@ from typing import Optional
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, ScoreResult
 from dragon_quant.scorers import registry as R
+from dragon_quant.sectors import sector_5min_key
 from dragon_quant.scorers.base import CHINA_TZ, trading_session
 
 DIM = "absorption"
@@ -15,18 +16,22 @@ WEIGHT = R.DIM_WEIGHTS[DIM]
 
 
 def score(code: str, cache: DataCache, primary_sector: str = "",
+          primary_sector_key: str = "",
           all_sector_codes: Optional[list[str]] = None,
+          all_sector_keys: Optional[list[str]] = None,
           sector_name_map: Optional[dict[str, str]] = None, **kwargs) -> ScoreResult:
-    if not primary_sector:
+    key = primary_sector_key or primary_sector
+    if not key:
         return _fallback("未指定主板块")
-    target = cache.get(f"kline:5min:sector:{primary_sector}") or []
+    target = cache.get(sector_5min_key(key)) or []
     if len(target) < R.ABS_WINDOW:
         return _fallback("目标板块5分K不足")
-    if all_sector_codes is None:
-        all_sector_codes = cache.get("__meta__:sector_codes") or []
+    keys = all_sector_keys
+    if keys is None:
+        keys = cache.get("__meta__:sector_codes") or all_sector_codes or []
     other_map = {}
-    for sector in set(all_sector_codes or []) - {primary_sector}:
-        bars = cache.get(f"kline:5min:sector:{sector}") or []
+    for sector in set(keys) - {key}:
+        bars = cache.get(sector_5min_key(sector)) or []
         if len(bars) >= R.ABS_WINDOW:
             other_map[sector] = bars
     if len(other_map) < R.ABS_MIN_AFFECTED:

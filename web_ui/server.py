@@ -332,10 +332,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self._send_json({"data": db.query_review_account_trades(run_id)})
 
     def _serve_api_account_positions(self, params: dict):
-        """GET /api/account/positions?run_id=1"""
+        """GET /api/account/positions?run_id=1 — 已平仓持仓 + 买点统计"""
         db = _get_db()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_positions(run_id)})
+        rows = db.query_review_account_positions(run_id)
+        run = db.get_review_account_run(run_id)
+        from dragon_quant.review_account.evaluation import entry_reason_stats
+        stats = entry_reason_stats(rows, (run or {}).get("initial_cash") or 0.0)
+        self._send_json({"data": rows, "stats": stats})
 
     def _serve_api_account_events(self, params: dict):
         """GET /api/account/events?run_id=1"""

@@ -1,8 +1,10 @@
 """
-交易日历工具 — 基于雪球日 K 线数据计算交易日
+交易日历工具 — 日 K 线推导交易日（雪球 / TDX 指数双来源）
 
-不依赖任何外部假期表，用平安银行（000001）日K线天然包含的
-交易日集合来判断任意两个日期之间的交易日数量。
+不依赖任何外部假期表：
+- ``build_trade_calendar``：用平安银行（000001）日 K（雪球）；
+- ``tdx_trade_dates``：用上证指数（SH000001）日 K（TDX，无 Cookie），供 prep 日期门禁
+  与 auction 的 T-1 快照选择共用。
 """
 
 from datetime import datetime
@@ -34,6 +36,25 @@ def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
         d = datetime.fromtimestamp(k.timestamp / 1000).strftime("%Y-%m-%d")
         if from_date <= d <= to_date and (d < today or (d == today and market_closed)):
             dates.add(d)
+    return dates
+
+
+def tdx_trade_dates(tdx, days: int = 120) -> list[str]:
+    """TDX 指数日 K → 升序交易日列表（不依赖雪球 Cookie）。
+
+    数据源失败/为空时抛中性 ``ValueError``（不依赖 review_account.prep，避免依赖倒置）；
+    prep 的日期门禁负责把它包装为既有 ``PrepError``，保持「非交易日 vs 日历源失败」区分。
+    """
+    from zoneinfo import ZoneInfo
+
+    bars = tdx.get_kline("SH000001", days=days)
+    shanghai = ZoneInfo("Asia/Shanghai")
+    dates = sorted({
+        datetime.fromtimestamp(b.timestamp / 1000, shanghai).strftime("%Y-%m-%d")
+        for b in (bars or [])
+    })
+    if not dates:
+        raise ValueError("交易日历数据源失败（TDX 指数日K为空），请稍后重试")
     return dates
 
 

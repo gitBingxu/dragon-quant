@@ -4,7 +4,8 @@ import json
 from typing import Optional
 
 from dragon_quant.review_account.models import StrategyConfig
-from dragon_quant.review_account.simulator import AccountSimulator
+from dragon_quant.review_account.priority import RANKING_MODE_LABELS
+from dragon_quant.review_account.simulator import AccountSimulator, annotate_post_exit
 from dragon_quant.storage import db
 
 
@@ -24,6 +25,8 @@ def run_review_account(date_from: str,
                                     "strategy_name": strategy_name, "initial_cash": initial_cash})
     sim = AccountSimulator(cfg)
     result = sim.run(date_from, date_to)
+    # 事后评估：清仓后窗口指标。放在 run() 之外，回测核心保持纯 as-of；失败逐条降级。
+    annotate_post_exit(result["positions"], sim.data)
 
     run_id = db.create_review_account_run(
         source=source,
@@ -82,4 +85,20 @@ def _print_summary(result: dict, source: str, strategy_name: str):
     else:
         print(f"胜率: {result['win_rate']:.1f}%")
     print(f"交割单: {result['trade_count']} 笔")
+    mode = result.get("ranking_mode")
+    if mode:
+        print(f"排序模式: {mode}（{RANKING_MODE_LABELS.get(mode, mode)}）")
+    fallbacks = {day: reason for day, reason in (result.get("fallback_reasons") or {}).items()
+                 if reason}
+    if fallbacks:
+        reasons = "、".join(sorted(set(fallbacks.values())))
+        print(f"候选池回退: {len(fallbacks)} 天（{reasons}）")
+    for note in result.get("priority_degraded") or []:
+        print(f"⚠️ {note}")
+    suspended = result.get("suspended_codes") or []
+    if suspended:
+        print(f"停牌跳过: {len(suspended)} 只 / {result.get('suspended_days_count', 0)} 天"
+              f"（{'、'.join(suspended)}）")
+    for note in result.get("data_degraded") or []:
+        print(f"⚠️ {note}")
     print(f"run_id: {result['run_id']}")

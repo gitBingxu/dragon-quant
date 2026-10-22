@@ -26,33 +26,39 @@ class StockProvider(ABC):
     # ─── 板块相关 ───
 
     @abstractmethod
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
         """
         获取板块涨跌幅排行。
         asc=False: 涨幅榜（领涨板块）
         asc=True: 跌幅榜（领跌板块）
+        category: hy 行业 / gn 概念 / dq 地区；默认 hy 保持历史行为
         """
         ...
 
     @abstractmethod
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
         """获取板块成分股列表（按涨跌幅降序）"""
         ...
 
     @abstractmethod
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         """获取板块 5 分钟 K 线"""
         ...
 
     # ─── scorers 新增（普通方法，默认未实现；仅 ths 覆写）───
 
-    def get_sector_1min_kline(self, sector_code: str, bars: int = 240) -> list[KBar]:
+    def get_sector_1min_kline(self, sector_code: str, bars: int = 240,
+                              category: str = "hy") -> list[KBar]:
         """获取板块当日 1 分钟分时 K 线（原始 1 分，不聚合）"""
         raise NotImplementedError(f"{self.name} 不提供板块当日 1 分 K")
 
-    def get_sector_5min_kline_history(self, sector_code: str, days: int = 10) -> list[KBar]:
+    def get_sector_5min_kline_history(self, sector_code: str, days: int = 10,
+                                      category: str = "hy") -> list[KBar]:
         """获取板块近 days 个交易日的 5 分钟历史 K 线（真实 OHLC）"""
         raise NotImplementedError(f"{self.name} 不提供板块历史 5 分 K")
 
@@ -88,3 +94,44 @@ class StockProvider(ABC):
     def batch_get_quotes(self, codes: list[str]) -> list[Quote]:
         """批量获取实时行情快照"""
         raise NotImplementedError(f"{self.name} 不提供批量行情")
+
+    # ─── prep 盘后复盘采集方法（普通方法，默认未实现；仅 tdx/ths 覆写）───
+    # 错误契约（与存量「异常吞掉返回 []」不同）：transport 层失败（超时/403/连接错误）
+    # 抛异常，由 prep 采集器捕获记 status=error；仅「请求成功但确无数据」返回空。
+
+    def get_market_breadth_rows(self, count: int = 6000) -> list[dict]:
+        """全 A 实时行情行（已归一化为 native 类型，NaN→None）。
+
+        行含 code/name/close/pre_close/high/low/vol/amount/buy_price_limit/sell_price_limit。
+        """
+        raise NotImplementedError(f"{self.name} 不提供全 A 市场宽度")
+
+    def get_fg_boards(self, names: list[str]) -> dict[str, dict]:
+        """FG(风格)板块批量成员：一次板块列表解析 + 逐板块成员。
+
+        返回 {name: {'rows': [...], 'status': 'ok'|'missing'}}；transport 失败抛异常。
+        """
+        raise NotImplementedError(f"{self.name} 不提供 FG 板块批量成员")
+
+    def get_limit_up_pool(self, date: str) -> dict:
+        """THS 涨停池 dataapi，date=YYYYMMDD；返回 {'total': int, 'rows': [...]}"""
+        raise NotImplementedError(f"{self.name} 不提供涨停池")
+
+    def get_block_top(self, date: str) -> dict:
+        """THS 题材主线榜 dataapi，date=YYYYMMDD；返回 {'rows': [...]}"""
+        raise NotImplementedError(f"{self.name} 不提供题材主线榜")
+
+    def get_announcements(self, code: str, count: int = 30, page: int = 1) -> list[dict]:
+        """cninfo 个股公告单页（title/type/date/url），最新在前；失败抛异常"""
+        raise NotImplementedError(f"{self.name} 不提供公告")
+
+    # ─── prep 宏观扰动（普通方法，默认未实现；仅部分 provider 覆写）───
+    # 错误契约：transport/解析失败抛异常，由 providers.macro.collect_macro 逐源回退。
+
+    def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
+        """批量获取宏观日 K/报价，返回 {spec.key: normalized_dict}。
+
+        canonical 取「日 K 中日期 < trade_date 的最后一根」；quote 类回退源必须
+        自行校验 session_date < trade_date，否则拒绝该品种。transport 失败抛异常。
+        """
+        raise NotImplementedError(f"{self.name} 不提供宏观报价")

@@ -11,14 +11,15 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dragon_quant.live_trade.trader import LiveTrader
 from dragon_quant.models.types import KBar
-from dragon_quant.review_account.evaluation import compare_strategies
+from dragon_quant.review_account.evaluation import TOTAL_ROW_CODE, compare_strategies, entry_reason_stats
 from dragon_quant.review_account.market import bar_times, validate_bars
-from dragon_quant.review_account.models import StrategyConfig
+from dragon_quant.review_account.models import ClosedPosition, StrategyConfig
 from dragon_quant.review_account.service import run_review_account
+from dragon_quant.review_account.simulator import AccountSimulator
 from dragon_quant.storage import db
 from tests.test_review_account import CAND, DAY, FakeData
 
@@ -79,6 +80,96 @@ class TestReviewAccountIntegration(IntegrationBase):
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["date_from"], "2026-09-07")
         self.assertEqual(runs[0]["date_to"], "2026-09-08")
+
+    def test_service_annotates_post_exit_fields_before_persist(self):
+        closed = ClosedPosition(
+            "600001", "样本", "2026-09-04", 10.0, 1000, "buy_open_ma5_pullback", {},
+            "2026-09-04", 10.0, "trailing_take_profit", {}, 10.0, 0,
+        )
+        fake = {"initial_cash": 100000.0, "final_equity": 101000.0, "total_return": 1.0,
+                "max_drawdown": 0.0, "trade_count": 2, "win_rate": 100.0,
+                "snapshots": [], "trades": [], "positions": [closed], "events": []}
+        sim = MagicMock()
+        sim.run.return_value = fake
+        sim.data = FakeData()   # daily() 返回截至 2026-09-08 的日K
+        with patch("dragon_quant.review_account.service.AccountSimulator", return_value=sim):
+            result = run_review_account("2026-09-04", "2026-09-08", source="v2", verbose=False)
+        rows = db.query_review_account_positions(result["run_id"])
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["post_exit_max_return"], 2.0)
+        self.assertAlmostEqual(rows[0]["post_exit_max_drawdown"], -2.0)
+        self.assertEqual(rows[0]["post_exit_window_days"], 2)
+
+    def test_entry_stats_win_rate_matches_simulator_result(self):
+        with patch("dragon_quant.storage.db.get_dragons_by_date", return_value=[CAND]):
+            result = AccountSimulator(StrategyConfig(), data=_DropData()).run(
+                "2026-09-04", "2026-09-08")
+        stats = entry_reason_stats([p.__dict__ for p in result["positions"]],
+                                   result["initial_cash"])
+        # run() 保持纯 as-of：注解字段在 run 结束时仍为默认值，由 service 补算。
+        for p in result["positions"]:
+            self.assertIsNone(p.post_exit_max_return)
+            self.assertIsNone(p.post_exit_max_drawdown)
+            self.assertEqual(p.post_exit_window_days, 0)
+        total = stats["rows"][-1]
+        self.assertEqual(total["reason_code"], TOTAL_ROW_CODE)
+        self.assertEqual(total["trades"], len(result["positions"]))
+        self.assertAlmostEqual(total["win_rate"], result["win_rate"])
+        # 注解不得改变交易结果（golden 值取自改动前的真实回测）
+        self.assertEqual(result["trade_count"], 2)
+        self.assertAlmostEqual(result["final_equity"], 99495.199)
+        self.assertEqual(result["win_rate"], 0.0)
+
+    def test_positions_api_includes_stats_and_nullable_old_columns(self):
+        from web_ui.server import ReviewHandler
+        handler = object.__new__(ReviewHandler)
+        captured = {}
+        handler._send_json = lambda payload, status=200: captured.update(
+            payload=payload, status=status)
+        fake_db = MagicMock()
+        fake_db.query_review_account_positions.return_value = [{
+            "code": "600001", "name": "样本", "entry_date": "2026-09-04",
+            "entry_price": 10.0, "qty": 1000,
+            "entry_reason_code": "buy_open_ma5_pullback",
+            "entry_signal": {}, "exit_date": "2026-09-08", "exit_price": 10.5,
+            "exit_reason_code": "trailing_take_profit", "exit_signal": {},
+            "realized_return": 5.0, "hold_days": 2, "status": "closed",
+            "post_exit_max_return": None, "post_exit_max_drawdown": None,
+            "post_exit_window_days": None,
+        }]
+        fake_db.get_review_account_run.return_value = {"initial_cash": 100000.0}
+        with patch("web_ui.server._get_db", return_value=fake_db):
+            handler._serve_api_account_positions({"run_id": ["1"]})
+        payload = captured["payload"]
+        self.assertEqual(len(payload["data"]), 1)
+        self.assertIsNone(payload["data"][0]["post_exit_max_return"])
+        stats = payload["stats"]
+        self.assertEqual(stats["initial_cash"], 100000.0)
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(len(stats["rows"]), 5)   # 四类 + 合计
+        self.assertEqual(stats["rows"][0]["reason_code"], "buy_open_ma5_pullback")
+        self.assertEqual(stats["rows"][0]["trades"], 1)
+        self.assertAlmostEqual(stats["rows"][-1]["win_rate"], 100.0)
+
+    def test_positions_api_handles_missing_run(self):
+        from web_ui.server import ReviewHandler
+        handler = object.__new__(ReviewHandler)
+        captured = {}
+        handler._send_json = lambda payload, status=200: captured.update(
+            payload=payload, status=status)
+        fake_db = MagicMock()
+        fake_db.query_review_account_positions.return_value = []
+        fake_db.get_review_account_run.return_value = None
+        with patch("web_ui.server._get_db", return_value=fake_db):
+            handler._serve_api_account_positions({"run_id": ["999"]})
+        payload = captured["payload"]
+        self.assertEqual(payload["data"], [])
+        self.assertEqual(payload["stats"]["initial_cash"], 0.0)
+        self.assertEqual(payload["stats"]["total_trades"], 0)
+        self.assertEqual(len(payload["stats"]["rows"]), 5)
+        for row in payload["stats"]["rows"]:
+            self.assertEqual(row["trades"], 0)
+            self.assertIsNone(row["contribution"])
 
 
 class TestEvaluationIntegration(IntegrationBase):

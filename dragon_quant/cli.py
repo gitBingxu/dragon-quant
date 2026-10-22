@@ -394,30 +394,107 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p.add_argument("--json", dest="json", action="store_true",
                            help="输出完整 JSON（默认只展示参与竞价判断的标的强弱与汇总）")
 
-    # assets 子命令（数据资产云端同步；M1 先提供 doctor）
+    # assets 子命令（数据资产云端同步）
     assets_p = sub.add_parser(
         "assets",
         help="数据资产云端同步（备份/恢复）",
         usage="dragon-quant assets <action> [action-options]",
         description="把 prep/auction 产出的原始数据资产备份到 S3 兼容对象存储，或从云端恢复。",
         epilog="""Examples:
+  dragon-quant assets push --profile r2
+  dragon-quant assets pull --from 20261020 --to 20261022 --apply
+  dragon-quant assets status --orphans
+  dragon-quant assets verify --from 20261020 --to 20261022 --deep
   dragon-quant assets doctor --profile r2 --samples 50
 """,
     )
     assets_subs = assets_p.add_subparsers(dest="assets_action")
     assets_subs.title = "Actions"  # type: ignore[assignment]
     assets_subs.metavar = "<action>"
+
+    def _assets_common(parser, *, timeout=True):
+        parser.add_argument("--profile", default=None, help="配置 profile（如 r2 / b2）")
+        if timeout:
+            parser.add_argument("--timeout", type=float, default=60.0,
+                                help="单请求超时秒数（默认 60）")
+
     assets_doctor = assets_subs.add_parser(
         "doctor",
         help="连通性与元数据回环检查（门槛 A）",
         usage="dragon-quant assets doctor [--profile NAME] [--samples N]",
         description="对选定 S3 兼容后端执行 PUT/HEAD/GET/LIST/DELETE，验证元数据回环与成功率。",
     )
-    assets_doctor.add_argument("--profile", default=None, help="配置 profile（如 r2 / b2）")
+    _assets_common(assets_doctor)
     assets_doctor.add_argument("--samples", type=int, default=50,
                                help="PUT/HEAD/GET 样本数（默认 50）")
-    assets_doctor.add_argument("--timeout", type=float, default=60.0,
-                               help="单请求超时秒数（默认 60）")
+
+    assets_push = assets_subs.add_parser(
+        "push",
+        help="上传本地原始数据资产",
+        usage="dragon-quant assets push [--from D] [--to D] [--all] [--dry-run]",
+        description="增量上传 assets.db 的 prep/auction 原始资产；无变化时零上传。",
+    )
+    _assets_common(assets_push)
+    assets_push.add_argument("--from", dest="from_date", default=None,
+                             help="起始交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
+    assets_push.add_argument("--to", dest="to_date", default=None,
+                             help="结束交易日 (同 --from 格式)")
+    assets_push.add_argument("--all", dest="all_dates", action="store_true",
+                             help="忽略 state 水位，重算全部本地日期")
+    assets_push.add_argument("--dry-run", dest="dry_run", action="store_true",
+                             help="只输出计划，不写任何远端对象/state")
+    assets_push.add_argument("--allow-shrink", dest="allow_shrink", action="store_true",
+                             help="允许新 manifest 成为远端严格子集（默认拒绝）")
+
+    assets_pull = assets_subs.add_parser(
+        "pull",
+        help="从云端恢复原始数据资产",
+        usage="dragon-quant assets pull --from D --to D [--apply] [--force]",
+        description="默认 dry-run；--apply 下载、逐片校验后写入 assets.db。",
+    )
+    _assets_common(assets_pull)
+    assets_pull.add_argument("--from", dest="from_date", required=False, default=None,
+                             help="起始交易日（必填）")
+    assets_pull.add_argument("--to", dest="to_date", required=False, default=None,
+                             help="结束交易日（必填）")
+    assets_pull.add_argument("--apply", action="store_true",
+                             help="执行下载与写库（默认只输出计划）")
+    assets_pull.add_argument("--force", action="store_true",
+                             help="覆盖本地内容不一致的资产（默认只报告冲突）")
+    assets_pull.add_argument("--pick", choices=["latest"], default=None,
+                             help="manifest 重建遇同日多候选时按 LastModified 取最新")
+    assets_pull.add_argument("--target-dir", dest="target_dir", default=None,
+                             help="恢复到隔离目录（<DIR>/assets.db）")
+
+    assets_status = assets_subs.add_parser(
+        "status",
+        help="展示本地/云端差异",
+        usage="dragon-quant assets status [--all] [--orphans]",
+        description="逐日比较本地与云端 manifest，输出缺失/不一致/体积。",
+    )
+    _assets_common(assets_status)
+    assets_status.add_argument("--all", dest="all_dates", action="store_true",
+                               help="检查全部日期（默认最近 30 个）")
+    assets_status.add_argument("--orphans", action="store_true",
+                               help="额外统计未被 manifest 引用的孤儿 blob")
+
+    assets_verify = assets_subs.add_parser(
+        "verify",
+        help="校验 manifest / blob 完整性",
+        usage="dragon-quant assets verify [--from D --to D | --samples N] [--deep]",
+        description="默认校验 manifest 哈希；--deep 下载并解压校验分片内容。",
+    )
+    _assets_common(assets_verify)
+    assets_verify.add_argument("--from", dest="from_date", default=None,
+                               help="起始交易日")
+    assets_verify.add_argument("--to", dest="to_date", default=None,
+                               help="结束交易日")
+    assets_verify.add_argument("--samples", type=int, default=None,
+                               help="深度校验抽样条数（未给日期范围时必填）")
+    assets_verify.add_argument("--deep", action="store_true",
+                               help="下载并解压校验 blob 内容")
+    assets_verify.add_argument("--md5", dest="show_md5", action="store_true",
+                               help="展示校验分片的 md5")
 
     # buy 子命令
     buy_p = sub.add_parser(

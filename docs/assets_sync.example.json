@@ -1,0 +1,23 @@
+{
+  "default_profile": "r2",
+  "profiles": {
+    "r2": {
+      "endpoint": "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
+      "region": "auto",
+      "bucket": "dragon-quant-assets",
+      "prefix": "",
+      "access_key_id": "${R2_ACCESS_KEY_ID}",
+      "secret_access_key": "${R2_SECRET_ACCESS_KEY}",
+      "addressing": "path"
+    },
+    "b2": {
+      "endpoint": "https://s3.us-west-004.backblazeb2.com",
+      "region": "us-west-004",
+      "bucket": "dragon-quant-assets",
+      "prefix": "",
+      "access_key_id": "${B2_ACCESS_KEY_ID}",
+      "secret_access_key": "${B2_SECRET_ACCESS_KEY}",
+      "addressing": "path"
+    }
+  }
+}

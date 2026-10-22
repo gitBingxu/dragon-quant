@@ -416,20 +416,171 @@ def _cmd_prep(args):
     print("\n".join(lines))
 
 
+def _parse_asset_date(raw, field: str):
+    """资产同步日期：支持 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD，拒绝未来日期。"""
+    from datetime import datetime, timezone, timedelta
+
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if len(text) == 8 and text.isdigit():
+        text = f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    elif len(text) == 10 and text[4] == "/" and text[7] == "/":
+        text = f"{text[:4]}-{text[5:7]}-{text[8:10]}"
+    try:
+        moment = datetime.strptime(text, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} 日期非法: {raw}（支持 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD）"
+        ) from exc
+    today = datetime.now(timezone(timedelta(hours=8))).date()
+    if moment.date() > today:
+        raise ValueError(f"{field} 不能是未来日期: {raw}")
+    return moment.strftime("%Y-%m-%d")
+
+
+def _emit_assets(payload: dict, exit_code: int) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    summary = payload.get("summary") or {}
+    if payload.get("ok"):
+        if summary:
+            print(f"{payload.get('command', 'assets')} 完成："
+                  f"ok={payload['ok']} fatal={summary.get('fatal', False)}",
+                  file=sys.stderr)
+    else:
+        reasons = [item.get("reason", str(item)) for item in payload.get("failed") or []]
+        if reasons:
+            print(f"{payload.get('command', 'assets')} 失败：{reasons[0]}",
+                  file=sys.stderr)
+    sys.exit(exit_code)
+
+
+def _assets_human_summary(command: str, result: dict) -> str:
+    summary = result.get("summary") or {}
+    if command.endswith("push"):
+        return (f"推送：pushed={summary.get('pushed', 0)} "
+                f"skipped={summary.get('skipped', 0)} "
+                f"blobs={summary.get('blobs_uploaded', 0)} "
+                f"manifests={summary.get('manifests_uploaded', 0)}")
+    if command.endswith("pull"):
+        return (f"恢复：restored={summary.get('restored', 0)} "
+                f"skipped={summary.get('skipped', 0)} "
+                f"conflicts={len(summary.get('conflicts') or [])} "
+                f"source={summary.get('manifest_source', 'remote')}")
+    if command.endswith("status"):
+        return (f"状态：missing={len(summary.get('dates_missing') or [])} "
+                f"mismatched={len(summary.get('dates_mismatched') or [])} "
+                f"local={summary.get('bytes_local', 0)}B "
+                f"remote={summary.get('bytes_remote', 0)}B")
+    return (f"校验：dates={summary.get('checked_dates', 0)} "
+            f"blobs={summary.get('checked_blobs', 0)} "
+            f"mismatched={len(summary.get('mismatched') or [])}")
+
+
+def _cmd_assets_sync(args) -> None:
+    from pathlib import Path
+
+    from dragon_quant.assets_sync.backends.s3 import S3Backend
+    from dragon_quant.assets_sync.credentials import load_config
+    from dragon_quant.assets_sync.errors import AssetsSyncError, LockBusyError
+    from dragon_quant.assets_sync.service import pull, push, status, verify
+    from dragon_quant.assets_sync.sources import build_sources
+    from dragon_quant.assets_sync.state import default_paths
+
+    action = args.assets_action
+    command = f"assets {action}"
+    try:
+        date_from = _parse_asset_date(getattr(args, "from_date", None), "--from")
+        date_to = _parse_asset_date(getattr(args, "to_date", None), "--to")
+        if date_from and date_to and date_from > date_to:
+            raise ValueError("--from 不能晚于 --to")
+        if action == "pull" and (not date_from or not date_to):
+            raise ValueError("pull 必须同时指定 --from 与 --to")
+        samples = getattr(args, "samples", None)
+        if action == "verify":
+            if samples is not None and samples < 1:
+                raise ValueError("--samples 必须 >= 1")
+            if bool(date_from) != bool(date_to):
+                raise ValueError("--from 与 --to 必须成对指定")
+            if args.deep and not (date_from and date_to) and samples is None:
+                raise ValueError("--deep 需配合 --from/--to 或 --samples")
+
+        target = getattr(args, "target_dir", None)
+        data_dir = Path(target).expanduser() if target else None
+        if data_dir is not None:
+            data_dir.mkdir(parents=True, exist_ok=True)
+        sources = build_sources(db_path=(data_dir / "assets.db") if data_dir else None)
+        paths = default_paths(data_dir)
+
+        config = load_config(profile=args.profile)
+        backend = S3Backend(config, timeout=args.timeout)
+
+        if action == "push":
+            result = push(
+                backend, sources, date_from=date_from, date_to=date_to,
+                all_dates=args.all_dates, dry_run=args.dry_run,
+                allow_shrink=args.allow_shrink, paths=paths)
+        elif action == "pull":
+            result = pull(
+                backend, sources, date_from=date_from, date_to=date_to,
+                apply=args.apply, force=args.force,
+                pick_latest=(args.pick == "latest"), paths=paths)
+        elif action == "status":
+            result = status(
+                backend, sources, all_dates=args.all_dates,
+                orphans=args.orphans, paths=paths)
+        else:
+            result = verify(
+                backend, sources, date_from=date_from, date_to=date_to,
+                samples=samples, deep=args.deep, show_md5=args.show_md5,
+                paths=paths)
+    except ValueError as exc:
+        _emit_assets({"ok": False, "command": command,
+                      "failed": [{"reason": str(exc)}], "summary": {}}, 2)
+        return
+    except LockBusyError as exc:
+        _emit_assets({"ok": False, "command": command,
+                      "failed": [{"reason": str(exc), "kind": "lock"}],
+                      "summary": {}}, 1)
+        return
+    except AssetsSyncError as exc:
+        _emit_assets({"ok": False, "command": command,
+                      "failed": [{"reason": str(exc), "kind": type(exc).__name__}],
+                      "summary": {}}, 2)
+        return
+    except Exception as exc:
+        _emit_assets({"ok": False, "command": command,
+                      "failed": [{"reason": f"{type(exc).__name__}: {exc}"}],
+                      "summary": {}}, 2)
+        return
+
+    print(_assets_human_summary(command, result), file=sys.stderr)
+    exit_code = 2 if result.get("fatal") else (0 if result.get("ok") else 1)
+    _emit_assets({
+        "ok": result.get("ok", False),
+        "command": command,
+        "failed": result.get("failed") or [],
+        "summary": result.get("summary") or {},
+    }, exit_code)
+
+
 def _cmd_assets(args):
-    """数据资产云端同步（M1：doctor 连通性门槛）。"""
+    """数据资产云端同步：doctor / push / pull / status / verify。"""
     from dragon_quant.assets_sync.backends.s3 import S3Backend
     from dragon_quant.assets_sync.credentials import load_config
     from dragon_quant.assets_sync.doctor import run_doctor
     from dragon_quant.assets_sync.errors import AssetsSyncError
 
-    command = "assets doctor"
     action = getattr(args, "assets_action", None)
+    if action in ("push", "pull", "status", "verify"):
+        return _cmd_assets_sync(args)
     if action != "doctor":
         print(json.dumps({"ok": False, "command": "assets",
-                          "failed": [{"reason": "当前版本仅支持 assets doctor"}],
+                          "failed": [{"reason": "未知 assets 子命令"}],
                           "summary": {}}, ensure_ascii=False, indent=2))
         sys.exit(2)
+
+    command = "assets doctor"
     if args.samples < 1:
         print(json.dumps({"ok": False, "command": command,
                           "failed": [{"reason": "--samples 必须 >= 1"}],

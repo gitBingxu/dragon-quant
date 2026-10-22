@@ -58,6 +58,7 @@ JSON 序列化（snake_case 全字段），非有限浮点清洗为 ``null``；�
 import json
 import sqlite3
 import threading
+from pathlib import Path
 from typing import Optional
 
 from dragon_quant.storage.paths import ASSETS_DB_PATH
@@ -133,15 +134,19 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def _connect(create: bool = True) -> Optional[sqlite3.Connection]:
+def _connect(create: bool = True, path=None) -> Optional[sqlite3.Connection]:
     """打开 assets.db。
 
     ``create=False`` 用于只读路径：库文件不存在时返回 None，绝不因查询而建库
     （避免 CLI 查询/测试在数据目录落下空库）。
+
+    ``path`` 为 None 时才读模块级 ``ASSETS_DB_PATH``；显式传入用于
+    ``assets pull --target-dir`` 与测试隔离（路径在调用期解析）。
     """
-    if not create and not ASSETS_DB_PATH.exists():
+    db_path = ASSETS_DB_PATH if path is None else path
+    if not create and not Path(db_path).exists():
         return None
-    conn = sqlite3.connect(str(ASSETS_DB_PATH))
+    conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
     # 跨进程（prep/auction 定时任务重叠）可能出现短暂 BUSY，交由 SQLite 等待吸收。
     conn.execute("PRAGMA busy_timeout=5000")
@@ -546,3 +551,272 @@ def replace_auction_snapshots(trade_date: str, payloads: dict[str, dict],
             raise
         finally:
             conn.close()
+
+
+# ─── 云端同步：导出 / 水位 / 恢复（M2） ────────────────────────────────────
+#
+# 这一组 API 只服务 assets_sync 的 Adapter：
+#   - 导出与水位走只读事务（WAL 快照），绝不写库；
+#   - 恢复走 BEGIN IMMEDIATE 单事务，逐来源独立（prep / auction 各自提交）；
+#   - created_at 只作旁路传输：新插入行写入源端时间，已存在行保留本地时间；
+#   - 所有函数支持可选 db_path（None → 调用期 ASSETS_DB_PATH），供
+#     `assets pull --target-dir` 与测试隔离。
+#
+# 水位 token = "<max_created_at>|<row_count>|<total_bytes>"，对调用方是不透明字符串；
+# 同时含行数与字节数，降低「同一秒内重采且内容等长」的漏检概率。
+
+
+def _watermark_token(max_created, count, total_bytes) -> str:
+    return f"{max_created or ''}|{int(count or 0)}|{int(total_bytes or 0)}"
+
+
+def _row_list(conn: sqlite3.Connection, sql: str, params: tuple) -> list[tuple]:
+    """在只读事务里取行，保证同一快照。"""
+    conn.execute("BEGIN")
+    try:
+        return conn.execute(sql, params).fetchall()
+    finally:
+        conn.rollback()
+
+
+def export_prep_assets(trade_date: str, *, db_path=None) -> list[dict]:
+    """导出某日 prep 资产（含 created_at 与逐行解析错误标记）。"""
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = _row_list(
+            conn,
+            "SELECT trade_date, asset_type, payload_json, created_at "
+            "FROM prep_assets WHERE trade_date = ? ORDER BY asset_type",
+            (trade_date,),
+        )
+    finally:
+        conn.close()
+    result = []
+    for trade_date_value, asset_type, payload_json, created_at in rows:
+        payload, error = _load_json(payload_json, None)
+        result.append({
+            "trade_date": trade_date_value,
+            "asset_type": asset_type,
+            "payload": payload,
+            "payload_error": error,
+            "created_at": created_at,
+        })
+    return result
+
+
+def export_auction_assets(trade_date: str, *, db_path=None) -> list[dict]:
+    """导出某日竞价原始资产（items + quote + created_at，逐行错误隔离）。"""
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        quote_expr = _auction_quote_expr(conn)
+        rows = _row_list(
+            conn,
+            f"SELECT trade_date, code, name, items_json, {quote_expr}, created_at "
+            "FROM auction_assets WHERE trade_date = ? ORDER BY code",
+            (trade_date,),
+        )
+    finally:
+        conn.close()
+    result = []
+    for trade_date_value, code, name, items_json, quote_json, created_at in rows:
+        items, items_error = _load_json(items_json, [])
+        quote, quote_error = _load_json(quote_json, None)
+        result.append({
+            "trade_date": trade_date_value,
+            "code": code,
+            "name": name,
+            "items": items,
+            "items_error": items_error,
+            "quote": quote,
+            "quote_error": quote_error,
+            "created_at": created_at,
+        })
+    return result
+
+
+def _list_dates(table: str, *, db_path=None) -> list[str]:
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = _row_list(
+            conn,
+            f"SELECT DISTINCT trade_date FROM {table} ORDER BY trade_date",
+            (),
+        )
+    finally:
+        conn.close()
+    return [row[0] for row in rows]
+
+
+def list_prep_asset_dates(*, db_path=None) -> list[str]:
+    return _list_dates("prep_assets", db_path=db_path)
+
+
+def list_auction_asset_dates(*, db_path=None) -> list[str]:
+    return _list_dates("auction_assets", db_path=db_path)
+
+
+def _watermarks(table: str, size_expr: str, *, db_path=None) -> dict[str, str]:
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {}
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = _row_list(
+            conn,
+            f"SELECT trade_date, MAX(created_at), COUNT(*), COALESCE(SUM({size_expr}), 0) "
+            f"FROM {table} GROUP BY trade_date",
+            (),
+        )
+    finally:
+        conn.close()
+    return {row[0]: _watermark_token(row[1], row[2], row[3]) for row in rows}
+
+
+def prep_watermarks(*, db_path=None) -> dict[str, str]:
+    return _watermarks("prep_assets", "LENGTH(payload_json)", db_path=db_path)
+
+
+def auction_watermarks(*, db_path=None) -> dict[str, str]:
+    return _watermarks(
+        "auction_assets",
+        "LENGTH(items_json) + LENGTH(COALESCE(quote_json, ''))",
+        db_path=db_path,
+    )
+
+
+def _same_json(left_text, right_value) -> bool:
+    """比较 DB 文本与解析值：按规范化 JSON 语义相等（不做文本逐字节断言）。"""
+    if left_text is None:
+        return right_value is None
+    try:
+        return _dumps(json.loads(left_text)) == _dumps(right_value)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+
+
+def restore_prep_assets(trade_date: str, rows: list[dict], *,
+                        force: bool = False, db_path=None) -> dict:
+    """恢复 prep 资产。
+
+    - 新插入行写入源端 created_at（AC3）；
+    - 已存在行：内容相同 skipped、不同未 force conflicts、force 只更新 payload_json，
+      **保留本地 created_at**（本地权威）。
+    """
+    result = {"restored": 0, "skipped": 0, "conflicts": [], "failed": []}
+    with _lock:
+        conn = _connect(path=db_path)
+        try:
+            _ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            for row in rows:
+                asset_type = row.get("asset_type")
+                payload = row.get("payload")
+                if not asset_type or payload is None:
+                    result["failed"].append({
+                        "key": f"prep:{asset_type}", "reason": "payload 缺失或损坏"})
+                    continue
+                new_text = _dumps(payload)
+                existing = conn.execute(
+                    "SELECT payload_json FROM prep_assets "
+                    "WHERE trade_date = ? AND asset_type = ?",
+                    (trade_date, asset_type),
+                ).fetchone()
+                if existing is None:
+                    conn.execute(
+                        "INSERT INTO prep_assets(trade_date, asset_type, payload_json, created_at) "
+                        "VALUES (?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now','localtime')))",
+                        (trade_date, asset_type, new_text, row.get("created_at") or ""),
+                    )
+                    result["restored"] += 1
+                elif _same_json(existing[0], payload):
+                    result["skipped"] += 1
+                elif not force:
+                    result["conflicts"].append({
+                        "key": f"prep:{asset_type}", "reason": "content differs"})
+                else:
+                    conn.execute(
+                        "UPDATE prep_assets SET payload_json = ? "
+                        "WHERE trade_date = ? AND asset_type = ?",
+                        (new_text, trade_date, asset_type),
+                    )
+                    result["restored"] += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return result
+
+
+def restore_auction_assets(trade_date: str, rows: list[dict], *,
+                           force: bool = False, db_path=None) -> dict:
+    """恢复竞价原始资产（逐 code）。
+
+    quote 合并语义与写入侧一致：``quote_json = COALESCE(远端, 本地)``，
+    远端 quote 为 None 时即使 force 也不得抹掉本地不可再生行情。
+    """
+    result = {"restored": 0, "skipped": 0, "conflicts": [], "failed": []}
+    with _lock:
+        conn = _connect(path=db_path)
+        try:
+            _ensure_schema(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            for row in rows:
+                code = row.get("code")
+                items = row.get("items")
+                if not code or items is None:
+                    result["failed"].append({
+                        "key": f"auction:{code}", "reason": "items 缺失或损坏"})
+                    continue
+                name = row.get("name") or ""
+                quote = row.get("quote")
+                quote_text = _dumps(quote) if quote is not None else None
+                existing = conn.execute(
+                    "SELECT name, items_json, quote_json FROM auction_assets "
+                    "WHERE trade_date = ? AND code = ?",
+                    (trade_date, code),
+                ).fetchone()
+                if existing is None:
+                    conn.execute(
+                        "INSERT INTO auction_assets(trade_date, code, name, items_json, quote_json, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now','localtime')))",
+                        (trade_date, code, name, _dumps(items), quote_text,
+                         row.get("created_at") or ""),
+                    )
+                    result["restored"] += 1
+                    continue
+                same = (
+                    (existing[0] or "") == name
+                    and _same_json(existing[1], items)
+                    and _same_json(existing[2], quote)
+                )
+                if same:
+                    result["skipped"] += 1
+                elif not force:
+                    result["conflicts"].append({
+                        "key": f"auction:{code}", "reason": "content differs"})
+                else:
+                    conn.execute(
+                        "UPDATE auction_assets SET name = ?, items_json = ?, "
+                        "quote_json = COALESCE(?, quote_json) "
+                        "WHERE trade_date = ? AND code = ?",
+                        (name, _dumps(items), quote_text, trade_date, code),
+                    )
+                    result["restored"] += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return result

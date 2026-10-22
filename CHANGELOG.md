@@ -12,8 +12,34 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 待发布
+
+> 草稿：覆盖 v0.6.2（`a94a907`）之后 `feat/reviewa-account-op` 与 `feat/assets-sync-m2` 分支的全部变更（提交 `3610e98`…`533df8d`）。按记录口径，合入 main 并完成版本提交后补记日期与 MR 编号。
+
+### Added
+- **盘后复盘 `prep`**：两段式架构（采集段按注册表逐类采集原始资产 → `assets.db/prep_assets`，计算段为资产纯函数 → `prep_snapshots`），默认增量语义（全健康零采集 / 失败补采 diff / `collection_report` 逐条合并），`--recompute` 用已存资产离线重算、`--force` 重采全部可采资产；复盘窗口为含 T 的近 3 个交易日龙头并集；资产覆盖 THS 涨停原因/题材主线、市场宽度五合一、昨日涨停溢价/晋级交叉、主力净额、巨潮公告、宏观扰动（日经225期指/富时A50 同日口径 + 美债10Y/黄金 T-1，TDX 扩展行情主链路 + Yahoo 回退）；逐只参与判定 `strong/light/ignore/unrated` + 维度明细；CLI 默认输出 4 行买入摘要（是否建议买入/仓位/等级/理由）+ 逐只标的清单；当日运行门禁 ≥16:40（A50 日盘收盘 + 缓冲），历史日 `same_day_only` 资产不补采按缺失降级。
+- **集合竞价 `auction`**：采集 T-1 prep 推荐标的（strong/light；推荐集为空/快照缺失自动回退最近 3 日龙头并集，输出 `fallback_reason`）的当日竞价盘口与行情快照，落 `auction_assets`；四维加权强度评分（方向/供需/量价/末段抢筹 + 否决闸门）写 `auction_snapshots`；`--recompute DATE` 零触网重算；仅当日 9:25 后可采、无历史回看。
+- **数据资产云端同步 `assets`**：`doctor`（门槛 A：PUT/GET/HEAD/LIST/DELETE + `x-amz-meta-*` 元数据回环）+ `push`/`pull`/`status`/`verify`（S3 兼容 R2/B2，自研 SigV4 签名，零新增运行时依赖）；云端布局 `blobs/<date>/...json.gz` + 每日 manifest（覆盖写、哈希身份为未压缩规范化 JSON）；`state.json` 增量水位 + 跨平台进程锁使 push 幂等（无变化零上传，仅采集时间变化只重写 manifest）；pull 默认 dry-run、内容冲突默认只报告不覆盖（`--force` 才覆盖、`--target-dir` 隔离恢复、新插入行还原源端 `created_at`、auction 远端 quote 为 null 不抹掉本地值）；凭据 `<DQ_DATA_DIR>/secrets/assets_sync.json`（0600）+ `DQ_ASSETS_*` 环境变量覆盖，凭据不进仓库/日志/manifest/state。M5（launchd 定时调度）尚未实现。
+- **买入链路增强**：候选池由 prep 快照驱动（`verdict=ignore` 出池，快照缺失/推荐集为空回退 3 日真龙并集）；买入 P/A 三值优先级排序（tier → 综合分 → 买点得分 → 代码）与竞价否决（`auction_ranking_enabled`/`auction_veto_enabled`，均默认关、可按买点豁免）；`buy` 首行输出建议仓位（仅参考不参与下单），`--json` 输出四类买点逐条诊断 `checks`（passed/failed/pending/window_closed/unavailable/skipped）；`buy`/`sell` 新增 `--force` 放行午间休市与已收盘时段回放（09:30 前仍拒绝，不伪造收盘价成交，落库标记 `"forced": true`）。
+- **策略与风控**：择时与仓位（复盘情绪 → sizing/禁买、组合风控日级熔断/净值回撤降仓/连亏降仓、`soft_time_stop`/`hard_time_stop` 时间止损、分级/ATR 移动止盈——除龙回头外均默认关，`sell_rule_toggles` 逐条开关供消融）；龙回头买点默认开启（显式 `false` 可复现旧基线）；新增首日止损减半 `first_day_stop`（默认关：盘中触及 -3.5% 先卖半仓、灾难线整仓优先、与次日涨停半仓共用唯一半仓腿守卫）。
+- **review-account 评估**：已平仓持仓清仓后 5 日窗口指标（`post_exit_max_return`/`post_exit_max_drawdown`，事后评估不参与决策，可越出回测区间，旧记录为 NULL 不回溯）；买点统计 `entry_reason_stats`（四类买点 + 未知 + 合计：笔数/胜率/平均每笔收益/累计贡献），`GET /api/account/positions` 返回 `{data, stats}`，前端新增「买点统计」卡片与清仓窗口两列。
+- **scan**：板块口径改为「行业 + 概念 + 地区」三维融合总榜 Top8（TDX `HY`/`GN`/`DQ`，THS 回退同支持三类；领跌 Top20 仍按行业），板块身份 `(source, category, code)`、缓存键按 `source:category:code` 命名空间隔离。
+- **数据分级**：历史交易日按 code 三态判定（完整 48 根 5 分 K 严格盘中撮合 / 仅日K整日兜底 / 停牌冻结估值），结果带 `data_quality`、`suspended_codes` 等标记；兜底成交价保守近似。
+
 ### Changed
 - 最低 Python 版本由 `>=3.9` 提升为 `>=3.10`（`requires-python` 与 `classifiers` 同步，新增 3.13/3.14 声明）。`tmdx` 随之变为无条件默认依赖，移除 `python_version >= '3.10'` 环境标记、空 `[tdx]` extra 及 `warn_if_unavailable()` 中 3.9 分支。Python 3.9 用户不再能安装新版本，将停留在 0.6.2（该版本仍含升级提示）。
+- 存储层统一重构：旧 `prep.db` 并入 `assets.db` 并新建 `auction_assets`；数据资产（prep/auction 原始资产 + 算法快照）与 dragon.db 物理隔离，避免被 `storage clear --all` 连带清理；旧 prep.db 与 dragon.db 遗留竞价表保留但不再读写、不自动迁移。
+- `buy`/`sell` 执行层完全对齐 review-account（保本线/半仓/影子风控/数据分级），提取 `apply_sell_fill`/`track_peak`/`notional_quantity` 共享原语，两引擎不复制规则；`SignalEngine` 卖出数量按回测首仓同口径冻结，`break_even_price` 与回测精确一致。
+- `auction`/`prep` 输出开关统一为 `--json`（移除 `--verbose`，传旧参数由 argparse 以 exit 2 拒绝）；默认模式错误写 stderr 并非零退出。
+- `buy` 信号记账改 buy-all（不再择优取第一只），排序只影响 pending 顺序；峰值跨日写回 `buy_sell_signals` 供移动止盈/保本判定。
+
+### Fixed
+- 修复 review-account 回测停牌标的缺日K崩溃（停牌按 code 冻结估值、不评估买卖，结果带 `suspended_codes`）。
+- 修正 prep 维度碰撞后的 `degraded`/`sources` 归因并加固 THS 回退解析。
+- prep 增量提示补充复盘日期与锚定原因说明。
+
+### Docs
+- 归档 15 份已消费调研/方案文档至 `archived_md/`（prep/scan/live_trade/auction/cli/assets_sync/review_account 分域），索引登记原路径；资产同步主设计文档因 M5 未实现暂不归档。
 
 ## [0.6.2] - 2026-10-13
 

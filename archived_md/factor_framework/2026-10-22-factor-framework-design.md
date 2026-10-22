@@ -2,8 +2,8 @@
 
 - 日期：2026-10-22
 - 分支：`feat/factor-framework`
-- 上游调研：`docs/research/2026-10-22-factor-framework-survey.md`（research-reviewer APPROVE）
-- 阶段：方案（阶段 2），**本文档只定义设计与实施边界，不含实现代码，不提交**
+- 上游调研：`archived_md/factor_framework/2026-10-22-factor-framework-survey.md`（research-reviewer APPROVE）
+- 阶段：方案（阶段 2），**本文档只定义设计与实施边界，不含实现代码**（已随 feat 落地于 2026-10-23 归档）
 - 结论摘要：采用「长表 + 并行诊断轨道」的轻量自研因子层。因子值落 `assets.db` 新表 `factor_values`（主键 `(trade_date, code, factor_name, factor_version)`，`source_scan_id` 作血缘字段）；五维评分保持唯一决策基线，因子层默认只诊断、不排序，决策接入只经 `review_account/priority.rank_key` 一个注入点、单开关控制、可零读取回退；评估口径自研（RankIC / ICIR / 2-3 分组 / HAC 修正），回测复用 `review_account`，不新建引擎。首期零新增运行时依赖。财务链路（P0.5，2026-10-22 delta 纳入）走 tmdx 财务接口：`get_finance_info` 日度观测（`same_day_only`）+ `gpcw*` 按报告期回填，PIT 以**法定披露截止日为下界、实测观测日优先**；原始财务数据落 `assets.db` 独立 `fin_*` 表，不进 `prep_assets`、不改变 `prep` 的采集/degraded 语义。
 
 ## Delta 修订记录（2026-10-22）

@@ -10,10 +10,14 @@
 
 import json
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from dragon_quant import cli as _cli
 from dragon_quant.cli import _normalize_cli_date, _resolve_trade_date, _kbar_to_dict, _to_dict
 from dragon_quant.storage.manager import StorageManager
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def orchestrate_scan(*args, **kwargs):
@@ -317,11 +321,13 @@ def _cmd_dragons(args):
     }, ensure_ascii=False, indent=2))
 
 
-def _prep_plan_hint(plan):
+def _prep_plan_hint(plan, trade_date=None, auto_date=False):
     """增量采集计划提示（stderr）。
 
     走 stderr 是为了保持 stdout 的「4 行摘要 + 标的清单」契约不被污染；
     cron 只按退出码判失败，stderr 输出不改变退出码。
+    ``trade_date`` 展示复盘锚定日期；``auto_date``（未显式传 --date）且锚定日早于
+    今天时追加原因说明，避免「资产已就绪」被误读为「该采的没采」。
     """
     collect = list(getattr(plan, "collect", None) or [])
     repairs = sorted(getattr(plan, "repairs", None) or {})
@@ -333,7 +339,15 @@ def _prep_plan_hint(plan):
         parts.append(f"{prefix}修复 {len(repairs)} 项历史状态标记：{', '.join(repairs)}")
     if not parts:
         parts.append("资产已就绪（无需采集），直接重算快照")
-    print("；".join(parts), file=sys.stderr)
+    msg = "；".join(parts)
+    if trade_date:
+        msg = f"复盘日期 {trade_date}：{msg}"
+        now = datetime.now(SHANGHAI)
+        # 仅工作日追加补救提示：周末/节假日锚定日必然早于今天，且当日无法补 scan，
+        # 提示「先运行 scan」会形成「怎么弄都没用」的循环（节假日残留由假设语气覆盖）。
+        if auto_date and trade_date < now.strftime("%Y-%m-%d") and now.weekday() < 5:
+            msg += "（已锚定最新有龙头数据的交易日；若今日为交易日，16:40 后先运行 scan 再 prep 即可复盘今日）"
+    print(msg, file=sys.stderr)
 
 
 def _emit_prep_error(payload: dict, as_json: bool):
@@ -363,6 +377,7 @@ def _cmd_prep(args):
     from dragon_quant.storage import db
 
     as_json = getattr(args, "json", False)
+    auto_date = not args.date
     if args.date:
         trade_date = _normalize_cli_date(args.date)
     else:
@@ -374,7 +389,7 @@ def _cmd_prep(args):
     try:
         result = run_prep(trade_date, recompute=args.recompute,
                           force=getattr(args, "force", False),
-                          on_plan=_prep_plan_hint)
+                          on_plan=lambda plan: _prep_plan_hint(plan, trade_date, auto_date))
     except PrepError as e:
         _emit_prep_error({"error": str(e)}, as_json)
     except Exception as e:  # 与其它命令一致：错误而非抛栈
@@ -564,7 +579,6 @@ def _score_auction_assets(assets: list[dict]) -> tuple[dict, list, dict]:
 
 def _parse_auction_date(raw: str) -> str:
     """归一 + 严格校验交易日；非法格式/不存在的日期抛 ValueError。"""
-    from datetime import datetime
     normalized = _normalize_cli_date(raw)
     try:
         return datetime.strptime(normalized, "%Y-%m-%d").strftime("%Y-%m-%d")
@@ -1000,7 +1014,6 @@ def _cmd_sell(args):
 def _cmd_vpa(args):
     """个股量价分析命令"""
     import json
-    from datetime import datetime
     from dragon_quant.vpa import analyze
     from dragon_quant.vpa.report import render
     from dragon_quant._version import __version__

@@ -515,6 +515,46 @@ def upsert_vpa(trade_date: str, code: str,
             conn.close()
 
 
+def list_vpa_analysis(trade_date: str) -> list[dict]:
+    """读取某日的量价分析结果（因子层 vpa 迁移的只读源）。
+
+    ``factors_json`` 逐行解析为 list；损坏时返回空列表并带 ``factors_error``，
+    不中断整批读取（因子层按「name 缺失」处理，不静默取第一个）。
+    """
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT trade_date, code, name, source, health_score, signal, summary, "
+            "factors_json, version, created_at FROM vpa_analysis "
+            "WHERE trade_date = ? ORDER BY code",
+            (trade_date,),
+        ).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for r in rows:
+        raw = r[7]
+        factors, error = [], None
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                error = f"{type(exc).__name__}: {exc}"
+            else:
+                if isinstance(parsed, list):
+                    factors = parsed
+                else:
+                    error = "factors_json 不是数组"
+        result.append({
+            "trade_date": r[0], "code": r[1], "name": r[2], "source": r[3],
+            "health_score": r[4], "signal": r[5], "summary": r[6],
+            "factors": factors, "factors_error": error,
+            "version": r[8] or "", "created_at": r[9],
+        })
+    return result
+
+
 def _parse_version(v: str, parts: Optional[int] = None) -> Optional[tuple]:
     """解析版本号字符串为整数元组，无法解析返回 None。
 

@@ -77,6 +77,14 @@ dragon-quant sell                             # 盘中：对已买入未卖出�
 dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
 dragon-quant buy --force                      # 非交易时段强制跑当日回放（09:30 前仍拒绝）
 dragon-quant sell --force                     # 同上，卖出建议
+
+# 因子层（P0-P2：只读迁移 + 财务链路 + 矩阵/评估 + 决策接入，默认不接入决策）
+dragon-quant factor list
+dragon-quant factor build --date 20260519
+dragon-quant factor query --date 20260519 --name five_dim_composite
+dragon-quant factor status
+dragon-quant factor export --from 20260501 --to 20260531 --name five_dim_composite --out /tmp/matrix.csv
+dragon-quant factor eval --name five_dim_composite --from 20260501 --to 20260831
 ```
 
 > 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。自动获取（`data cookie-fetch`）首次运行会自动下载 chromium 内核（约 150MB，走国内镜像，仅一次），无需手动 `playwright install`。
@@ -230,6 +238,50 @@ dragon-quant assets verify --deep --samples 20
 - 配置样例：`docs/assets_sync.example.json`（占位符，凭据建议用 `${ENV}` 注入）。
 - 凭据文件：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），结构为 `default_profile + profiles{r2,b2}`；也可用 `DQ_ASSETS_*` 环境变量覆盖当前 profile。凭据不进入仓库、日志、manifest 或 state。
 - 当前里程碑：M2 数据层 / M3 同步层 / M4 CLI 已完成；M5（launchd / `assets_daily.sh` / 门槛 B）待做。B2 通道尚未验证，v1 以 R2 为主通道。
+
+### `factor` — 因子层（P0/P0.5/P1/P2：只读迁移 + 长表 + 财务链路 + 矩阵/评估 + 决策接入）
+
+```bash
+dragon-quant factor list                                  # 列出注册表（代码即真值）
+dragon-quant factor build --date 20260519                 # 单日构建
+dragon-quant factor build --from 20260501 --to 20260531   # 区间：按有扫描记录的交易日逐日展开
+dragon-quant factor build --date 20260519 --only five_dim_drive,vpa_breakout
+dragon-quant factor query --date 20260519 --name five_dim_composite
+dragon-quant factor query --from 20260501 --to 20260531 --name vpa_breakout --code 600001
+dragon-quant factor status
+
+# 矩阵导出：CSV/JSON + <out>.meta.json sidecar；默认原始值，--clean 才清洗
+dragon-quant factor export --from 20260501 --to 20260531 \
+    --name five_dim_composite --out /tmp/matrix.csv
+dragon-quant factor export --from 20260501 --to 20260531 \
+    --name five_dim_composite --name vpa_breakout --clean --normalize rank \
+    --format json --out /tmp/matrix.json
+
+# 因子评估：RankIC / ICIR / NW-t / 2-3 分组 / 换手 / 覆盖率 / PIT 口径
+dragon-quant factor eval --name five_dim_composite --from 20260501 --to 20260831
+dragon-quant factor eval --name fin_roe --from 20260101 --to 20260930 \
+    --pit-policy research --groups 3 --json
+
+dragon-quant factor fin sync --snapshot                   # 当日财务观测（same_day_only）
+dragon-quant factor fin sync --backfill                   # gpcw 按报告期回填（md5 幂等 / 追加 vintage）
+dragon-quant factor fin calibrate --sample 20             # 字段索引/单位校准（未校准即 fail-closed）
+dragon-quant factor fin status                            # 账本/校准/观测/PIT 占比/pandas 依赖来源
+```
+
+- **只读迁移、不重算**：P0 首批 12 个因子 = 五维系 7 个（6 个维度分 + `is_true_dragon`）+ vpa 系 5 个（`health_score` + 4 个量价因子），值全部从既有 `scan_stocks_v2` / `vpa_analysis` 复制。
+- **默认启用集**：不带 `--only` 只构建 `default_enabled=True` 因子；P0.5 的 6 个 `fin_*` 默认关，必须显式 `--only` 才计算。
+- **缺失 = 无行**：`is_true_dragon IS NULL`、维度分 NULL、vpa 因子缺失、财务分母非正/缺期都不写行，绝不写 0 / 50 / 中性分；`factor query` 看不到某只标的的某因子即为「当日无值」。
+- **PIT 时点**：每行带 `available_at`（Asia/Shanghai）。`recorded` 源取 `max(phase, created_at)`；`created_at.date() != trade_date` 的 vpa 行（`review.py` 跨日回填污染）整行跳过并计入 `skipped_backfilled`；`asof` 源（财务）按账本可用时刻硬门禁。
+- **写入语义**：整日整因子原子替换；同日重 build 幂等；候选集合变小时旧 code 被 prune；源整体不可用（无扫描/读取失败）**不删旧行**，源可用但当日无值则删除该因子当日行。版本缺省时按注册表解析并由 SQL 过滤，输出始终带 `resolved_versions`。
+- **主板块快照**：`factor_sector_snapshots` 从 `scans.raw_output.ranking` 派生，`category` 如实记录 `hy`/`gn`/`dq`（只有 `hy` 是真实行业），字段缺失不猜。
+- **财务链路**：`assets.db` 的 `fin_observed_snapshots` / `fin_report_files` / `fin_report_records` / `fin_field_calibrations` / `fin_xdxr_records`。观测仅当日可采；回填默认最近 12 期（`--from-period` 扩大），按 `(报告期, md5)` 幂等、修订追加 vintage（不回溯、不覆盖，值未变的 code 不产新行也不撤销）；法定截止日按 23:59:59；`observed` / `statutory_backfilled` / `revised` 三桶可审计。字段映射未校准 → 财务因子整体禁用（`layout_unverified` 计数进报告）；stale 逾期判定用真实交易日历，缺失时告警 `stale_calendar_missing`。
+- **矩阵导出（P1）**：`factor export` 是派生视图（不写因子表），CSV/JSON + `<out>.meta.json`（`dates` / `codes` / `resolved_versions` / `clean` / `missing_rate_by_factor` / `coverage_by_date` / `build_ids` / `generated_at` / `pipeline_version`）。默认导出原始值；`--clean` 启用当日截面内的 MAD/quantile 缩尾与 rank/zscore 归一（`MAD=0` 跳过并记 `winsorize_skipped="mad_zero"`，绝不除零、绝不回退全样本分位）。
+- **因子评估（P1）**：`factor eval` 主指标 Spearman RankIC（Pearson 附加）、ICIR、`nw_lag=max(horizon-1,0)` 的 Newey-West t、2/3 分组（5 直接拒绝；某日某组 <3 只跳过）、换手、覆盖率与 `effective_independent_days`；样本不足返回 `insufficient_data`（**这是有效结论，进程 exit 0**；参数错误 exit 2、运行时失败 exit 1）。标签从 `available_at` 之后第一个可成交日开盘起算（开盘→开盘），停牌剔除；行情以参数注入，不 import `review_account`。`--pit-policy strict`（默认）只统计 `observed`/`revised`，`research` 纳入 `statutory_backfilled` 并标 `restatement_unverifiable`（结论禁止写入模型快照）；`1q` 额外输出 `effective_independent_observations`、报告期 block bootstrap t、IC 一阶自相关，日频 naive t 标 `pseudo_independent`。所有统计量纯 Python 实现（零 numpy/scipy/pandas）。
+- **决策接入（P2，默认关）**：`StrategyConfig.factor_ranking_enabled=True` 时，`review-account` / `buy` 在 tier(A,P) 内插入因子分量（`factor_rank` → `-factor_score` → `-composite` → `-priority` → code）；关闭时零读取，排序与旧实现逐位等价。`factors/decision.py` 的 `EqualWeightRankModel` 按**每只候选自己的 `trade_date`** 读因子值、组内 rank 归一；模型快照存 `factor_model_snapshots`（`factor_model_version=""` 取最新，无快照 → 整日 `degraded(model_snapshot_missing)`，不隐式兜底）。任一必需因子缺值 → 该候选进 `factor_rank=1` 桶排在所有有分者之后；覆盖率低于 `factor_min_coverage`（默认 0.6）/ 读取失败 → 整日排序回退，绝不中断回测或 buy。`metrics` 新增 `sharpe`（只增键）；`industry_exposure` 只统计 `category="hy"` 并输出 `unattributed_ratio` / `unattributed_reasons`（归属日用 `entry_date` 快照）。
+- **A/B**：`compare_strategies` 的 `variant_grid` 可跑 `factor_ranking_enabled=True/False`，但区间内因子 build 完成率必须 ≥ 95%，否则结论标 `insufficient_data`；`trial_count` 计入所有 variant。
+- **默认零影响**：因子层不进入 `scan` / `prep` 候选池；决策层只有 `rank_key` 单一注入点，`factor_ranking_enabled` 默认关。
+- **存储**：落 `assets.db` 的 `factor_*` 与 `fin_*` 表，**不纳入 `assets_sync`**（派生/可重取数据）；`assets status` 固定输出 `factor_*: not_synced` 与 `fin_*: not_synced`。
+- 当前进度：P0 + P0.5 + P1 + P2（决策接入 / Sharpe / 行业暴露）已完成；P3（替换五维、行业中性化、ML）不在本期。
 
 ### `review` — 龙头回测
 
@@ -407,6 +459,7 @@ dragon_quant/
 ├── rate_limit.py         # 并发限流器
 ├── providers/            # 数据源适配（tdx/ths/xueqiu/tencent/macro/cookie）
 ├── scorers/           # 五维评分器 + registry + aggregator
+├── factors/              # 因子层（registry/engine/storage/decision/builtin/service；只读迁移 + 决策注解，不 import scorers）
 ├── vpa/                  # 量价分析（插件式因子）
 ├── cache/                # 内存+本地双缓存
 ├── logging/              # ScanLogger + ReportBuilder + query
@@ -438,6 +491,7 @@ SQLite 表分为三类：
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`
 - 实盘辅助买卖信号表：`buy_sell_signals`（`buy` / `sell` 命令使用，未平仓 code 唯一）
 - 数据资产独立库 `assets.db`：`prep_assets` / `prep_snapshots`（盘后复盘原始资产/结果）、`auction_assets` / `auction_snapshots`（竞价原始资产/结果；采集与 `--recompute` 已接线）
+- 因子层 `assets.db` 表（P0）：`factor_values`（因子值长表，主键 `(trade_date, code, factor_name, factor_version)`）、`factor_registry`（元数据历史快照，同版本 `DO NOTHING`）、`factor_model_snapshots`（P2 模型快照）、`factor_build_runs`（build 审计）、`factor_sector_snapshots`（按日主板块快照，`UNIQUE(trade_date, code, category)`）
 
 运行时不创建旧无后缀 `scans` / `scan_stocks` / `scan_logs` / `dragons` 表；新扫描固定写 `source="v2"` 和 `*_v2` 表，以兼容已存在的 v2 历史数据。
 

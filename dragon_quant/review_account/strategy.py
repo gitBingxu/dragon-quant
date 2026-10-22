@@ -194,7 +194,8 @@ def _apply_entry_priority_gate(cfg: StrategyConfig, candidate: dict,
     if isinstance(entry_priority, dict):
         signal["signal"]["entry_priority"] = entry_priority
     signal["signal"]["priority_key"] = key_components(
-        signal, candidate, bool(getattr(cfg, "auction_ranking_enabled", False)))
+        signal, candidate, bool(getattr(cfg, "auction_ranking_enabled", False)),
+        bool(getattr(cfg, "factor_ranking_enabled", False)))
     if getattr(cfg, "auction_veto_enabled", False):
         reason = auction_veto_reason(cfg, candidate, signal)
         if reason:
@@ -643,7 +644,8 @@ def _enrich_detail(detail: dict, candidate: dict, cfg: StrategyConfig) -> dict:
                       or detail.get("signal") or {})
     detail["priority_key"] = key_components(
         signal_payload, candidate,
-        bool(getattr(cfg, "auction_ranking_enabled", False)))
+        bool(getattr(cfg, "auction_ranking_enabled", False)),
+        bool(getattr(cfg, "factor_ranking_enabled", False)))
     block = detail["entry_priority"].get("auction")
     if isinstance(block, dict) and block.get("loaded"):
         detail["would_veto"] = would_veto(candidate)

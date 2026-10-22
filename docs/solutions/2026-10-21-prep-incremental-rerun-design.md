@@ -324,7 +324,9 @@ dragon-quant prep [--date YYYYMMDD] [--recompute | --force] [--verbose]
 
 - `--force` 与 `--recompute` 用 argparse `add_mutually_exclusive_group` 互斥；`--force` 不改变日期门禁。
   help 文本显式写明「与 `scan --force` 不同：不绕过 15:30 / 交易日校验，仅重采全部可采资产」。
-- `_cmd_prep` 通过 `on_plan(plan)` 把决策写到 **stderr**（stdout 四行摘要契约不变）：
+- `_cmd_prep` 通过 `on_plan(plan)` 把决策写到 **stderr**（stdout 四行摘要契约不变）；提示统一带
+  「复盘日期 YYYY-MM-DD：」前缀（2026-10-22 起），未显式传 `--date` 且锚定日早于今天（仅工作日）
+  时追加「（已锚定最新有龙头数据的交易日；若今日为交易日，16:40 后先运行 scan 再 prep 即可复盘今日）」：
   - 无采集无修复：`资产已就绪（无需采集），直接重算快照`
   - 仅采集：`增量补采 N 项资产：a, b, c`
   - 仅修复：`资产已就绪，修复 N 项历史状态标记：a, b`

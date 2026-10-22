@@ -1541,6 +1541,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         self.assertIn("--json", output)
         self.assertNotIn("--verbose", output)
 
+
     def test_prep_verbose_is_rejected(self):
         import io
         from contextlib import redirect_stderr
@@ -1702,6 +1703,51 @@ def _sh_now(day="2026-10-19", hour=16):
     from datetime import datetime
     from dragon_quant.review_account.prep import SHANGHAI
     return datetime.fromisoformat(day).replace(hour=hour, minute=0, tzinfo=SHANGHAI)
+
+
+class TestPrepPlanHint(unittest.TestCase):
+    """_prep_plan_hint 的日期前缀与 auto_date 补救提示（2026-10-22 起）。"""
+
+    @staticmethod
+    def _hint(trade_date, auto_date, fake_now):
+        import io
+        from contextlib import redirect_stderr
+        from types import SimpleNamespace
+        import dragon_quant.cli  # 先加载 cli，规避循环导入
+        from dragon_quant.cli_commands import _prep_plan_hint
+        plan = SimpleNamespace(collect=[], repairs={})
+        buf = io.StringIO()
+        with patch("dragon_quant.cli_commands.datetime") as mock_dt, \
+             redirect_stderr(buf):
+            mock_dt.now.return_value = fake_now
+            _prep_plan_hint(plan, trade_date, auto_date)
+        return buf.getvalue().strip()
+
+    def test_auto_date_weekday_shows_remedy_hint(self):
+        from datetime import datetime as real_datetime
+        # 2026-10-22 是周四（工作日），锚定 10-21 → 应出现补救提示
+        out = self._hint("2026-10-21", True, real_datetime(2026, 10, 22, 17, 50))
+        self.assertTrue(out.startswith("复盘日期 2026-10-21：资产已就绪"))
+        self.assertIn("先运行 scan 再 prep", out)
+
+    def test_auto_date_weekend_no_remedy_hint(self):
+        from datetime import datetime as real_datetime
+        # 2026-10-24 是周六，锚定周五 10-23 → 不出现补救提示（当日无法补 scan）
+        out = self._hint("2026-10-23", True, real_datetime(2026, 10, 24, 17, 50))
+        self.assertTrue(out.startswith("复盘日期 2026-10-23：资产已就绪"))
+        self.assertNotIn("先运行 scan", out)
+
+    def test_auto_date_same_day_no_remedy_hint(self):
+        from datetime import datetime as real_datetime
+        out = self._hint("2026-10-22", True, real_datetime(2026, 10, 22, 17, 50))
+        self.assertNotIn("先运行 scan", out)
+
+    def test_explicit_date_no_remedy_hint(self):
+        from datetime import datetime as real_datetime
+        # 显式 --date（auto_date=False）即使是工作日也不追加补救提示
+        out = self._hint("2026-10-21", False, real_datetime(2026, 10, 22, 17, 50))
+        self.assertTrue(out.startswith("复盘日期 2026-10-21：资产已就绪"))
+        self.assertNotIn("先运行 scan", out)
 
 
 class TestAssetHealth(unittest.TestCase):

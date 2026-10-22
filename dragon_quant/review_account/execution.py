@@ -4,6 +4,9 @@ import math
 
 from dragon_quant.review_account.models import Position, StrategyConfig
 
+# 半仓腿原因码：`sell_quantity` 减半、`apply_sell_fill` 置 took_profit_half（同一信号只一条腿）。
+_HALF_REASONS = frozenset({"next_day_limit_up_half", "first_day_stop_half"})
+
 
 def fee(amount: float, side: str, cfg: StrategyConfig) -> float:
     return max(cfg.min_commission, amount * cfg.commission_rate) + (
@@ -28,17 +31,31 @@ def fill_price(row: dict, side: str, cfg: StrategyConfig, raw: float | None = No
     return round(result, 4)
 
 
+def _stop_fallback_price(entry: float, row: dict, pct: float) -> float:
+    """兜底日止损近似价：开盘已破线按开盘价（跳空），否则按止损线。"""
+    stop = entry * (1 + pct / 100)
+    return row["open"] if row["open"] <= stop else stop
+
+
 def daily_fallback_sell_price(position: Position, row: dict, reason: str, cfg: StrategyConfig) -> float:
     """日K兜底日的卖出成交价（无分时，按原保守约定按原因近似）。
 
-    止损：跌破止损线，若当日开盘已低于止损线则按开盘价（跳空），否则按止损线；
+    止损类：跌破止损线，若当日开盘已低于止损线则按开盘价（跳空），否则按止损线；
     保本：按完整成本线；其余（移动止盈/弱势/放量等）：按当日收盘价。
+    首日两种新原因码同属止损类：`first_day_stop_half` 用减半线，`first_day_disaster_stop`
+    用灾难线（未配置时退化为减半线，保证映射表对每个已登记 reason 都有确定语义）——
+    兜底日只有 open/late 两帧，无法像真盘中那样在击穿瞬间退出（方案 §4.2）。
+    本表按 reason 定价，不看 toggle。
     """
     entry = position.entry_price
     if reason in {"hard_stop_loss", "first_day_stop_loss"}:
         pct = cfg.first_day_stop_loss_pct if reason == "first_day_stop_loss" else cfg.stop_loss_pct
-        stop = entry * (1 + pct / 100)
-        return row["open"] if row["open"] <= stop else stop
+        return _stop_fallback_price(entry, row, pct)
+    if reason == "first_day_stop_half":
+        return _stop_fallback_price(entry, row, cfg.first_day_stop_loss_pct)
+    if reason == "first_day_disaster_stop":
+        return _stop_fallback_price(entry, row,
+                                    cfg.first_day_disaster_stop_pct or cfg.first_day_stop_loss_pct)
     if reason == "profit_back_to_cost_take_profit":
         return break_even_price(position, cfg)
     return row["bar_close"]
@@ -50,7 +67,8 @@ def buy_quantity(cash: float, equity: float, price: float, cfg: StrategyConfig,
     qty = int(budget / price / cfg.lot_size) * cfg.lot_size
     if cfg.risk_per_trade_pct:
         risk = equity * cfg.risk_per_trade_pct / 100
-        per_share = price * (-cfg.first_day_stop_loss_pct / 100 + cfg.sell_slippage
+        # 风险距离读 StrategyConfig 单一真值（首日规则开启后是 (half+tail)/2 的保守上界）。
+        per_share = price * (-cfg.first_day_risk_distance_pct() / 100 + cfg.sell_slippage
                              + 2 * cfg.commission_rate + cfg.stamp_tax_rate)
         qty = min(qty, int(max(0, risk - 2 * cfg.min_commission) / per_share / cfg.lot_size) * cfg.lot_size)
     while qty > 0 and price * qty + fee(price * qty, "BUY", cfg) > budget:
@@ -58,10 +76,15 @@ def buy_quantity(cash: float, equity: float, price: float, cfg: StrategyConfig,
     return qty
 
 
+def _half_qty(qty: int, lot_size: int) -> int:
+    """半仓腿数量：向下取整到整手；不足一手时退化为全卖（不产生 0 股成交）。"""
+    return (qty // 2 // lot_size) * lot_size or qty
+
+
 def sell_quantity(position: Position, reason: str, cfg: StrategyConfig) -> int:
-    if reason != "next_day_limit_up_half":
+    if reason not in _HALF_REASONS:
         return position.qty
-    return (position.qty // 2 // cfg.lot_size) * cfg.lot_size or position.qty
+    return _half_qty(position.qty, cfg.lot_size)
 
 
 def notional_quantity(cfg: StrategyConfig, price: float) -> int:
@@ -87,7 +110,7 @@ def apply_sell_fill(position: Position, price: float, reason_code: str, cfg: Str
     position.qty -= qty
     position.cost -= cost
     partial = bool(position.qty)
-    if partial and reason_code == "next_day_limit_up_half":
+    if partial and reason_code in _HALF_REASONS:
         position.took_profit_half = True
     return {"qty": qty, "amount": amount, "fee": cost_fee, "cost": cost,
             "pnl": pnl, "partial": partial}

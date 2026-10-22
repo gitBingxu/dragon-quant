@@ -150,7 +150,8 @@ def compare_strategies(date_from: str, date_to: str, data, cfg=None, variant_gri
 
 def drawdown_decomposition(result: dict) -> dict:
     """按卖出 reason_code 聚合已实现盈亏，粗分「止损/止盈/其它」三桶（纯函数，可离线测试）。"""
-    stop = {"first_day_stop_loss", "hard_stop_loss", "soft_time_stop", "hard_time_stop"}
+    stop = {"first_day_stop_loss", "hard_stop_loss", "soft_time_stop", "hard_time_stop",
+            "first_day_stop_half", "first_day_disaster_stop"}
     tp = {"trailing_take_profit", "profit_back_to_cost_take_profit", "next_day_close_below_open",
           "close_below_open_stop", "break_intraday_ma_stop", "next_day_limit_up_half",
           "volume_spike_take_profit", "high_open_7pct_no_limit_5m_clear", "high_open_5pct_no_limit_30m_clear"}

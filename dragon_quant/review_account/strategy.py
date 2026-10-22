@@ -7,7 +7,7 @@ from dragon_quant.review_account.market import SHANGHAI, bar_times
 from dragon_quant.review_account.models import (
     BUY_SIGNAL_DIVERGENCE_BREAK, BUY_SIGNAL_DRAGON_COMEBACK,
     BUY_SIGNAL_MA5_PULLBACK, BUY_SIGNAL_OPEN_TURN_STRONG,
-    Position, StrategyConfig,
+    DEFAULT_OFF_SELL_RULES, Position, StrategyConfig,
 )
 from dragon_quant.review_account.priority import (
     auction_state, auction_veto_reason, key_components, would_veto,
@@ -728,8 +728,36 @@ class SellRule:
     evaluate: Callable[["SellContext"], Optional[dict]]
 
 
+def _rule_first_day_stop(ctx: SellContext) -> Optional[dict]:
+    """首日止损（新增规则，默认关）：盘中浮亏达减半线先卖一半，灾难线优先整清。
+
+    - 仅 `hold_days == 1` 生效，首日之后交给 `hard_stop` 等既有规则。
+    - 灾难段**优先且不带半仓守卫**：首次击穿即整仓退出（不得先卖一半），已减半后再次
+      击穿则清掉剩余半仓。
+    - `took_profit_half` 是「该信号已完成一条半仓腿」的唯一性守卫（与 `next_day_limit_up_half`
+      共用，语义不分盈亏），因此同一信号只会有一条半仓腿。
+    """
+    row, pos, hold_days, cfg = ctx.row, ctx.position, ctx.hold_days, ctx.cfg
+    if hold_days != 1:
+        return None
+    low_return = (row["bar_low"] / pos.entry_price - 1) * 100
+    if cfg.first_day_disaster_stop_pct and low_return <= cfg.first_day_disaster_stop_pct:
+        return _sell("first_day_disaster_stop",
+                     f"首日触及灾难止损线{cfg.first_day_disaster_stop_pct:.1f}%，清仓", row)
+    if pos.took_profit_half:  # 同一信号只允许一条半仓腿
+        return None
+    if low_return <= cfg.first_day_stop_loss_pct:
+        return _sell("first_day_stop_half",
+                     f"首日浮亏触及{cfg.first_day_stop_loss_pct:.1f}%止损线，"
+                     "执行半仓腿（不足一手则全卖）", row)
+    return None
+
+
 def _rule_hard_stop(ctx: SellContext) -> Optional[dict]:
     row, pos, hold_days, cfg = ctx.row, ctx.position, ctx.hold_days, ctx.cfg
+    if hold_days == 1 and cfg.first_day_stop_enabled():
+        # 首日由 first_day_stop 接管；判定收在 StrategyConfig，规则之间不互相读 toggle。
+        return None
     stop = cfg.first_day_stop_loss_pct if hold_days == 1 else cfg.stop_loss_pct
     low_return = (row["bar_low"] / pos.entry_price - 1) * 100
     if low_return <= stop:
@@ -829,6 +857,7 @@ def _rule_volume_spike(ctx: SellContext) -> Optional[dict]:
 
 # 卖出规则链：代码顺序即优先级，命中即短路。late_only 承载「phase != late 即跳过」的阶段门。
 _SELL_RULES = [
+    SellRule("first_day_stop", False, _rule_first_day_stop),
     SellRule("hard_stop", False, _rule_hard_stop),
     SellRule("trailing", False, _rule_trailing),
     SellRule("breakeven", False, _rule_breakeven),
@@ -839,8 +868,8 @@ _SELL_RULES = [
     SellRule("half", True, _rule_half),
     SellRule("volume_spike", True, _rule_volume_spike),
 ]
-# 新增规则默认关；存量规则默认开。sell_rule_toggles 空 dict 时即此默认。
-_DEFAULT_OFF_RULES = {"soft_time_stop", "hard_time_stop"}
+# 新增规则默认关；存量规则默认开。sell_rule_toggles 空 dict 时即此默认（与 models 同一真值来源）。
+_DEFAULT_OFF_RULES = set(DEFAULT_OFF_SELL_RULES)
 
 
 def evaluate_sell(position: Position, row: dict, hold_days: int,

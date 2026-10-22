@@ -39,6 +39,8 @@
 | 2026-10-12 | 复盘候选池技术方案 | [候选池技术方案.md](review_account/候选池技术方案.md) | `dragon_quant/review_account/候选池技术方案.md` |
 | 2026-09-06 | 操盘策略（旧版 `STRATEGY.md`，现行版本见 `review_account/STRATEGY.md`） | [操盘策略.md](review_account/操盘策略.md) | `dragon_quant/review_account/STRATEGY.md` |
 
+> 注：`现状策略基线.md` / `择时与仓位技术方案.md` 中的「9 条 SellRule、首日 -3.5% 盘中止损」为 2026-10-14 的历史快照；现行规则链为 10 条并新增 `first_day_stop`（默认关），以 `review_account/STRATEGY.md` 为准。
+
 ## 根目录
 
 | 日期 | 主题 | 文件 | 原路径 |

@@ -3,9 +3,12 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-# 卖出规则链的稳定规则名（sell_rule_toggles 的合法键）
-SELL_RULE_NAMES = ("hard_stop", "trailing", "breakeven", "high_open_clear",
+# 卖出规则链的稳定规则名（sell_rule_toggles 的合法键），顺序与 strategy._SELL_RULES 一致
+SELL_RULE_NAMES = ("first_day_stop", "hard_stop", "trailing", "breakeven", "high_open_clear",
                    "soft_time_stop", "weak_close", "hard_time_stop", "half", "volume_spike")
+# 新增规则默认关；存量规则默认开。strategy._DEFAULT_OFF_RULES 与 first_day_stop_enabled()
+# 共用本集合（单一真值），避免「规则链按默认开、让位判定按默认关」的分裂。
+DEFAULT_OFF_SELL_RULES = frozenset({"first_day_stop", "soft_time_stop", "hard_time_stop"})
 
 # 买点类型的唯一来源：strategy._buy 的调用与 auction_veto_exempt_signals 校验共用。
 # 改动/新增买点时必须同步此处，否则配置里的豁免名会静默 fail-open。
@@ -63,6 +66,8 @@ class StrategyConfig:
     divergence_break_open_ratio: float = 0.998
     stop_loss_pct: float = -5.0
     first_day_stop_loss_pct: float = -3.5
+    # 首日灾难线（仅 first_day_stop 开启时生效）：0 = 关闭，只做「首日浮亏减半」
+    first_day_disaster_stop_pct: float = 0.0
     weak_close_tolerance_pct: float = 1.0
     take_profit_pct: float = 12.0
     breakeven_activate_pct: float = 6.0
@@ -165,6 +170,14 @@ class StrategyConfig:
             raise ValueError("卖出费率之和必须小于 1")
         if not -100 < cfg.stop_loss_pct < 0 or not -100 < cfg.first_day_stop_loss_pct < 0:
             raise ValueError("止损百分比必须在 (-100, 0) 内")
+        if not -100 < cfg.first_day_disaster_stop_pct <= 0:
+            raise ValueError("首日灾难止损线必须在 (-100, 0] 内（0 表示关闭）")
+        if cfg.first_day_disaster_stop_pct and cfg.first_day_disaster_stop_pct > cfg.first_day_stop_loss_pct:
+            raise ValueError("首日灾难止损线不能高于首日止损线（灾难线必须更宽）")
+        if cfg.first_day_disaster_stop_pct and not cfg.first_day_stop_enabled():
+            # 只配灾难线而不开规则会让配置静默失效（仍走旧的首日 -3.5% 整仓止损）。
+            raise ValueError("first_day_disaster_stop_pct 需要同时开启 "
+                             "sell_rule_toggles['first_day_stop']（否则灾难线静默失效）")
         if not isinstance(cfg.strategy_name, str) or not cfg.strategy_name.strip():
             raise ValueError("strategy_name 必须是非空字符串")
         for name in ("min_commission", "trailing_atr_multiple", "min_amount", "min_turnover",
@@ -189,6 +202,28 @@ class StrategyConfig:
         data["sell_rule_toggles"] = dict(self.sell_rule_toggles)
         data["auction_veto_exempt_signals"] = list(self.auction_veto_exempt_signals)
         return data
+
+    # ── 首日止损的唯一真值来源（strategy 与 execution 都读这里，避免循环依赖）──
+    def first_day_stop_enabled(self) -> bool:
+        """首日止损规则是否启用（`sell_rule_toggles["first_day_stop"]`，默认关）。
+
+        默认值来自 `DEFAULT_OFF_SELL_RULES`，与 `strategy._DEFAULT_OFF_RULES` 同一真值来源。
+        """
+        return bool(self.sell_rule_toggles.get(
+            "first_day_stop", "first_day_stop" not in DEFAULT_OFF_SELL_RULES))
+
+    def first_day_risk_distance_pct(self) -> float:
+        """首日最大单股风险距离（负数，%）：`buy_quantity` 风险预算的下单量口径。
+
+        关闭首日规则时等于 `first_day_stop_loss_pct`（旧口径逐分不变）；开启后首日
+        最大损失不再是单条 -3.5% 线——半仓在减半线退出、剩余半仓在灾难线（未设则
+        T+2 硬止损线）退出，故用加权上界 `(half + tail) / 2`。该值是**近似上界**，
+        不包含跳空开盘与滑点之外的费用细节。
+        """
+        if not self.first_day_stop_enabled():
+            return self.first_day_stop_loss_pct
+        tail = self.first_day_disaster_stop_pct or self.stop_loss_pct
+        return (self.first_day_stop_loss_pct + tail) / 2
 
 
 @dataclass

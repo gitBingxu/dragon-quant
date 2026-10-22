@@ -829,6 +829,15 @@ class _CrashIntradayData(FakeData):
         return validate_bars(bars(day, price=9.5), day, until)
 
 
+class _FirstDayDipData(FakeData):
+    """首根5分钟K插针到 -5%，其余时段回到 10.0：触发首日减半且剩余半仓当日不动。"""
+
+    def intraday(self, code, day, until=None):
+        b = bars(day, price=10.0)
+        b[0] = KBar(b[0].timestamp, 10000, 10.0, 10.05, 9.5, 10.0, 0, 0, 1.0, 100000)
+        return validate_bars(b, day, until)
+
+
 class TestLiveTraderAlignment(unittest.TestCase):
     """trader 层：数据分级（codes 全集）、峰值写回、as-of、落库标注。"""
 
@@ -933,6 +942,34 @@ class TestLiveTraderAlignment(unittest.TestCase):
         self.assertEqual(len(unfilled[0]["checks"]), 4)
         self.assertEqual(unfilled[0]["phase"], "open")
         self.assertEqual(unfilled[0]["observed_at"], open_row["observed_at"])
+
+    def test_first_day_half_routes_to_half_close_and_rebuilds(self):
+        """首日减半（first_day_stop 开启）：partial 走 half_close_signal，影子状态重建 qty/took_profit_half。"""
+        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+                         "v2", qty=1000)
+        cfg = StrategyConfig(sell_rule_toggles={"first_day_stop": True})
+        trader = LiveTrader(cfg, source="v2", data=_FirstDayDipData())
+        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[]):
+            result = trader.sell(DAY, "10:00")
+        self.assertEqual(len(result["sells"]), 1)
+        sell = result["sells"][0]
+        self.assertTrue(sell["partial"])
+        self.assertEqual(sell["reason_code"], "first_day_stop_half")
+        self.assertEqual(sell["qty"], 500)
+        self.assertEqual(result["held"][0]["qty"], 500)
+        self.assertTrue(result["held"][0]["took_profit_half"])
+        row_sig = db.list_all_signals(source="v2")[0]
+        self.assertEqual(row_sig["status"], "open")          # 剩余半仓继续跟踪
+        self.assertTrue(row_sig["took_profit_half"])
+        self.assertEqual(row_sig["half_exit_qty"], 500)
+        self.assertEqual(row_sig["half_exit_reason_code"], "first_day_stop_half")
+        # 同一信号不得再写第二条半仓腿（took_profit_half 幂等守卫）
+        self.assertFalse(db.half_close_signal("600001", DAY, 9.9, 100,
+                                              "next_day_limit_up_half", "重复减半", {}))
+        self.assertEqual(db.list_all_signals(source="v2")[0]["half_exit_qty"], 500)
+        rebuilt = position_as_of(row_sig, cfg, DAY, at(DAY, "15:00"))
+        self.assertTrue(rebuilt.took_profit_half)
+        self.assertEqual(rebuilt.qty, 500)
 
     def test_forced_buy_persists_forced_marker(self):
         with patch("dragon_quant.live_trade.trader.datetime",

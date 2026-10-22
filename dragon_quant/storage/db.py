@@ -143,7 +143,10 @@ CREATE TABLE IF NOT EXISTS review_account_positions (
     exit_signal_json     TEXT,
     realized_return      REAL,
     hold_days            INTEGER,
-    status               TEXT
+    status               TEXT,
+    post_exit_max_return    REAL,
+    post_exit_max_drawdown  REAL,
+    post_exit_window_days   INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_account_positions_run ON review_account_positions(run_id, entry_date);
@@ -186,7 +189,14 @@ CREATE TABLE IF NOT EXISTS buy_sell_signals (
     exit_signal_json   TEXT,
     hold_days          INTEGER,
     created_at         TEXT DEFAULT (datetime('now', 'localtime')),
-    updated_at         TEXT DEFAULT (datetime('now', 'localtime'))
+    updated_at         TEXT DEFAULT (datetime('now', 'localtime')),
+    qty                INTEGER,
+    half_exit_date     TEXT,
+    half_exit_price    REAL,
+    half_exit_qty      INTEGER,
+    half_exit_reason_code TEXT,
+    half_exit_reason_text TEXT,
+    half_exit_signal_json TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_buy_sell_open ON buy_sell_signals(code) WHERE status = 'open';
@@ -208,11 +218,38 @@ def _connect() -> sqlite3.Connection:
 def _ensure_schema(conn: sqlite3.Connection):
     conn.executescript(BASE_SCHEMA)
     _ensure_review_account_columns(conn)
+    _ensure_signal_columns(conn)
     for source in sorted(VALID_SOURCES):
         _create_versioned_tables(conn, source)
         _ensure_dragon_columns(conn, source)
     _seed_blacklist(conn)
     conn.commit()
+
+
+def _ensure_signal_columns(conn: sqlite3.Connection):
+    """对已存在的 buy_sell_signals 幂等补列（qty 落库冻结 + 半仓腿记账）。
+
+    并发首启撞 duplicate column 时复查后视为成功（沿用 assets_db 迁移先例）。
+    """
+    wanted = (
+        ("qty", "INTEGER"),
+        ("half_exit_date", "TEXT"),
+        ("half_exit_price", "REAL"),
+        ("half_exit_qty", "INTEGER"),
+        ("half_exit_reason_code", "TEXT"),
+        ("half_exit_reason_text", "TEXT"),
+        ("half_exit_signal_json", "TEXT"),
+    )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(buy_sell_signals)")}
+    for name, decl in wanted:
+        if name in cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE buy_sell_signals ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(buy_sell_signals)")}
+            if name not in existing:
+                raise
 
 
 def _ensure_dragon_columns(conn: sqlite3.Connection, source: str):
@@ -235,6 +272,20 @@ def _ensure_review_account_columns(conn: sqlite3.Connection):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_trades)")}
     if "realized_pnl" not in cols:
         conn.execute("ALTER TABLE review_account_trades ADD COLUMN realized_pnl REAL")
+
+    # 清仓后窗口指标：不带 DEFAULT，旧行保持 NULL（与「旧 run 不回溯」语义一致）。
+    pos_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_positions)")}
+    for name, decl in (("post_exit_max_return", "REAL"),
+                       ("post_exit_max_drawdown", "REAL"),
+                       ("post_exit_window_days", "INTEGER")):
+        if name in pos_cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE review_account_positions ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(review_account_positions)")}
+            if name not in existing:
+                raise
 
 
 def _create_versioned_tables(conn: sqlite3.Connection, source: str):
@@ -407,7 +458,9 @@ from dragon_quant.storage.review_account import (  # noqa: E402
 )
 from dragon_quant.storage.signals import (  # noqa: E402
     close_signal,
+    half_close_signal,
     insert_signal,
+    list_all_signals,
     list_open_signals,
     update_signal_peaks,
 )

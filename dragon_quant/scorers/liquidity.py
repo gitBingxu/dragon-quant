@@ -11,6 +11,7 @@ from __future__ import annotations
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, Quote, ScoreResult, StockInfo
 from dragon_quant.scorers import registry as R
+from dragon_quant.sectors import components_key
 from dragon_quant.scorers.base import at_limit, clip, desc_rank_score
 
 DIM = "liquidity"
@@ -18,12 +19,13 @@ WEIGHT = R.DIM_WEIGHTS[DIM]
 
 
 def score(code: str, cache: DataCache, primary_sector: str = "",
-          **kwargs) -> ScoreResult:
+          primary_sector_key: str = "", **kwargs) -> ScoreResult:
+    key = primary_sector_key or primary_sector
     quotes: list[Quote] = cache.get("quotes:batch") or []
     qmap = {q.code: q for q in quotes}
     q = qmap.get(code)
     minute: list[KBar] = cache.get(f"kline:1min:{code}") or []
-    components: list[StockInfo] = cache.get(f"sector:components:{primary_sector}") or []
+    components: list[StockInfo] = cache.get(components_key(key)) or []
 
     degraded = False
 

@@ -1,10 +1,20 @@
 """日线指标计算，供账户级 review 的买卖规则使用。"""
 
+import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
 
 from dragon_quant.models.types import KBar
+
+
+def is_tradable_daily_bar(bar: Optional[KBar]) -> bool:
+    """当日日K是否代表真实成交。
+
+    停牌日的数据源形态有两种：整行缺失，或保留占位行但 `volume<=0 且 amount<=0`。
+    两者都不能用来构造兜底成交价，故按「有量或有额」判定可交易。
+    """
+    return bool(bar is not None and ((bar.volume or 0) > 0 or (bar.amount or 0) > 0))
 
 
 def kbar_date(k: KBar) -> str:
@@ -118,3 +128,54 @@ def _avg_amplitude(rows: list[dict]) -> Optional[float]:
         if base and base > 0:
             vals.append((r["high"] - r["low"]) / base * 100)
     return sum(vals) / len(vals) if vals else None
+
+
+def post_exit_stats(history: list[KBar], exit_date: str, exit_price: float,
+                    window: int = 5) -> dict:
+    """清仓后窗口指标（纯函数，无 I/O）。
+
+    窗口 = ``exit_date`` **之后**的 ``window`` 根有效日K（按时间升序），
+    停牌占位行（无成交量/成交额）与非法 OHLC（<=0 或 NaN/inf）不占窗口名额。
+    不足 ``window`` 根按实际根数；无有效 bar → 两列为 None、天数为 0。
+
+    最高盈利 = (窗口最高价 - 卖出价) / 卖出价 * 100。
+    最大回撤 = min(0, (窗口最低价 - 卖出价) / 卖出价 * 100)，即卖出价起算的单边跌幅：
+    从未跌破卖出价时为 0。
+    """
+    empty = {"post_exit_max_return": None, "post_exit_max_drawdown": None,
+             "post_exit_window_days": 0}
+    try:
+        exit_price = float(exit_price)
+    except (TypeError, ValueError):
+        return empty
+    if not math.isfinite(exit_price) or exit_price <= 0:
+        return empty
+    try:
+        limit = max(0, int(window))
+    except (TypeError, ValueError):
+        return empty
+    if not limit:
+        return empty
+
+    bars = []
+    for bar in history:
+        if kbar_date(bar) <= exit_date or not is_tradable_daily_bar(bar):
+            continue
+        try:
+            valid = (math.isfinite(bar.high) and math.isfinite(bar.low)
+                     and bar.high > 0 and bar.low > 0)
+        except TypeError:
+            valid = False
+        if valid:
+            bars.append(bar)
+    bars.sort(key=lambda b: b.timestamp)
+    bars = bars[:limit]
+    if not bars:
+        return empty
+    high = max(b.high for b in bars)
+    low = min(b.low for b in bars)
+    return {
+        "post_exit_max_return": (high - exit_price) / exit_price * 100,
+        "post_exit_max_drawdown": min(0.0, (low - exit_price) / exit_price * 100),
+        "post_exit_window_days": len(bars),
+    }

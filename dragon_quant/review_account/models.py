@@ -3,6 +3,40 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+# 卖出规则链的稳定规则名（sell_rule_toggles 的合法键），顺序与 strategy._SELL_RULES 一致
+SELL_RULE_NAMES = ("first_day_stop", "hard_stop", "trailing", "breakeven", "high_open_clear",
+                   "soft_time_stop", "weak_close", "hard_time_stop", "half", "volume_spike")
+# 新增规则默认关；存量规则默认开。strategy._DEFAULT_OFF_RULES 与 first_day_stop_enabled()
+# 共用本集合（单一真值），避免「规则链按默认开、让位判定按默认关」的分裂。
+DEFAULT_OFF_SELL_RULES = frozenset({"first_day_stop", "soft_time_stop", "hard_time_stop"})
+
+# 买点类型的唯一来源：strategy._buy 的调用与 auction_veto_exempt_signals 校验共用。
+# 改动/新增买点时必须同步此处，否则配置里的豁免名会静默 fail-open。
+BUY_SIGNAL_MA5_PULLBACK = "buy_open_ma5_pullback"
+BUY_SIGNAL_OPEN_TURN_STRONG = "buy_open_turn_strong"
+BUY_SIGNAL_DIVERGENCE_BREAK = "buy_divergence_first_break"
+BUY_SIGNAL_DRAGON_COMEBACK = "buy_dragon_comeback"
+BUY_SIGNAL_CODES = (
+    BUY_SIGNAL_MA5_PULLBACK,
+    BUY_SIGNAL_OPEN_TURN_STRONG,
+    BUY_SIGNAL_DIVERGENCE_BREAK,
+    BUY_SIGNAL_DRAGON_COMEBACK,
+)
+
+# 当日行情不可用的稳定原因名（MarketEvent.unavailable 的 value）
+UNAVAILABLE_SUSPENDED = "suspended"              # 停牌：无分时且当日日K缺行/有价无量
+UNAVAILABLE_DAILY_MISSING = "daily_unavailable"  # 日K兜底模式下当日日K不可用（分时可用）
+
+_UNAVAILABLE_TEXT = {
+    UNAVAILABLE_SUSPENDED: "当日停牌无行情（无分时且日K缺行或有价无量），当日跳过评估",
+    UNAVAILABLE_DAILY_MISSING: "当日日K不可用（日K兜底模式无法建行），当日跳过评估",
+}
+
+
+def unavailable_text(reason: str) -> str:
+    """不可用原因的中文可读文案（未知原因有兜底）。"""
+    return _UNAVAILABLE_TEXT.get(reason, "当日行情不可用，跳过评估")
+
 
 @dataclass
 class StrategyConfig:
@@ -32,6 +66,8 @@ class StrategyConfig:
     divergence_break_open_ratio: float = 0.998
     stop_loss_pct: float = -5.0
     first_day_stop_loss_pct: float = -3.5
+    # 首日灾难线（仅 first_day_stop 开启时生效）：0 = 关闭，只做「首日浮亏减半」
+    first_day_disaster_stop_pct: float = 0.0
     weak_close_tolerance_pct: float = 1.0
     take_profit_pct: float = 12.0
     breakeven_activate_pct: float = 6.0
@@ -53,6 +89,32 @@ class StrategyConfig:
     max_daily_buys: int = 1
     min_commission: float = 5.0
     quote_max_age_seconds: int = 60
+    # ── 择时与仓位改造（全部 default-off / =现值，向后兼容）──
+    sentiment_sizing_enabled: bool = False
+    sentiment_ban_enabled: bool = False
+    sell_rule_toggles: dict = field(default_factory=dict)
+    max_daily_loss_pct: float = 0.0
+    drawdown_delevel_pct: float = 0.0
+    streak_delevel_enabled: bool = False
+    soft_time_stop_days: int = 0
+    soft_time_stop_floor_pct: float = 0.0
+    tiered_trailing_enabled: bool = False
+    trailing_tier2_activate_pct: float = 15.0
+    trailing_tier2_drawdown_pct: float = 5.0
+    trailing_tier3_activate_pct: float = 25.0
+    trailing_tier3_drawdown_pct: float = 8.0
+    dragon_comeback_enabled: bool = True
+    dragon_comeback_min_rise_pct: float = 30.0
+    dragon_comeback_min_boards: int = 2
+    dragon_comeback_pullback_days_min: int = 3
+    dragon_comeback_pullback_days_max: int = 10
+    dragon_comeback_volume_ratio: float = 0.333
+    dragon_comeback_confirm_pct: float = 3.0
+    # ── P/A 优先级（默认关；见 archived_md/auction/2026-10-21-auction-prep-buy-priority-design.md）──
+    auction_ranking_enabled: bool = False     # A 维度参与排序
+    auction_veto_enabled: bool = False        # D3 否决（verified ∧ is_weak）
+    prep_verdict_filter_enabled: bool = True  # D4：verdict=ignore 出池（消融可关）
+    auction_veto_exempt_signals: list = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, values: dict) -> "StrategyConfig":
@@ -76,6 +138,23 @@ class StrategyConfig:
                     raise ValueError(f"{name} 必须是有限数值")
                 if isinstance(default, int) and not isinstance(value, int):
                     raise ValueError(f"{name} 必须是整数")
+            elif isinstance(default, dict):
+                if not isinstance(value, dict):
+                    raise ValueError(f"{name} 必须是对象")
+                for k, v in value.items():
+                    if k not in SELL_RULE_NAMES:
+                        raise ValueError(f"未知卖出规则开关: {k}")
+                    if not isinstance(v, bool):
+                        raise ValueError(f"卖出规则开关 {k} 必须是布尔值")
+            elif isinstance(default, list):
+                if not isinstance(value, list):
+                    raise ValueError(f"{name} 必须是数组")
+                bad = [v for v in value
+                       if not isinstance(v, str) or v not in BUY_SIGNAL_CODES]
+                if bad:
+                    raise ValueError(
+                        f"未知买点类型: {', '.join(map(str, bad))}；"
+                        f"合法值: {', '.join(BUY_SIGNAL_CODES)}")
         if cfg.source not in {"v1", "v2"}:
             raise ValueError("source 必须是 v1 或 v2")
         for name in ("initial_cash", "candidate_top_n", "candidate_lookback_days", "max_positions",
@@ -91,6 +170,14 @@ class StrategyConfig:
             raise ValueError("卖出费率之和必须小于 1")
         if not -100 < cfg.stop_loss_pct < 0 or not -100 < cfg.first_day_stop_loss_pct < 0:
             raise ValueError("止损百分比必须在 (-100, 0) 内")
+        if not -100 < cfg.first_day_disaster_stop_pct <= 0:
+            raise ValueError("首日灾难止损线必须在 (-100, 0] 内（0 表示关闭）")
+        if cfg.first_day_disaster_stop_pct and cfg.first_day_disaster_stop_pct > cfg.first_day_stop_loss_pct:
+            raise ValueError("首日灾难止损线不能高于首日止损线（灾难线必须更宽）")
+        if cfg.first_day_disaster_stop_pct and not cfg.first_day_stop_enabled():
+            # 只配灾难线而不开规则会让配置静默失效（仍走旧的首日 -3.5% 整仓止损）。
+            raise ValueError("first_day_disaster_stop_pct 需要同时开启 "
+                             "sell_rule_toggles['first_day_stop']（否则灾难线静默失效）")
         if not isinstance(cfg.strategy_name, str) or not cfg.strategy_name.strip():
             raise ValueError("strategy_name 必须是非空字符串")
         for name in ("min_commission", "trailing_atr_multiple", "min_amount", "min_turnover",
@@ -111,7 +198,32 @@ class StrategyConfig:
         return cfg
 
     def to_json_dict(self) -> dict:
-        return dict(self.__dict__)
+        data = dict(self.__dict__)
+        data["sell_rule_toggles"] = dict(self.sell_rule_toggles)
+        data["auction_veto_exempt_signals"] = list(self.auction_veto_exempt_signals)
+        return data
+
+    # ── 首日止损的唯一真值来源（strategy 与 execution 都读这里，避免循环依赖）──
+    def first_day_stop_enabled(self) -> bool:
+        """首日止损规则是否启用（`sell_rule_toggles["first_day_stop"]`，默认关）。
+
+        默认值来自 `DEFAULT_OFF_SELL_RULES`，与 `strategy._DEFAULT_OFF_RULES` 同一真值来源。
+        """
+        return bool(self.sell_rule_toggles.get(
+            "first_day_stop", "first_day_stop" not in DEFAULT_OFF_SELL_RULES))
+
+    def first_day_risk_distance_pct(self) -> float:
+        """首日最大单股风险距离（负数，%）：`buy_quantity` 风险预算的下单量口径。
+
+        关闭首日规则时等于 `first_day_stop_loss_pct`（旧口径逐分不变）；开启后首日
+        最大损失不再是单条 -3.5% 线——半仓在减半线退出、剩余半仓在灾难线（未设则
+        T+2 硬止损线）退出，故用加权上界 `(half + tail) / 2`。该值是**近似上界**，
+        不包含跳空开盘与滑点之外的费用细节。
+        """
+        if not self.first_day_stop_enabled():
+            return self.first_day_stop_loss_pct
+        tail = self.first_day_disaster_stop_pct or self.stop_loss_pct
+        return (self.first_day_stop_loss_pct + tail) / 2
 
 
 @dataclass
@@ -206,6 +318,10 @@ class ClosedPosition:
     realized_return: float
     hold_days: int
     status: str = "closed"
+    # 清仓后窗口指标（事后评估，不参与任何交易决策）；旧记录为 None/0。
+    post_exit_max_return: Optional[float] = None
+    post_exit_max_drawdown: Optional[float] = None
+    post_exit_window_days: int = 0
 
 
 @dataclass
@@ -215,6 +331,17 @@ class MarketEvent:
     rows: dict[str, dict]
     candidates: list[dict] = field(default_factory=list)
     allow_buy: bool = True
+    # 当日不可用（停牌/日K缺失）的 code → 原因；rows 中不含这些 code。
+    unavailable: dict[str, str] = field(default_factory=dict)
+    # 不可用 code 的估值价（停牌=前收，daily_unavailable=当日末根5分钟K收盘）；
+    # 只用于 marks 估值，不参与买卖评估、不更新峰值。
+    last_closes: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def suspended(self) -> set[str]:
+        """停牌子集（从 unavailable 派生，单一事实来源）。"""
+        return {code for code, reason in self.unavailable.items()
+                if reason == UNAVAILABLE_SUSPENDED}
 
 
 @dataclass
@@ -228,6 +355,10 @@ class AccountState:
     buys_today: int = 0
     marks: dict[str, float] = field(default_factory=dict)
     evaluated: dict[str, int] = field(default_factory=dict)
+    realized_today: float = 0.0
+    consecutive_losses: int = 0
+    sentiment_pct: Optional[float] = None
+    peak_equity: float = 0.0
 
     def to_dict(self) -> dict:
         from dataclasses import asdict

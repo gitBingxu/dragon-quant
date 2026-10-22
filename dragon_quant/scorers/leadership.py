@@ -19,21 +19,23 @@ WEIGHT = R.DIM_WEIGHTS[DIM]
 
 
 def score(code: str, cache: DataCache, primary_sector: str = "",
+          primary_sector_key: str = "",
           candidate_pool: Optional[list[Candidate]] = None,
           **kwargs) -> ScoreResult:
+    sector_id = primary_sector_key or primary_sector
     self_cand = _find_candidate(code, candidate_pool)
     board_count = self_cand.board_count if self_cand else 0
     fived_pct = self_cand.fived_pct if self_cand else 0.0
 
     # ── 连板最多 BOARD_W：与板块内最高连板对比 ──
-    peer_boards = _peer_board_counts(primary_sector, candidate_pool)
+    peer_boards = _peer_board_counts(sector_id, candidate_pool)
     b_max = max([board_count] + peer_boards) if peer_boards else board_count
     s_board = clip(100.0 - (b_max - board_count) * R.BOARD_DECAY)
 
     # ── 5日涨幅最大 PCT_W：板块内当日涨停候选股之间 fived_pct 降序排名分位 ──
     # 口径说明：成分股 StockInfo.five_day_return 仅对当日拉过日K的涨停股为真实值，
     # 其余成分股为默认 0，会污染分位；故样本取候选池（均已在 Phase C 算真实 fived_pct）。
-    sample = _peer_fived(primary_sector, candidate_pool)
+    sample = _peer_fived(sector_id, candidate_pool)
     degraded = self_cand is None or len(sample) < 2
     s_pct, rank, n = desc_rank_score(fived_pct, sample)
 
@@ -66,4 +68,4 @@ def _peer_fived(sector, pool) -> list[float]:
 def _same_sector(cand: Candidate, sector: str) -> bool:
     if not sector:
         return True
-    return cand.primary_sector == sector
+    return (cand.primary_sector_key or cand.primary_sector) == sector

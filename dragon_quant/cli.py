@@ -339,30 +339,193 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     dragons_p.add_argument("--true-only", action="store_true",
                            help="只输出真龙 (is_true_dragon=1)")
 
+    # prep 子命令（盘后复盘：主线 + 情绪温度 + 候选池快照；固定 v2）
+    prep_p = sub.add_parser(
+        "prep",
+        help="盘后复盘，生成候选池+情绪温度快照（默认增量采集）",
+        usage="dragon-quant prep [--date YYYYMMDD] [--recompute | --force] [--json]",
+        description="盘后执行复盘，采集原始数据资产（assets.db prep_assets）并计算候选池快照"
+                    "（prep_snapshots），review-account 消费。默认增量：资产完好则跳过采集，"
+                    "仅补采缺失/不健康项；--json 输出完整复盘 JSON。",
+        epilog="""Examples:
+  dragon-quant prep
+  dragon-quant prep --date 20260519
+  dragon-quant prep --date 20260519 --recompute   # 用已存资产重算快照（算法升级重放）
+  dragon-quant prep --date 20260519 --force       # 强制重采全部可采资产（不绕过 16:40 门禁）
+  dragon-quant prep --json                        # 输出完整复盘 JSON
+""",
+    )
+    prep_p.add_argument("--date", default=None,
+                        help="复盘日 (YYYYMMDD / YYYY-MM-DD，默认最新有龙头数据的交易日)")
+    prep_mode = prep_p.add_mutually_exclusive_group()
+    prep_mode.add_argument("--recompute", action="store_true",
+                           help="跳过检测与采集，用已存数据资产重算快照（无资产时报错）")
+    prep_mode.add_argument("--force", action="store_true",
+                           help="强制重采全部可采资产（历史日 same_day_only 仍不采）；"
+                                "与 scan --force 不同：不绕过 16:40 与交易日校验")
+    prep_p.add_argument("--json", dest="json", action="store_true",
+                        help="输出完整复盘 JSON（默认只输出买入建议摘要）")
+
+    # auction 子命令（采集最近 N 日龙头的当日集合竞价盘口并落库；或重算已存快照）
+    auction_p = sub.add_parser(
+        "auction",
+        help="采集最近 N 日龙头的当日集合竞价盘口（TDX），或重算已存快照",
+        usage="dragon-quant auction [--pool prep|legacy] [--days N] [--json] | "
+              "dragon-quant auction --recompute DATE [--json]",
+        description="默认读取严格 T-1 的 prep 快照，采集 verdict∈{strong,light} 的推荐标的；"
+                    "推荐集为空/快照缺失时回退最近 N 个交易日的龙头并集。落库原始资产"
+                    "（assets.db/auction_assets）并计算强度快照（auction_snapshots）。"
+                    "默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。"
+                    "使用 --recompute 时不触网，用已存原始资产重算指定交易日快照。",
+        epilog="""Examples:
+  dragon-quant auction                        # 优先 prep 推荐，空则回退 legacy
+  dragon-quant auction --pool legacy          # 强制旧口径
+  dragon-quant auction --days 5               # 仅 legacy/回退路径生效
+  dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
+  dragon-quant auction --json                 # 输出完整 JSON
+""",
+    )
+    auction_p.add_argument("--pool", choices=["prep", "legacy"], default="prep",
+                           help="候选池来源：prep=盘后复盘推荐（默认），legacy=最近 N 日龙头并集")
+    auction_p.add_argument("--days", type=int, default=None,
+                           help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 3）")
+    auction_p.add_argument("--recompute", metavar="DATE", default=None,
+                           help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
+    auction_p.add_argument("--json", dest="json", action="store_true",
+                           help="输出完整 JSON（默认只展示参与竞价判断的标的强弱与汇总）")
+
+    # assets 子命令（数据资产云端同步）
+    assets_p = sub.add_parser(
+        "assets",
+        help="数据资产云端同步（备份/恢复）",
+        usage="dragon-quant assets <action> [action-options]",
+        description="把 prep/auction 产出的原始数据资产备份到 S3 兼容对象存储，或从云端恢复。",
+        epilog="""Examples:
+  dragon-quant assets push --profile r2
+  dragon-quant assets pull --from 20261020 --to 20261022 --apply
+  dragon-quant assets status --orphans
+  dragon-quant assets verify --from 20261020 --to 20261022 --deep
+  dragon-quant assets doctor --profile r2 --samples 50
+""",
+    )
+    assets_subs = assets_p.add_subparsers(dest="assets_action")
+    assets_subs.title = "Actions"  # type: ignore[assignment]
+    assets_subs.metavar = "<action>"
+
+    def _assets_common(parser, *, timeout=True):
+        parser.add_argument("--profile", default=None, help="配置 profile（如 r2 / b2）")
+        if timeout:
+            parser.add_argument("--timeout", type=float, default=60.0,
+                                help="单请求超时秒数（默认 60）")
+
+    assets_doctor = assets_subs.add_parser(
+        "doctor",
+        help="连通性与元数据回环检查（门槛 A）",
+        usage="dragon-quant assets doctor [--profile NAME] [--samples N]",
+        description="对选定 S3 兼容后端执行 PUT/HEAD/GET/LIST/DELETE，验证元数据回环与成功率。",
+    )
+    _assets_common(assets_doctor)
+    assets_doctor.add_argument("--samples", type=int, default=50,
+                               help="PUT/HEAD/GET 样本数（默认 50）")
+
+    assets_push = assets_subs.add_parser(
+        "push",
+        help="上传本地原始数据资产",
+        usage="dragon-quant assets push [--from D] [--to D] [--all] [--dry-run]",
+        description="增量上传 assets.db 的 prep/auction 原始资产；无变化时零上传。",
+    )
+    _assets_common(assets_push)
+    assets_push.add_argument("--from", dest="from_date", default=None,
+                             help="起始交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
+    assets_push.add_argument("--to", dest="to_date", default=None,
+                             help="结束交易日 (同 --from 格式)")
+    assets_push.add_argument("--all", dest="all_dates", action="store_true",
+                             help="忽略 state 水位，重算全部本地日期")
+    assets_push.add_argument("--dry-run", dest="dry_run", action="store_true",
+                             help="只输出计划，不写任何远端对象/state")
+    assets_push.add_argument("--allow-shrink", dest="allow_shrink", action="store_true",
+                             help="允许新 manifest 成为远端严格子集（默认拒绝）")
+
+    assets_pull = assets_subs.add_parser(
+        "pull",
+        help="从云端恢复原始数据资产",
+        usage="dragon-quant assets pull --from D --to D [--apply] [--force]",
+        description="默认 dry-run；--apply 下载、逐片校验后写入 assets.db。",
+    )
+    _assets_common(assets_pull)
+    assets_pull.add_argument("--from", dest="from_date", required=False, default=None,
+                             help="起始交易日（必填）")
+    assets_pull.add_argument("--to", dest="to_date", required=False, default=None,
+                             help="结束交易日（必填）")
+    assets_pull.add_argument("--apply", action="store_true",
+                             help="执行下载与写库（默认只输出计划）")
+    assets_pull.add_argument("--force", action="store_true",
+                             help="覆盖本地内容不一致的资产（默认只报告冲突）")
+    assets_pull.add_argument("--pick", choices=["latest"], default=None,
+                             help="manifest 重建遇同日多候选时按 LastModified 取最新")
+    assets_pull.add_argument("--target-dir", dest="target_dir", default=None,
+                             help="恢复到隔离目录（<DIR>/assets.db）")
+
+    assets_status = assets_subs.add_parser(
+        "status",
+        help="展示本地/云端差异",
+        usage="dragon-quant assets status [--all] [--orphans]",
+        description="逐日比较本地与云端 manifest，输出缺失/不一致/体积。",
+    )
+    _assets_common(assets_status)
+    assets_status.add_argument("--all", dest="all_dates", action="store_true",
+                               help="检查全部日期（默认最近 30 个）")
+    assets_status.add_argument("--orphans", action="store_true",
+                               help="额外统计未被 manifest 引用的孤儿 blob")
+
+    assets_verify = assets_subs.add_parser(
+        "verify",
+        help="校验 manifest / blob 完整性",
+        usage="dragon-quant assets verify [--from D --to D | --samples N] [--deep]",
+        description="默认校验 manifest 哈希；--deep 下载并解压校验分片内容。",
+    )
+    _assets_common(assets_verify)
+    assets_verify.add_argument("--from", dest="from_date", default=None,
+                               help="起始交易日")
+    assets_verify.add_argument("--to", dest="to_date", default=None,
+                               help="结束交易日")
+    assets_verify.add_argument("--samples", type=int, default=None,
+                               help="深度校验抽样条数（未给日期范围时必填）")
+    assets_verify.add_argument("--deep", action="store_true",
+                               help="下载并解压校验 blob 内容")
+    assets_verify.add_argument("--md5", dest="show_md5", action="store_true",
+                               help="展示校验分片的 md5")
+
     # buy 子命令
     buy_p = sub.add_parser(
         "buy",
         help="实盘辅助：给出今日买入建议并记账（纯信号）",
-        usage="dragon-quant buy [--config FILE] [--date YYYYMMDD --at HH:MM]",
-        description="回放当日分时，复用 review-account 共享买点，候选池内所有触发买点的标的均记入买入信号。",
+        usage="dragon-quant buy [--config FILE] [--date YYYYMMDD --at HH:MM] [--force] [--json]",
+        description="回放当日分时，复用 review-account 共享买点，候选池内所有触发买点的标的均记入买入信号。"
+                    "默认输出四类买点逐条诊断；--json 输出完整结果（details[].checks）。",
         epilog="""Examples:
   dragon-quant buy
   dragon-quant buy --date 20260907 --at 10:00
+  dragon-quant buy --force
+  dragon-quant buy --json
 """,
     )
     buy_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
     buy_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                        help="候选数据来源体系 (默认 v2)")
+    buy_p.add_argument("--json", dest="json", action="store_true",
+                       help="输出完整 JSON（details[].checks 含四类买点诊断）")
 
     # sell 子命令
     sell_p = sub.add_parser(
         "sell",
         help="实盘辅助：给出今日卖出建议并记账（纯信号）",
-        usage="dragon-quant sell [--config FILE] [--date YYYYMMDD --at HH:MM]",
+        usage="dragon-quant sell [--config FILE] [--date YYYYMMDD --at HH:MM] [--force]",
         description="对已买入未卖出的信号回放当日分时，复用 review-account 共享卖出策略，触发即平。",
         epilog="""Examples:
   dragon-quant sell
   dragon-quant sell --date 20260908 --at 14:55
+  dragon-quant sell --force
 """,
     )
     sell_p.add_argument("--date", default=None, help="交易日 (YYYYMMDD/YYYY-MM-DD，默认今日)")
@@ -372,6 +535,9 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     for trade_parser in (buy_p, sell_p):
         trade_parser.add_argument("--at", help="历史回放截止时刻 HH:MM，仅与 --date 配合")
         trade_parser.add_argument("--config", help="共享策略参数 JSON 文件")
+        trade_parser.add_argument(
+            "--force", action="store_true",
+            help="非交易时段仍强制跑当日回放（09:30 前仍拒绝；15:00–15:06 宽限窗口无需 --force）")
 
     # vpa 子命令
     vpa_p = sub.add_parser(
@@ -412,7 +578,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 
     clear_p = st_subs.add_parser("clear", help="清理数据",
                                  usage="dragon-quant storage clear [options]")
-    clear_p.add_argument("--all", action="store_true", help="清理全部(cache+results+logs)")
+    clear_p.add_argument("--all", action="store_true",
+                         help="清理全部(cache+results+logs)；数据库文件不清理")
     clear_p.add_argument("--cache", action="store_true", help="清理缓存")
     clear_p.add_argument("--results", action="store_true", help="清理结果")
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
@@ -423,7 +590,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         argv[0] = "scan"
     args = parser.parse_args(argv)
 
-    # tmdx 缺失时提示升级 Python（-h/--help/-v/--version 在 parse_args 内已 exit，不会到达这里）
+    # tmdx 缺失时提示补装（-h/--help/-v/--version 在 parse_args 内已 exit，不会到达这里）
     warn_if_unavailable()
 
     if args.command == "scan":
@@ -440,6 +607,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_review_account(args)
     elif args.command == "dragons":
         _cmd_dragons(args)
+    elif args.command == "prep":
+        _cmd_prep(args)
+    elif args.command == "auction":
+        _cmd_auction(args)
+    elif args.command == "assets":
+        _cmd_assets(args)
     elif args.command == "buy":
         _cmd_buy(args)
     elif args.command == "sell":
@@ -465,6 +638,9 @@ from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循�
     _cmd_review,
     _cmd_review_account,
     _cmd_dragons,
+    _cmd_prep,
+    _cmd_auction,
+    _cmd_assets,
     _cmd_buy,
     _cmd_sell,
     _cmd_vpa,

@@ -86,8 +86,9 @@ def save_review_account_results(run_id: int,
                 "INSERT INTO review_account_positions("
                 "run_id, code, name, entry_date, entry_price, qty, entry_reason_code, "
                 "entry_signal_json, exit_date, exit_price, exit_reason_code, exit_signal_json, "
-                "realized_return, hold_days, status"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "realized_return, hold_days, status, post_exit_max_return, "
+                "post_exit_max_drawdown, post_exit_window_days"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         run_id, p.get("code"), p.get("name"), p.get("entry_date"),
@@ -95,6 +96,8 @@ def save_review_account_results(run_id: int,
                         p.get("entry_signal_json"), p.get("exit_date"), p.get("exit_price"),
                         p.get("exit_reason_code"), p.get("exit_signal_json"),
                         p.get("realized_return"), p.get("hold_days"), p.get("status"),
+                        p.get("post_exit_max_return"), p.get("post_exit_max_drawdown"),
+                        p.get("post_exit_window_days"),
                     )
                     for p in positions
                 ],
@@ -258,7 +261,8 @@ def query_review_account_positions(run_id: int) -> list[dict]:
         _ensure_schema(conn)
         rows = conn.execute(
             "SELECT code, name, entry_date, entry_price, qty, entry_reason_code, entry_signal_json, "
-            "exit_date, exit_price, exit_reason_code, exit_signal_json, realized_return, hold_days, status "
+            "exit_date, exit_price, exit_reason_code, exit_signal_json, realized_return, hold_days, status, "
+            "post_exit_max_return, post_exit_max_drawdown, post_exit_window_days "
             "FROM review_account_positions WHERE run_id = ? ORDER BY entry_date ASC, id ASC",
             (run_id,),
         ).fetchall()
@@ -270,6 +274,8 @@ def query_review_account_positions(run_id: int) -> list[dict]:
                 "exit_date": r[7], "exit_price": r[8], "exit_reason_code": r[9] or "",
                 "exit_signal": json.loads(r[10]) if r[10] else {},
                 "realized_return": r[11], "hold_days": r[12], "status": r[13],
+                "post_exit_max_return": r[14], "post_exit_max_drawdown": r[15],
+                "post_exit_window_days": r[16],
             }
             for r in rows
         ]

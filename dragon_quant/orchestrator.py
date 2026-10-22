@@ -33,6 +33,10 @@ from dragon_quant.storage.paths import RESULTS_DIR
 from dragon_quant._version import __version__
 from dragon_quant.scorers import registry as R, rank_verdicts
 from dragon_quant.scorers.base import DragonVerdict
+from dragon_quant.sectors import (
+    CATEGORY_CN, SECTOR_CATEGORIES, SECTOR_TOP_N, category_priority,
+    components_key, sector_1min_key, sector_5min_key, sector_key,
+)
 
 STATISTICAL_CONCEPT_PREFIXES = (
     "昨日涨停", "昨日连板", "昨日首板", "昨日打二板",
@@ -41,8 +45,7 @@ STATISTICAL_CONCEPT_PREFIXES = (
     "最近多板", "东方财富热股",
 )
 
-RANK_UP_COUNT = 5     # 领涨行业取前 5（候选为板块内当日涨停股）
-RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K）
+RANK_DOWN_COUNT = 20  # 领跌板块取前 20（资金承接 + 5分K，固定行业口径）
 
 # 数据源 / 接口中文名（仅用于控制台失败提示）
 PROVIDER_CN = {"tdx": "通达信", "ths": "同花顺", "xueqiu": "雪球", "tencent": "腾讯"}
@@ -59,15 +62,17 @@ ENDPOINT_CN = {
 
 
 def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
-    """打印自上次游标以来新增的 api 失败，按 provider+endpoint 聚合。返回新游标。
+    """打印自上次游标以来新增的 api 失败，按 provider+endpoint+维度 聚合。返回新游标。
 
     数据源：logger.query(category="api", level="error")，每条 category 形如
-    api:{provider}:{endpoint}，data["error"] 为失败原因，code 为板块/个股代码。
+    api:{provider}:{endpoint}，data["error"] 为失败原因，code 为板块/个股代码，
+    data["dimension"] 为板块维度（hy/gn/dq，非板块接口为空）。
     """
     fails = logger.query(category="api", level="error")
     new = fails[seen_count:]
-    # 已成功回退的 endpoint（主链路失败但老链路兜底成功）→ 归因为「已回退」而非真失败
-    rescued = {e.category.split(":")[-1] for e in logger.query(category="fallback")}
+    # 已成功回退的 (endpoint, dimension)（主链路失败但老链路兜底成功）
+    rescued = {(e.category.split(":")[-1], e.data.get("dimension"))
+               for e in logger.query(category="fallback")}
     if verbose and new:
         agg: dict = {}
         for e in new:
@@ -75,16 +80,17 @@ def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
             if len(parts) < 3:
                 continue
             provider, endpoint = parts[1], parts[2]
-            g = agg.setdefault((provider, endpoint),
+            dimension = e.data.get("dimension") or ""
+            g = agg.setdefault((provider, endpoint, dimension),
                                {"count": 0, "codes": [], "error": ""})
             g["count"] += 1
             if e.code:
                 g["codes"].append(e.code)
             g["error"] = e.data.get("error", "") or g["error"]
-        for (provider, endpoint), g in agg.items():
+        for (provider, endpoint, dimension), g in agg.items():
             pcn = PROVIDER_CN.get(provider, provider)
             ecn = ENDPOINT_CN.get(endpoint, endpoint)
-            is_rescued = provider == "tdx" and endpoint in rescued
+            is_rescued = provider == "tdx" and (endpoint, dimension or None) in rescued
             codes = ""
             if g["codes"]:
                 shown = ", ".join(g["codes"][:5])
@@ -93,7 +99,8 @@ def _report_api_failures(logger, seen_count: int, verbose: bool) -> int:
             reason = f"：{g['error']}" if g["error"] else ""
             icon = "⚠️" if is_rescued else "❌"
             suffix = "（已回退老链路）" if is_rescued else ""
-            print(f"   {icon} {pcn}·{ecn} 失败 {g['count']} 次{suffix}{codes}{reason}",
+            dim = f"[{dimension}]" if dimension else ""
+            print(f"   {icon} {pcn}·{ecn}{dim} 失败 {g['count']} 次{suffix}{codes}{reason}",
                   file=sys.stderr)
     return len(fails)
 
@@ -151,6 +158,81 @@ def _cached_fetch_sync(cache, key, fetch_fn, trade_date, *,
     else:
         cache.set(key, data)
     return data
+
+
+def _merge_sector_rankings(rankings: dict[str, list], *, top_n: int, keep) -> list:
+    """三维板块榜合并 → 过滤 → 去重 → 按涨幅降序截断。
+
+    rankings: {category: [SectorPerformance, ...]}
+    去重键为规范化板块键（source:category:code），排序键为 (-pct, code) 保证确定性。
+    """
+    seen: set[str] = set()
+    merged = []
+    for rows in rankings.values():
+        for s in rows:
+            if not keep(s):
+                continue
+            key = sector_key(s.source, s.category, s.code)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(s)
+    merged.sort(key=lambda s: (-s.pct, s.code))
+    return merged[:top_n]
+
+
+def _drop_code_collisions(rankings: dict[str, list], logger=None):
+    """逐板块剔除跨维度同 code 的冲突项。
+
+    协议层 get_board_members(board_symbol) / get_stock_kline(market, code) 不携带
+    board_type，同 code 会被服务端解析为同一板块。按 hy > gn > dq 优先级保留首个
+    占用者，只丢弃后出现维度中该 code 的板块（不是整维剔除）。
+
+    返回 (过滤后的 rankings, [(category, code), ...])。
+    """
+    owner: dict[str, str] = {}
+    out: dict[str, list] = {cat: [] for cat in rankings}
+    dropped: list[tuple[str, str]] = []
+    for cat in sorted(rankings, key=category_priority):
+        for s in rankings[cat]:
+            if s.code in owner:
+                dropped.append((cat, s.code))
+                continue
+            owner[s.code] = cat
+            out[cat].append(s)
+    if dropped and logger:
+        logger.error("degraded:sector_code_collision",
+                     f"跨维度 code 冲突 {len(dropped)} 个，已逐板块剔除",
+                     collisions=[f"{c}:{code}" for c, code in dropped])
+    return {c: v for c, v in out.items() if v}, dropped
+
+
+def _build_candidates(top_sectors: list, filtered_by_key: dict[str, list],
+                      limit_up_pct: float) -> dict[str, Candidate]:
+    """按总榜顺序把各板块涨停股合并为候选池。
+
+    top_sectors 已按涨幅降序；同一 code 首次出现即归属最高排名板块，
+    后续板块只追加 concepts 标签（去重 + primary_sector 归属一次完成）。
+    filtered_by_key 已在 Phase B 过 _is_valid_candidate（ST/双创/北交所）。
+    """
+    out: dict[str, Candidate] = {}
+    for s in top_sectors:
+        key = sector_key(s.source, s.category, s.code)
+        for st in filtered_by_key.get(key, []) or []:
+            if st.pct < limit_up_pct:
+                continue
+            cand = out.get(st.code)
+            if cand is None:
+                out[st.code] = Candidate(
+                    code=st.code, name=st.name, concepts=[s.name],
+                    primary_sector=s.code,
+                    primary_sector_key=key,
+                    primary_sector_category=s.category,
+                    primary_sector_source=s.source,
+                )
+            elif s.name not in cand.concepts:
+                cand.concepts.append(s.name)
+    return out
 
 
 def _is_valid_candidate(stock: StockInfo) -> bool:
@@ -217,7 +299,7 @@ def _to_serializable(obj):
 
 def _score_one(cand: Candidate, cache: DataCache,
                candidate_pool: list[Candidate],
-               all_sector_codes: list[str],
+               all_sector_keys: list[str],
                sector_name_map: dict[str, str],
                logger) -> dict:
     """五维评分 + 门槛/加权聚合。"""
@@ -227,7 +309,8 @@ def _score_one(cand: Candidate, cache: DataCache,
         cand.code, cache,
         candidate_pool=candidate_pool,
         primary_sector=cand.primary_sector,
-        all_sector_codes=all_sector_codes,
+        primary_sector_key=cand.primary_sector_key,
+        all_sector_keys=all_sector_keys,
         sector_name_map=sector_name_map,
     )
     dims = {}
@@ -236,11 +319,15 @@ def _score_one(cand: Candidate, cache: DataCache,
         logger.scorer(dim_name, cand.code, score=sr.score, weight=sr.weight,
                       **sr.details)
 
+    sector_id = cand.primary_sector_key or cand.primary_sector
     return {
         "code": cand.code, "name": cand.name,
         "concepts": cand.concepts, "board_count": cand.board_count,
         "primary_sector": cand.primary_sector,
-        "primary_sector_name": sector_name_map.get(cand.primary_sector, ""),
+        "primary_sector_key": cand.primary_sector_key,
+        "primary_sector_category": cand.primary_sector_category,
+        "primary_sector_source": cand.primary_sector_source,
+        "primary_sector_name": sector_name_map.get(sector_id, ""),
         "composite_score": verdict.composite, "dimensions": dims,
         "is_true_dragon": verdict.is_true_dragon,
         "reject_reason": verdict.reject_reason,
@@ -344,7 +431,6 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     bj_tz = timezone(timedelta(hours=8))
     now = datetime.now(bj_tz)
     source = "v2"
-    rank_up_count = RANK_UP_COUNT
 
     # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
     is_trading_day = now.weekday() < 5
@@ -449,37 +535,108 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             return False
         return True
 
-    # 一次抓取全部行业排行（provider 内已多页+本地排序），本地切涨幅/跌幅榜。
-    # 缓存原始榜，黑名单过滤仍在内存做，
-    # 保证黑名单改动即时生效。
-    # 板块链锚点：首选 tdx 行业板块，失败/空回退 ths。整轮板块链随 source 一致（§4.1）。
-    # 缓存按 source 命名空间隔离，避免上一轮 ths 榜命中导致 tdx 形同虚设（§7.2）。
-    sector_source = "tdx"
-    ranking_raw = _cf_sync(f"sector:ranking:{sector_source}",
-                           lambda: tdx.get_sector_ranking(asc=False)) or []
-    if not ranking_raw:
-        sector_source = "ths"
-        ranking_raw = _cf_sync(f"sector:ranking:{sector_source}",
-                               lambda: ths.get_sector_ranking(asc=False)) or []
-        if logger and _tdx_available() and ranking_raw:
-            logger.warn("fallback:sector_ranking",
-                        "sector_ranking 主链路(tdx)失败，已回退 同花顺")
-    sector_provider = tdx if sector_source == "tdx" else ths
-    ranking_all = [s for s in ranking_raw if _sector_ok(s)]
-    top10_up = ranking_all[:rank_up_count]
-    top10_down = sorted(ranking_all, key=lambda s: s.pct)[:RANK_DOWN_COUNT]
-    logger.phase("A", "板块排行", up=len(top10_up), down=len(top10_down))
+    # 三维融合：行业(HY) + 概念(GN) + 地区(DQ)，逐维度 TDX → THS 回退。
+    # 缓存键含 source+category，避免跨源/跨维度串号（§7.2）。
+    rankings: dict[str, list] = {}
+    sector_sources: dict[str, str] = {}
+    degraded: list[str] = []
+
+    def _fetch_category_ranking(cat: str):
+        """单维度排行：tdx → ths → 空。两段调用都兜异常，单维度失败不中断扫描。"""
+        rows = []
+        try:
+            rows = _cf_sync(f"sector:ranking:tdx:{cat}",
+                            lambda c=cat: tdx.get_sector_ranking(asc=False,
+                                                                 category=c)) or []
+        except ValueError:
+            raise
+        except Exception as e:
+            if logger:
+                logger.warn("fallback:sector_ranking",
+                            f"sector_ranking[{cat}] 主链路(tdx)异常，尝试回退同花顺: {e}",
+                            dimension=cat)
+            rows = []
+        if rows:
+            return rows, "tdx"
+        try:
+            rows = _cf_sync(f"sector:ranking:ths:{cat}",
+                            lambda c=cat: ths.get_sector_ranking(asc=False,
+                                                                 category=c)) or []
+        except ValueError:
+            raise
+        except Exception as e:
+            if logger:
+                logger.warn("degraded:sector_ranking",
+                            f"sector_ranking[{cat}] 回退同花顺异常: {e}",
+                            dimension=cat)
+            rows = []
+        if rows:
+            if logger and _tdx_available():
+                logger.warn("fallback:sector_ranking",
+                            f"sector_ranking[{cat}] 主链路(tdx)失败，已回退 同花顺",
+                            dimension=cat)
+            return rows, "ths"
+        return [], ""
+
+    for cat in SECTOR_CATEGORIES:
+        rows, src = _fetch_category_ranking(cat)
+        if rows:
+            rankings[cat] = rows
+            sector_sources[cat] = src
+        else:
+            degraded.append(cat)
+            if logger:
+                logger.warn("degraded:sector_ranking",
+                            f"sector_ranking[{cat}] 不可用，已从融合总榜剔除",
+                            dimension=cat)
+
+    # 防御：进入融合榜的板块必须带维度与来源，否则会生成空 namespace 缓存键
+    for cat in list(rankings):
+        valid = [s for s in rankings[cat] if s.source and s.category]
+        dropped_rows = len(rankings[cat]) - len(valid)
+        if dropped_rows and logger:
+            logger.error("degraded:sector_identity",
+                         f"sector_ranking[{cat}] 有 {dropped_rows} 个板块缺少 "
+                         f"source/category，已剔除",
+                         dimension=cat)
+        rankings[cat] = valid
+        if not rankings[cat]:
+            rankings.pop(cat, None)
+            sector_sources.pop(cat, None)
+            if cat not in degraded:
+                degraded.append(cat)
+
+    # 协议层按 code 请求、不带 board_type：逐板块剔除跨维度冲突 code（hy > gn > dq）
+    rankings, collisions = _drop_code_collisions(rankings, logger)
+    # 按最终可用维度反推状态：被碰撞清空/取数失败的维度统一 unavailable + degraded
+    degraded = [c for c in SECTOR_CATEGORIES if c not in rankings]
+
+    top_up = _merge_sector_rankings(rankings, top_n=SECTOR_TOP_N, keep=_sector_ok)
+    # 领跌固定行业口径（资金承接语义不变）
+    top_down = sorted([s for s in rankings.get("hy", []) if _sector_ok(s)],
+                      key=lambda s: s.pct)[:RANK_DOWN_COUNT]
+    sector_providers = {cat: (tdx if sector_sources[cat] == "tdx" else ths)
+                        for cat in rankings}
+    sources_out = {cat: (sector_sources.get(cat) if cat in rankings else "unavailable")
+                   for cat in SECTOR_CATEGORIES}
+
+    logger.phase("A", "板块排行", up=len(top_up), down=len(top_down),
+                 degraded=degraded)
     if verbose:
-        print(f"   领涨 {len(top10_up)} 个板块:")
-        for s in top10_up:
-            print(f"     ↑ {s.name}({s.code})  {s.pct:+.2f}%")
-        print(f"   领跌 {len(top10_down)} 个板块:")
-        for s in top10_down:
+        print(f"   领涨 {len(top_up)} 个板块（行业+概念+地区融合 Top{SECTOR_TOP_N}）:")
+        for s in top_up:
+            print(f"     ↑ {s.name}({s.code}, {CATEGORY_CN.get(s.category, s.category)})"
+                  f"  {s.pct:+.2f}%")
+        print(f"   领跌 {len(top_down)} 个板块（行业）:")
+        for s in top_down:
             print(f"     ↓ {s.name}({s.code})  {s.pct:+.2f}%")
+        if degraded:
+            names = "、".join(CATEGORY_CN.get(c, c) for c in degraded)
+            print(f"   ⚠️ 维度不可用: {names}（已从融合榜剔除）", file=sys.stderr)
 
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
-    if not top10_up:
+    if not top_up:
         return {"error": "未获取到领涨板块", "ranking": [], "report_text": ""}
 
     # ────────────────────────────────────────────
@@ -488,30 +645,30 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("📋 Phase B — 候选股筛选")
 
-    all_candidates: dict[str, Candidate] = {}
     sector_components: dict[str, list[StockInfo]] = {}
     sector_filtered: dict[str, list[StockInfo]] = {}
 
-    # 提交领涨板块成分股请求（过 RateLimiter 防 burst 反爬）
-    for s in top10_up:
-        _cf(sector_source, f"sector:components:{s.code}",
-            (lambda sc=s.code: sector_provider.get_sector_components(sc, page=1,
-                                                                     all_pages=True)),
-            namespace=source)
+    # 提交入选板块成分股请求（过 RateLimiter 防 burst 反爬）
+    for s in top_up:
+        key = sector_key(s.source, s.category, s.code)
+        _cf(s.source, components_key(key),
+            (lambda s=s: sector_providers[s.category].get_sector_components(
+                s.code, page=1, all_pages=True, category=s.category)))
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
-    for s in top10_up:
-        components = cache.get(f"sector:components:{s.code}") or []
-        sector_components[s.code] = components
-        filtered = [c for c in components if _is_valid_candidate(c)]
-        sector_filtered[s.code] = filtered
+    for s in top_up:
+        key = sector_key(s.source, s.category, s.code)
+        components = cache.get(components_key(key)) or []
+        sector_components[key] = components
+        sector_filtered[key] = [c for c in components if _is_valid_candidate(c)]
 
     # 收集需要拉K线的唯一股票：每板块当日所有涨停个股（pct ≥ LIMIT_UP_PCT）。
     unique_codes: dict[str, StockInfo] = {}
     LIMIT_UP_PCT = 9.9
-    for s in top10_up:
-        picks = [st for st in sector_filtered[s.code] if st.pct >= LIMIT_UP_PCT]
+    for s in top_up:
+        key = sector_key(s.source, s.category, s.code)
+        picks = [st for st in sector_filtered[key] if st.pct >= LIMIT_UP_PCT]
         for stock in picks:
             if stock.code not in unique_codes:
                 unique_codes[stock.code] = stock
@@ -532,39 +689,23 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         klines = cache.get(f"kline:day:{code}") or []
         stock.five_day_return = _compute_5day_return(klines)
 
-    # 候选构建：取每板块当日所有涨停个股（不截断）。
-    for s in top10_up:
-        pre_list = [st for st in sector_filtered[s.code] if st.code in unique_codes]
-        top_n_stocks = [st for st in pre_list if st.pct >= LIMIT_UP_PCT]
-        if verbose:
-            print(f"   [{s.name}] 涨停候选 {len(top_n_stocks)} 只"
-                  f"（成分股{len(sector_filtered[s.code])}只）")
-        for stock in top_n_stocks:
-            if stock.code in all_candidates:
-                all_candidates[stock.code].concepts.append(s.name)
-            else:
-                all_candidates[stock.code] = Candidate(
-                    code=stock.code, name=stock.name,
-                    concepts=[s.name], primary_sector=s.code,
-                )
-
+    # 候选构建：按总榜降序合并各板块涨停股（去重 + primary_sector 归属）。
+    all_candidates = _build_candidates(top_up, sector_filtered, LIMIT_UP_PCT)
     candidate_pool = list(all_candidates.values())
     logger.phase("B", "候选股筛选", count=len(candidate_pool))
     if verbose:
         print(f"   候选池: {len(candidate_pool)} 只（去重），按板块明细:")
-        for s in top10_up:
-            picks = [c for c in sector_filtered[s.code]
+        for s in top_up:
+            key = sector_key(s.source, s.category, s.code)
+            picks = [c for c in sector_filtered[key]
                      if c.code in all_candidates]
-            print(f"     ▎{s.name}({s.code})  {len(picks)} 只")
+            print(f"     ▎{s.name}({s.code}, {CATEGORY_CN.get(s.category, s.category)})"
+                  f"  {len(picks)} 只")
             for c in picks:
                 print(f"        {c.code} {c.name}  涨幅{c.pct:+.2f}%")
 
     if not candidate_pool:
         return {"error": "无候选股", "ranking": [], "report_text": ""}
-
-    # 缓存板块成分股
-    for s_code, comps in sector_components.items():
-        cache.set(f"sector:components:{s_code}", comps)
 
     # ────────────────────────────────────────────
     # Phase C: 连板高度 + 排序
@@ -597,16 +738,18 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print("⏳ Phase D — 并发加载")
 
-    # T1: 板块历史5分K（虹吸回看）+ 主板块当日1分K（带动/抗跌基准）
-    all_sectors = top10_up + top10_down
+    # T1: 板块历史5分K（虹吸回看）+ 入选板块当日1分K（带动/抗跌基准）
+    all_sectors = top_up + top_down
     for s in all_sectors:
-        _cf(sector_source, f"kline:5min:sector:{s.code}",
-            (lambda sc=s.code: sector_provider.get_sector_5min_kline_history(sc, days=10)),
-            namespace=source)
-    for s in top10_up:
-        _cf(sector_source, f"kline:1min:sector:{s.code}",
-            (lambda sc=s.code: sector_provider.get_sector_1min_kline(sc)),
-            namespace=source)
+        key = sector_key(s.source, s.category, s.code)
+        _cf(s.source, sector_5min_key(key),
+            (lambda s=s: sector_providers[s.category].get_sector_5min_kline_history(
+                s.code, days=10, category=s.category)))
+    for s in top_up:
+        key = sector_key(s.source, s.category, s.code)
+        _cf(s.source, sector_1min_key(key),
+            (lambda s=s: sector_providers[s.category].get_sector_1min_kline(
+                s.code, category=s.category)))
 
     # T2: 全部候选股分时K线（含 drive 封板池对比所需的同板块涨停股）
     for r in candidate_pool:
@@ -666,14 +809,33 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # 注入元数据到缓存（供 scorer 读取）
     cache.set("__meta__:candidates", [
         {"code": c.code, "name": c.name, "concepts": c.concepts,
-         "primary_sector": c.primary_sector, "board_count": c.board_count}
+         "primary_sector": c.primary_sector,
+         "primary_sector_key": c.primary_sector_key,
+         "board_count": c.board_count}
         for c in ranking
     ])
-    cache.set("__meta__:sector_codes", [s.code for s in top10_down])
+    down_keys = [sector_key(s.source, s.category, s.code) for s in top_down]
+    cache.set("__meta__:sector_codes", down_keys)
 
-    # 板块名称映射
-    sector_name_map = {s.code: s.name for s in all_sectors}
+    # 板块名称映射（键为规范化 source:category:code）
+    sector_name_map = {sector_key(s.source, s.category, s.code): s.name
+                       for s in all_sectors}
     cache.set("__meta__:sector_name_map", sector_name_map)
+
+    # 缓存键存在性自检：全部候选全部板块键都未命中 → 系统性键名失配（防静默降级）
+    def _has_sector_data(c: Candidate) -> bool:
+        key = c.primary_sector_key or c.primary_sector
+        return bool(cache.get(components_key(key))
+                    or cache.get(sector_1min_key(key))
+                    or cache.get(sector_5min_key(key)))
+
+    expected_keys = {k for k, comps in sector_components.items() if comps}
+    check = [c for c in candidate_pool
+             if (c.primary_sector_key or c.primary_sector) in expected_keys]
+    sector_cache_miss = bool(check) and all(not _has_sector_data(c) for c in check)
+    if sector_cache_miss:
+        logger.error("degraded:sector_cache",
+                     "所有候选的板块缓存键均未命中，疑似键名失配（评分将整体降级）")
 
     # 用全候选池做板块内对比（连板/涨幅分位、封板池）。
     peer_pool = candidate_pool
@@ -681,7 +843,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     for cand in ranking:
         try:
             sr = _score_one(cand, cache, peer_pool,
-                            [s.code for s in top10_down],
+                            down_keys,
                             sector_name_map, logger)
             results.append(sr)
             if verbose:
@@ -710,9 +872,15 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         "elapsed_s": round(elapsed, 1),
         "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers, "scorers": source},
         "sectors": {
-            "up": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_up],
-            "down": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4)} for s in top10_down],
+            "up": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4),
+                    "category": s.category, "source": s.source} for s in top_up],
+            "down": [{"code": s.code, "name": s.name, "pct": round(s.pct, 4),
+                      "category": s.category, "source": s.source} for s in top_down],
+            "degraded": list(degraded),
+            "sources": dict(sources_out),
+            "collisions": [f"{c}:{code}" for c, code in collisions],
         },
+        "sector_cache_miss": sector_cache_miss,
         "ranking": [],
         "api_stats": logger.api_stats(),
         "report_text": "",

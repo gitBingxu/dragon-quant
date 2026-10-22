@@ -49,6 +49,8 @@ class TestSectorPerformance(unittest.TestCase):
         sp = SectorPerformance(code="BK1145", name="机器人执行器", pct=3.5, amplitude=5.2)
         self.assertEqual(sp.name, "机器人执行器")
         self.assertEqual(sp.pct, 3.5)
+        self.assertEqual(sp.category, "")
+        self.assertEqual(sp.source, "")
 
 
 class TestCandidate(unittest.TestCase):
@@ -57,6 +59,9 @@ class TestCandidate(unittest.TestCase):
         self.assertEqual(c.concepts, [])
         self.assertEqual(c.board_count, 0)
         self.assertEqual(c.score, 0.0)
+        self.assertEqual(c.primary_sector_key, "")
+        self.assertEqual(c.primary_sector_category, "")
+        self.assertEqual(c.primary_sector_source, "")
 
     def test_full(self):
         c = Candidate(code="002031", name="巨轮智能",

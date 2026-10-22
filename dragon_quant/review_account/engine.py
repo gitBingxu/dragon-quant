@@ -1,11 +1,16 @@
 from dragon_quant.review_account.execution import (
-    buy_quantity, daily_fallback_sell_price, fee, fill_price, sell_quantity,
+    apply_sell_fill, buy_quantity, daily_fallback_sell_price, fee, fill_price, track_peak,
 )
 from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import (
     AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade,
+    unavailable_text,
 )
-from dragon_quant.review_account.strategy import evaluate_buy, evaluate_sell, explain_buy_candidate
+from dragon_quant.review_account.priority import TRI_LABELS, key_components, rank_key
+from dragon_quant.review_account.risk import risk_governor
+from dragon_quant.review_account.strategy import (
+    evaluate_sell, explain_buy_candidate, explain_buy_checks,
+)
 
 
 class TradingEngine:
@@ -21,8 +26,20 @@ class TradingEngine:
         if state.trade_date != day:
             state.pending = [o for o in state.pending if o["side"] == "SELL"]
             state.trade_date, state.sold_today, state.buys_today = day, False, 0
+            state.realized_today = 0.0
         for code, row in event.rows.items():
             state.marks[code] = row.get("execution_price") or row["bar_close"]
+        # 停牌/不可用持仓：不评估、不更新峰值，但按最近可得价格估值，避免净值回落成本价。
+        for code, price in event.last_closes.items():
+            if code not in event.rows:
+                state.marks[code] = price
+        for detail in self._unavailable_details(event):
+            result["details"].append(detail)
+        equity = self._equity()
+        state.peak_equity = max(state.peak_equity, equity)
+        _, risk_allow_buy, fired = risk_governor(cfg, state, equity)
+        if fired:
+            result.setdefault("fired_gate", []).extend(fired)
         for order in sorted(list(state.pending), key=lambda o: o["side"] != "SELL"):
             if order["created_at"] >= event.timestamp:
                 continue
@@ -31,7 +48,7 @@ class TradingEngine:
                 continue
             if row.get("execution_timestamp", event.timestamp) <= order["created_at"]:
                 continue
-            if order["side"] == "BUY" and not event.allow_buy:
+            if order["side"] == "BUY" and (not event.allow_buy or not risk_allow_buy):
                 continue
             if order["side"] == "BUY" and (state.sold_today or event.timestamp - order["created_at"] > 300_000
                     or state.buys_today >= cfg.max_daily_buys):
@@ -73,24 +90,31 @@ class TradingEngine:
                     if signals:
                         state.pending.append(self._order(p.code, p.name, signals[0], event.timestamp))
                 # The current bar cannot activate protection retroactively within that same bar.
-                if row["bar_timestamp"] > entry_ts:
-                    observed_high = (row["bar_high"] if row["bar_timestamp"] - 300_000 >= entry_ts
-                                     else row["bar_close"])
-                    p.highest_price = max(p.highest_price, observed_high)
-                    p.highest_return = max(p.highest_return, (p.highest_price / p.entry_price - 1) * 100)
-            if (event.phase != "close" and event.allow_buy
-                    and not state.sold_today and state.buys_today < cfg.max_daily_buys
+                track_peak(p, row, entry_ts)
+            buy_window = (event.phase != "close" and event.allow_buy and risk_allow_buy
+                          and not state.sold_today)
+            if (buy_window and state.buys_today < cfg.max_daily_buys
                     and len(state.positions) < cfg.max_positions
                     and not any(o["side"] == "BUY" for o in state.pending)):
                 signals = []
                 held = {p.code for p in state.positions}
                 for cand in event.candidates:
-                    if cand["code"] in held:
-                        result["details"].append({"code": cand["code"], "name": cand.get("name", ""),
-                                                  "passed": False, "rank": cand.get("rank"),
-                                                  "reason_code": "already_holding", "reason_text": "已持仓"})
-                        continue
+                    if cand["code"] in event.unavailable:
+                        continue  # 已由 _unavailable_details 在闸门外输出
                     row = event.rows.get(cand["code"])
+                    if cand["code"] in held:
+                        checks = (explain_buy_checks(
+                            cand, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+                            row.get("intraday_bars")) if row else [])
+                        result["details"].append({
+                            "code": cand["code"], "name": cand.get("name", ""),
+                            "passed": False, "rank": cand.get("rank"),
+                            "reason_code": "already_holding", "reason_text": "已持仓",
+                            "signal": {}, "full_signal": None,
+                            "observed_at": row.get("observed_at") if row else None,
+                            "phase": row.get("phase") if row else None,
+                            "checks": checks})
+                        continue
                     key = f"buy:{cand['code']}"
                     if row and state.evaluated.get(key, 0) >= row["bar_timestamp"]:
                         continue
@@ -98,16 +122,42 @@ class TradingEngine:
                         state.evaluated[key] = row["bar_timestamp"]
                     detail = explain_buy_candidate(cand, row, cfg, row.get("prev_row") if row else None,
                                                    row.get("hist_rows") if row else None,
-                                                   row.get("intraday_bars") if row else None)
+                                                   row.get("intraday_bars") if row else None,
+                                                   state.sentiment_pct)
                     result["details"].append(detail)
-                    if detail["passed"] and row is not None:
-                        sig = evaluate_buy(cand, row, cfg, row["prev_row"], row["hist_rows"], row["intraday_bars"])
-                        signals.append((sig, cand))
-                # 择优：买点得分越高越优先，同分看五维综合分，再按代码稳定排序。
-                signals.sort(key=lambda x: (-x[0]["priority"], -(x[1].get("composite_score") or 0), x[1]["code"]))
+                    if detail["passed"] and detail.get("full_signal"):
+                        signals.append((detail["full_signal"], cand))
+                # 择优：P/A 三值 tier → 五维综合分 → 买点得分 → 代码（两引擎共用 key）。
+                signals.sort(key=lambda x: rank_key(x[0], x[1], cfg.auction_ranking_enabled))
                 if signals:
                     sig, cand = signals[0]
                     state.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))
+                    for position, (other_sig, other) in enumerate(signals[1:], start=2):
+                        result["details"].append(
+                            self._ranked_out_detail(
+                                other, other_sig, position, cfg,
+                                row=event.rows.get(other["code"])))
+            elif (buy_window and state.buys_today >= cfg.max_daily_buys
+                    and len(state.positions) < cfg.max_positions):
+                # 当日买入次数已满：只记一次，避免在每个后续事件重复追加。
+                limit_key = f"limit:{day}"
+                if limit_key not in state.evaluated:
+                    state.evaluated[limit_key] = 1
+                    held = {p.code for p in state.positions}
+                    for cand in event.candidates:
+                        if cand["code"] in event.unavailable:
+                            continue  # 已由 _unavailable_details 在闸门外输出
+                        if cand["code"] in held:
+                            continue
+                        row = event.rows.get(cand["code"])
+                        checks = (explain_buy_checks(
+                            cand, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+                            row.get("intraday_bars")) if row else [])
+                        result["details"].append(
+                            self._unsignaled_detail(
+                                cand, "daily_buy_limit",
+                                f"当日买入次数已达上限 {cfg.max_daily_buys}", cfg,
+                                row=row, checks=checks))
         state.last_event = event.timestamp
         result["pending"] = list(state.pending)
         if state.pending:
@@ -118,6 +168,66 @@ class TradingEngine:
     def _order(code, name, signal, timestamp):
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
                 "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+
+    def _unavailable_details(self, event) -> list[dict]:
+        """停牌/不可用候选的 detail：在买窗闸门外产出，每 code 每日一条。"""
+        details = []
+        mark = at(event_date(event.timestamp), "00:00")
+        for cand in event.candidates:
+            reason = event.unavailable.get(cand["code"])
+            if reason is None:
+                continue
+            key = f"unavailable:{cand['code']}"
+            if self.state.evaluated.get(key, 0) >= mark:
+                continue
+            self.state.evaluated[key] = mark
+            details.append(self._detail_base(cand, self.cfg, reason,
+                                             unavailable_text(reason)))
+        return details
+
+    @staticmethod
+    def _detail_base(candidate, cfg, reason_code, reason_text, signal=None,
+                     row=None, checks=None):
+        detail = {
+            "code": candidate.get("code"), "name": candidate.get("name", ""),
+            "rank": candidate.get("rank"), "passed": False,
+            "reason_code": reason_code, "reason_text": reason_text,
+            "signal": {}, "full_signal": None,
+            "observed_at": row.get("observed_at") if row else None,
+            "phase": row.get("phase") if row else None,
+            "checks": checks or [],
+            "entry_priority": candidate.get("entry_priority") or {},
+            "priority_key": key_components(signal or {}, candidate,
+                                           cfg.auction_ranking_enabled),
+        }
+        block = detail["entry_priority"].get("auction")
+        if isinstance(block, dict) and block.get("loaded"):
+            detail["would_veto"] = block.get("state") is False
+        return detail
+
+    @classmethod
+    def _ranked_out_detail(cls, candidate, signal, position, cfg, row=None):
+        entry = candidate.get("entry_priority") or {}
+        a_state = (entry.get("auction") or {}).get("state")
+        p_state = (entry.get("prep") or {}).get("state")
+        checks = (explain_buy_checks(
+            candidate, row, cfg, row.get("prev_row"), row.get("hist_rows"),
+            row.get("intraday_bars"), selected_rule=signal.get("code")) if row else [])
+        return cls._detail_base(
+            candidate, cfg, "ranked_out",
+            f"排序第 {position}（A={TRI_LABELS.get(a_state, '未知')}, "
+            f"P={TRI_LABELS.get(p_state, '未知')}），当日最多买入 {cfg.max_daily_buys} 只，未入选",
+            signal=signal, row=row, checks=checks)
+
+    @classmethod
+    def _unsignaled_detail(cls, candidate, reason_code, reason_text, cfg,
+                           row=None, checks=None):
+        return cls._detail_base(candidate, cfg, reason_code, reason_text,
+                                row=row, checks=checks)
+
+    def _equity(self) -> float:
+        return self.state.cash + sum(p.qty * self.state.marks.get(p.code, p.entry_price)
+                                     for p in self.state.positions)
 
     def _raw_fill_price(self, order, row):
         """日K兜底日的卖出按原因近似定价；盘中及买入仍用 execution_price。"""
@@ -137,7 +247,11 @@ class TradingEngine:
             if any(p.code == code for p in state.positions) or len(state.positions) >= cfg.max_positions:
                 return None, None
             equity = state.cash + sum(p.qty * state.marks.get(p.code, p.entry_price) for p in state.positions)
-            qty = buy_quantity(state.cash, equity, price, cfg)
+            delevel, _, _ = risk_governor(cfg, state, equity)
+            budget_scale = delevel
+            if cfg.sentiment_sizing_enabled and state.sentiment_pct is not None:
+                budget_scale *= state.sentiment_pct
+            qty = buy_quantity(state.cash, equity, price, cfg, budget_scale)
             if not qty:
                 return None, None
             amount, cost_fee = price * qty, fee(price * qty, side, cfg)
@@ -151,23 +265,17 @@ class TradingEngine:
         p = next((p for p in state.positions if p.code == code), None)
         if p is None or p.entry_date >= day:
             return None, None
-        qty = sell_quantity(p, order["code"], cfg)
-        amount, cost_fee = price * qty, fee(price * qty, side, cfg)
-        cost = p.cost * qty / p.qty
-        pnl = amount - cost_fee - cost
-        state.cash += amount - cost_fee
+        fill = apply_sell_fill(p, price, order["code"], cfg)
+        state.cash += fill["amount"] - fill["fee"]
         state.sold_today = True
-        p.realized_pnl += pnl
-        p.qty -= qty
-        p.cost -= cost
+        state.realized_today += fill["pnl"]
         closed = None
-        if not p.qty:
+        if not fill["partial"]:
             days = sum(p.entry_date < r["date"] < day for r in row["hist_rows"]) + 1
             closed = ClosedPosition(p.code, p.name, p.entry_date, p.entry_price, p.initial_qty,
                                     p.entry_reason_code, p.entry_signal, day, price, order["code"], signal,
                                     p.realized_pnl / p.initial_cost * 100, days)
             state.positions.remove(p)
-        elif order["code"] == "next_day_limit_up_half":
-            p.took_profit_half = True
-        return Trade(day, code, p.name, side, price, qty, amount, cost_fee, pnl, state.cash,
-                     p.qty, order["code"], order["reason_text"], signal), closed
+            state.consecutive_losses = state.consecutive_losses + 1 if closed.realized_return < 0 else 0
+        return Trade(day, code, p.name, side, price, fill["qty"], fill["amount"], fill["fee"],
+                     fill["pnl"], state.cash, p.qty, order["code"], order["reason_text"], signal), closed

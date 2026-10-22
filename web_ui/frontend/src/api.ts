@@ -192,6 +192,25 @@ export interface AccountPosition {
   realized_return: number;
   hold_days: number;
   status: string;
+  post_exit_max_return: number | null;
+  post_exit_max_drawdown: number | null;
+  post_exit_window_days: number | null;
+}
+
+export interface EntryReasonStatRow {
+  reason_code: string;
+  label: string;
+  trades: number;
+  wins: number;
+  win_rate: number | null;
+  avg_return: number | null;
+  contribution: number | null;
+}
+
+export interface AccountPositionStats {
+  initial_cash: number;
+  total_trades: number;
+  rows: EntryReasonStatRow[];
 }
 
 export async function fetchAccountRuns(
@@ -275,7 +294,9 @@ export async function fetchAccountEvents(runId: number): Promise<{ data: Account
   return res.json();
 }
 
-export async function fetchAccountPositions(runId: number): Promise<{ data: AccountPosition[] }> {
+export async function fetchAccountPositions(
+  runId: number
+): Promise<{ data: AccountPosition[]; stats: AccountPositionStats }> {
   const params = new URLSearchParams({ run_id: String(runId) });
   const res = await fetch("/api/account/positions?" + params.toString());
   if (!res.ok) throw new Error(`account positions ${res.status}`);

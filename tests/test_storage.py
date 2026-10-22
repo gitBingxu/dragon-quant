@@ -42,6 +42,9 @@ class TestStorageManager(unittest.TestCase):
         status = self.mgr.status()
         self.assertIn("results", status)
         self.assertIn("logs", status)
+        self.assertIn("assets_db", status)
+        self.assertIn("legacy_prep_db", status)
+        self.assertNotIn("prep_db", status)
 
     def test_size(self):
         size = self.mgr.size()
@@ -49,9 +52,43 @@ class TestStorageManager(unittest.TestCase):
         self.assertIn("by_dir", size)
 
     def test_clear_no_error(self):
-        self.mgr.clear_all()
-        self.mgr.clear_results()
-        self.mgr.clear_logs()
+        """clear 只作用于临时目录，绝不清理真实 cache/results/logs。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for name in ("cache", "logs", "results", "shared"):
+                (base / name).mkdir()
+            with patch("dragon_quant.storage.manager.CACHE_DIR", base / "cache"), \
+                 patch("dragon_quant.storage.manager.LOG_DIR", base / "logs"), \
+                 patch("dragon_quant.storage.manager.RESULTS_DIR", base / "results"), \
+                 patch("dragon_quant.storage.manager.SHARED_DIR", base / "shared"), \
+                 patch("dragon_quant.storage.db.delete_all_scan_logs", return_value=0), \
+                 patch("dragon_quant.storage.db.delete_old_scan_logs", return_value=0):
+                self.mgr.clear_all()
+                self.mgr.clear_results()
+                self.mgr.clear_logs()
+
+    def test_clear_all_protects_databases(self):
+        """数据库文件永不进入清理计数，作为独立 protected_databases 字段返回。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            for name in ("dragon.db", "assets.db", "prep.db"):
+                (base / name).write_bytes(b"x")
+            with patch("dragon_quant.storage.manager.CACHE_DIR", base / "cache"), \
+                 patch("dragon_quant.storage.manager.LOG_DIR", base / "logs"), \
+                 patch("dragon_quant.storage.manager.RESULTS_DIR", base / "results"), \
+                 patch("dragon_quant.storage.manager.SHARED_DIR", base / "shared"), \
+                 patch("dragon_quant.storage.manager.DB_PATH", base / "dragon.db"), \
+                 patch("dragon_quant.storage.manager.ASSETS_DB_PATH", base / "assets.db"), \
+                 patch("dragon_quant.storage.manager.LEGACY_PREP_DB_PATH", base / "prep.db"), \
+                 patch("dragon_quant.storage.db.delete_all_scan_logs", return_value=0), \
+                 patch("dragon_quant.storage.db.delete_old_scan_logs", return_value=0):
+                result = self.mgr.clear_all()
+
+        protected = {Path(p).name for p in result["protected_databases"]}
+        self.assertEqual(protected, {"dragon.db", "assets.db", "prep.db"})
+        # 保护字段不混入清理计数
+        for key in ("cache", "results", "logs", "shared"):
+            self.assertIsInstance(result[key], int)
 
 
 class TestGetPendingDragons(unittest.TestCase):
@@ -325,6 +362,90 @@ class TestReviewAccountStorage(unittest.TestCase):
         self.assertEqual(positions, [])
         self.assertEqual(events, [])
 
+    def test_post_exit_columns_roundtrip(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            run_id = db.create_review_account_run(
+                source="v2", strategy_name="dragon_pullback_daily",
+                strategy_params_json="{}", date_from="2026-05-01", date_to="2026-06-01",
+                initial_cash=100000, final_equity=100000, total_return=0.0,
+                max_drawdown=0.0, trade_count=1, win_rate=100.0,
+            )
+            db.save_review_account_results(
+                run_id, snapshots=[], trades=[],
+                positions=[{
+                    "code": "000001", "name": "样本", "entry_date": "2026-05-01",
+                    "entry_price": 10, "qty": 1000, "entry_reason_code": "buy_open_ma5_pullback",
+                    "entry_signal_json": "{}", "exit_date": "2026-05-06", "exit_price": 11,
+                    "exit_reason_code": "trailing_take_profit", "exit_signal_json": "{}",
+                    "realized_return": 10.0, "hold_days": 3, "status": "closed",
+                    "post_exit_max_return": 3.2, "post_exit_max_drawdown": -1.4,
+                    "post_exit_window_days": 5,
+                }],
+            )
+            positions = db.query_review_account_positions(run_id)
+
+        self.assertEqual(len(positions), 1)
+        self.assertAlmostEqual(positions[0]["post_exit_max_return"], 3.2)
+        self.assertAlmostEqual(positions[0]["post_exit_max_drawdown"], -1.4)
+        self.assertEqual(positions[0]["post_exit_window_days"], 5)
+
+    def test_post_exit_columns_added_to_old_schema_as_null(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            run_id = db.create_review_account_run(
+                source="v2", strategy_name="dragon_pullback_daily",
+                strategy_params_json="{}", date_from="2026-05-01", date_to="2026-06-01",
+                initial_cash=100000, final_equity=100000, total_return=0.0,
+                max_drawdown=0.0, trade_count=1, win_rate=100.0,
+            )
+        # 模拟旧库：positions 表没有三列，且已有一行历史数据。
+        self._conn.execute("DROP TABLE review_account_positions")
+        self._conn.execute(
+            """
+            CREATE TABLE review_account_positions (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id               INTEGER NOT NULL,
+                code                 TEXT NOT NULL,
+                name                 TEXT,
+                entry_date           TEXT,
+                entry_price          REAL,
+                qty                  INTEGER,
+                entry_reason_code    TEXT,
+                entry_signal_json    TEXT,
+                exit_date            TEXT,
+                exit_price           REAL,
+                exit_reason_code     TEXT,
+                exit_signal_json     TEXT,
+                realized_return      REAL,
+                hold_days            INTEGER,
+                status               TEXT
+            )
+            """
+        )
+        self._conn.execute(
+            "INSERT INTO review_account_positions("
+            "run_id, code, entry_date, entry_price, qty, entry_reason_code, "
+            "exit_date, exit_price, exit_reason_code, realized_return, hold_days, status"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (run_id, "000001", "2026-05-01", 10, 1000, "buy_open_ma5_pullback",
+             "2026-05-06", 11, "trailing_take_profit", 10.0, 3, "closed"),
+        )
+        self._conn.commit()
+
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()   # 幂等补列
+            positions = db.query_review_account_positions(run_id)
+
+        self.assertEqual(len(positions), 1)
+        self.assertIsNone(positions[0]["post_exit_max_return"])
+        self.assertIsNone(positions[0]["post_exit_max_drawdown"])
+        self.assertIsNone(positions[0]["post_exit_window_days"])
+
     def test_account_run_display_name_column_is_added_to_old_schema(self):
         self._conn.execute("DROP TABLE review_account_runs")
         self._conn.execute(
@@ -577,3 +698,52 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             db.save_dragons(D, [{"code": "A", "rank": 1}], source="v1")
             rows = db.get_dragons(D, source="v1")
             self.assertIsNone(rows[0]["is_true_dragon"])
+
+
+class TestDragonDbHasNoAuctionStorage(unittest.TestCase):
+    """存储层重构回归：dragon.db 不再创建/暴露竞价相关表与 API。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._db_path = str(Path(self._tmpdir.name) / "dragon.db")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_init_db_does_not_create_auction_tables(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+        conn = sqlite3.connect(self._db_path)
+        try:
+            names = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            conn.close()
+        self.assertNotIn("auction_snapshots", names)
+        self.assertNotIn("auction_assets", names)
+
+    def test_db_no_longer_exports_auction_apis(self):
+        from dragon_quant.storage import db
+        for name in ("save_auction_snapshot", "get_auction_snapshot",
+                     "list_auction_snapshots"):
+            self.assertFalse(hasattr(db, name), f"db.{name} 应已移除")
+
+    def test_legacy_auction_table_is_ignored(self):
+        """旧库已有 auction_snapshots 时，新代码不依赖也不报错。"""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                "CREATE TABLE auction_snapshots (trade_date TEXT, code TEXT, "
+                "name TEXT, items_json TEXT)")
+            conn.commit()
+        finally:
+            conn.close()
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()
+            db.save_dragons("2026-10-20", [{"code": "A", "rank": 1}], source="v1")
+            rows = db.get_dragons("2026-10-20", source="v1")
+        self.assertEqual(len(rows), 1)

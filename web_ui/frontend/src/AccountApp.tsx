@@ -3,6 +3,7 @@ import {
   ActionIcon,
   Alert,
   Badge,
+  Box,
   Button,
   Card,
   Container,
@@ -12,6 +13,7 @@ import {
   NumberInput,
   Pagination,
   Paper,
+  Progress,
   Select,
   SimpleGrid,
   Stack,
@@ -35,6 +37,7 @@ import {
   type AccountBenchmarkPoint,
   type AccountTimelineEvent,
   type AccountPosition,
+  type AccountPositionStats,
   type AccountRun,
   type AccountSnapshot,
   type AccountTrade,
@@ -54,6 +57,7 @@ export function AccountApp() {
   const [benchmark, setBenchmark] = useState<AccountBenchmarkPoint[]>([]);
   const [trades, setTrades] = useState<AccountTrade[]>([]);
   const [positions, setPositions] = useState<AccountPosition[]>([]);
+  const [positionStats, setPositionStats] = useState<AccountPositionStats | null>(null);
   const [events, setEvents] = useState<AccountTimelineEvent[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
@@ -103,6 +107,7 @@ export function AccountApp() {
       setBenchmark([]);
       setTrades([]);
       setPositions([]);
+      setPositionStats(null);
       setEvents([]);
       return;
     }
@@ -118,6 +123,7 @@ export function AccountApp() {
         setBenchmark(b.data || []);
         setTrades(t.data || []);
         setPositions(p.data || []);
+        setPositionStats(p.stats || null);
         setEvents(e.data || []);
       })
       .catch(() => {
@@ -125,6 +131,7 @@ export function AccountApp() {
         setBenchmark([]);
         setTrades([]);
         setPositions([]);
+        setPositionStats(null);
         setEvents([]);
       });
   }, [runId]);
@@ -221,6 +228,7 @@ export function AccountApp() {
       ) : (
         <>
           <AccountStats run={selectedRun} latest={latest} />
+          <EntryReasonStats stats={positionStats} />
 
           <Grid gutter="md" mt="md">
             <Grid.Col span={{ base: 12, lg: 8 }}>
@@ -458,6 +466,87 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
         {children}
       </Text>
     </Card>
+  );
+}
+
+function EntryReasonStats({ stats }: { stats: AccountPositionStats | null }) {
+  const rows = stats?.rows || [];
+  return (
+    <Paper withBorder radius="md" mt="md" style={{ overflow: "hidden" }}>
+      <Group justify="space-between" px="md" py="sm">
+        <div>
+          <Text fw={700}>买点统计</Text>
+          <Text size="xs" c="dimmed">
+            累计贡献按 Σ已实现盈亏/初始资金估算，四类之和≈组合已实现收益
+          </Text>
+        </div>
+        <Badge variant="light">{stats?.total_trades ?? 0} 笔</Badge>
+      </Group>
+      <Table.ScrollContainer minWidth={760}>
+        <Table verticalSpacing="xs" highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>买点</Table.Th>
+              <Table.Th>笔数</Table.Th>
+              <Table.Th>盈利笔数</Table.Th>
+              <Table.Th>胜率</Table.Th>
+              <Table.Th>平均每笔收益</Table.Th>
+              <Table.Th>累计贡献收益</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.length ? (
+              rows.map((r) => {
+                const total = r.reason_code === "__total__";
+                return (
+                  <Table.Tr key={r.reason_code}>
+                    <Table.Td fw={total ? 700 : undefined}>{r.label}</Table.Td>
+                    <Table.Td fw={total ? 700 : undefined}>{r.trades}</Table.Td>
+                    <Table.Td fw={total ? 700 : undefined}>{r.wins}</Table.Td>
+                    <Table.Td>
+                      <Group gap="xs" wrap="nowrap">
+                        <Box w={64}>
+                          <Progress
+                            value={r.win_rate ?? 0}
+                            size="sm"
+                            radius="xl"
+                            aria-label={`${r.label} 胜率`}
+                          />
+                        </Box>
+                        <Text size="sm" fw={total ? 700 : undefined}>
+                          {r.win_rate != null ? `${r.win_rate.toFixed(1)}%` : "—"}
+                        </Text>
+                        {r.trades > 0 && r.trades < 5 && (
+                          <Tooltip label="样本不足（<5 笔）" withinPortal>
+                            <Badge size="xs" color="yellow" variant="light">
+                              样本不足
+                            </Badge>
+                          </Tooltip>
+                        )}
+                      </Group>
+                    </Table.Td>
+                    <Table.Td c={pnlColor(r.avg_return)} fw={total ? 700 : undefined}>
+                      {fmtPct(r.avg_return)}
+                    </Table.Td>
+                    <Table.Td c={pnlColor(r.contribution)} fw={total ? 700 : undefined}>
+                      {fmtPct(r.contribution)}
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })
+            ) : (
+              <Table.Tr>
+                <Table.Td colSpan={6}>
+                  <Text ta="center" c="dimmed" py={24}>
+                    {stats == null ? "统计数据不可用" : "暂无已平仓持仓"}
+                  </Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
+    </Paper>
   );
 }
 
@@ -828,11 +917,13 @@ function PositionsTable({ positions }: { positions: AccountPosition[] }) {
       <Group justify="space-between" px="md" py="sm">
         <div>
           <Text fw={700}>单票收益汇总</Text>
-          <Text size="xs" c="dimmed">按已平仓持仓统计每只股票收益</Text>
+          <Text size="xs" c="dimmed">
+            按已平仓持仓统计每只股票收益；窗口指标为卖出日之后 5 个交易日，可能含回测区间外数据（事后评估，不参与交易决策）
+          </Text>
         </div>
         <Badge variant="light">{positions.length} 笔</Badge>
       </Group>
-      <Table.ScrollContainer minWidth={900}>
+      <Table.ScrollContainer minWidth={1100}>
         <Table verticalSpacing="xs" highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -844,6 +935,8 @@ function PositionsTable({ positions }: { positions: AccountPosition[] }) {
               <Table.Th>收益</Table.Th>
               <Table.Th>持有天</Table.Th>
               <Table.Th>退出逻辑</Table.Th>
+              <Table.Th>清仓5日内最高盈利</Table.Th>
+              <Table.Th>清仓5日内最大回撤</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -858,11 +951,33 @@ function PositionsTable({ positions }: { positions: AccountPosition[] }) {
                   <Table.Td c={pnlColor(p.realized_return)}>{fmtPct(p.realized_return)}</Table.Td>
                   <Table.Td>{p.hold_days}</Table.Td>
                   <Table.Td>{p.exit_reason_code}</Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="sm" c={pnlColor(p.post_exit_max_return)}>
+                        {fmtPct(p.post_exit_max_return)}
+                      </Text>
+                      {p.post_exit_max_return != null
+                        && p.post_exit_window_days != null
+                        && p.post_exit_window_days < 5 && (
+                          <Tooltip
+                            label={`实际窗口 ${p.post_exit_window_days}/5 天（后续日K不足或停牌）`}
+                            withinPortal
+                          >
+                            <Badge size="xs" variant="light" color="gray">
+                              {p.post_exit_window_days}/5
+                            </Badge>
+                          </Tooltip>
+                        )}
+                    </Group>
+                  </Table.Td>
+                  <Table.Td c={pnlColor(p.post_exit_max_drawdown)}>
+                    {fmtPct(p.post_exit_max_drawdown)}
+                  </Table.Td>
                 </Table.Tr>
               ))
             ) : (
               <Table.Tr>
-                <Table.Td colSpan={8}>
+                <Table.Td colSpan={10}>
                   <Text ta="center" c="dimmed" py={32}>暂无已平仓持仓</Text>
                 </Table.Td>
               </Table.Tr>

@@ -96,6 +96,16 @@ def _parse_gtimg_quote(line: str) -> Optional[Quote]:
         return None
 
 
+def _fetch_macro_raw(url: str) -> str:
+    """宏观 quote 原始 GBK 文本；失败抛 RuntimeError（provider 契约）。"""
+    req = urllib.request.Request(url, headers=dict(TENCENT_HEADERS))
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("gbk", errors="ignore")
+    except Exception as exc:
+        raise RuntimeError(f"腾讯宏观行情失败: {exc}") from exc
+
+
 class TencentProvider(StockProvider):
 
     @property
@@ -214,15 +224,81 @@ class TencentProvider(StockProvider):
 
         return result[-bars:]
 
+    # ─── 宏观 quote（历史契约；当前 MACRO_SPECS 无该源路由）──────────────────
+
+    def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
+        """腾讯 gtimg 境外指数 quote（历史契约；当前规格未路由）。
+
+        当前 ``MACRO_SPECS`` 没有任何品种声明 ``tencent``，故 prep 不会调用本方法；
+        方法保留以维持 provider 契约与测试覆盖。若未来启用，只接受
+        ``session_date < trade_date`` 的已完成 session；不做日 K。
+        HTTP/解析失败抛 RuntimeError，由 providers.macro 门面回退。
+        """
+        from dragon_quant.providers.macro import build_macro_record
+
+        # 同日口径（<= trade_date）无法用 T-1 quote 表达，跳过以防 caliber 失真
+        wanted = [s for s in (specs or [])
+                  if getattr(s, "tencent", None)
+                  and not getattr(s, "same_day_close", False)]
+        if not wanted:
+            return {}
+        codes = [s.tencent for s in wanted]
+        url = f"{GTIMG}/q={','.join(codes)}"
+        raw = _fetch_macro_raw(url)
+
+        by_code = {s.tencent: s for s in wanted}
+        out: dict[str, dict] = {}
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            left, right = line.split("=", 1)
+            code = left.strip()
+            if code.startswith("v_"):
+                code = code[2:]
+            spec = by_code.get(code)
+            if spec is None:
+                continue
+            value = right.strip().strip(';"\' ')
+            fields = value.split("~")
+            if len(fields) < 33:
+                continue
+            try:
+                price = float(fields[3])
+                prev_close = float(fields[4])
+                pct = float(fields[32])
+                chg = float(fields[31])
+            except (TypeError, ValueError):
+                continue
+            stamp = fields[30]
+            session_date = stamp[:10] if len(stamp) >= 10 else None
+            # 只接受已完成的上一 session；盘中/当日值拒绝，避免资产漂移
+            if not session_date or session_date >= trade_date:
+                continue
+            rec = build_macro_record(
+                spec, price=price, prev_close=prev_close, source="tencent",
+                code=code, market="gtimg", session_date=session_date,
+                raw_time=stamp[11:] if len(stamp) > 11 else None,
+            )
+            if rec:
+                # gtimg 直接给涨跌幅，避免 close/prev 舍入误差
+                rec["pct"] = round(pct, 4)
+                rec["chg"] = round(chg, 6)
+                out[spec.key] = rec
+        return out
+
     # ─── 未实现 ───
 
-    def get_sector_ranking(self, asc: bool = False) -> list[SectorPerformance]:
+    def get_sector_ranking(self, asc: bool = False,
+                           category: str = "hy") -> list[SectorPerformance]:
         raise NotImplementedError
 
     def get_sector_components(self, sector_code: str, page: int = 1,
                               all_pages: bool = False,
-                              page_size: int = 50) -> list[StockInfo]:
+                              page_size: int = 50,
+                              category: str = "hy") -> list[StockInfo]:
         raise NotImplementedError
 
-    def get_sector_5min_kline(self, sector_code: str, bars: int = 100) -> list[KBar]:
+    def get_sector_5min_kline(self, sector_code: str, bars: int = 100,
+                              category: str = "hy") -> list[KBar]:
         raise NotImplementedError

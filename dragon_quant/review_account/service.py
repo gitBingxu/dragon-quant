@@ -93,4 +93,10 @@ def _print_summary(result: dict, source: str, strategy_name: str):
         print(f"候选池回退: {len(fallbacks)} 天（{reasons}）")
     for note in result.get("priority_degraded") or []:
         print(f"⚠️ {note}")
+    suspended = result.get("suspended_codes") or []
+    if suspended:
+        print(f"停牌跳过: {len(suspended)} 只 / {result.get('suspended_days_count', 0)} 天"
+              f"（{'、'.join(suspended)}）")
+    for note in result.get("data_degraded") or []:
+        print(f"⚠️ {note}")
     print(f"run_id: {result['run_id']}")

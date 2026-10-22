@@ -20,7 +20,9 @@ from dragon_quant.review_account.execution import (
     apply_sell_fill, daily_fallback_sell_price, fee, fill_price, notional_quantity, track_peak,
 )
 from dragon_quant.review_account.market import at, event_date
-from dragon_quant.review_account.models import AccountState, MarketEvent, Position, StrategyConfig
+from dragon_quant.review_account.models import (
+    AccountState, MarketEvent, Position, StrategyConfig, unavailable_text,
+)
 from dragon_quant.review_account.priority import rank_key
 from dragon_quant.review_account.risk import risk_governor
 from dragon_quant.review_account.strategy import (
@@ -65,10 +67,16 @@ class SignalEngine:
         if self.trade_date != day:
             self.pending = [o for o in self.pending if o["side"] == "SELL"]
             self.trade_date = day
+        for detail in self._unavailable_details(event):
+            result["details"].append(detail)
         risk_allow_buy = True
         if self.account is not None:
             for code, row in event.rows.items():
                 self.account.marks[code] = row.get("execution_price") or row["bar_close"]
+            # 停牌/不可用持仓：不评估、不更新峰值，但按最近可得价格估值。
+            for code, price in event.last_closes.items():
+                if code not in event.rows:
+                    self.account.marks[code] = price
             equity = self.account.cash + sum(
                 p.qty * self.account.marks.get(p.code, p.entry_price) for p in self.positions)
             _, risk_allow_buy, fired = risk_governor(cfg, self.account, equity)
@@ -158,6 +166,8 @@ class SignalEngine:
             held = {p.code for p in self.positions} | self.held_codes
             signals = []
             for cand in event.candidates:
+                if cand["code"] in event.unavailable:
+                    continue  # 已由 _unavailable_details 在闸门外输出
                 row = event.rows.get(cand["code"])
                 if cand["code"] in held:
                     result["details"].append(self._already_holding_detail(cand, row, cfg))
@@ -197,6 +207,8 @@ class SignalEngine:
                 self.buy_eval_skipped.append(gate)
             held = {p.code for p in self.positions} | self.held_codes
             for cand in event.candidates:
+                if cand["code"] in event.unavailable:
+                    continue  # 已由 _unavailable_details 在闸门外输出
                 row = event.rows.get(cand["code"])
                 key = f"buy_gate:{cand['code']}"
                 observation = row["bar_timestamp"] if row else event.timestamp
@@ -224,6 +236,27 @@ class SignalEngine:
         if self.pending:
             result["reason_code"] = "pending_execution"
         return result
+
+    def _unavailable_details(self, event) -> list[dict]:
+        """停牌/不可用候选的 detail：买窗闸门外产出，每 code 每日一条。"""
+        details = []
+        mark = at(event_date(event.timestamp), "00:00")
+        for cand in event.candidates:
+            reason = event.unavailable.get(cand["code"])
+            if reason is None:
+                continue
+            key = f"unavailable:{cand['code']}"
+            if self.evaluated.get(key, 0) >= mark:
+                continue
+            self.evaluated[key] = mark
+            details.append({
+                "code": cand["code"], "name": cand.get("name", ""),
+                "rank": cand.get("rank"), "passed": False,
+                "reason_code": reason, "reason_text": unavailable_text(reason),
+                "signal": {}, "full_signal": None,
+                "observed_at": None, "phase": None, "checks": [],
+            })
+        return details
 
     def _already_holding_detail(self, cand: dict, row: Optional[dict], cfg) -> dict:
         checks = (explain_buy_checks(cand, row, cfg, row.get("prev_row"), row.get("hist_rows"),

@@ -4,6 +4,7 @@ from dragon_quant.review_account.execution import (
 from dragon_quant.review_account.market import at, event_date
 from dragon_quant.review_account.models import (
     AccountState, ClosedPosition, MarketEvent, Position, StrategyConfig, Trade,
+    unavailable_text,
 )
 from dragon_quant.review_account.priority import TRI_LABELS, key_components, rank_key
 from dragon_quant.review_account.risk import risk_governor
@@ -28,6 +29,12 @@ class TradingEngine:
             state.realized_today = 0.0
         for code, row in event.rows.items():
             state.marks[code] = row.get("execution_price") or row["bar_close"]
+        # 停牌/不可用持仓：不评估、不更新峰值，但按最近可得价格估值，避免净值回落成本价。
+        for code, price in event.last_closes.items():
+            if code not in event.rows:
+                state.marks[code] = price
+        for detail in self._unavailable_details(event):
+            result["details"].append(detail)
         equity = self._equity()
         state.peak_equity = max(state.peak_equity, equity)
         _, risk_allow_buy, fired = risk_governor(cfg, state, equity)
@@ -92,6 +99,8 @@ class TradingEngine:
                 signals = []
                 held = {p.code for p in state.positions}
                 for cand in event.candidates:
+                    if cand["code"] in event.unavailable:
+                        continue  # 已由 _unavailable_details 在闸门外输出
                     row = event.rows.get(cand["code"])
                     if cand["code"] in held:
                         checks = (explain_buy_checks(
@@ -136,6 +145,8 @@ class TradingEngine:
                     state.evaluated[limit_key] = 1
                     held = {p.code for p in state.positions}
                     for cand in event.candidates:
+                        if cand["code"] in event.unavailable:
+                            continue  # 已由 _unavailable_details 在闸门外输出
                         if cand["code"] in held:
                             continue
                         row = event.rows.get(cand["code"])
@@ -157,6 +168,22 @@ class TradingEngine:
     def _order(code, name, signal, timestamp):
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
                 "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+
+    def _unavailable_details(self, event) -> list[dict]:
+        """停牌/不可用候选的 detail：在买窗闸门外产出，每 code 每日一条。"""
+        details = []
+        mark = at(event_date(event.timestamp), "00:00")
+        for cand in event.candidates:
+            reason = event.unavailable.get(cand["code"])
+            if reason is None:
+                continue
+            key = f"unavailable:{cand['code']}"
+            if self.state.evaluated.get(key, 0) >= mark:
+                continue
+            self.state.evaluated[key] = mark
+            details.append(self._detail_base(cand, self.cfg, reason,
+                                             unavailable_text(reason)))
+        return details
 
     @staticmethod
     def _detail_base(candidate, cfg, reason_code, reason_text, signal=None,

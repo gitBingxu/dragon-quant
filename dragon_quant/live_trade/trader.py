@@ -9,6 +9,7 @@ from dragon_quant.review_account.market import (
     SHANGHAI, at, bar_times, calendar_start, collect_candidates,
     collect_candidates_ex, load_market_sentiment,
 )
+from dragon_quant.review_account.models import UNAVAILABLE_SUSPENDED
 from dragon_quant.storage import db
 
 
@@ -96,6 +97,17 @@ class LiveTrader:
             return current
         return next(iter(events_rows.values())).get("data_quality", current)
 
+    @staticmethod
+    def _unavailable_notes(suspended: set[str], unavailable: dict[str, str]) -> list[str]:
+        notes = []
+        if suspended:
+            notes.append(f"停牌跳过 {len(suspended)} 只：{'、'.join(sorted(suspended))}"
+                         "（当日不评估，持仓冻结）")
+        others = sorted(c for c, r in unavailable.items() if r != UNAVAILABLE_SUSPENDED)
+        if others:
+            notes.append(f"日K不可用跳过 {len(others)} 只：{'、'.join(others)}")
+        return notes
+
     def _run_buy(self, day, target, until, calendar, cutoff, forced):
         signals = db.list_all_signals(source=self.source)
         shadow = build_shadow_state(signals, self.cfg, day, as_of=target)
@@ -114,7 +126,10 @@ class LiveTrader:
         buys, details = [], []
         quality = "strict_5min"
         last_rows = {}
+        suspended, unavailable = set(), {}
         for event in historical_events(day, candidates, codes, self.data, until=until):
+            suspended |= event.suspended
+            unavailable.update(event.unavailable)
             if event.timestamp > cutoff:
                 break
             event.allow_buy = True
@@ -123,6 +138,7 @@ class LiveTrader:
             result = engine.step(event)
             buys.extend(result["buys"])
             details.extend(result["details"])
+        degraded.extend(self._unavailable_notes(suspended, unavailable))
         # 回放结束时仍未成交的 pending BUY：保留「命中但未成交」诊断（--force 截断常见）。
         for order in engine.pending:
             if order["side"] != "BUY":
@@ -150,6 +166,9 @@ class LiveTrader:
                 "action": "buy" if buys else "idle", "buys": buys, "details": details,
                 "sentiment_pct": sentiment, "data_quality": quality,
                 "degraded": degraded + list(ctx.get("degraded") or []),
+                "suspended_codes": sorted(suspended),
+                "unavailable_codes": {c: r for c, r in sorted(unavailable.items())
+                                      if r != UNAVAILABLE_SUSPENDED},
                 "fired_gate": engine.fired_gate,
                 "buy_eval_skipped": list(engine.buy_eval_skipped),
                 "ranking_mode": ctx["ranking_mode"],
@@ -178,13 +197,17 @@ class LiveTrader:
         engine = SignalEngine(self.cfg, positions=positions)
         sells = []
         quality = "strict_5min"
+        suspended, unavailable = set(), {}
         for event in historical_events(day, candidates, codes, self.data, until=until):
+            suspended |= event.suspended
+            unavailable.update(event.unavailable)
             if event.timestamp > cutoff:
                 break
             event.allow_buy = False
             quality = self._quality(event.rows, quality)
             result = engine.step(event)
             sells.extend(result["sells"])
+        degraded.extend(self._unavailable_notes(suspended, unavailable))
         if forced:
             # 强制模式落库可追溯：复用既有 exit/half_exit_signal_json，无 schema 变更。
             for s in sells:
@@ -206,4 +229,7 @@ class LiveTrader:
                  "took_profit_half": p.took_profit_half} for p in engine.positions]
         return {"action": "sell" if sells else "idle", "sells": sells, "held": held,
                 "data_quality": quality, "degraded": degraded,
+                "suspended_codes": sorted(suspended),
+                "unavailable_codes": {c: r for c, r in sorted(unavailable.items())
+                                      if r != UNAVAILABLE_SUSPENDED},
                 "reason_text": f"卖出 {len(sells)} 只" if sells else "持仓暂无卖出信号"}

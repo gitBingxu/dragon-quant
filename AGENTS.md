@@ -521,7 +521,7 @@ python -m dragon_quant factor fin status
 - 因子层 P2：`factors/decision.py`（FactorModel 协议 / EqualWeightRankModel 按候选入选日 cohort rank 归一 / annotate_pool / 模型快照读写 / build 完成率）、`priority.key_components`+`rank_key` 因子分量（默认关、缺失桶、逐位等价）、`market.collect_candidates_ex` 因子注解、`StrategyConfig` 四字段、`evaluation.sharpe_ratio` + `industry_exposure`、`compare_strategies` 因子 variant 门禁；新增 `tests/test_factors_decision.py` / `test_priority_factor.py` / `test_p2_integration.py` / `test_factors_p1_gaps.py`
 
 ### ⚠️ 待完成/观察
-- 因子层后续里程碑：P3（替换五维需满足方案 §1.3-D1 五条准入条件、行业中性化、ML 模型）；财务真实网络冒烟（少量 code）待补，方案见 `docs/solutions/2026-10-22-factor-framework-design.md`
+- 因子层后续里程碑：P3（替换五维需满足方案 §1.3-D1 五条准入条件、行业中性化、ML 模型）；财务真实网络冒烟（少量 code）待补，方案见 `archived_md/factor_framework/2026-10-22-factor-framework-design.md`
 - 同花顺数据网关 403 频控：高频访问会临时封 IP（已加退避重试，正常每日一两次扫描不触发）
 - 数据资产同步 M5：launchd / `assets_daily.sh` 调度与门槛 B 记录待做；B2 profile 未配置，v1 以 R2 为主通道（需用户豁免 B2 补验）
 

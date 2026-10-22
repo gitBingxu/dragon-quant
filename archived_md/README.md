@@ -6,6 +6,13 @@
 - **日期**：文档对应 feat 的落地日期（取自首次提交），非移动归档日期。
 - **原路径**：归档前的仓库路径；`—` 表示自创建起就在本目录。
 
+## factor_framework/
+
+| 日期 | 主题 | 文件 | 原路径 |
+|------|------|------|--------|
+| 2026-10-22 | 量化因子框架技术方案（issue #28，P0-P2 全部落地；含财务 tmdx delta） | [2026-10-22-factor-framework-design.md](factor_framework/2026-10-22-factor-framework-design.md) | `docs/solutions/2026-10-22-factor-framework-design.md` |
+| 2026-10-22 | 量化因子框架调研（开源候选否决 + 业界规范；结论：混合自研零新增依赖） | [2026-10-22-factor-framework-survey.md](factor_framework/2026-10-22-factor-framework-survey.md) | `docs/research/2026-10-22-factor-framework-survey.md` |
+
 ## assets_sync/
 
 | 日期 | 主题 | 文件 | 原路径 |

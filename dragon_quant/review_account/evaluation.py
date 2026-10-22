@@ -3,8 +3,74 @@ from __future__ import annotations
 from dataclasses import replace
 
 from dragon_quant.review_account.market import DataCoverageError
-from dragon_quant.review_account.models import StrategyConfig
+from dragon_quant.review_account.models import BUY_SIGNAL_CODES, StrategyConfig
 from dragon_quant.review_account.simulator import AccountSimulator
+from dragon_quant.review_account.strategy import BUY_CHECK_LABELS
+
+TOTAL_ROW_CODE = "__total__"
+
+
+def _num(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def entry_reason_stats(positions: list[dict], initial_cash: float) -> dict:
+    """按买点类型聚合已平仓记录（纯函数，供 API / 测试复用）。
+
+    - 固定按 ``BUY_SIGNAL_CODES`` 顺序输出四类（0 笔也输出），未知 reason_code 追加在后，
+      最后一行合计（``reason_code="__total__"``）；
+    - 胜率口径与 ``AccountSimulator._result()["win_rate"]`` 同源：同一批已平仓记录、
+      ``realized_return > 0`` 计为盈利；
+    - 累计贡献为近似值：``Σ(realized_return/100 × entry_price × qty) / initial_cash × 100``，
+      用 ``entry_price × qty`` 近似初始成本（忽略买入佣金），``realized_return`` 已含半仓与买卖费用；
+    - 0 笔且 ``initial_cash>0`` 时 contribution 为 0.0（可计算的「无贡献」）；
+      ``initial_cash<=0`` 时 contribution 为 None（不可计算）。
+    """
+    closed = [p for p in positions if (p.get("status") or "closed") == "closed"]
+
+    def realized(p: dict) -> float:
+        return _num(p.get("realized_return"))
+
+    def contribution(items: list[dict]):
+        try:
+            cash = float(initial_cash)
+        except (TypeError, ValueError):
+            return None
+        if not (cash > 0):
+            return None
+        pnl = sum(realized(p) / 100 * _num(p.get("entry_price")) * _num(p.get("qty"))
+                  for p in items)
+        return pnl / cash * 100
+
+    def row(code: str, label: str, items: list[dict]) -> dict:
+        trades = len(items)
+        wins = sum(1 for p in items if realized(p) > 0)
+        return {
+            "reason_code": code, "label": label, "trades": trades, "wins": wins,
+            "win_rate": wins / trades * 100 if trades else None,
+            "avg_return": sum(realized(p) for p in items) / trades if trades else None,
+            "contribution": contribution(items),
+        }
+
+    rows = [row(code, BUY_CHECK_LABELS.get(code, code),
+                [p for p in closed if (p.get("entry_reason_code") or "") == code])
+            for code in BUY_SIGNAL_CODES]
+    unknown: dict[str, list[dict]] = {}
+    for p in closed:
+        code = p.get("entry_reason_code") or ""
+        if code in BUY_SIGNAL_CODES:
+            continue
+        unknown.setdefault(code, []).append(p)
+    rows.extend(row(code, code or "未知", items) for code, items in unknown.items())
+    rows.append(row(TOTAL_ROW_CODE, "合计", closed))
+    try:
+        cash = float(initial_cash)
+    except (TypeError, ValueError):
+        cash = 0.0
+    return {"initial_cash": cash, "total_trades": len(closed), "rows": rows}
 
 
 def metrics(result: dict) -> dict:

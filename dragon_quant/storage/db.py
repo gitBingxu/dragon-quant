@@ -143,7 +143,10 @@ CREATE TABLE IF NOT EXISTS review_account_positions (
     exit_signal_json     TEXT,
     realized_return      REAL,
     hold_days            INTEGER,
-    status               TEXT
+    status               TEXT,
+    post_exit_max_return    REAL,
+    post_exit_max_drawdown  REAL,
+    post_exit_window_days   INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_account_positions_run ON review_account_positions(run_id, entry_date);
@@ -269,6 +272,20 @@ def _ensure_review_account_columns(conn: sqlite3.Connection):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_trades)")}
     if "realized_pnl" not in cols:
         conn.execute("ALTER TABLE review_account_trades ADD COLUMN realized_pnl REAL")
+
+    # 清仓后窗口指标：不带 DEFAULT，旧行保持 NULL（与「旧 run 不回溯」语义一致）。
+    pos_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_positions)")}
+    for name, decl in (("post_exit_max_return", "REAL"),
+                       ("post_exit_max_drawdown", "REAL"),
+                       ("post_exit_window_days", "INTEGER")):
+        if name in pos_cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE review_account_positions ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(review_account_positions)")}
+            if name not in existing:
+                raise
 
 
 def _create_versioned_tables(conn: sqlite3.Connection, source: str):

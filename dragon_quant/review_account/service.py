@@ -5,7 +5,7 @@ from typing import Optional
 
 from dragon_quant.review_account.models import StrategyConfig
 from dragon_quant.review_account.priority import RANKING_MODE_LABELS
-from dragon_quant.review_account.simulator import AccountSimulator
+from dragon_quant.review_account.simulator import AccountSimulator, annotate_post_exit
 from dragon_quant.storage import db
 
 
@@ -25,6 +25,8 @@ def run_review_account(date_from: str,
                                     "strategy_name": strategy_name, "initial_cash": initial_cash})
     sim = AccountSimulator(cfg)
     result = sim.run(date_from, date_to)
+    # 事后评估：清仓后窗口指标。放在 run() 之外，回测核心保持纯 as-of；失败逐条降级。
+    annotate_post_exit(result["positions"], sim.data)
 
     run_id = db.create_review_account_run(
         source=source,

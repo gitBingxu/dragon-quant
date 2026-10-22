@@ -6,7 +6,9 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from dragon_quant.models.types import KBar
-from dragon_quant.review_account.indicators import enrich_daily_klines
+from dragon_quant.review_account.indicators import (
+    enrich_daily_klines, is_tradable_daily_bar,
+)
 from dragon_quant.review_account.priority import (
     PREP_RECOMMENDED, auction_state, prep_state, ranking_mode,
 )
@@ -31,13 +33,8 @@ def daily_bar(history: list[KBar], day: str) -> Optional[KBar]:
     return next((b for b in history if event_date(b.timestamp) == day), None)
 
 
-def is_tradable_daily_bar(bar: Optional[KBar]) -> bool:
-    """当日日K是否代表真实成交。
-
-    停牌日的数据源形态有两种：整行缺失，或保留占位行但 `volume<=0 且 amount<=0`。
-    两者都不能用来构造兜底成交价，故按「有量或有额」判定可交易。
-    """
-    return bool(bar is not None and ((bar.volume or 0) > 0 or (bar.amount or 0) > 0))
+# is_tradable_daily_bar 的唯一实现在 indicators.py（无 market 依赖，避免循环导入）；
+# 此处经顶部 import re-export，保持既有 `from market import is_tradable_daily_bar` 调用点不变。
 
 
 def last_close(history: list[KBar], day: str) -> Optional[float]:

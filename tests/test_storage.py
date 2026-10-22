@@ -362,6 +362,90 @@ class TestReviewAccountStorage(unittest.TestCase):
         self.assertEqual(positions, [])
         self.assertEqual(events, [])
 
+    def test_post_exit_columns_roundtrip(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            run_id = db.create_review_account_run(
+                source="v2", strategy_name="dragon_pullback_daily",
+                strategy_params_json="{}", date_from="2026-05-01", date_to="2026-06-01",
+                initial_cash=100000, final_equity=100000, total_return=0.0,
+                max_drawdown=0.0, trade_count=1, win_rate=100.0,
+            )
+            db.save_review_account_results(
+                run_id, snapshots=[], trades=[],
+                positions=[{
+                    "code": "000001", "name": "样本", "entry_date": "2026-05-01",
+                    "entry_price": 10, "qty": 1000, "entry_reason_code": "buy_open_ma5_pullback",
+                    "entry_signal_json": "{}", "exit_date": "2026-05-06", "exit_price": 11,
+                    "exit_reason_code": "trailing_take_profit", "exit_signal_json": "{}",
+                    "realized_return": 10.0, "hold_days": 3, "status": "closed",
+                    "post_exit_max_return": 3.2, "post_exit_max_drawdown": -1.4,
+                    "post_exit_window_days": 5,
+                }],
+            )
+            positions = db.query_review_account_positions(run_id)
+
+        self.assertEqual(len(positions), 1)
+        self.assertAlmostEqual(positions[0]["post_exit_max_return"], 3.2)
+        self.assertAlmostEqual(positions[0]["post_exit_max_drawdown"], -1.4)
+        self.assertEqual(positions[0]["post_exit_window_days"], 5)
+
+    def test_post_exit_columns_added_to_old_schema_as_null(self):
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            run_id = db.create_review_account_run(
+                source="v2", strategy_name="dragon_pullback_daily",
+                strategy_params_json="{}", date_from="2026-05-01", date_to="2026-06-01",
+                initial_cash=100000, final_equity=100000, total_return=0.0,
+                max_drawdown=0.0, trade_count=1, win_rate=100.0,
+            )
+        # 模拟旧库：positions 表没有三列，且已有一行历史数据。
+        self._conn.execute("DROP TABLE review_account_positions")
+        self._conn.execute(
+            """
+            CREATE TABLE review_account_positions (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id               INTEGER NOT NULL,
+                code                 TEXT NOT NULL,
+                name                 TEXT,
+                entry_date           TEXT,
+                entry_price          REAL,
+                qty                  INTEGER,
+                entry_reason_code    TEXT,
+                entry_signal_json    TEXT,
+                exit_date            TEXT,
+                exit_price           REAL,
+                exit_reason_code     TEXT,
+                exit_signal_json     TEXT,
+                realized_return      REAL,
+                hold_days            INTEGER,
+                status               TEXT
+            )
+            """
+        )
+        self._conn.execute(
+            "INSERT INTO review_account_positions("
+            "run_id, code, entry_date, entry_price, qty, entry_reason_code, "
+            "exit_date, exit_price, exit_reason_code, realized_return, hold_days, status"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (run_id, "000001", "2026-05-01", 10, 1000, "buy_open_ma5_pullback",
+             "2026-05-06", 11, "trailing_take_profit", 10.0, 3, "closed"),
+        )
+        self._conn.commit()
+
+        with patch("dragon_quant.storage.db._connect",
+                   side_effect=lambda: sqlite3.connect(self._db_path)):
+            from dragon_quant.storage import db
+            db.init_db()   # 幂等补列
+            positions = db.query_review_account_positions(run_id)
+
+        self.assertEqual(len(positions), 1)
+        self.assertIsNone(positions[0]["post_exit_max_return"])
+        self.assertIsNone(positions[0]["post_exit_max_drawdown"])
+        self.assertIsNone(positions[0]["post_exit_window_days"])
+
     def test_account_run_display_name_column_is_added_to_old_schema(self):
         self._conn.execute("DROP TABLE review_account_runs")
         self._conn.execute(

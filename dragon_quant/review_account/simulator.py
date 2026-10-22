@@ -1,14 +1,50 @@
+import logging
 from dataclasses import asdict
 
 from dragon_quant.review_account.data import MarketData, historical_events
 from dragon_quant.review_account.engine import TradingEngine
+from dragon_quant.review_account.indicators import post_exit_stats
 from dragon_quant.review_account.market import (
     calendar_start, collect_candidates_ex, load_market_sentiment,
 )
 from dragon_quant.review_account.models import (
-    AccountState, Snapshot, StrategyConfig, TimelineEvent, UNAVAILABLE_SUSPENDED,
+    AccountState, ClosedPosition, Snapshot, StrategyConfig, TimelineEvent,
+    UNAVAILABLE_SUSPENDED,
 )
 from dragon_quant.storage import db
+
+logger = logging.getLogger(__name__)
+
+
+def annotate_post_exit(positions: list[ClosedPosition], data: MarketData) -> None:
+    """为已平仓记录补算清仓后 5 日窗口指标（事后评估，不参与交易决策）。
+
+    在 ``AccountSimulator.run()`` **之外**调用（service 落库前），保证回测核心保持纯 as-of。
+    逐 code 只取一次日K；任一条失败仅将该 code 的三字段降级为 None/None/0，绝不中断回测。
+    实现依赖 ``MarketData.daily`` 的内存缓存键（回测当天已对同一 code 取过日K），
+    若未来修改 ``daily`` 的缓存键计算方式，需重新评估重复拉取成本。
+    """
+    groups: dict[str, list[ClosedPosition]] = {}
+    for p in positions:
+        groups.setdefault(p.code, []).append(p)
+    for code, items in groups.items():
+        history = None
+        try:
+            history = data.daily(code, min(p.exit_date for p in items))
+        except Exception as exc:
+            logger.warning("清仓后窗口指标补算失败（日K不可用）code=%s: %s", code, exc)
+        for p in items:
+            stats = {"post_exit_max_return": None, "post_exit_max_drawdown": None,
+                     "post_exit_window_days": 0}
+            if history is not None:
+                try:
+                    stats = post_exit_stats(history, p.exit_date, p.exit_price)
+                except Exception as exc:
+                    logger.warning("清仓后窗口指标计算失败 code=%s exit=%s: %s",
+                                   code, p.exit_date, exc)
+            p.post_exit_max_return = stats["post_exit_max_return"]
+            p.post_exit_max_drawdown = stats["post_exit_max_drawdown"]
+            p.post_exit_window_days = stats["post_exit_window_days"]
 
 
 class AccountSimulator:

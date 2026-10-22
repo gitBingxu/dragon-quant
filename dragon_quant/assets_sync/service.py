@@ -638,6 +638,8 @@ def status(backend, sources, *, all_dates=False, orphans=False, paths=None,
         "last_state": _state_summary(paths),
         "metadata_supported": True,
         "orphan_blobs": [] if orphans else None,
+        # 因子表 / 财务表与 assets 同库但永不上传（方案 §13 运维可见性要求）
+        "not_synced": {"factor_*": "not_synced", "fin_*": "not_synced"},
     }
     fatal = False
     orphan_unknown: list[str] = []

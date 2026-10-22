@@ -185,7 +185,9 @@ class SignalEngine:
                 if detail["passed"] and detail.get("full_signal"):
                     signals.append((detail["full_signal"], cand))
             # buy-all 语义不变；排序只决定 pending 顺序（两引擎共用同一 key）。
-            signals.sort(key=lambda x: rank_key(x[0], x[1], cfg.auction_ranking_enabled))
+            signals.sort(key=lambda x: rank_key(
+                x[0], x[1], cfg.auction_ranking_enabled,
+                getattr(cfg, "factor_ranking_enabled", False)))
             for sig, cand in signals:
                 order = self._order(cand["code"], cand.get("name", ""), sig, event.timestamp)
                 order["checks"] = next(

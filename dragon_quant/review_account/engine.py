@@ -128,7 +128,9 @@ class TradingEngine:
                     if detail["passed"] and detail.get("full_signal"):
                         signals.append((detail["full_signal"], cand))
                 # 择优：P/A 三值 tier → 五维综合分 → 买点得分 → 代码（两引擎共用 key）。
-                signals.sort(key=lambda x: rank_key(x[0], x[1], cfg.auction_ranking_enabled))
+                signals.sort(key=lambda x: rank_key(
+                    x[0], x[1], cfg.auction_ranking_enabled,
+                    getattr(cfg, "factor_ranking_enabled", False)))
                 if signals:
                     sig, cand = signals[0]
                     state.pending.append(self._order(cand["code"], cand.get("name", ""), sig, event.timestamp))
@@ -197,8 +199,9 @@ class TradingEngine:
             "phase": row.get("phase") if row else None,
             "checks": checks or [],
             "entry_priority": candidate.get("entry_priority") or {},
-            "priority_key": key_components(signal or {}, candidate,
-                                           cfg.auction_ranking_enabled),
+            "priority_key": key_components(
+                signal or {}, candidate, cfg.auction_ranking_enabled,
+                getattr(cfg, "factor_ranking_enabled", False)),
         }
         block = detail["entry_priority"].get("auction")
         if isinstance(block, dict) and block.get("loaded"):

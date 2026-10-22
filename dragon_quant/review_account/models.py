@@ -115,6 +115,11 @@ class StrategyConfig:
     auction_veto_enabled: bool = False        # D3 否决（verified ∧ is_weak）
     prep_verdict_filter_enabled: bool = True  # D4：verdict=ignore 出池（消融可关）
     auction_veto_exempt_signals: list = field(default_factory=list)
+    # ── 因子层决策接入（P2，默认关；关闭时零读取、排序与旧实现逐位等价）──
+    factor_ranking_enabled: bool = False
+    factor_model_name: str = "equal_rank_v1"
+    factor_model_version: str = ""            # 空 = 同名模型最新快照；无快照 → degraded
+    factor_min_coverage: float = 0.6          # 决策池覆盖率门槛，低于此值整日回退
 
     @classmethod
     def from_dict(cls, values: dict) -> "StrategyConfig":
@@ -180,6 +185,13 @@ class StrategyConfig:
                              "sell_rule_toggles['first_day_stop']（否则灾难线静默失效）")
         if not isinstance(cfg.strategy_name, str) or not cfg.strategy_name.strip():
             raise ValueError("strategy_name 必须是非空字符串")
+        if (not isinstance(cfg.factor_model_name, str)
+                or not cfg.factor_model_name.strip()):
+            raise ValueError("factor_model_name 必须是非空字符串")
+        if not isinstance(cfg.factor_model_version, str):
+            raise ValueError("factor_model_version 必须是字符串（空 = 最新快照）")
+        if not 0 < cfg.factor_min_coverage <= 1:
+            raise ValueError("factor_min_coverage 必须在 (0, 1] 内")
         for name in ("min_commission", "trailing_atr_multiple", "min_amount", "min_turnover",
                      "trailing_drawdown_pct", "weak_close_tolerance_pct", "breakeven_activate_pct"):
             if getattr(cfg, name) < 0:

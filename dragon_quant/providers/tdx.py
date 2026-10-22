@@ -361,6 +361,19 @@ _FG_MEMBER_FIELDS = {
 def _fg_member_row(r: dict) -> dict:
     return {k: _normalize_value(r.get(src)) for k, src in _FG_MEMBER_FIELDS.items()}
 
+
+def _finance_record(row: dict) -> dict:
+    """财务 DataFrame 行 → 纯 dict（丢弃 ``_`` 内部字段、枚举转 int、NaN→None）。"""
+    out: dict = {}
+    for key, value in row.items():
+        if str(key).startswith("_"):
+            continue
+        normalized = _normalize_value(value)
+        if hasattr(normalized, "value"):      # Market 等 Enum
+            normalized = normalized.value
+        out[key] = normalized
+    return out
+
 # ─── Provider ──────────────────────────────────────────────────────────────
 
 
@@ -372,6 +385,7 @@ class TdxProvider(StockProvider):
         self._client: Any = None  # MacClient；False=永久不可用
         self._macro_client: Any = None  # MacExClient（扩展行情）；False=永久不可用
         self._macro_error: Optional[str] = None  # 首次失败根因（供 RuntimeError 诊断）
+        self._fin_client: Any = None  # TdxClient（标准行情，财务命令专属）；False=不可用
         self._preset: Any = None  # easy_tdx PresetField
 
     @property
@@ -424,6 +438,141 @@ class TdxProvider(StockProvider):
     def _quote_fields(self):
         """完整 Quote 字段集：COMMON（换手/量比/市值/PE/涨跌停）+ QUOTE（买一卖一）。"""
         return self._preset.COMMON + self._preset.QUOTE
+
+    # ─── 财务（P0.5，独立第二连接）──────────────────────────────────────────
+
+    def _get_fin_client(self):
+        """惰性创建标准行情 ``TdxClient``（财务命令所在客户端）。
+
+        与 ``MacClient`` 分开：财务命令不在 MAC 扩展客户端上，且独立连接避免把
+        财务的单票串行调用塞进行情链路的锁。失败返回 None（调用方法抛异常）。
+        """
+        if self._fin_client is None:
+            et = _import_easytdx()
+            if et is None:
+                self._fin_client = False
+                return None
+            try:
+                client = et.TdxClient.from_best_host(timeout=8, ping_timeout=2)
+                client.ensure_connected()
+                self._fin_client = client
+            except Exception:
+                self._fin_client = False
+                return None
+        return self._fin_client or None
+
+    def _require_fin_client(self):
+        client = self._get_fin_client()
+        if client is None:
+            raise RuntimeError("tdx 财务客户端不可用（easy_tdx 缺失或连接失败）")
+        return client
+
+    def get_finance_info(self, code: str) -> dict:
+        """最新单期命名财务快照（``FinanceInfo``）→ 纯 dict（含 ``updated_date``）。
+
+        transport/解析失败抛异常（新增采集方法契约，不返回空 dict）。
+        """
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._require_fin_client()
+        market, c = _resolve(code)
+        t0 = time.time()
+        try:
+            df = client.get_finance_info(market=et.Market(market), code=c)
+            records = df.to_dict("records") if df is not None and not df.empty else []
+            if not records:
+                raise RuntimeError(f"get_finance_info({code}) 返回空结果")
+            row = _finance_record(records[0])
+            row.setdefault("code", c)
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "finance_info", ok=True, elapsed_ms=elapsed,
+                                 note=f"{code} updated={row.get('updated_date')}")
+            return row
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "finance_info", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            raise
+
+    def get_financial_files(self, host: Optional[str] = None) -> list[dict]:
+        """``gpcw.txt`` 专业财报文件清单 → ``[{filename, md5, size}]``。
+
+        tmdx 的 DataFrame 列名是 ``hash`` / ``filesize``；此处显式改名，
+        否则 ``fin_report_files.md5`` 会写空。
+        """
+        client = self._require_fin_client()
+        t0 = time.time()
+        try:
+            df = client.get_financial_file_list(host=host)
+            records = df.to_dict("records") if df is not None and not df.empty else []
+            out = []
+            for row in records:
+                filename = row.get("filename")
+                md5 = row.get("hash") or row.get("md5")
+                if not filename or not md5:
+                    continue
+                size = row.get("filesize", row.get("size"))
+                if hasattr(size, "item"):
+                    size = size.item()
+                out.append({
+                    "filename": str(filename),
+                    "md5": str(md5).lower(),
+                    "size": int(size) if size is not None else None,
+                })
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "financial_files", ok=True,
+                                 elapsed_ms=elapsed, note=f"n={len(out)}")
+            return out
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "financial_files", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            raise
+
+    def get_financial_records(self, filename: str, host: Optional[str] = None) -> list[dict]:
+        """单期财报 → ``[{code, market, report_date, fields}]``。
+
+        注意：该调用内部会**再下载一次 zip**，调用方不得先调 ``get_financial_file``。
+        """
+        client = self._require_fin_client()
+        t0 = time.time()
+        try:
+            df = client.get_financial_records(filename, host=host)
+            records = df.to_dict("records") if df is not None and not df.empty else []
+            out = [_finance_record(row) for row in records]
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "financial_records", ok=True,
+                                 elapsed_ms=elapsed,
+                                 note=f"{filename} n={len(out)}")
+            return out
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "financial_records", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            raise
+
+    def get_financial_file(self, filename: str, host: Optional[str] = None) -> bytes:
+        """下载财报 zip 原始字节（审计/校准备用；常规解析走 ``get_financial_records``）。"""
+        client = self._require_fin_client()
+        return client.get_financial_file(filename, host=host)
+
+    def get_xdxr_info(self, code: str) -> list[dict]:
+        """除权除息记录（本期仅落库备用，不参与因子）。"""
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._require_fin_client()
+        market, c = _resolve(code)
+        df = client.get_xdxr_info(market=et.Market(market), code=c)
+        records = df.to_dict("records") if df is not None and not df.empty else []
+        return [_finance_record(row) for row in records]
 
     # ─── 板块 ───
 

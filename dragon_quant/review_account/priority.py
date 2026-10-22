@@ -9,11 +9,15 @@
   语义未实测（unverified）与空 items 哨兵一律 Unknown，绝不把「不知道」当成「弱」；
 - ``rank_key`` 是 ``TradingEngine`` 与 ``SignalEngine`` 的唯一排序键；``key_components``
   是同一分量的可落库版本，二者不得各写一套；
+- 因子分量（P2）插在 ``-composite`` 之前，受 ``factor_ranking_enabled``（默认关）控制；
+  关闭时恒为 ``(0, 0.0, "off")``，排序与旧实现逐位等价。缺失 ≠ 中性：缺因子分的
+  候选进 ``factor_rank=1`` 桶，整日 ``degraded`` 时完全回退；
 - 本模块纯函数、无 I/O，便于单测与跨引擎复用。
 """
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from dragon_quant.auction.registry import AUCTION_ITEMS_MISSING
@@ -26,6 +30,11 @@ PREP_RECOMMENDED = frozenset({"strong", "light"})
 PREP_NOT_RECOMMENDED = frozenset({"ignore", "unrated"})
 
 TRI_LABELS = {True: "强", False: "弱", None: "未知"}
+
+# 因子分排序分量（P2）：0=有分；1=缺失（排在所有有分者之后）。关闭时恒 0。
+FACTOR_RANK_SCORED = 0
+FACTOR_RANK_MISSING = 1
+FACTOR_MODES = ("off", "on", "degraded")
 
 RANKING_MODE_LABELS = {
     "auction": "A/P 已启用（竞价快照已验证，参与排序与否决）",
@@ -80,8 +89,35 @@ def _side_state(candidate: dict, side: str) -> Optional[bool]:
     return state if isinstance(state, bool) else None
 
 
+def _factor_component(candidate: dict, enabled: bool) -> tuple[int, float, str]:
+    """因子分量的**唯一**归零/缺失判定（``rank_key`` 只消费，不另写分支）。
+
+    - 开关关：``(0, 0.0, "off")``，无论候选注解残留什么都强制归零；
+    - 有 ``entry_priority.factor`` 且 ``mode == "on"``：
+      ``score`` 为有限数值 → ``(0, score, "on")``；否则 → 缺失桶 ``(1, 0.0, "on")``；
+    - ``mode == "degraded"``（整日回退）或注解缺失/损坏 → ``(0, 0.0, "degraded")``，
+      排序完全回退到无因子层基线。
+    """
+    if not enabled:
+        return FACTOR_RANK_SCORED, 0.0, "off"
+    block = _entry_priority(candidate).get("factor")
+    if not isinstance(block, dict) or block.get("mode") in (None, "off"):
+        return FACTOR_RANK_SCORED, 0.0, "degraded"
+    if block.get("mode") != "on":
+        return FACTOR_RANK_SCORED, 0.0, "degraded"
+    score = block.get("score")
+    try:
+        number = float(score)
+    except (TypeError, ValueError):
+        return FACTOR_RANK_MISSING, 0.0, "on"
+    if not math.isfinite(number):
+        return FACTOR_RANK_MISSING, 0.0, "on"
+    return FACTOR_RANK_SCORED, number, "on"
+
+
 def key_components(signal: dict, candidate: dict,
-                   auction_ranking_enabled: bool = False) -> dict:
+                   auction_ranking_enabled: bool = False,
+                   factor_ranking_enabled: bool = False) -> dict:
     """排序键的可观测分量（落库/展示）；``rank_key`` 由同一份数据派生。"""
     a_state = _side_state(candidate, "auction") if auction_ranking_enabled else None
     p_state = _side_state(candidate, "prep")
@@ -95,9 +131,14 @@ def key_components(signal: dict, candidate: dict,
         priority = int(priority)
     except (TypeError, ValueError):
         priority = 0
+    factor_rank, factor_score, factor_mode = _factor_component(
+        candidate, bool(factor_ranking_enabled))
     return {
         "auction_order": tri_order(a_state),
         "prep_order": tri_order(p_state),
+        "factor_rank": factor_rank,
+        "factor_score": factor_score,
+        "factor_mode": factor_mode,
         "composite": composite,
         "priority": priority,
         "code": str((candidate or {}).get("code") or ""),
@@ -105,16 +146,23 @@ def key_components(signal: dict, candidate: dict,
 
 
 def rank_key(signal: dict, candidate: dict,
-             auction_ranking_enabled: bool = False) -> tuple:
-    """全序排序键：tier(A,P) → composite desc → priority desc → code。
+             auction_ranking_enabled: bool = False,
+             factor_ranking_enabled: bool = False) -> tuple:
+    """全序排序键：tier(A,P) → factor_rank → factor_score desc → composite desc
+    → priority desc → code。
 
-    ``auction_ranking_enabled=False`` 时 A 分量恒为 Unknown；因此「仅否决模式」不会改变
-    排序，两个开关都关时排序只由 P 维决定（AC8'）。
+    ``auction_ranking_enabled=False`` 时 A 分量恒为 Unknown；``factor_ranking_enabled``
+    默认 ``False`` 时因子分量为 ``(0, 0.0)``，插入的两个零分量对所有候选相同，
+    排序与旧实现**逐位等价**（去掉第 3、4 位即旧元组）。因子分插在 ``-composite``
+    之前（不是之后）：否则退化成几乎不生效的 tie-breaker，A/B 永远测不出增量。
     """
-    parts = key_components(signal, candidate, auction_ranking_enabled)
+    parts = key_components(signal, candidate, auction_ranking_enabled,
+                           factor_ranking_enabled)
     return (
         parts["auction_order"],
         parts["prep_order"],
+        parts["factor_rank"],
+        -parts["factor_score"],
         -parts["composite"],
         -parts["priority"],
         parts["code"],

@@ -15,7 +15,7 @@ ITEMS = [{"time": "09:25:00", "price": 10.0, "matched": 100, "unmatched": 0}]
 class TestAuctionPool(unittest.TestCase):
     def _run(self, *, pool="prep", days=None, snapshot=None,
              snapshot_error=None, calendar=None, calendar_error=None,
-             dragons=None, legacy_dates=None, as_json=True):
+             dragons=None, legacy_dates=None, as_json=True, get_dragons=None):
         # 先导入 cli：cli_commands 在模块底部反向引用 cli（既有循环规避设计），
         # 直接先导入 cli_commands 会在独立运行该测试文件时触发循环导入。
         from dragon_quant import cli  # noqa: F401
@@ -62,13 +62,18 @@ class TestAuctionPool(unittest.TestCase):
                 "dragon_quant.storage.assets_db.get_prep_snapshot",
                 side_effect=fake_snapshot))
             stack.enter_context(patch(
-                "dragon_quant.storage.db.list_dragon_trade_dates",
+                "dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
                 return_value=legacy_dates))
             stack.enter_context(patch(
-                "dragon_quant.storage.db.get_dragons", return_value=dragons))
+                "dragon_quant.storage.dragons_mirror.get_dragons",
+                **({"side_effect": get_dragons} if get_dragons is not None
+                   else {"return_value": dragons})))
             stack.enter_context(patch(
-                "dragon_quant.storage.db.get_dragons_by_date",
+                "dragon_quant.storage.dragons_mirror.get_dragons_by_date",
                 return_value=dragons))
+            stack.enter_context(patch(
+                "dragon_quant.storage.dragons_mirror.stale_dates",
+                return_value={}))
             stack.enter_context(patch(
                 "dragon_quant.data.get_auction", side_effect=fake_auction))
             stack.enter_context(patch(
@@ -234,6 +239,15 @@ class TestAuctionPool(unittest.TestCase):
         self.assertEqual(out["fallback_reason"], "all_ignored")
         self.assertFalse(out["days_ignored"])
         self.assertEqual(out["lookback_dates"], [PREV])
+
+    def test_legacy_default_days_is_five(self):
+        """AC2：auction legacy 回退池默认最近 5 日（--days 未显式给出时）。"""
+        dates = [f"2026-10-{d:02d}" for d in range(12, 19)]
+        out, err, code, calls, _ = self._run(
+            pool="legacy", dragons=[{"code": "L", "name": "龙"}],
+            legacy_dates=dates)
+        self.assertIsNone(code)
+        self.assertEqual(out["lookback_dates"], dates[-5:])
 
     def test_prep_snapshot_date_matches_collect_candidates_ex(self):
         """N1：auction 与 buy 的池解析必须命中同一 T-1 快照。"""

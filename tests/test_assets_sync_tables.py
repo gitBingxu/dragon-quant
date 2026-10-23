@@ -39,7 +39,7 @@ class TestTableSpecRegistry(unittest.TestCase):
     def test_covers_every_new_table(self):
         table_names = {spec.table for spec in tables.TABLE_SPECS}
         self.assertEqual(table_names, {
-            "prep_snapshots", "auction_snapshots",
+            "prep_snapshots", "auction_snapshots", "dragons",
             "factor_values",
             "factor_build_runs", "factor_sector_snapshots", "factor_registry",
             "factor_model_snapshots", "fin_observed_snapshots",
@@ -50,11 +50,12 @@ class TestTableSpecRegistry(unittest.TestCase):
         units = [spec.unit_key for spec in tables.TABLE_SPECS]
         self.assertIn("fin:report_files", units)
         self.assertIn("fin:report_raw", units)
+        self.assertIn("dragons:mirror", units)
 
     def test_volatile_set_is_explicit(self):
         volatile = {spec.unit_key for spec in tables.TABLE_SPECS if spec.volatile}
         self.assertEqual(volatile, {
-            "prepsnap:snapshots", "auctionsnap:snapshots",
+            "prepsnap:snapshots", "auctionsnap:snapshots", "dragons:mirror",
             "fin:observed",
             "fin:report_files", "fin:report_raw", "fin:records",
             "fin:calibrations", "fin:xdxr",

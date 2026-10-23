@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Optional
@@ -37,7 +38,8 @@ from dragon_quant.providers.macro import (
 from dragon_quant.review_account.verdicts import (
     evaluate_candidates, find_risk_announcement,
 )
-from dragon_quant.storage import db, assets_db
+from dragon_quant.storage import assets_db, dragons_mirror
+from dragon_quant.storage.dragons_mirror import BACKFILL_HINT, DragonsMirrorStale
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -49,8 +51,13 @@ FG_BOARD_NAMES = ["昨日涨停", "昨日跌停", "昨日连板", "昨日首板"
 CNINFO_WINDOW_DAYS = 7   # 公告窗口：保留 [T-7, T] 内公告
 CNINFO_MAX_PAGES = 5     # 翻页上限保护；触顶且未到窗口 → truncated
 
-# 复盘窗口：含 T 在内的最近 N 个日历交易日（T-2 / T-1 / T）
-WINDOW_TRADING_DAYS = 3
+# 复盘窗口：含 T 在内的最近 N 个交易日（T-4 / … / T）
+WINDOW_TRADING_DAYS = 5
+
+# 目标日镜像缺行的短重试窗口（scan 主写已提交、镜像 fan-out 尚未写完的毫秒级并发）
+MIRROR_RETRY_DELAY = 0.2
+# 逐日对账错误前缀：区分「镜像丢数据」与「该日真的没有真龙」
+MIRROR_STALE_PREFIX = "mirror_stale_day"
 
 _LIMIT_TOL_UP = 0.999    # 涨停/炸板判定容差（涨停价的 0.1%）
 _LIMIT_TOL_DOWN = 1.001
@@ -126,61 +133,136 @@ class CollectorSpec:
     suspicious_check: Optional[Callable[[dict], Optional[str]]] = None
 
 
-def _collect_dragons(ctx: PrepContext) -> dict:
-    """窗口内逐日冻结真龙（compute 的唯一真龙来源；含逐日 scan_id/version 血缘）。
+def _stale_dates(dates: list) -> dict[str, int]:
+    """逐日镜像对账（异常不外抛给载荷构造；由调用方决定严格度）。"""
+    return dragons_mirror.stale_dates(dates)
 
-    逐日异常隔离：单日读取失败只把该日标 error，其它日继续；仅当**并集无任何行
-    且存在 error 日**时 raise，避免把取数故障伪装成「今日无龙头」。
+
+def _read_dragon_day(day: str) -> list[dict]:
+    """读镜像单日真龙（类型收敛）；读取异常由调用方逐日隔离。"""
+    raw_rows = dragons_mirror.get_dragons(day)
+    if not isinstance(raw_rows, list):
+        raise TypeError(f"get_dragons 返回 {type(raw_rows).__name__}，预期 list")
+    return _list_of_dicts(raw_rows)
+
+
+def _is_mirror_stale_day(day: dict) -> bool:
+    """该日是否因镜像缺行被标 error（而非真实无真龙）。"""
+    error = day.get("error")
+    return isinstance(error, str) and error.startswith(MIRROR_STALE_PREFIX)
+
+
+def build_dragons_payload(window: list, window_days: int, *,
+                          trade_date: str,
+                          window_source: str = "calendar",
+                          day_rows: Optional[dict] = None,
+                          day_errors: Optional[dict] = None,
+                          stale: Optional[dict] = None,
+                          extra: Optional[dict] = None) -> dict:
+    """逐日窗口 + 血缘构造 dragons 资产 payload（普通采集与 recompute 重建共用）。
+
+    - ``day_rows`` / ``day_errors``：按日预读结果（缺省按空日处理）；
+    - ``stale``：``{date: 源库行数}`` 的逐日对账结果，命中日强制改写为 ``error``
+      （**不得**保留 ``empty``），使「数据丢失」与「真实空日」在快照/CLI 可区分；
+    - ``window_source``：``calendar``（TDX 日历解析）或 ``local``（recompute 本地推断）；
+    - ``extra``：只增审计键（如 recompute 的 ``rebuilt_at``）。
     """
-    window = list(ctx.window_trade_dates or [ctx.trade_date])
+    window = list(window or [])
+    day_rows = day_rows if isinstance(day_rows, dict) else {}
+    day_errors = day_errors if isinstance(day_errors, dict) else {}
+    stale = stale if isinstance(stale, dict) else {}
     rows_all: list[dict] = []
     days: list[dict] = []
-    errors: list[str] = []
     for day in window:
-        try:
-            raw_rows = db.get_dragons(day, source="v2")
-            if not isinstance(raw_rows, list):
-                raise TypeError(f"get_dragons 返回 {type(raw_rows).__name__}，预期 list")
-            day_rows = _list_of_dicts(raw_rows)
-            scan_ids = sorted({r.get("scan_id") for r in day_rows if r.get("scan_id")})
-            versions = sorted({r.get("version") for r in day_rows if r.get("version")})
-            days.append({
-                "trade_date": day,
-                # 同日多次 scan（不同 topN）无法唯一归属 → null，不输出列表
-                "scan_id": scan_ids[0] if len(scan_ids) == 1 else None,
-                "version": versions[0] if len(versions) == 1 else None,
-                "count": len(day_rows),
-                "status": "ok" if day_rows else "empty",
-            })
-        except Exception as e:  # 单日失败不中断：记 error 继续下一个交易日
-            message = f"{type(e).__name__}: {e}"
-            errors.append(f"{day}: {message}")
-            days.append({"trade_date": day, "count": 0, "status": "error", "error": message})
-            continue
-        for row in day_rows:
+        rows = _list_of_dicts(day_rows.get(day))
+        error = day_errors.get(day)
+        if day in stale:
+            rows = []
+            error = (f"{MIRROR_STALE_PREFIX}: 源库有行而镜像缺行"
+                     f"（源库 {stale[day]} 行）；运行 {BACKFILL_HINT} 修复")
+        scan_ids = sorted({r.get("scan_id") for r in rows if r.get("scan_id")})
+        versions = sorted({r.get("version") for r in rows if r.get("version")})
+        entry = {
+            "trade_date": day,
+            # 同日多次 scan（不同 topN）无法唯一归属 → null，不输出列表
+            "scan_id": scan_ids[0] if len(scan_ids) == 1 else None,
+            "version": versions[0] if len(versions) == 1 else None,
+            "count": len(rows),
+            "status": "error" if error else ("ok" if rows else "empty"),
+        }
+        if error:
+            entry["error"] = error
+        days.append(entry)
+        for row in rows:
             item = dict(row)
             item["trade_date"] = day       # 保留真实入选日（供 compute 去重/血缘）
             rows_all.append(item)
 
-    if not rows_all and errors:
-        raise RuntimeError("三日龙头读取失败：" + "；".join(errors))
-
-    ctx.dragons_rows = rows_all
-    ctx.dragons_ready = True          # 含真空（窗口内无真龙）：codes 为空是确定事实
     all_scan_ids = sorted({d["scan_id"] for d in days if d.get("scan_id")})
     all_versions = sorted({d["version"] for d in days if d.get("version")})
     single_day = len(window) == 1
-    return {
-        "trade_date": ctx.trade_date,
+    payload = {
+        "trade_date": trade_date,
         # 顶层兼容键仅对单日窗口有值；多日窗口血缘一律看 days[]
         "scan_id": all_scan_ids[0] if single_day and len(all_scan_ids) == 1 else None,
         "version": all_versions[0] if single_day and len(all_versions) == 1 else None,
         "count": len(rows_all),
         "rows": rows_all,
-        "window_days": ctx.window_days,
+        "window_days": window_days,
         "window_trade_dates": window,
+        "window_source": window_source,
         "days": days,
     }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _collect_dragons(ctx: PrepContext) -> dict:
+    """窗口内逐日冻结真龙（compute 的唯一真龙来源；含逐日 scan_id/version 血缘）。
+
+    读源 = ``assets.db.dragons`` 镜像（AC5）；镜像写入是锁外 best-effort，
+    因此必须**逐日对账**：源库有行而镜像缺行的日期改写为 error，绝不伪装成
+    「该日没有真龙」。目标日 stale 先短重试一次（覆盖 scan 主写已提交、镜像
+    尚未写完的并发窗口），仍 stale 则抛 :class:`DragonsMirrorStale`；
+    历史日 stale 只降级（``dragons_mirror_missing_day``）。
+    """
+    window = list(ctx.window_trade_dates or [ctx.trade_date])
+    day_rows: dict[str, list] = {}
+    day_errors: dict[str, str] = {}
+    for day in window:
+        try:
+            day_rows[day] = _read_dragon_day(day)
+        except Exception as e:  # 单日失败不中断：记 error 继续下一个交易日
+            day_errors[day] = f"{type(e).__name__}: {e}"
+
+    stale = _stale_dates(window)
+    if ctx.trade_date in stale:
+        time.sleep(MIRROR_RETRY_DELAY)
+        retry = _stale_dates([ctx.trade_date])
+        if ctx.trade_date in retry:
+            raise DragonsMirrorStale(
+                f"{ctx.trade_date} 源库有龙头记录而镜像缺行（assets.db.dragons）；"
+                f"运行 {BACKFILL_HINT} 修复")
+        stale.pop(ctx.trade_date, None)
+        # 竞态恢复后必须**回读真实行**：首读发生在镜像写入之前，其空列表不可复用，
+        # 否则会把「已恢复的数据」静默记成当日无真龙（error 伪装只是换成了 empty）。
+        day_rows[ctx.trade_date] = _read_dragon_day(ctx.trade_date)
+        day_errors.pop(ctx.trade_date, None)
+
+    payload = build_dragons_payload(
+        window, ctx.window_days, trade_date=ctx.trade_date,
+        window_source="calendar", day_rows=day_rows, day_errors=day_errors,
+        stale=stale)
+
+    errors = [f"{d['trade_date']}: {d['error']}"
+              for d in payload["days"] if d.get("error")]
+    if not payload["rows"] and errors:
+        raise RuntimeError(f"{len(window)}日龙头读取失败：" + "；".join(errors))
+
+    ctx.dragons_rows = payload["rows"]
+    ctx.dragons_ready = True          # 含真空（窗口内无真龙）：codes 为空是确定事实
+    return payload
 
 
 def _dragon_codes(rows: list) -> list[str]:
@@ -683,26 +765,42 @@ def _prepare_assets(assets: dict, trade_date: str) -> tuple[dict[str, dict], lis
         usable[asset_type] = payload
         if asset_type == "dragons":
             degraded.extend(_window_degradations(payload))
+    # 窗口加宽后新入候选可能缺 fund_flow / cninfo 覆盖（历史日 same_day_only 无法补采）：
+    # 只让降级原因可见，绝不伪造资金/公告数据（否则 verdict 静默降档会被误读为资金面变差）。
+    dragon_codes = _asset_codes(usable.get("dragons"))
+    if dragon_codes and _uncovered_assets(usable, dragon_codes, set()):
+        degraded.append("dragons_window_widened_dependents_stale")
     return usable, sorted(set(degraded))
 
 
 def _window_degradations(payload) -> list[str]:
-    """窗口口径降级标记（仅新资产；旧资产无 window_days 时一律跳过）。
+    """窗口口径降级标记（防御式读取：畸形 payload 不得击穿 compute）。
 
-    防御式读取：payload 畸形（str/list）或字段缺失不得击穿 compute。
+    - ``window_days`` 缺失/非 int → ``[]``（旧资产无口径信息，不假设）；
+    - ``window_days < WINDOW_TRADING_DAYS`` → ``dragons_window_stale``
+      （含 ``window_days=1`` 的旧单日资产：普通 prep 会本地重读自动升级，
+      ``--recompute`` 仍按旧口径重放，保留 R1 既有语义）；
+    - 窗口日期不足 → ``dragons_window_short``；
+    - 某日因镜像缺行被标 error → ``dragons_mirror_missing_day``（数据丢失）；
+    - 其它 empty/error 日 → ``dragons_partial``（真实空日或读取失败）。
     """
     if not isinstance(payload, dict):
         return []
     window_days = payload.get("window_days")
-    if not isinstance(window_days, int) or isinstance(window_days, bool) or window_days <= 1:
+    if not isinstance(window_days, int) or isinstance(window_days, bool):
         return []
     marks: list[str] = []
+    if window_days < WINDOW_TRADING_DAYS:
+        marks.append("dragons_window_stale")
     window_dates = payload.get("window_trade_dates")
     window_dates = window_dates if isinstance(window_dates, list) else []
     if len(window_dates) < window_days:
         marks.append("dragons_window_short")
-    if any(day.get("status") in ("empty", "error")
-           for day in _list_of_dicts(payload.get("days"))):
+    days = _list_of_dicts(payload.get("days"))
+    if any(_is_mirror_stale_day(day) for day in days):
+        marks.append("dragons_mirror_missing_day")
+    if any(day.get("status") in ("empty", "error") and not _is_mirror_stale_day(day)
+           for day in days):
         marks.append("dragons_partial")
     return marks
 
@@ -1328,13 +1426,105 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
         set(sentiment.get("degraded") or []) | set(degraded) | set(macro_marks))
     return {
         "trade_date": trade_date,
-        "version": "0.5",
+        "version": "0.6",
         "sentiment": sentiment,
         "main_boards": main_boards,
         "macro": macro,
         "candidates": candidates,
         "dragon_source": _dragon_source(usable),
     }
+
+
+# ─── recompute：从镜像本地重建窗口（零网络）──────────────────────────────────
+
+
+def _local_window_dates(trade_date: str, stored_dragons) -> list[str]:
+    """recompute 的本地窗口：存量窗口日期 ∪ 镜像中 ``<= T`` 的日期 → 最近 N 个。"""
+    candidates: set[str] = set()
+    if isinstance(stored_dragons, dict):
+        raw = stored_dragons.get("window_trade_dates")
+        for day in raw if isinstance(raw, list) else []:
+            if isinstance(day, str) and day and day <= trade_date:
+                candidates.add(day)
+    try:
+        mirror_dates = dragons_mirror.list_dragon_trade_dates()
+    except Exception:
+        mirror_dates = []
+    for day in mirror_dates:
+        if isinstance(day, str) and day and day <= trade_date:
+            candidates.add(day)
+    return sorted(candidates)[-WINDOW_TRADING_DAYS:]
+
+
+def _stored_rows_by_day(stored: dict) -> dict[str, list]:
+    """存量 dragons 资产 → ``{trade_date: rows}``（旧资产无行内日期时归到 payload 日期）。"""
+    payload_date = stored.get("trade_date")
+    out: dict[str, list] = {}
+    for row in _list_of_dicts(stored.get("rows")):
+        day = row.get("trade_date") or payload_date
+        if isinstance(day, str) and day:
+            out.setdefault(day, []).append(row)
+    return out
+
+
+def rebuild_dragons_for_recompute(trade_date: str, assets: dict) -> Optional[dict]:
+    """recompute 用本地镜像重建 5 日窗口的 dragons 资产（零采集零网络）。
+
+    仅当存量 dragons 资产带 ``days[]``（多日口径）时重建；旧单日资产返回
+    ``None``，保持 R1 既有「按单日口径重放」语义。``window_days=1`` 的旧单日
+    资产在普通 prep 下由 ``dragons_window_stale`` 触发本地重读自动升级。
+
+    **不降级原则**：镜像缺某日但存量资产仍冻结着该日 rows 时，重放保留存量行
+    （审计键 ``rebuilt_fallback_days``），绝不把可用资产改成缺行资产；当日
+    既无镜像也无存量行时保留 stale 标记（error），不静默写成 ``empty``。
+    """
+    stored = (assets or {}).get("dragons")
+    if not isinstance(stored, dict) or not _list_of_dicts(stored.get("days")):
+        return None
+    window = _local_window_dates(trade_date, stored)
+    if not window:
+        return None
+    stored_by_day = _stored_rows_by_day(stored)
+    stale = _stale_dates(window)
+    day_rows: dict[str, list] = {}
+    day_errors: dict[str, str] = {}
+    fallback_days: list[str] = []
+    for day in window:
+        try:
+            rows = _read_dragon_day(day)
+        except Exception as e:  # 单日异常隔离：该日标 error，其余继续
+            rows = []
+            day_errors[day] = f"{type(e).__name__}: {e}"
+        # 仅在「源库仍有行、镜像缺行」时用存量行兜底；源库确认为空的日期
+        # 按真实 empty 输出，避免把合法清空误报成有数据。
+        if not rows and day in stale:
+            legacy = stored_by_day.get(day) or []
+            if legacy:
+                day_rows[day] = legacy
+                day_errors.pop(day, None)
+                fallback_days.append(day)
+                stale.pop(day, None)     # 存量行兜底后不再算缺行
+                continue
+        day_rows[day] = rows
+
+    extra = {
+        "rebuilt_at": datetime.now(SHANGHAI).strftime("%Y-%m-%d %H:%M:%S"),
+        "rebuilt_from_window_days": stored.get("window_days"),
+    }
+    if fallback_days:
+        extra["rebuilt_fallback_days"] = fallback_days
+    return build_dragons_payload(
+        window, WINDOW_TRADING_DAYS, trade_date=trade_date,
+        window_source="local", day_rows=day_rows, day_errors=day_errors,
+        stale=stale, extra=extra)
+
+
+def _same_dragons_payload(old, new) -> bool:
+    """重建内容是否与存量一致（``rebuilt_at`` 是审计时戳，不参与比较）。"""
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return False
+    return ({k: v for k, v in old.items() if k != "rebuilt_at"}
+            == {k: v for k, v in new.items() if k != "rebuilt_at"})
 
 
 # ─── 入口 ──────────────────────────────────────────────────────────────────
@@ -1400,6 +1590,9 @@ def run_prep(trade_date: str, recompute: bool = False, *,
     ``force=True`` 只影响 collect（重采全部可采资产），repairs 仍按 C3 计算。
 
     recompute 模式：零检测零采集，用已存资产重算（无资产时报错，不写空快照）。
+    重算前先用 ``assets.db.dragons`` 镜像**本地重建** 5 日窗口并回写 dragons 资产
+    （仅该资产行 + ``rebuilt_at``/``rebuilt_from_window_days``/``window_source="local"``
+    审计键，不写 collection_report）；旧单日资产不重建，按单日口径重放。
     recompute 只读本地已存资产、不触网采集，故不做交易日/时点门禁（仅拒绝未来日期），
     计算段的 as_of 校验仍会拦下时点不符的资产。
     """
@@ -1409,6 +1602,11 @@ def run_prep(trade_date: str, recompute: bool = False, *,
         assets = assets_db.get_prep_assets(trade_date)
         if not assets:
             raise PrepError(f"{trade_date} 无可重算资产（请先正常采集 prep）")
+        refreshed = rebuild_dragons_for_recompute(trade_date, assets)
+        if refreshed is not None and not _same_dragons_payload(
+                assets.get("dragons"), refreshed):
+            assets_db.save_prep_assets(trade_date, {"dragons": refreshed})
+            assets = assets_db.get_prep_assets(trade_date)
     else:
         now = now or datetime.now(SHANGHAI)
         today = now.strftime("%Y-%m-%d")

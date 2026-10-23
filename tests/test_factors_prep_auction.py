@@ -592,5 +592,26 @@ class TestReportCounters(TempDb):
         self.assertEqual(entry["meta"]["counters"]["unparsed_high_days"], 1)
 
 
+class TestDragonsDegradedTokens(unittest.TestCase):
+    """R-7：新增降级 token 必须维持因子层 fail-closed（空候选不 DELETE 历史行）。"""
+
+    def _snapshot(self, degraded):
+        return {
+            "dragon_source": {"window_days": 5,
+                              "dates": [{"trade_date": DAY, "status": "ok"}]},
+            "sentiment": {"degraded": list(degraded)},
+            "candidates": [],
+        }
+
+    def test_new_tokens_mark_empty_as_degraded(self):
+        for token in ("dragons_window_stale", "dragons_mirror_missing_day",
+                      "dragons_window_widened_dependents_stale"):
+            self.assertTrue(engine._prep_empty_is_degraded(self._snapshot([token])),
+                            token)
+
+    def test_healthy_basis_allows_real_empty(self):
+        self.assertFalse(engine._prep_empty_is_degraded(self._snapshot([])))
+
+
 if __name__ == "__main__":
     unittest.main()

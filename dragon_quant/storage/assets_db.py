@@ -10,6 +10,10 @@
   - ``prep_snapshots``    盘后复盘计算结果（UNIQUE(trade_date, source)）
   - ``auction_snapshots`` 竞价强度计算结果（UNIQUE(trade_date, code, source)），
                           由 ``auction`` 采集/``auction --recompute`` 写入。
+  - ``dragons``           ``dragon.db.dragons_v2`` 的全量镜像（列 schema 一致），
+                          由存储门面锁外 best-effort 双写 + ``assets backfill-dragons``
+                          回填；权威仍是 dragon.db，本表供 prep / review-account /
+                          buy / sell / auction 的候选池读取。
 
 设计要点（沿用原 prep.db 门面约定）：
   - 独立 ``_connect/_ensure_schema/_lock``（WAL + busy_timeout + 每操作独立连接 +
@@ -104,6 +108,47 @@ CREATE TABLE IF NOT EXISTS auction_snapshots (
     created_at    TEXT DEFAULT (datetime('now','localtime')),
     UNIQUE(trade_date, code, source)
 );
+
+-- ─── dragons 全量镜像（dragon.db.dragons_v2 → assets.db）─────────────────────
+-- 列 schema 与 dragons_v2 **完全一致**（含 id / source），同一行可直接对拷；
+-- 权威仍是 dragon.db，镜像 best-effort 写入、可经 `assets backfill-dragons` 自愈。
+-- id 为本库自增（与源库不保证相等），created_at 为本库写入时间，两者均不参与
+-- 一致性判定、不进入 assets_sync 语义列（见 assets_sync/tables.py）。
+CREATE TABLE IF NOT EXISTS dragons (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date            TEXT NOT NULL,
+    code                  TEXT NOT NULL,
+    name                  TEXT,
+    scan_id               TEXT,
+    rank                  INTEGER,
+    composite_score       REAL,
+    board_count           INTEGER,
+    open_px               REAL,
+    close_px              REAL,
+    high_px               REAL,
+    low_px                REAL,
+    pct                   REAL,
+    turnover_rate         REAL,
+    amount                REAL,
+    market_cap            REAL,
+    concepts_json         TEXT,
+    report_text           TEXT,
+    is_true_dragon        INTEGER,
+    version               TEXT DEFAULT '',
+    created_at            TEXT DEFAULT (datetime('now','localtime')),
+    buy_date              TEXT,
+    buy_price             REAL,
+    max_return_5d         REAL,
+    max_drawdown_5d       REAL,
+    max_return_hold_days  INTEGER,
+    review_status         TEXT DEFAULT 'pending',
+    source                TEXT DEFAULT 'v2',
+    UNIQUE(trade_date, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_dragons_date   ON dragons(trade_date);
+CREATE INDEX IF NOT EXISTS idx_assets_dragons_code   ON dragons(code);
+CREATE INDEX IF NOT EXISTS idx_assets_dragons_review ON dragons(review_status, trade_date);
 
 -- ─── 因子层（factors/，P0）──────────────────────────────────────────────
 -- 权威源：一个交易日的每只标的每个因子一行；缺失 = 无行（绝不写 0 / 中性分）。
@@ -262,6 +307,8 @@ _REQUIRED_COLUMNS = {
     "prep_snapshots": ("trade_date", "source", "result_json"),
     "auction_assets": ("trade_date", "code", "items_json"),
     "auction_snapshots": ("trade_date", "code", "source", "analysis_json"),
+    # dragons 镜像：只登记核心列，用于 wrong-DB 识别（写路径全量断言自动继承）。
+    "dragons": ("trade_date", "code", "name", "composite_score", "review_status"),
     # 因子层（P0）：只登记核心列，用于 wrong-DB 识别。
     "factor_values": ("trade_date", "code", "factor_name", "factor_version",
                       "value", "available_at", "source"),

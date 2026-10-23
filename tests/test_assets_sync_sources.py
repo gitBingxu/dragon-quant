@@ -154,7 +154,7 @@ class TestRestore(SourceTestBase):
         sources = build_sources(db_path=self.db_path)
         self.assertEqual([source.name for source in sources],
                          ["prep", "auction", "prepsnap", "auctionsnap",
-                          "factor", "fin"])
+                          "dragons", "factor", "fin"])
         self.assertTrue(all(source.db_path == self.db_path for source in sources))
 
     def test_restore_prep_created_at_conflict_and_force(self):

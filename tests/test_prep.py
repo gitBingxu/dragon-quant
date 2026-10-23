@@ -211,7 +211,7 @@ class TestComputeErrorIsolation(unittest.TestCase):
     def test_output_contract_keys(self):
         from dragon_quant.review_account.prep import _compute_all
         out = _compute_all("2026-10-19", _assets())
-        self.assertEqual(out["version"], "0.5")
+        self.assertEqual(out["version"], "0.6")
         self.assertEqual(out["dragon_source"]["scan_id"], "v2_20261019_top25")
         for k in ("sentiment", "main_boards", "candidates"):
             self.assertIn(k, out)
@@ -477,10 +477,10 @@ class TestRunPrepIntegration(unittest.TestCase):
         # 快照已落库，且由资产计算而来
         self.assertEqual(snap["sentiment"]["limit_up_cnt"], 10)
         self.assertEqual(snap["candidates"][0]["code"], "600001")
-        self.assertEqual(out["version"], "0.5")
+        self.assertEqual(out["version"], "0.6")
         # run_prep → resolve_window_dates → PrepContext 的窗口透传不能断链
         self.assertEqual(captured["window"], ["2026-10-15", "2026-10-16"])
-        self.assertEqual(captured["window_days"], 3)
+        self.assertEqual(captured["window_days"], 5)
 
 
 class TestMalformedAssetsTypeCoercion(unittest.TestCase):
@@ -773,12 +773,129 @@ class TestRunPrepRecompute(unittest.TestCase):
              patch("dragon_quant.review_account.prep.TdxProvider"), \
              patch("dragon_quant.review_account.prep.THSProvider"):
             out = run_prep(day, recompute=True)
-        self.assertEqual(out["version"], "0.5")
+        self.assertEqual(out["version"], "0.6")
         self.assertFalse(out["macro"]["available"])
         self.assertIn("macro_global", out["sentiment"]["degraded"])
         self.assertTrue(out["candidates"])
         self.assertIn(out["candidates"][0]["verdict"],
                       ("strong", "light", "ignore", "unrated"))
+
+    def test_recompute_rebuilds_window_from_mirror(self):
+        """多日资产 + 镜像 → 本地重建窗口并只回写 dragons 资产（不碰 report）。"""
+        from dragon_quant.review_account import prep
+        day = "2026-10-20"
+        stored = _window_assets(
+            trade_date=day,
+            window_dates=["2026-10-16", "2026-10-19", day],
+            days=[{"trade_date": d, "status": "ok", "count": 1}
+                  for d in ("2026-10-16", "2026-10-19", day)])
+        stored["dragons"]["window_days"] = 3
+        written = {}
+
+        def fake_save(trade_date, payloads, report=None):
+            written.update(payloads)
+
+        refreshed_assets = dict(stored)
+
+        def fake_get(trade_date):
+            return {**refreshed_assets, "dragons": written.get(
+                "dragons", stored["dragons"])}
+
+        with patch("dragon_quant.review_account.prep.assets_db.get_prep_assets",
+                   side_effect=fake_get), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_assets",
+                   side_effect=fake_save) as save_assets, \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_snapshot"), \
+             patch.object(prep, "dragons_mirror") as mirror, \
+             patch.object(prep, "_read_dragon_day", return_value=[{"code": "600001"}]), \
+             patch.object(prep, "_stale_dates", return_value={}):
+            mirror.list_dragon_trade_dates.return_value = [
+                "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", day]
+            out = prep.run_prep(day, recompute=True)
+
+        payload = written["dragons"]
+        self.assertEqual(payload["window_days"], 5)
+        self.assertEqual(len(payload["window_trade_dates"]), 5)
+        self.assertEqual(payload["window_source"], "local")
+        self.assertIn("rebuilt_at", payload)
+        self.assertEqual(payload["rebuilt_from_window_days"], 3)
+        self.assertNotIn("collection_report", written)   # 不伪造采集健康状态
+        save_assets.assert_called_once()
+        self.assertEqual(out["version"], "0.6")
+
+    def test_recompute_keeps_single_day_asset(self):
+        """旧单日资产（无 days[]）不重建，按单日口径重放（R1 既有语义）。"""
+        from dragon_quant.review_account import prep
+        day = "2026-10-16"
+        with patch("dragon_quant.review_account.prep.assets_db.get_prep_assets",
+                   return_value=_assets(day)), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_assets") as save_assets, \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_snapshot"), \
+             patch.object(prep, "TdxProvider"), patch.object(prep, "THSProvider"):
+            out = prep.run_prep(day, recompute=True)
+        save_assets.assert_not_called()
+        self.assertEqual(out["dragon_source"]["window_days"], 1)
+
+    def test_recompute_keeps_stored_rows_when_mirror_missing(self):
+        """镜像缺行时不得用「空」覆盖存量冻结行（T 日静默归零是最危险的退化）。"""
+        from dragon_quant.review_account import prep
+        day = "2026-10-20"
+        stored = _window_assets(
+            trade_date=day, rows=[{"code": "600001", "trade_date": day}])
+        written = {}
+
+        def fake_save(trade_date, payloads, report=None):
+            written.update(payloads)
+
+        def fake_get(trade_date):
+            return {**stored, "dragons": written.get("dragons", stored["dragons"])}
+
+        with patch("dragon_quant.review_account.prep.assets_db.get_prep_assets",
+                   side_effect=fake_get), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_assets",
+                   side_effect=fake_save), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_snapshot"), \
+             patch.object(prep, "dragons_mirror") as mirror, \
+             patch.object(prep, "_read_dragon_day", return_value=[]), \
+             patch.object(prep, "_stale_dates", return_value={day: 1}):
+            mirror.list_dragon_trade_dates.return_value = []
+            prep.run_prep(day, recompute=True)
+
+        payload = written["dragons"]
+        self.assertEqual([r["code"] for r in payload["rows"]], ["600001"])
+        self.assertIn(day, payload["rebuilt_fallback_days"])
+        self.assertEqual(payload["days"][-1]["status"], "ok")
+        self.assertEqual(payload["window_source"], "local")
+
+    def test_recompute_does_not_resurrect_legitimately_empty_day(self):
+        """源库确认该日为空（非 stale）时不得用存量 rows 复活旧数据。"""
+        from dragon_quant.review_account import prep
+        day = "2026-10-20"
+        stored = _window_assets(
+            trade_date=day, rows=[{"code": "600001", "trade_date": day}])
+        written = {}
+
+        def fake_save(trade_date, payloads, report=None):
+            written.update(payloads)
+
+        def fake_get(trade_date):
+            return {**stored, "dragons": written.get("dragons", stored["dragons"])}
+
+        with patch("dragon_quant.review_account.prep.assets_db.get_prep_assets",
+                   side_effect=fake_get), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_assets",
+                   side_effect=fake_save), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_snapshot"), \
+             patch.object(prep, "dragons_mirror") as mirror, \
+             patch.object(prep, "_read_dragon_day", return_value=[]), \
+             patch.object(prep, "_stale_dates", return_value={}):
+            mirror.list_dragon_trade_dates.return_value = []
+            prep.run_prep(day, recompute=True)
+
+        payload = written["dragons"]
+        self.assertEqual(payload["rows"], [])
+        self.assertNotIn("rebuilt_fallback_days", payload)
+        self.assertEqual(payload["days"][-1]["status"], "empty")
 
     def test_recompute_deterministic(self):
         from dragon_quant.review_account.prep import _compute_all
@@ -957,8 +1074,9 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
             collect_candidates(
                 ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07"],
                 "2026-09-07", StrategyConfig(), loader)
+        # 回退池默认 5 日（candidate_lookback_days）
         self.assertEqual([c.args[0] for c in loader.call_args_list],
-                         ["2026-09-02", "2026-09-03", "2026-09-04"])
+                         ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"])
 
     def test_falls_back_on_snapshot_read_error(self):
         from dragon_quant.review_account.market import collect_candidates
@@ -1001,9 +1119,11 @@ class TestPreSourceV1Removed(unittest.TestCase):
 
 
 def _window_assets(trade_date: str = "2026-10-20",
-                   window_dates=None, days=None, rows=None, **overrides):
-    """构造三日窗口资产（默认三日都有数据）。"""
-    window_dates = window_dates or ["2026-10-16", "2026-10-19", trade_date]
+                   window_dates=None, days=None, rows=None,
+                   window_days=None, **overrides):
+    """构造窗口资产（默认 5 日窗口且每日都有数据）。"""
+    window_dates = window_dates or ["2026-10-14", "2026-10-15", "2026-10-16",
+                                    "2026-10-19", trade_date]
     days = days or [{"trade_date": d, "scan_id": f"v2_{d.replace('-', '')}_top25",
                      "version": "1.0", "count": 1, "status": "ok"} for d in window_dates]
     if rows is None:
@@ -1013,18 +1133,21 @@ def _window_assets(trade_date: str = "2026-10-20",
     base["dragons"] = {
         "trade_date": trade_date, "scan_id": None, "version": None,
         "count": len(rows), "rows": rows,
-        "window_days": 3, "window_trade_dates": window_dates, "days": days,
+        "window_days": len(window_dates) if window_days is None else window_days,
+        "window_trade_dates": window_dates, "days": days,
     }
     base.update(overrides)
     return base
 
 
 class TestResolveWindowDates(unittest.TestCase):
-    def test_last_three_including_t(self):
+    def test_last_five_including_t(self):
         from dragon_quant.review_account.prep import resolve_window_dates
-        calendar = ["2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20"]
+        calendar = ["2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16",
+                    "2026-10-19", "2026-10-20"]
         self.assertEqual(resolve_window_dates("2026-10-20", calendar),
-                         ["2026-10-16", "2026-10-19", "2026-10-20"])
+                         ["2026-10-14", "2026-10-15", "2026-10-16",
+                          "2026-10-19", "2026-10-20"])
 
     def test_short_calendar_returns_available(self):
         from dragon_quant.review_account.prep import resolve_window_dates
@@ -1057,11 +1180,22 @@ class TestValidateTradeDateReturnsCalendar(unittest.TestCase):
 
 
 class TestCollectDragonsWindow(unittest.TestCase):
-    def _ctx(self, dates, window_days=3):
+    """读源已切 assets.db.dragons 镜像：patch 镜像读取 + 逐日对账。"""
+
+    def _ctx(self, dates, window_days=5):
         from dragon_quant.review_account.prep import PrepContext
         return PrepContext(trade_date=dates[-1], today="2026-10-20",
                            tdx=MagicMock(), ths=MagicMock(),
                            window_trade_dates=dates, window_days=window_days)
+
+    def _patch(self, rows=None, read_side_effect=None, stale=None):
+        return (
+            patch("dragon_quant.review_account.prep._read_dragon_day",
+                  return_value=rows if rows is not None else [],
+                  side_effect=read_side_effect),
+            patch("dragon_quant.review_account.prep._stale_dates",
+                  return_value=dict(stale or {})),
+        )
 
     def test_merges_days_and_injects_trade_date(self):
         from dragon_quant.review_account import prep
@@ -1072,8 +1206,8 @@ class TestCollectDragonsWindow(unittest.TestCase):
             "2026-10-20": [{"code": "B", "composite_score": 70,
                             "scan_id": "s20", "version": "1.0"}],
         }
-        with patch("dragon_quant.review_account.prep.db.get_dragons",
-                   side_effect=lambda day, source="v2": rows[day]):
+        read, stale = self._patch(read_side_effect=lambda day: rows[day])
+        with read, stale:
             payload = prep._collect_dragons(
                 self._ctx(["2026-10-16", "2026-10-17", "2026-10-20"]))
         self.assertEqual(payload["window_trade_dates"],
@@ -1083,11 +1217,13 @@ class TestCollectDragonsWindow(unittest.TestCase):
                          ["2026-10-16", "2026-10-20"])
         self.assertEqual(payload["days"][1]["status"], "empty")
         self.assertIsNone(payload["scan_id"])           # 多日窗口顶层恒 null
+        self.assertEqual(payload["window_source"], "calendar")
 
     def test_single_day_keeps_scan_id_scalar(self):
         from dragon_quant.review_account import prep
-        with patch("dragon_quant.review_account.prep.db.get_dragons",
-                   return_value=[{"code": "A", "scan_id": "s1", "version": "1.0"}]):
+        read, stale = self._patch(
+            rows=[{"code": "A", "scan_id": "s1", "version": "1.0"}])
+        with read, stale:
             payload = prep._collect_dragons(
                 self._ctx(["2026-10-20"], window_days=1))
         self.assertEqual(payload["scan_id"], "s1")
@@ -1096,12 +1232,13 @@ class TestCollectDragonsWindow(unittest.TestCase):
     def test_partial_error_isolated(self):
         from dragon_quant.review_account import prep
 
-        def fake(day, source="v2"):
+        def fake(day):
             if day == "2026-10-16":
                 raise RuntimeError("db down")
             return [{"code": "B", "scan_id": "s20"}]
 
-        with patch("dragon_quant.review_account.prep.db.get_dragons", side_effect=fake):
+        read, stale = self._patch(read_side_effect=fake)
+        with read, stale:
             payload = prep._collect_dragons(
                 self._ctx(["2026-10-16", "2026-10-20"]))
         self.assertEqual(payload["days"][0]["status"], "error")
@@ -1110,16 +1247,18 @@ class TestCollectDragonsWindow(unittest.TestCase):
 
     def test_all_error_with_no_rows_raises(self):
         from dragon_quant.review_account import prep
-        with patch("dragon_quant.review_account.prep.db.get_dragons",
-                   side_effect=RuntimeError("boom")):
+        read, stale = self._patch(read_side_effect=RuntimeError("boom"))
+        with read, stale:
             with self.assertRaises(RuntimeError) as cm:
                 prep._collect_dragons(self._ctx(["2026-10-16", "2026-10-20"]))
         self.assertIn("2026-10-16", str(cm.exception))
         self.assertIn("2026-10-20", str(cm.exception))
+        self.assertIn("2日龙头读取失败", str(cm.exception))
 
     def test_all_empty_without_error_is_empty_not_raise(self):
         from dragon_quant.review_account import prep
-        with patch("dragon_quant.review_account.prep.db.get_dragons", return_value=[]):
+        read, stale = self._patch(rows=[])
+        with read, stale:
             payload = prep._collect_dragons(
                 self._ctx(["2026-10-16", "2026-10-20"]))
         self.assertEqual(payload["count"], 0)
@@ -1127,13 +1266,54 @@ class TestCollectDragonsWindow(unittest.TestCase):
 
     def test_empty_window_falls_back_to_trade_date(self):
         from dragon_quant.review_account import prep
-        ctx = self._ctx(["2026-10-20"], window_days=3)
+        ctx = self._ctx(["2026-10-20"])
         ctx.window_trade_dates = []
-        with patch("dragon_quant.review_account.prep.db.get_dragons",
-                   return_value=[{"code": "A"}]) as get:
+        read, stale = self._patch(rows=[{"code": "A"}])
+        with read as get, stale:
             payload = prep._collect_dragons(ctx)
-        get.assert_called_once_with("2026-10-20", source="v2")
+        get.assert_called_once_with("2026-10-20")
         self.assertEqual(payload["window_trade_dates"], ["2026-10-20"])
+
+    def test_target_day_stale_raises_after_retry(self):
+        """目标日镜像缺行：200ms 短重试一次仍 stale → DragonsMirrorStale。"""
+        from dragon_quant.review_account import prep
+        read, stale = self._patch(rows=[])
+        with read, stale as stale_mock:
+            stale_mock.return_value = {"2026-10-20": 3}
+            with patch("dragon_quant.review_account.prep.time.sleep") as sleep:
+                with self.assertRaises(prep.DragonsMirrorStale) as cm:
+                    prep._collect_dragons(self._ctx(["2026-10-16", "2026-10-20"]))
+        sleep.assert_called_once()
+        self.assertIn("backfill-dragons", str(cm.exception))
+
+    def test_target_day_stale_retry_recovers_and_rereads(self):
+        """并发窗口恢复后必须回读真实行（首读的空列表不可复用）。"""
+        from dragon_quant.review_account import prep
+        reads = [[], [{"code": "A"}]]
+        with patch("dragon_quant.review_account.prep._read_dragon_day",
+                   side_effect=lambda day: reads.pop(0)), \
+             patch("dragon_quant.review_account.prep._stale_dates",
+                   side_effect=[{"2026-10-20": 1}, {}]), \
+             patch("dragon_quant.review_account.prep.time.sleep"):
+            payload = prep._collect_dragons(self._ctx(["2026-10-20"]))
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["days"][0]["status"], "ok")
+        self.assertEqual([r["code"] for r in payload["rows"]], ["A"])
+
+    def test_historical_day_stale_marked_error_not_empty(self):
+        """历史日 stale → 该日 error + mirror_stale_day 前缀（不得伪装 empty）。"""
+        from dragon_quant.review_account import prep
+        read, stale = self._patch(
+            read_side_effect=lambda day: ([{"code": "B"}] if day == "2026-10-20" else []),
+            stale={"2026-10-16": 2})
+        with read, stale:
+            payload = prep._collect_dragons(
+                self._ctx(["2026-10-16", "2026-10-20"]))
+        entry = payload["days"][0]
+        self.assertEqual(entry["status"], "error")
+        self.assertTrue(entry["error"].startswith("mirror_stale_day"))
+        self.assertIn("dragons_mirror_missing_day",
+                      prep._window_degradations(payload))
 
 
 class TestWindowDegradation(unittest.TestCase):
@@ -1164,8 +1344,54 @@ class TestWindowDegradation(unittest.TestCase):
         days = [{"trade_date": "2026-10-19", "status": "ok", "count": 1},
                 {"trade_date": "2026-10-20", "status": "ok", "count": 1}]
         out = _compute_all("2026-10-20", _window_assets(
-            window_dates=["2026-10-19", "2026-10-20"], days=days))
+            window_dates=["2026-10-19", "2026-10-20"], days=days,
+            window_days=5))
         self.assertIn("dragons_window_short", out["sentiment"]["degraded"])
+
+    def test_three_day_asset_marks_window_stale(self):
+        """升窗口后旧的 3 日资产必须显式标记口径落后（普通 prep 可本地升级）。"""
+        from dragon_quant.review_account.prep import _compute_all
+        days = [{"trade_date": d, "status": "ok", "count": 1}
+                for d in ("2026-10-16", "2026-10-19", "2026-10-20")]
+        out = _compute_all("2026-10-20", _window_assets(
+            window_dates=[d["trade_date"] for d in days], days=days,
+            window_days=3))
+        self.assertIn("dragons_window_stale", out["sentiment"]["degraded"])
+
+    def test_single_day_asset_marks_window_stale(self):
+        """window_days=1 的旧单日资产同样标 stale（不再静默跳过）。"""
+        from dragon_quant.review_account.prep import _compute_all
+        days = [{"trade_date": "2026-10-20", "status": "ok", "count": 1}]
+        out = _compute_all("2026-10-20", _window_assets(
+            window_dates=["2026-10-20"], days=days, window_days=1))
+        self.assertIn("dragons_window_stale", out["sentiment"]["degraded"])
+
+    def test_missing_window_days_key_produces_no_marks(self):
+        from dragon_quant.review_account.prep import _window_degradations
+        self.assertEqual(_window_degradations(
+            {"trade_date": "2026-10-20", "count": 1, "rows": []}), [])
+
+    def test_widened_dependents_stale_marked(self):
+        """窗口加宽新入候选无 fund_flow/cninfo 覆盖 → 显式降级（不伪造数据）。"""
+        from dragon_quant.review_account.prep import _compute_all
+        assets = _window_assets()
+        assets.pop("fund_flow")
+        assets.pop("cninfo_announcements")
+        out = _compute_all("2026-10-20", assets)
+        self.assertIn("dragons_window_widened_dependents_stale",
+                      out["sentiment"]["degraded"])
+        self.assertIsNone(out["candidates"][0]["main_net_amount"])
+
+    def test_mirror_missing_day_token_distinct_from_partial(self):
+        from dragon_quant.review_account.prep import _compute_all
+        days = [{"trade_date": d, "status": "ok", "count": 1}
+                for d in ("2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19")]
+        days.append({"trade_date": "2026-10-20", "count": 0, "status": "error",
+                     "error": "mirror_stale_day: 源库有行而镜像缺行"})
+        degraded = _compute_all("2026-10-20", _window_assets(days=days))[
+            "sentiment"]["degraded"]
+        self.assertIn("dragons_mirror_missing_day", degraded)
+        self.assertNotIn("dragons_partial", degraded)
 
     def test_malformed_dragons_payload_does_not_crash(self):
         from dragon_quant.review_account.prep import _compute_all
@@ -1304,7 +1530,9 @@ class TestDragonSourceLineage(unittest.TestCase):
                  "count": 1, "status": "ok"},
                 {"trade_date": "2026-10-20", "scan_id": "s20", "version": "1.1",
                  "count": 1, "status": "ok"}]
-        source = _compute_all("2026-10-20", _window_assets(days=days))["dragon_source"]
+        source = _compute_all("2026-10-20", _window_assets(
+            window_dates=[d["trade_date"] for d in days], days=days,
+            window_days=3))["dragon_source"]
         self.assertEqual(source["window_days"], 3)
         self.assertEqual([d["trade_date"] for d in source["dates"]],
                          ["2026-10-16", "2026-10-19", "2026-10-20"])
@@ -1411,9 +1639,17 @@ class TestAdviceReason(unittest.TestCase):
     def test_window_degraded_labels_are_rendered(self):
         from dragon_quant.review_account.advice import build_advice_reason
         text = build_advice_reason(
-            self._sentiment(degraded=["dragons_partial", "dragons_window_short"]), [])
-        self.assertIn("近三日龙头窗口缺日", text)
-        self.assertIn("交易日历不足三日", text)
+            self._sentiment(degraded=["dragons_partial", "dragons_window_short",
+                                      "dragons_window_stale",
+                                      "dragons_mirror_missing_day",
+                                      "dragons_window_widened_dependents_stale"]), [])
+        self.assertIn("龙头窗口缺日", text)
+        self.assertIn("交易日历不足以填满窗口", text)
+        self.assertIn("龙头窗口口径落后", text)
+        self.assertIn("龙头镜像缺日", text)
+        self.assertIn("窗口加宽后资金/公告覆盖不足", text)
+        # 文案不得再写死窗口天数（常量 3→5 后会变成事实性错误）
+        self.assertNotIn("三日", text)
 
     def test_control_characters_are_stripped(self):
         from dragon_quant.review_account.advice import build_advice_reason
@@ -1995,7 +2231,7 @@ class TestRunPrepIncremental(unittest.TestCase):
             self.assertEqual(assets_db.get_prep_assets(self.day), before)
             self.assertEqual(snap1, snap2)          # 快照覆盖写且内容一致
             self.assertTrue(plans[0].is_empty())
-            self.assertEqual(out1["version"], "0.5")
+            self.assertEqual(out1["version"], "0.6")
             self.assertTrue(snap1 and snap2)        # 零采集 ≠ 零 compute
 
     def test_partial_unhealthy_collects_only_that_type(self):
@@ -2081,7 +2317,7 @@ class TestRunPrepIncremental(unittest.TestCase):
         save_snap.assert_called_once()
         tdx_cls.assert_not_called()
         ths_cls.assert_not_called()
-        self.assertEqual(out["version"], "0.5")
+        self.assertEqual(out["version"], "0.6")
 
     def test_force_recollects_all_collectable(self):
         import tempfile

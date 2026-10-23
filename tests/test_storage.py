@@ -1,13 +1,14 @@
 """
 tests for dragon_quant.storage — paths + manager
 """
-import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from dragon_quant.storage.paths import DATA_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR
+
+from tests.support import patch_storage_dbs
 
 
 class TestPaths(unittest.TestCase):
@@ -507,8 +508,9 @@ class TestDragonsRebuildUnion(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def test_union_and_force_replace(self):
-        # 注意：db 层每次操作会主动 close 连接；因此这里必须用 side_effect 每次返回新连接。
-        with patch("dragon_quant.storage.db._connect", side_effect=lambda: sqlite3.connect(self._db_path)):
+        # db 层每次操作主动 close 连接，side_effect 每次返回新连接；
+        # save_dragons 会 fan-out 双写 assets.db 镜像，故两个连接点一起 patch。
+        with patch_storage_dbs(self._db_path):
             from dragon_quant.storage import db
             db.init_db()
 
@@ -626,9 +628,9 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
                 db.save_dragons("2026-06-20", [{"code": "A"}], scorer_version="v2")
 
     def test_default_v2_and_explicit_v1_are_separate_tables(self):
-        # db 层每次操作主动 close 连接，须用 side_effect 每次返回新连接
-        with patch("dragon_quant.storage.db._connect",
-                   side_effect=lambda: sqlite3.connect(self._db_path)):
+        # db 层每次操作主动 close 连接，side_effect 每次返回新连接；
+        # v2 写入会 fan-out 双写 assets.db 镜像，故两个连接点一起 patch。
+        with patch_storage_dbs(self._db_path):
             from dragon_quant.storage import db
             db.init_db()
             D = "2026-06-20"
@@ -645,8 +647,7 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             self.assertEqual(self._dragon_row("dragons_v2", D, "A")[:3], (2, 82.0, "from-v2"))
 
     def test_query_and_review_update_are_source_scoped(self):
-        with patch("dragon_quant.storage.db._connect",
-                   side_effect=lambda: sqlite3.connect(self._db_path)):
+        with patch_storage_dbs(self._db_path):
             from dragon_quant.storage import db
             db.init_db()
             D = "2026-06-20"
@@ -663,8 +664,7 @@ class TestSaveDragonsSourceIsolation(unittest.TestCase):
             self.assertEqual(db.get_review_summary(source="v2")["completed"], 0)
 
     def test_is_true_dragon_written_and_read_for_v2(self):
-        with patch("dragon_quant.storage.db._connect",
-                   side_effect=lambda: sqlite3.connect(self._db_path)):
+        with patch_storage_dbs(self._db_path):
             from dragon_quant.storage import db
             db.init_db()
             D = "2026-06-20"

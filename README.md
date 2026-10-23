@@ -1,10 +1,30 @@
-# dragon-quant 🐉
+<p align="center">
+  <img src="https://raw.githubusercontent.com/gitBingxu/dragon-quant/feat/factor-framework/assets/icon.png" width="120" alt="dragon-quant icon">
+</p>
 
-**龙头战法量化筛选系统** — A 股涨停板龙头识别工具
+<h1 align="center">dragon-quant A 股涨停板龙头识别工</h1>
 
-基于通达信 TDX（首选）+ 同花顺、雪球、腾讯三大公开数据源（宏观回退 Yahoo），对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
+<p align="center">
+  <a href="https://pypi.org/project/dragon-quant/"><img src="https://img.shields.io/pypi/v/dragon-quant" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/dragon-quant/"><img src="https://img.shields.io/badge/python-%3E%3D3.10-blue" alt="Python >= 3.10"></a>
+  <a href="https://github.com/gitBingxu/dragon-quant/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/dragon-quant" alt="License"></a>
+  <a href="https://pypi.org/project/dragon-quant/"><img src="https://img.shields.io/pypi/dm/dragon-quant" alt="Downloads"></a>
+  <a href="https://github.com/gitBingxu/dragon-quant"><img src="https://img.shields.io/github/stars/gitBingxu/dragon-quant" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/stable-scan%20%7C%20review-brightgreen" alt="Stability: scan and review">
+</p>
 
-当前主流程使用**五维「识别真龙」评分体系**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，采用**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。完整规则见 [评分规范](dragon_quant/scorers/评分器Refactor.md)。
+> ## 成熟度声明
+>
+> **本仓库当前只有 `scan` 与 `review` 两条链路是稳定的**，经过持续使用与回测验证：
+>
+> - **`scan`** — 五维「识别真龙」扫描，结果落到 `dragons_v2`；
+> - **`review`** — 龙头回测与 Web UI 结果查看。
+>
+> 稳定性状态变更时会更新本节；使用前请以本节为准。
+
+基于 tmdx，对涨停候选股进行多维量化评分，自动识别市场龙头；同时提供日志查询、SQLite 持久化、龙头回测与 Web UI 可视化能力。
+
+当前主流程使用**五维「识别真龙」评分体系**：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，采用**门槛 + 加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。设计哲学：龙头不是预判出来的，是「识别」出来的。完整规则见 [评分规范](https://github.com/gitBingxu/dragon-quant/blob/main/archived_md/score/评分器Refactor.md)。
 
 ## 目录
 
@@ -53,8 +73,6 @@ cd dragon-quant && pip install -e .
 ## 快速开始
 
 ```bash
-# 首次使用：配置雪球 Cookie（个股数据依赖；自动获取需 playwright，首次自动下载 chromium 内核约 150MB，走国内镜像）
-dragon-quant data cookie-fetch
 
 # 查看 Linux 风格帮助提示
 dragon-quant -h
@@ -63,31 +81,14 @@ dragon-quant scan -h
 # 五维「识别真龙」扫榜 — 找 top5 龙头
 dragon-quant scan --top 5
 
-# 账户级模拟交易回测（按真实账户逐日推进，可 --ui 打开 /account 面板）
-dragon-quant review-account --ui-only
-
 # 龙头回测 + Web UI
 dragon-quant review --ui
 # 查看龙头回测面板（默认读取 dragons_v2）
 dragon-quant review --ui-only
 
-# 实盘辅助交易（复用 review-account 策略，纯信号记账，不维护真实账户）
-dragon-quant buy                              # 盘中：候选池内触发买点的标的全部记入买入信号
-dragon-quant sell                             # 盘中：对已买入未卖出的信号判定是否卖出
-dragon-quant buy --date 20260907 --at 10:00   # 历史日期回放当日分时（必须指定 --at）
-dragon-quant buy --force                      # 非交易时段强制跑当日回放（09:30 前仍拒绝）
-dragon-quant sell --force                     # 同上，卖出建议
-
-# 因子层（P0-P2：只读迁移 + 财务链路 + 矩阵/评估 + 决策接入，默认不接入决策）
-dragon-quant factor list
-dragon-quant factor build --date 20260519
-dragon-quant factor query --date 20260519 --name five_dim_composite
-dragon-quant factor status
-dragon-quant factor export --from 20260501 --to 20260531 --name five_dim_composite --out /tmp/matrix.csv
-dragon-quant factor eval --name five_dim_composite --from 20260501 --to 20260831
+# 账户级模拟交易回测（按真实账户逐日推进，可 --ui 打开 /account 面板）
+dragon-quant review-account --ui-only
 ```
-
-> 雪球 Cookie 也可手动设置：`dragon-quant data cookie-set --cookie "xq_a_token=...; u=..."`。Cookie 文件位于数据目录下的 `cookies/xueqiu`（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。自动获取（`data cookie-fetch`）首次运行会自动下载 chromium 内核（约 150MB，走国内镜像，仅一次），无需手动 `playwright install`。
 
 ## CLI 命令大全
 
@@ -331,10 +332,10 @@ dragon-quant review-account --ui-only
 - 信号与成交分离：历史信号在下一可交易事件撮合，实时信号等待更晚的有效报价；跳空不补填成本线或止损价，封死涨跌停不假定能买卖。
 - T+1、当天卖出后不再买入；按事件顺序先卖后买，不用下午卖出结果阻止早上买入。止损、移动止盈、保本、高开窗口和尾盘规则共用一处实现；尾盘以 14:55 已知行情判断，15:00 只估值和更新峰值。
 - 默认仍保留原仓位基线；`--config params.json` 可统一设置风险预算、单票仓位上限、MA5 距离/趋势过滤、ATR 移动止盈。最低佣金默认每笔 5 元，双边滑点 0.2%，佣金 0.03%，卖出印花税 0.05%。
-- 择时与仓位改造（除龙回头默认开启外，其余 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、首日止损减半 `first_day_stop`（默认关；开启后 T+1 必须至少运行一次 `sell`）、时间止损、分级移动止盈、龙回头买点（**默认开启**，显式 false 可复现旧基线），及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。
+- 择时与仓位改造（除龙回头默认开启外，其余 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、首日止损减半 `first_day_stop`（默认关；开启后 T+1 必须至少运行一次 `sell`）、时间止损、分级移动止盈、龙回头买点（**默认开启**，显式 false 可复现旧基线），及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](https://github.com/gitBingxu/dragon-quant/blob/main/dragon_quant/review_account/STRATEGY.md)。
 - 数据分级成交：当日所有相关个股都有完整 5 分钟 K 时走严格盘中撮合；任一缺失则整日**日K兜底**（开盘价买入、当日 OHLC 判止损止盈，分歧买龙/高开窗口等分时规则自动跳过；分时可用但当日日K缺行的标的记为 `daily_unavailable`，当日不建行）。雪球 5 分钟历史约仅保留 14 天，故多月回测多为兜底模式，成交价为保守近似，结果标注 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。**停牌标的按 code 跳过并标记**：历史交易日「当日日K缺行」或「日K `volume`/`amount` 双零」且无分时 → 判停牌，不进当日 `rows`、不评估买卖、按最近可得收盘价估值（净值沿用上一交易日收盘），剔除停牌 code 后再判断是否整日兜底；结果新增 `suspended_days` / `suspended_codes` / `suspended_days_count` / `unavailable_days` / `data_degraded`，停牌候选仍保留在 `details` 并以 `reason_code=suspended` 说明。当日（盘中与收盘后）不做停牌分类（日K缓存按写入日命名、不校验新鲜度），沿用旧契约硬报错。日K完全无历史或预热不足仍报错、不保存部分回测；除权口径缺口仍待解决。
 
-`/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
+`/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](https://github.com/gitBingxu/dragon-quant/blob/main/dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
 
 - **买点统计**：`/account` 新增「买点统计」卡片，按四类买点（开盘回踩MA5 / 弱转强 / 分歧买龙 / 龙回头）+ 未知 code + 合计，展示笔数、盈利笔数、胜率、平均每笔收益、累计贡献收益；胜率与顶部 KPI 同源。基于已落库的 `entry_reason_code` / `realized_return` 实时聚合，旧 run 也可用；累计贡献按 `Σ已实现盈亏 / 初始资金` 估算（忽略买入佣金）。
 - **清仓后窗口指标**：「单票收益汇总」新增「清仓5日内最高盈利」「清仓5日内最大回撤」两列。窗口为卖出日之后的 5 根有效日K（停牌不计入、不足按实际、无 bar 显示 `—`），可越出回测区间（事后评估，不影响交易）；旧 run 不回溯，显示 `—`。最高盈利 =（窗口最高−卖出）/卖出×100，最大回撤 = min(0,（窗口最低−卖出）/卖出×100)。`GET /api/account/positions` 同时返回 `stats` 买点聚合（只增键）。

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/gitBingxu/dragon-quant/feat/factor-framework/assets/icon.png" width="120" alt="dragon-quant icon">
+  <img src="https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/icon.png" width="120" alt="dragon-quant icon">
 </p>
 
 <h1 align="center">dragon-quant 缅A龙头识别工具</h1>

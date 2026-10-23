@@ -12,7 +12,7 @@
 
 ## [Unreleased]
 
-## [0.7.1] - 待发布
+## [0.7.1] - 2026-10-24
 
 > 草稿：覆盖 `v0.7.0`（`f051fbd`）之后 `feat/factor-framework` 分支的 9 个提交（`4d58519..80668c7`）。因子层与资产同步均为**默认零影响**，升级后 `scan`/`review` 行为与 0.7.0 等价；但因 `prep` 窗口与候选池读源变更，历史回测结果不可直接与 0.7.0 比较。
 
@@ -45,7 +45,7 @@
 - 就地 `pull` 后如需收敛，用 `assets backfill-dragons --prune`，不要在镜像上手工删行。
 - 因子层保持默认关闭：不显式设置 `factor_ranking_enabled=True` 时排序与 0.7.0 逐位等价；`factor_values` 需自行 `factor build` 才有数据。
 
-## [0.7.0] - 待发布
+## [0.7.0] - 2026-10-22
 
 > 草稿：覆盖 v0.6.2（`a94a907`）之后 `feat/reviewa-account-op` 与 `feat/assets-sync-m2` 分支的全部变更（提交 `3610e98`…`533df8d`）。按记录口径，合入 main 并完成版本提交后补记日期与 MR 编号。
 

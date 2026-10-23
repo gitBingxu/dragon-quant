@@ -1,7 +1,6 @@
 """tests for 板块三维融合：规范化键、合并/去重/冲突剔除、扫描集成。"""
 import io
 import json
-import sqlite3
 import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stdout
@@ -15,8 +14,8 @@ from dragon_quant.sectors import (
     SECTOR_TOP_N, components_key, sector_1min_key, sector_5min_key,
     sector_key, split_sector_key,
 )
-from dragon_quant.storage import db
 from tests.test_scorers import _min_bars, _quote
+from tests.support import patch_storage_dbs
 
 
 def _sp(code, name, pct, category, source="tdx"):
@@ -110,8 +109,9 @@ class TestThreeDimensionScan(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.db_path = str(Path(self.tmp.name) / "test.db")
-        self.stack.enter_context(patch.object(
-            db, "_connect", side_effect=lambda: sqlite3.connect(self.db_path)))
+        # orch.scan() 会 save_dragons → 锁外 fan-out 双写 assets.db 镜像，
+        # 必须两个连接点一起隔离，否则镜像写落到真实数据目录。
+        self.stack.enter_context(patch_storage_dbs(self.db_path))
         self.stack.enter_context(patch.object(orch, "RESULTS_DIR", Path(self.tmp.name)))
         self.cache = DataCache(cache_dir="")
         self.stack.enter_context(patch.object(orch, "DataCache", return_value=self.cache))

@@ -271,7 +271,21 @@ class TestMarketAndSimulator(unittest.TestCase):
     def test_calendar_pool_does_not_skip_empty_dates(self):
         loader = MagicMock(return_value=[])
         collect_candidates(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", DAY], DAY, StrategyConfig(), loader)
-        self.assertEqual([c.args[0] for c in loader.call_args_list], ["2026-09-02", "2026-09-03", "2026-09-04"])
+        # 回退池默认 5 日（candidate_lookback_days 3→5）
+        self.assertEqual([c.args[0] for c in loader.call_args_list],
+                         ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"])
+
+    def test_default_lookback_five_and_explicit_three_reproduces_baseline(self):
+        """回退池默认 5 日；显式 3 可复现旧基线（不可直接比较，需文档声明）。"""
+        from dragon_quant.review_account.market import collect_candidates
+        self.assertEqual(StrategyConfig().candidate_lookback_days, 5)
+        loader = MagicMock(return_value=[])
+        calendar = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", DAY]
+        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=None):
+            collect_candidates(calendar, DAY,
+                               StrategyConfig(candidate_lookback_days=3), loader)
+        self.assertEqual([c.args[0] for c in loader.call_args_list],
+                         ["2026-09-02", "2026-09-03", "2026-09-04"])
 
     def test_candidate_pool_is_all_true_dragons_filtered_and_score_sorted(self):
         # 前三日全部真龙并集，共享层过滤否决/低分，按综合分降序，不再截断前5
@@ -312,7 +326,7 @@ class TestMarketAndSimulator(unittest.TestCase):
         self.assertEqual(len(r["intraday_bars"]), 1)
 
     def test_simulator_can_buy_first_requested_day(self):
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
             result = AccountSimulator(StrategyConfig(), data=FakeData()).run(DAY, DAY)
         self.assertEqual(len(result["trades"]), 1)
         self.assertEqual(result["trades"][0].trade_date, DAY)
@@ -320,7 +334,7 @@ class TestMarketAndSimulator(unittest.TestCase):
 
     def test_daily_fallback_runs_when_intraday_missing(self):
         data = FakeData(intraday_missing={DAY})
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
             result = AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
         self.assertEqual(result["data_quality"], "daily_fallback")
         self.assertEqual(result["fallback_days"], 1)
@@ -330,7 +344,7 @@ class TestMarketAndSimulator(unittest.TestCase):
     def test_missing_daily_still_fails(self):
         data = FakeData(intraday_missing={DAY})
         data.daily = MagicMock(side_effect=DataCoverageError("no daily"))
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]), self.assertRaises(DataCoverageError):
+        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])), self.assertRaises(DataCoverageError):
             AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
 
     def test_daily_fallback_stop_loss_price_by_reason(self):
@@ -349,7 +363,7 @@ class TestMarketAndSimulator(unittest.TestCase):
     def test_missing_intraday_fails_instead_of_faking_returns(self):
         data = FakeData()
         data.daily = MagicMock(side_effect=DataCoverageError("missing"))
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]), self.assertRaises(DataCoverageError):
+        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])), self.assertRaises(DataCoverageError):
             AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
 
     def test_historical_fill_is_after_signal(self):

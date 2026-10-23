@@ -22,8 +22,11 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # 降级 code → 中文标签（未知 code 原样展示）
 DEGRADED_LABELS = {
     "dragons": "龙头数据缺失",
-    "dragons_partial": "近三日龙头窗口缺日",
-    "dragons_window_short": "交易日历不足三日",
+    "dragons_partial": "龙头窗口缺日",
+    "dragons_window_short": "交易日历不足以填满窗口",
+    "dragons_window_stale": "龙头窗口口径落后（非最新窗口长度）",
+    "dragons_mirror_missing_day": "龙头镜像缺日（源库有行而镜像缺行）",
+    "dragons_window_widened_dependents_stale": "窗口加宽后资金/公告覆盖不足",
     "ths_limit_up_pool": "THS 涨停数据缺失",
     "ths_block_top": "题材主线数据缺失",
     "market_breadth": "市场宽度缺失",

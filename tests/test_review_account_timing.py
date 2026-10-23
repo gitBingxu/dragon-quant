@@ -2,7 +2,7 @@
 
 import unittest
 from datetime import date, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.test_review_account import CAND, DAY, FakeData, row, position
 
@@ -221,7 +221,7 @@ class TestEvaluationInfra(unittest.TestCase):
     def test_plateau_scan_structure(self):
         from dragon_quant.review_account.evaluation import plateau_scan
         data = FakeData()
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
             r = plateau_scan(DAY, DAY, data, StrategyConfig(), "max_position_pct", [25, 50, 100])
         self.assertIn("grid", r)
         self.assertEqual(r["trial_count"], 3)
@@ -229,7 +229,7 @@ class TestEvaluationInfra(unittest.TestCase):
     def test_ablation_structure(self):
         from dragon_quant.review_account.evaluation import ablation
         data = FakeData()
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
             r = ablation(DAY, DAY, data, StrategyConfig(), ["hard_stop", "trailing"])
         self.assertIn("baseline", r)
         self.assertEqual(set(r["marginal"]), {"hard_stop", "trailing"})

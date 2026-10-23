@@ -16,6 +16,7 @@ from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import SectorPerformance
 from dragon_quant.storage import db
 from tests.test_scorers import _min_bars, _quote
+from tests.support import patch_storage_dbs
 from dragon_quant.models.types import StockInfo, KBar, Candidate
 from dragon_quant.orchestrator import (
     _is_valid_candidate,
@@ -201,7 +202,9 @@ class TestScanScoringIntegration(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.db_path = str(Path(self.tmp.name) / "test.db")
-        self.stack.enter_context(patch.object(db, "_connect", side_effect=lambda: sqlite3.connect(self.db_path)))
+        # orch.scan() 的 Phase F 会 save_dragons → 锁外 fan-out 双写 assets.db 镜像，
+        # 必须两个连接点一起隔离，否则镜像写落到真实数据目录。
+        self.stack.enter_context(patch_storage_dbs(self.db_path))
         self.stack.enter_context(patch.object(orch, "RESULTS_DIR", Path(self.tmp.name)))
         self.cache = DataCache(cache_dir="")
         self.stack.enter_context(patch.object(orch, "DataCache", return_value=self.cache))
@@ -333,3 +336,67 @@ class TestApiFailureAttribution(unittest.TestCase):
         self.assertIn("已回退老链路", text.split("[dq]")[0])
         self.assertIn("[dq]", text)
         self.assertNotIn("[dq] 失败 1 次（已回退老链路）", text)
+
+
+class TestGetTradeDate(unittest.TestCase):
+    """_get_trade_date：TDX 优先（无 Cookie），雪球兜底，全失败返回 None。"""
+
+    @staticmethod
+    def _bar(date_str):
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        dt = _dt.strptime(date_str, "%Y-%m-%d").replace(tzinfo=_tz(_td(hours=8)))
+        return _make_kbar(int(dt.timestamp() * 1000), 1.0)
+
+    def _run(self, tdx=None, xq=None):
+        providers = {"tdx": tdx, "ths": None, "xueqiu": xq, "tencent": None}
+        with patch.object(orch, "create_providers", return_value=providers):
+            return orch._get_trade_date()
+
+    def test_tdx_minute_first(self):
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = [self._bar("2026-10-23")]
+        xq = Mock()
+        self.assertEqual(self._run(tdx, xq), "2026-10-23")
+        tdx.get_minute_kline.assert_called_once_with(orch.R.MARKET_SYMBOL)
+        xq.get_minute_kline.assert_not_called()
+        xq.get_kline.assert_not_called()
+
+    def test_tdx_daily_fallback_when_minute_empty(self):
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = []
+        tdx.get_kline.return_value = [self._bar("2026-10-22")]
+        self.assertEqual(self._run(tdx, Mock()), "2026-10-22")
+        tdx.get_kline.assert_called_once_with(orch.R.MARKET_SYMBOL, days=5)
+
+    def test_tdx_empty_lists_fall_through_to_xueqiu(self):
+        """TDX 两层都返回空列表（生产主路径：tdx 内部吞异常返回 []）→ 雪球兜底。"""
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = []
+        tdx.get_kline.return_value = []
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
+        self.assertEqual(self._run(tdx, xq), "2026-10-21")
+
+    def test_tdx_provider_missing_uses_xueqiu(self):
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-20")]
+        self.assertEqual(self._run(None, xq), "2026-10-20")
+
+    def test_xueqiu_fallback_when_tdx_fails(self):
+        tdx = Mock()
+        tdx.get_minute_kline.side_effect = RuntimeError("tdx down")
+        tdx.get_kline.side_effect = RuntimeError("tdx down")
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
+        self.assertEqual(self._run(tdx, xq), "2026-10-21")
+
+    def test_all_sources_fail_returns_none(self):
+        tdx = Mock()
+        tdx.get_minute_kline.side_effect = RuntimeError("boom")
+        tdx.get_kline.side_effect = RuntimeError("boom")
+        xq = Mock()
+        xq.get_minute_kline.side_effect = RuntimeError("boom")
+        xq.get_kline.side_effect = RuntimeError("boom")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertIsNone(self._run(tdx, xq))
+        self.assertIn("无法确定最近交易日", err.getvalue())

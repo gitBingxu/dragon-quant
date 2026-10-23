@@ -152,7 +152,9 @@ class TestAuctionSource(SourceTestBase):
 class TestRestore(SourceTestBase):
     def test_build_sources_uses_explicit_db_path(self):
         sources = build_sources(db_path=self.db_path)
-        self.assertEqual([source.name for source in sources], ["prep", "auction"])
+        self.assertEqual([source.name for source in sources],
+                         ["prep", "auction", "prepsnap", "auctionsnap",
+                          "dragons", "factor", "fin"])
         self.assertTrue(all(source.db_path == self.db_path for source in sources))
 
     def test_restore_prep_created_at_conflict_and_force(self):

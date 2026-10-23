@@ -1,18 +1,25 @@
 """push / pull / status / verify 编排（普通函数 + 共享 helper）。
 
+M6 起按**分区**处理（``date`` / ``period`` / ``period_raw`` / ``static``）：
+  - push 按 (分区, source) 判定新鲜度，新鲜源复用远端条目（0 本地读）；
+  - pull 对 ``merge_granularity="row"`` 的新表做行级合并，prep/auction 保持分片级门禁；
+  - status 增加 ``dates_drift`` 弱信号与 ``tables`` 覆盖图。
+
 返回统一 dict：``{"ok", "fatal", "failed", "summary"}``：
   - ``fatal=True`` 表示配置/传输/正式 manifest 不可读等阻断级错误 → CLI 退出 2；
-  - ``ok=False`` 且非 fatal（部分分片失败、收缩被拒、pull 冲突）→ CLI 退出 1。
+  - ``ok=False`` 且非 fatal（部分分片失败、收缩被拒、pull 冲突）→ CLI 退出 1；
+  - ``drift`` 是弱信号，不计入 ``ok``。
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
 import shutil
 from datetime import date, timedelta
 
 from dragon_quant._version import __version__
-from dragon_quant.assets_sync import codec, manifest as manifest_mod
+from dragon_quant.assets_sync import codec, manifest as manifest_mod, tables
 from dragon_quant.assets_sync.backends.s3 import content_md5_b64
 from dragon_quant.assets_sync.errors import (
     AmbiguousError,
@@ -30,23 +37,18 @@ from dragon_quant.assets_sync.state import (
     save_state,
 )
 
-CODEC_VERSION = 1
+CODEC_VERSION = 2
 DEFAULT_DATE_LIMIT = 30
 _MIN_FREE_BYTES = 16 * 1024 * 1024
+WARN_SHARD_BYTES = 16 * 1024 * 1024
+MAX_SHARD_BYTES = 32 * 1024 * 1024
+
 
 def _result(ok: bool, fatal: bool, failed: list, summary: dict) -> dict:
     summary = dict(summary)
     summary["fatal"] = bool(fatal)
     return {"ok": bool(ok), "fatal": bool(fatal), "failed": list(failed),
             "summary": summary}
-
-
-def _in_range(value: str, date_from: str | None, date_to: str | None) -> bool:
-    if date_from and value < date_from:
-        return False
-    if date_to and value > date_to:
-        return False
-    return True
 
 
 def _calendar_dates(date_from: str, date_to: str) -> list[str]:
@@ -59,19 +61,16 @@ def _calendar_dates(date_from: str, date_to: str) -> list[str]:
     return out
 
 
-def _remote_manifest_dates(backend) -> set[str]:
-    dates = set()
+def _remote_manifest_partitions(backend) -> set[str]:
+    partitions = set()
     for meta in backend.list("manifests/"):
         name = meta.key
         if not name.startswith("manifests/") or not name.endswith(".json"):
             continue
         value = name[len("manifests/"): -len(".json")]
-        try:
-            date.fromisoformat(value)
-        except ValueError:
-            continue
-        dates.add(value)
-    return dates
+        if codec.is_partition(value):
+            partitions.add(value)
+    return partitions
 
 
 def _diff_keys(local: dict[str, str], remote_manifest) -> list[str]:
@@ -128,46 +127,89 @@ def _created_signature(manifest) -> dict:
 def _put_manifest(backend, manifest) -> None:
     body = codec.manifest_to_bytes(manifest)
     backend.put(
-        codec.manifest_key(manifest.trade_date),
+        codec.manifest_key(manifest.partition),
         body,
         manifest_mod.manifest_metadata(manifest),
         content_md5=content_md5_b64(codec.hashes(body)[1]),
     )
 
 
-def _state_fresh(state: dict, trade_date: str, watermarks: dict) -> bool:
-    entry = (state.get("dates") or {}).get(trade_date)
+def _shard_row_count(shard: AssetShard) -> int | None:
+    """表分片的行数诊断（legacy 分片返回 None）。"""
+    try:
+        payload = json.loads(shard.content.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if isinstance(payload, dict) and "table" in payload:
+        rows = payload.get("rows")
+        if isinstance(rows, list):
+            return len(rows)
+    return None
+
+
+def _excluded_periods(partitions, date_from, date_to) -> list[dict]:
+    """显式给了 ``--from/--to`` 时，被区间排除的 period 分区（供人读提示）。"""
+    if not date_from and not date_to:
+        return []
+    out = []
+    for partition in partitions:
+        try:
+            info = codec.parse_partition(partition)
+        except ValueError:
+            continue
+        if info.kind not in ("period", "period_raw"):
+            continue
+        if info.sort_date and not codec.partition_in_range(partition, date_from, date_to):
+            out.append({"partition": partition, "sort_date": info.sort_date})
+    return sorted(out, key=lambda item: (item["sort_date"], item["partition"]))
+
+
+def _source_fresh(state: dict, source, partition: str, remote, watermarks: dict,
+                  volatile: dict) -> bool:
+    """按 (分区, source) 判新鲜：volatile 永不短路，且要求远端条目集合 ⊇ 上次集合。"""
+    if partition in volatile.get(source.name, set()):
+        return False
+    if remote is None:
+        return False
+    entry = (state.get("partitions") or {}).get(partition)
     if not entry or entry.get("codec") != CODEC_VERSION:
         return False
-    current = {name: wm[trade_date] for name, wm in watermarks.items()
-               if trade_date in wm}
-    previous = entry.get("sources") or {}
-    if set(current) != set(previous):
+    source_state = (entry.get("sources") or {}).get(source.name)
+    if not source_state:
         return False
-    return all((previous[name].get("watermark") == token)
-               for name, token in current.items())
+    token = (watermarks.get(source.name) or {}).get(partition)
+    if token is None or source_state.get("watermark") != token:
+        return False
+    recorded = set(source_state.get("entries") or [])
+    remote_keys = {key for key in remote.assets if key.startswith(source.name + ":")}
+    return recorded <= remote_keys
 
 
-def _record_state(state: dict, trade_date: str, manifest, watermarks: dict,
-                  timestamp: str) -> None:
+def _record_partition_state(state: dict, partition: str, manifest,
+                            watermarks: dict, timestamp: str) -> None:
     sources_state = {}
     for name, wm in watermarks.items():
-        token = wm.get(trade_date)
+        token = wm.get(partition)
         if token is None:
             continue
         sources_state[name] = {
             "watermark": token,
             "max_created_at": token.split("|", 1)[0],
+            "entries": sorted(key for key in manifest.assets
+                              if key.startswith(name + ":")),
         }
-    state.setdefault("dates", {})[trade_date] = {
+    kind = codec.partition_kind(partition)
+    state.setdefault("partitions", {})[partition] = {
+        "kind": kind,
         "manifest_id": manifest.manifest_id,
         "codec": CODEC_VERSION,
         "pushed_at": timestamp,
         "sources": sources_state,
     }
-    last = state.get("last_success_trade_date") or ""
-    if trade_date > last:
-        state["last_success_trade_date"] = trade_date
+    if kind == "date":
+        last = state.get("last_success_trade_date") or ""
+        if partition > last:
+            state["last_success_trade_date"] = partition
     state["updated_at"] = timestamp
 
 
@@ -199,55 +241,60 @@ def _push(backend, sources, *, state, paths, timestamp, date_from, date_to,
           all_dates, dry_run, allow_shrink) -> dict:
     report = SyncReport(dry_run=dry_run)
     watermarks: dict[str, dict[str, str]] = {}
-    for source in sources:
-        try:
+    volatile: dict[str, set] = {}
+    local_by_source: dict[str, set] = {}
+    try:
+        for source in sources:
             watermarks[source.name] = source.watermarks()
-        except Exception as exc:   # 源级失败：该次 push 无法判断水位
-            report.failed.append({
-                "kind": "source", "source": source.name,
-                "reason": f"{type(exc).__name__}: {exc}",
-            })
-            return _result(False, True, report.failed, dataclasses.asdict(report))
+            volatile[source.name] = source.volatile_partitions()
+            local_by_source[source.name] = set(source.partitions())
+    except Exception as exc:   # 源级失败：该次 push 无法判断水位 / 分区
+        report.failed.append({
+            "kind": "source", "source": getattr(source, "name", ""),
+            "reason": f"{type(exc).__name__}: {exc}",
+        })
+        return _result(False, True, report.failed, dataclasses.asdict(report))
 
-    local_dates: set[str] = set()
-    for source in sources:
-        try:
-            local_dates.update(source.list_dates())
-        except Exception as exc:
-            report.failed.append({
-                "kind": "source", "source": source.name,
-                "reason": f"{type(exc).__name__}: {exc}",
-            })
-            return _result(False, True, report.failed, dataclasses.asdict(report))
+    local_partitions: set[str] = set()
+    for value in local_by_source.values():
+        local_partitions |= value
 
-    dates = sorted(d for d in local_dates if _in_range(d, date_from, date_to))
+    partitions = sorted(
+        (p for p in local_partitions
+         if codec.partition_in_range(p, date_from, date_to)),
+        key=codec.partition_sort_key,
+    )
+    summary_extra = {"period_excluded": _excluded_periods(
+        local_partitions, date_from, date_to)}
+
     fatal = False
-
     if all_dates:
-        recorded = set((state.get("dates") or {}).keys())
-        for lost in sorted(recorded - local_dates):
-            if not _in_range(lost, date_from, date_to):
+        recorded = set((state.get("partitions") or {}).keys())
+        for lost in sorted(recorded - local_partitions, key=codec.partition_sort_key):
+            if not codec.partition_in_range(lost, date_from, date_to):
                 continue
             report.local_empty_remote_present.append(lost)
             report.failed.append({
-                "trade_date": lost, "kind": "local_empty",
-                "reason": "state 记录过该日但本地已无资产",
+                "partition": lost, "kind": "local_empty",
+                "reason": "state 记录过该分区但本地已无资产",
             })
 
-    for trade_date in dates:
+    for partition in partitions:
         try:
-            fatal = _push_date(
-                backend, sources, state=state, watermarks=watermarks, paths=paths,
-                timestamp=timestamp, trade_date=trade_date, all_dates=all_dates,
+            fatal = _push_partition(
+                backend, sources, state=state, watermarks=watermarks,
+                volatile=volatile, local_by_source=local_by_source,
+                paths=paths, timestamp=timestamp,
+                partition=partition, all_dates=all_dates,
                 dry_run=dry_run, allow_shrink=allow_shrink, report=report,
             ) or fatal
         except StorageError as exc:
             report.failed.append({
-                "trade_date": trade_date, "kind": "transport", "reason": str(exc)})
+                "partition": partition, "kind": "transport", "reason": str(exc)})
             fatal = True
         except IntegrityError as exc:
             report.failed.append({
-                "trade_date": trade_date, "kind": "manifest_unreadable",
+                "partition": partition, "kind": "manifest_unreadable",
                 "reason": str(exc)})
             fatal = True
 
@@ -256,103 +303,145 @@ def _push(backend, sources, *, state, paths, timestamp, date_from, date_to,
         save_state(paths.state_path, state)
 
     ok = not report.failed and not report.shrunk
-    return _result(ok, fatal, report.failed, dataclasses.asdict(report))
+    summary = dataclasses.asdict(report)
+    summary.update(summary_extra)
+    return _result(ok, fatal, report.failed, summary)
 
 
-def _push_date(backend, sources, *, state, watermarks, paths, timestamp,
-               trade_date, all_dates, dry_run, allow_shrink, report) -> bool:
-    entry = (state.get("dates") or {}).get(trade_date)
-    if not all_dates and not dry_run and _state_fresh(state, trade_date, watermarks):
-        remote_id, supported = manifest_mod.remote_manifest_id(backend, trade_date)
-        report.metadata_supported = report.metadata_supported and supported
-        if remote_id == entry.get("manifest_id"):
-            report.skipped += 1
-            report.dates.append({"trade_date": trade_date, "action": "skip"})
-            return False
+def _push_partition(backend, sources, *, state, watermarks, volatile,
+                    local_by_source, paths, timestamp, partition, all_dates,
+                    dry_run, allow_shrink, report) -> bool:
+    remote = None
+    if not dry_run:
+        remote = manifest_mod.read_remote_manifest(backend, partition)
 
-    shards = []
-    failures = []
+    entries: dict = {}
+    uploads: list[tuple[AssetShard, bytes]] = []
+    reused_sources: list[str] = []
     for source in sources:
+        prefix = source.name + ":"
+        source_local = partition in local_by_source.get(source.name, set())
+        remote_prefix = (remote is not None
+                         and any(key.startswith(prefix) for key in remote.assets))
+        if not source_local and not remote_prefix:
+            # 该源在此分区既无本地行、远端也无历史条目：无需读取。
+            continue
+        if not source_local:
+            # 远端曾有该源条目、本地已无行 → 读取空结果，交给收缩保护判定
+            # （绝不静默保留已消失的数据，也绝不静默删除）。
+            batch = source.read_partition(partition)
+            if batch.failed:
+                report.failed.extend(batch.failed)
+                report.dates.append({"partition": partition,
+                                     "action": "failed", "failed": batch.failed})
+                return False
+            continue
+        if (not dry_run and not all_dates
+                and _source_fresh(state, source, partition, remote,
+                                  watermarks, volatile)):
+            prefix = source.name + ":"
+            entries.update({key: entry for key, entry in remote.assets.items()
+                            if key.startswith(prefix)})
+            reused_sources.append(source.name)
+            continue
         try:
-            batch = source.read_date(trade_date)
+            batch = source.read_partition(partition)
         except Exception as exc:
             report.failed.append({
-                "trade_date": trade_date, "kind": "source", "source": source.name,
+                "partition": partition, "kind": "source", "source": source.name,
                 "reason": f"{type(exc).__name__}: {exc}",
             })
             return True
-        shards.extend(batch.shards)
-        failures.extend(batch.failed)
+        if batch.failed:
+            report.failed.extend(batch.failed)
+            report.dates.append({"partition": partition,
+                                 "trade_date": codec.partition_sort_date(partition)
+                                 if codec.partition_kind(partition) == "date" else "",
+                                 "action": "failed", "failed": batch.failed})
+            return False
+        for shard in batch.shards:
+            if shard.partition != partition:
+                report.failed.append({
+                    "partition": partition, "kind": "shard",
+                    "asset_type": shard.asset_type,
+                    "reason": "分片分区与请求分区不一致",
+                })
+                report.dates.append({"partition": partition, "action": "failed"})
+                return False
+            size = len(shard.content)
+            if size > MAX_SHARD_BYTES:
+                report.failed.append({
+                    "partition": partition, "kind": "shard_too_large",
+                    "asset_type": shard.asset_type,
+                    "reason": f"分片 {size} 字节超过上限 {MAX_SHARD_BYTES}",
+                })
+                report.dates.append({"partition": partition, "action": "failed"})
+                return False
+            if size > WARN_SHARD_BYTES:
+                report.dates.append({
+                    "partition": partition, "action": "warning",
+                    "warning": "shard_large", "asset_type": shard.asset_type,
+                    "size": size})
+            blob = codec.compress(shard.content)
+            entries[f"{shard.source}:{shard.asset_type}"] = codec.make_entry(
+                shard, blob, rows=_shard_row_count(shard))
+            uploads.append((shard, blob))
 
-    if failures:
-        report.failed.extend(failures)
-        report.dates.append({"trade_date": trade_date, "action": "failed",
-                             "failed": failures})
+    if not entries:
+        report.dates.append({"partition": partition, "action": "empty"})
         return False
 
-    if not shards:
-        report.dates.append({"trade_date": trade_date, "action": "empty"})
-        return False
+    built = manifest_mod.manifest_from_entries(
+        partition, entries, generated_at=timestamp,
+        generator_version=__version__)
+    base_entry = {
+        "partition": partition,
+        "manifest_id": built.manifest_id,
+        "shards": len(entries),
+    }
+    if reused_sources:
+        base_entry["reused"] = sorted(reused_sources)
 
     if dry_run:
-        built = manifest_mod.build_manifest(
-            trade_date, shards, generated_at=timestamp,
-            generator_version=__version__)
-        report.dates.append({
-            "trade_date": trade_date, "action": "push",
-            "manifest_id": built.manifest_id, "shards": len(shards),
-        })
+        report.dates.append({**base_entry, "action": "push"})
         return False
 
-    return _push_manifest(
-        backend, state=state, watermarks=watermarks, paths=paths,
-        timestamp=timestamp, trade_date=trade_date, shards=shards,
-        allow_shrink=allow_shrink, report=report)
-
-
-def _push_manifest(backend, *, state, watermarks, paths, timestamp, trade_date,
-                   shards, allow_shrink, report) -> bool:
-    built = manifest_mod.build_manifest(
-        trade_date, shards, generated_at=timestamp, generator_version=__version__)
-    remote_id, supported = manifest_mod.remote_manifest_id(backend, trade_date)
+    remote_id, supported = manifest_mod.remote_manifest_id(backend, partition)
     report.metadata_supported = report.metadata_supported and supported
 
     if remote_id == built.manifest_id:
-        remote = manifest_mod.read_remote_manifest(backend, trade_date)
+        remote = remote or manifest_mod.read_remote_manifest(backend, partition)
         if remote is not None and _created_signature(remote) == _created_signature(built):
             report.skipped += 1
-            action = "skip"
+            report.dates.append({**base_entry, "action": "skip"})
         else:
             # 仅采集时间变化；或 HEAD 与 GET 之间对象被删除/替换 → 重写 body（0 blob PUT）。
             _put_manifest(backend, built)
             report.manifests_uploaded += 1
-            action = "manifest_refresh"
-        _record_state(state, trade_date, built, watermarks, timestamp)
+            report.dates.append({**base_entry, "action": "manifest_refresh"})
+        _record_partition_state(state, partition, built, watermarks, timestamp)
         save_state(paths.state_path, state)
-        report.dates.append({"trade_date": trade_date, "action": action})
         return False
 
-    remote = manifest_mod.read_remote_manifest(backend, trade_date)
     if remote is not None and not allow_shrink:
         old_keys = set(remote.assets)
         new_keys = set(built.assets)
         if new_keys < old_keys:
             removed = sorted(old_keys - new_keys)
-            report.shrunk.append({"trade_date": trade_date, "removed": removed})
+            report.shrunk.append({"partition": partition, "removed": removed})
             report.failed.append({
-                "trade_date": trade_date, "kind": "shrink",
+                "partition": partition, "kind": "shrink",
                 "reason": "新 manifest 是远端严格子集，需 --allow-shrink",
                 "removed": removed,
             })
-            report.dates.append({"trade_date": trade_date, "action": "shrink_rejected"})
+            report.dates.append({**base_entry, "action": "shrink_rejected"})
             return False
 
-    for shard in shards:
+    for shard, blob in uploads:
         key = codec.blob_key(shard)
         meta = backend.head(key)
         if meta is not None and (meta.metadata or {}).get("sha256") == shard.sha256:
             continue
-        blob = codec.compress(shard.content)
         backend.put(key, blob, codec.blob_metadata(shard, blob),
                     content_md5=content_md5_b64(codec.hashes(blob)[1]))
         report.blobs_uploaded += 1
@@ -361,12 +450,9 @@ def _push_manifest(backend, *, state, watermarks, paths, timestamp, trade_date,
     _put_manifest(backend, built)
     report.manifests_uploaded += 1
     report.pushed += 1
-    _record_state(state, trade_date, built, watermarks, timestamp)
+    _record_partition_state(state, partition, built, watermarks, timestamp)
     save_state(paths.state_path, state)
-    report.dates.append({
-        "trade_date": trade_date, "action": "push",
-        "manifest_id": built.manifest_id, "shards": len(shards),
-    })
+    report.dates.append({**base_entry, "action": "push"})
     return False
 
 
@@ -390,31 +476,37 @@ def pull(backend, sources, *, date_from, date_to, apply=False, force=False,
             lock.release()
 
 
-def _blob_dates(backend, *, date_from=None, date_to=None,
-                tolerate_errors=False) -> set[str]:
-    """从 `blobs/` 前缀一次性求出现过的日期（避免按自然日空转）。
+def _blob_partitions(backend, *, date_from=None, date_to=None,
+                     tolerate_errors=False) -> set[str]:
+    """从 `blobs/` 前缀一次性求出出现过的分区（避免按自然日空转）。
 
     ``tolerate_errors=True`` 时 LIST 失败（如超过 10 万 key）降级为空集合，
-    不阻断按 manifest/本地日期进行的恢复。
+    不阻断按 manifest/本地分区进行的恢复。
     """
-    dates = set()
+    partitions = set()
     try:
         objects = backend.list("blobs/")
     except StorageError:
         if tolerate_errors:
-            return dates
+            return partitions
         raise
     for meta in objects:
         parts = meta.key.split("/")
         if len(parts) < 3 or parts[0] != "blobs":
             continue
-        try:
-            date.fromisoformat(parts[1])
-        except ValueError:
+        if not codec.is_partition(parts[1]):
             continue
-        if _in_range(parts[1], date_from, date_to):
-            dates.add(parts[1])
-    return dates
+        if codec.partition_in_range(parts[1], date_from, date_to):
+            partitions.add(parts[1])
+    return partitions
+
+
+def _partition_label(partition: str) -> dict:
+    kind = codec.partition_kind(partition)
+    return {
+        "partition": partition,
+        "trade_date": partition if kind == "date" else "",
+    }
 
 
 def _pull(backend, sources, *, date_from, date_to, apply, force, pick_latest,
@@ -426,68 +518,69 @@ def _pull(backend, sources, *, date_from, date_to, apply, force, pick_latest,
     try:
         known: set[str] = set()
         for source in sources:
-            known.update(source.list_dates())
-        known |= _remote_manifest_dates(backend)
-        known |= _blob_dates(
+            known.update(source.partitions())
+        known |= _remote_manifest_partitions(backend)
+        known |= _blob_partitions(
             backend, date_from=date_from, date_to=date_to, tolerate_errors=True)
     except Exception as exc:
         return _result(False, True, [{
             "kind": "source", "reason": f"{type(exc).__name__}: {exc}"}],
             dataclasses.asdict(report))
 
-    for trade_date in sorted(d for d in known if _in_range(d, date_from, date_to)):
+    report.period_excluded = _excluded_periods(known, date_from, date_to)
+
+    selected = sorted(
+        (p for p in known if codec.partition_in_range(p, date_from, date_to)),
+        key=codec.partition_sort_key,
+    )
+    for partition in selected:
         try:
-            manifest = manifest_mod.read_remote_manifest(backend, trade_date)
+            manifest = manifest_mod.read_remote_manifest(backend, partition)
             manifest_source = "remote"
             degraded = False
             if manifest is None:
                 manifest, degraded = manifest_mod.rebuild_manifest(
-                    backend, trade_date, pick_latest=pick_latest)
+                    backend, partition, pick_latest=pick_latest)
                 manifest_source = "rebuilt"
         except AmbiguousError as exc:
             report.failed.append({
-                "trade_date": trade_date, "kind": "ambiguous", "reason": str(exc)})
+                **_partition_label(partition), "kind": "ambiguous", "reason": str(exc)})
             continue
         except IntegrityError as exc:
             report.failed.append({
-                "trade_date": trade_date, "kind": "manifest_unreadable",
+                **_partition_label(partition), "kind": "manifest_unreadable",
                 "reason": str(exc)})
             fatal = True
             continue
         except StorageError as exc:
             report.failed.append({
-                "trade_date": trade_date, "kind": "transport", "reason": str(exc)})
-            fatal = True
-            continue
-        if manifest is not None and manifest.trade_date != trade_date:
-            report.failed.append({
-                "trade_date": trade_date, "kind": "manifest_unreadable",
-                "reason": f"manifest trade_date 与请求日期不一致: {manifest.trade_date}"})
+                **_partition_label(partition), "kind": "transport", "reason": str(exc)})
             fatal = True
             continue
 
         if manifest is None or not manifest.assets:
-            report.dates.append({"trade_date": trade_date, "action": "no_remote"})
+            report.dates.append({**_partition_label(partition), "action": "no_remote"})
             continue
         if manifest_source == "rebuilt":
             report.manifest_source = "rebuilt"
         if degraded:
             report.degraded = True
 
-        local: dict[str, str] = {}
+        local: dict[str, str] | None = {}
         for source in sources:
             try:
-                local.update(source.local_index(trade_date))
+                index, _counts, _shards = source.local_snapshot(partition)
+                local.update(index)
             except IntegrityError as exc:
                 report.failed.append({
-                    "trade_date": trade_date, "kind": "integrity",
+                    **_partition_label(partition), "kind": "integrity",
                     "source": source.name, "reason": str(exc),
                 })
                 local = None
                 break
             except Exception as exc:
                 report.failed.append({
-                    "trade_date": trade_date, "kind": "source",
+                    **_partition_label(partition), "kind": "source",
                     "source": source.name, "reason": f"{type(exc).__name__}: {exc}",
                 })
                 fatal = True
@@ -498,45 +591,54 @@ def _pull(backend, sources, *, date_from, date_to, apply, force, pick_latest,
 
         needed = []
         conflicts = []
+        pending = 0
         for key, entry in sorted(manifest.assets.items()):
             if entry.source not in by_name:
                 report.unsupported.append({
-                    "trade_date": trade_date, "key": key, "source": entry.source})
+                    **_partition_label(partition), "key": key,
+                    "source": entry.source})
                 continue
             local_sha = local.get(key)
             if local_sha is None:
                 needed.append(entry)
             elif local_sha == entry.sha256:
                 report.skipped += 1
-            elif not force:
-                conflicts.append({
-                    "trade_date": trade_date, "key": key,
-                    "local_sha256": local_sha, "remote_sha256": entry.sha256,
-                })
             else:
-                needed.append(entry)
+                granularity = by_name[entry.source].merge_granularity_for(
+                    entry.asset_type)
+                if granularity == "shard" and not force:
+                    conflicts.append({
+                        **_partition_label(partition), "key": key,
+                        "local_sha256": local_sha, "remote_sha256": entry.sha256,
+                    })
+                else:
+                    needed.append(entry)
+                    if granularity == "row":
+                        pending += 1
         report.conflicts.extend(conflicts)
+        report.merge_pending += pending
 
         if not apply:
             report.dates.append({
-                "trade_date": trade_date, "action": "plan",
+                **_partition_label(partition), "action": "plan",
                 "download": len(needed), "conflicts": len(conflicts),
+                "merge_pending": pending,
                 "manifest_source": manifest_source,
             })
             continue
         if not needed:
             report.dates.append({
-                "trade_date": trade_date, "action": "nothing",
+                **_partition_label(partition), "action": "nothing",
                 "conflicts": len(conflicts)})
             continue
 
         total = sum(int(entry.blob_size or 0) for entry in needed)
-        tmp_date = paths.tmp_dir / trade_date
-        tmp_date.mkdir(parents=True, exist_ok=True)
-        free = shutil.disk_usage(str(tmp_date)).free
+        tmp_partition = paths.tmp_dir / partition
+        tmp_partition.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(str(tmp_partition)).free
         if free < total * 2 + _MIN_FREE_BYTES:
             report.failed.append({
-                "trade_date": trade_date, "kind": "config",
+                **_partition_label(partition), "kind": "config",
                 "reason": f"临时区磁盘不足: 需要 {total * 2 + _MIN_FREE_BYTES}，剩余 {free}",
             })
             fatal = True
@@ -550,20 +652,20 @@ def _pull(backend, sources, *, date_from, date_to, apply, force, pick_latest,
                 content = _load_blob(entry, blob)
             except (IntegrityError, NotFoundError, OSError) as exc:
                 report.failed.append({
-                    "trade_date": trade_date, "key": entry.blob,
+                    **_partition_label(partition), "key": entry.blob,
                     "kind": "integrity", "reason": str(exc)})
                 integrity_failed = True
                 break
             except StorageError as exc:
                 report.failed.append({
-                    "trade_date": trade_date, "key": entry.blob,
+                    **_partition_label(partition), "key": entry.blob,
                     "kind": "transport", "reason": str(exc)})
                 fatal = True
                 integrity_failed = True
                 break
             report.bytes_downloaded += len(blob)
             shards.append(AssetShard(
-                trade_date=trade_date,
+                partition=partition,
                 asset_type=entry.asset_type,
                 source=entry.source,
                 content=content,
@@ -580,32 +682,38 @@ def _pull(backend, sources, *, date_from, date_to, apply, force, pick_latest,
         for shard in shards:
             grouped.setdefault(shard.source, []).append(shard)
 
-        date_failed = False
+        partition_failed = False
         for name, group in grouped.items():
             try:
-                restored = by_name[name].restore(trade_date, group, force=force)
+                restored = by_name[name].restore(partition, group, force=force)
             except Exception as exc:
                 report.failed.append({
-                    "trade_date": trade_date, "source": name, "kind": "db",
+                    **_partition_label(partition), "source": name, "kind": "db",
                     "reason": f"{type(exc).__name__}: {exc}",
                 })
-                date_failed = True
+                partition_failed = True
                 continue
             report.restored += restored.restored
             report.skipped += restored.skipped
+            report.rows_inserted += restored.rows_inserted
+            report.rows_skipped += restored.rows_skipped
+            report.rows_filled += restored.rows_filled
             report.conflicts.extend(
-                {**item, "trade_date": trade_date, "source": name}
+                {**item, **_partition_label(partition), "source": name}
                 for item in restored.conflicts)
+            report.deferred.extend(
+                {**item, **_partition_label(partition), "source": name}
+                for item in restored.deferred)
             report.failed.extend(
-                {**item, "trade_date": trade_date, "source": name}
+                {**item, **_partition_label(partition), "source": name}
                 for item in restored.failed)
 
         report.dates.append({
-            "trade_date": trade_date, "action": "applied",
+            **_partition_label(partition), "action": "applied",
             "shards": len(shards), "conflicts": len(conflicts),
         })
-        if not date_failed:
-            shutil.rmtree(tmp_date, ignore_errors=True)
+        if not partition_failed:
+            shutil.rmtree(tmp_partition, ignore_errors=True)
 
     ok = not report.failed and not report.conflicts
     return _result(ok, fatal, report.failed, dataclasses.asdict(report))
@@ -614,111 +722,203 @@ def _pull(backend, sources, *, date_from, date_to, apply, force, pick_latest,
 # ─── status ───────────────────────────────────────────────────────────────
 
 
+def _select_partitions(partitions, all_dates: bool) -> list[str]:
+    """默认窗口：date 取最近 30 个，period/period_raw/static 全取。
+
+    不能沿用 ``sorted(...)[-30:]``——``fin-`` / ``static-`` 在字符串序里落在
+    ``2026-`` 之后，直接取尾会丢掉最近日期分区。
+    """
+    ordered = sorted(partitions, key=codec.partition_sort_key)
+    if all_dates:
+        return ordered
+    dates = [p for p in ordered if codec.partition_kind(p) == "date"]
+    others = [p for p in ordered if codec.partition_kind(p) != "date"]
+    return sorted(dates[-DEFAULT_DATE_LIMIT:] + others, key=codec.partition_sort_key)
+
+
+def _drift_or_mismatch(diff_keys, local_index, local_rows, remote) -> tuple[list, list]:
+    drift, mismatched = [], []
+    for key in diff_keys:
+        entry = remote.assets.get(key)
+        if entry is None:
+            mismatched.append(key)
+            continue
+        try:
+            spec = tables.spec_for(entry.source, entry.asset_type)
+        except KeyError:
+            spec = None
+        local_sha = local_index.get(key)
+        local_count = int(local_rows.get(key) or 0)
+        if (spec is not None and spec.drift_ok and entry.rows is not None
+                and local_sha is not None and local_sha != entry.sha256
+                and local_count > int(entry.rows)):
+            drift.append(key)
+        else:
+            mismatched.append(key)
+    return drift, mismatched
+
+
+def _tables_coverage(remote_counts: dict, local_counts: dict) -> dict:
+    coverage = {}
+    for spec in tables.TABLE_SPECS:
+        coverage[spec.unit_key] = {
+            "table": spec.table,
+            "partition_kind": spec.partition_kind,
+            "merge": spec.merge_granularity,
+            "volatile": spec.volatile,
+            "local_entries": int(local_counts.get(spec.unit_key, 0)),
+            "remote_entries": int(remote_counts.get(spec.unit_key, 0)),
+        }
+    coverage["prep:*"] = {"table": "prep_assets", "partition_kind": "date",
+                          "merge": "shard", "volatile": False,
+                          "local_entries": int(local_counts.get("prep", 0)),
+                          "remote_entries": int(remote_counts.get("prep", 0))}
+    coverage["auction:*"] = {"table": "auction_assets", "partition_kind": "date",
+                             "merge": "shard", "volatile": False,
+                             "local_entries": int(local_counts.get("auction", 0)),
+                             "remote_entries": int(remote_counts.get("auction", 0))}
+    return coverage
+
+
 def status(backend, sources, *, all_dates=False, orphans=False, paths=None,
            now=None) -> dict:
     paths = paths or default_paths()
     try:
-        local_dates = set()
+        local_partitions: set[str] = set()
         for source in sources:
-            local_dates.update(source.list_dates())
-        remote_dates = _remote_manifest_dates(backend)
+            local_partitions.update(source.partitions())
+        remote_partitions = _remote_manifest_partitions(backend)
     except Exception as exc:
         return _result(False, True, [{
             "kind": "transport", "reason": f"{type(exc).__name__}: {exc}"}],
-            {"dates": [], "dates_missing": [], "dates_mismatched": []})
+            {"dates": [], "dates_missing": [], "dates_mismatched": [],
+             "dates_drift": []})
 
-    all_known = sorted(local_dates | remote_dates)
-    dates = all_known if all_dates else all_known[-DEFAULT_DATE_LIMIT:]
+    selected = _select_partitions(local_partitions | remote_partitions, all_dates)
     summary = {
         "dates": [],
         "dates_missing": [],
         "dates_mismatched": [],
+        "dates_drift": [],
         "bytes_local": 0,
         "bytes_remote": 0,
         "last_state": _state_summary(paths),
         "metadata_supported": True,
         "orphan_blobs": [] if orphans else None,
+        # M6：factor_* / fin_* 已纳入同步（值保持为 {}，见方案 §10 breaking 说明）
+        "not_synced": {},
+        "tables": {},
     }
     fatal = False
     orphan_unknown: list[str] = []
+    remote_counts: dict[str, int] = {}
+    local_counts: dict[str, int] = {}
 
-    for trade_date in dates:
+    for partition in selected:
         local: dict[str, str] | None = None
+        local_rows: dict[str, int] = {}
         local_shards: list = []
-        if trade_date in local_dates:
+        if partition in local_partitions:
             local = {}
             try:
                 for source in sources:
-                    batch = source.read_date(trade_date)
-                    if batch.failed:
-                        raise IntegrityError(
-                            f"本地 {source.name} 资产损坏: {batch.failed[0].get('reason')}")
-                    local_shards.extend(batch.shards)
-                    local.update({f"{s.source}:{s.asset_type}": s.sha256
-                                  for s in batch.shards})
-                    summary["bytes_local"] += sum(len(s.content) for s in batch.shards)
+                    index, counts, shards = source.local_snapshot(partition)
+                    local.update(index)
+                    local_rows.update(counts)
+                    local_shards.extend(shards)
+                    summary["bytes_local"] += sum(len(s.content) for s in shards)
             except IntegrityError as exc:
                 summary["dates"].append({
-                    "trade_date": trade_date, "status": "local_error",
+                    **_partition_label(partition), "status": "local_error",
                     "reason": str(exc)})
                 continue
             except Exception as exc:
                 summary["dates"].append({
-                    "trade_date": trade_date, "status": "local_error",
+                    **_partition_label(partition), "status": "local_error",
                     "reason": f"{type(exc).__name__}: {exc}"})
                 fatal = True
                 continue
 
         try:
-            remote_id, supported = manifest_mod.remote_manifest_id(backend, trade_date)
+            remote_id, supported = manifest_mod.remote_manifest_id(backend, partition)
             summary["metadata_supported"] = summary["metadata_supported"] and supported
-            remote = manifest_mod.read_remote_manifest(backend, trade_date)
+            remote = manifest_mod.read_remote_manifest(backend, partition)
         except IntegrityError as exc:
             summary["dates"].append({
-                "trade_date": trade_date, "status": "unreadable", "reason": str(exc)})
+                **_partition_label(partition), "status": "unreadable",
+                "reason": str(exc)})
             fatal = True
             continue
         except StorageError as exc:
             summary["dates"].append({
-                "trade_date": trade_date, "status": "transport_error", "reason": str(exc)})
+                **_partition_label(partition), "status": "transport_error",
+                "reason": str(exc)})
             fatal = True
             continue
 
         if local is None:
             summary["dates_missing"].append({
-                "trade_date": trade_date, "reason": "local_missing"})
-            summary["dates"].append({"trade_date": trade_date, "status": "local_missing"})
+                **_partition_label(partition), "reason": "local_missing"})
+            summary["dates"].append({
+                **_partition_label(partition), "status": "local_missing"})
             continue
         if remote is None:
             summary["dates_missing"].append({
-                "trade_date": trade_date, "reason": "remote_missing"})
-            entry = {"trade_date": trade_date, "status": "remote_missing"}
+                **_partition_label(partition), "reason": "remote_missing"})
+            entry = {**_partition_label(partition), "status": "remote_missing"}
             if orphans:
-                orphan_unknown.append(trade_date)
+                orphan_unknown.append(partition)
                 entry["orphans"] = None
                 entry["orphan_reason"] = "manifest_missing"
             summary["dates"].append(entry)
             continue
 
+        for key in local:
+            local_counts[key.split(":", 1)[0]] = local_counts.get(
+                key.split(":", 1)[0], 0) + 1
+            if tables.has_spec(*key.split(":", 1)):
+                local_counts[key] = local_counts.get(key, 0) + 1
+        for key in remote.assets:
+            remote_counts[key.split(":", 1)[0]] = remote_counts.get(
+                key.split(":", 1)[0], 0) + 1
+            if tables.has_spec(*key.split(":", 1)):
+                remote_counts[key] = remote_counts.get(key, 0) + 1
+
         diff = _diff_keys(local, remote)
+        drift_keys, mismatch_keys = _drift_or_mismatch(
+            diff, local, local_rows, remote)
         local_manifest_id = codec.manifest_id_for_shards(local_shards)
         id_mismatch = bool(remote_id) and local_manifest_id != remote_id
-        if diff or id_mismatch:
+        # 追加式单元的「本地行更多」会让 manifest_id 必然不同；此时按 drift 处理，
+        # 不让 id 差异把它升级成 mismatched（定性交给 verify）。
+        if drift_keys and not mismatch_keys:
+            id_mismatch = False
+        if mismatch_keys or id_mismatch:
             summary["dates_mismatched"].append({
-                "trade_date": trade_date,
-                "keys": diff,
+                **_partition_label(partition),
+                "keys": mismatch_keys,
                 "local_manifest_id": local_manifest_id,
                 "remote_manifest_id": remote_id,
             })
+        if drift_keys:
+            summary["dates_drift"].append({
+                **_partition_label(partition),
+                "keys": drift_keys, "reason": "row_count_only",
+            })
         summary["bytes_remote"] += sum(
             int(entry.blob_size or 0) for entry in remote.assets.values())
+        if mismatch_keys or id_mismatch:
+            state = "mismatched"
+        elif drift_keys:
+            state = "drift"
+        else:
+            state = "ok"
         summary["dates"].append({
-            "trade_date": trade_date,
-            "status": "mismatched" if (diff or id_mismatch) else "ok",
+            **_partition_label(partition), "status": state,
             "keys": len(remote.assets),
         })
         if orphans:
-            listed = backend.list(f"blobs/{trade_date}/")
+            listed = backend.list(f"blobs/{partition}/")
             expected = {entry.blob for entry in remote.assets.values()}
             summary["orphan_blobs"].extend(
                 meta.key for meta in listed if meta.key not in expected)
@@ -729,6 +929,7 @@ def status(backend, sources, *, all_dates=False, orphans=False, paths=None,
         summary["orphan_reason"] = {
             "reason": "manifest_missing", "dates": orphan_unknown}
 
+    summary["tables"] = _tables_coverage(remote_counts, local_counts)
     ok = not summary["dates_missing"] and not summary["dates_mismatched"] and not fatal
     return _result(ok, fatal, summary["dates_missing"] + summary["dates_mismatched"],
                    summary)
@@ -736,11 +937,13 @@ def status(backend, sources, *, all_dates=False, orphans=False, paths=None,
 
 def _state_summary(paths) -> dict:
     state = load_state(paths.state_path) if paths.state_path else {}
+    partitions = state.get("partitions") or {}
     return {
         "hostname": state.get("hostname", ""),
         "updated_at": state.get("updated_at", ""),
         "last_success_trade_date": state.get("last_success_trade_date", ""),
-        "dates": len(state.get("dates") or {}),
+        "partitions": len(partitions),
+        "dates": len(partitions),
     }
 
 
@@ -753,19 +956,26 @@ def verify(backend, sources, *, date_from=None, date_to=None, samples=None,
         raise ValueError("--from 与 --to 必须成对指定")
     paths = paths or default_paths()
     try:
-        local_dates = set()
+        local_partitions: set[str] = set()
         for source in sources:
-            local_dates.update(source.list_dates())
-        remote_dates = _remote_manifest_dates(backend)
+            local_partitions.update(source.partitions())
+        remote_partitions = _remote_manifest_partitions(backend)
     except Exception as exc:
         return _result(False, True, [{
             "kind": "transport", "reason": f"{type(exc).__name__}: {exc}"}],
             {"checked_dates": 0, "checked_blobs": 0, "mismatched": []})
 
+    known = local_partitions | remote_partitions
     if date_from and date_to:
-        dates = _calendar_dates(date_from, date_to)
+        selected = set(_calendar_dates(date_from, date_to))
+        selected |= {p for p in known
+                     if codec.partition_kind(p) in ("period", "period_raw")
+                     and codec.partition_in_range(p, date_from, date_to)}
+        selected |= {p for p in known if codec.partition_kind(p) == "static"}
+        partitions = sorted(selected, key=codec.partition_sort_key)
     else:
-        dates = sorted(local_dates | remote_dates)[-DEFAULT_DATE_LIMIT:]
+        partitions = _select_partitions(known, False)
+    excluded = _excluded_periods(known, date_from, date_to)
 
     mismatched: list[dict] = []
     entries: list[tuple[str, str, object]] = []
@@ -773,62 +983,65 @@ def verify(backend, sources, *, date_from=None, date_to=None, samples=None,
     checked_dates = 0
     metadata_supported = True
 
-    for trade_date in dates:
+    for partition in partitions:
         try:
-            metadata_id, supported = manifest_mod.remote_manifest_id(backend, trade_date)
+            metadata_id, supported = manifest_mod.remote_manifest_id(backend, partition)
             metadata_supported = metadata_supported and supported
-            remote = manifest_mod.read_remote_manifest(backend, trade_date)
+            remote = manifest_mod.read_remote_manifest(backend, partition)
         except (IntegrityError, StorageError) as exc:
-            mismatched.append({"trade_date": trade_date, "reason": str(exc)})
+            mismatched.append({**_partition_label(partition), "reason": str(exc)})
             continue
         if remote is None:
-            mismatched.append({"trade_date": trade_date, "reason": "manifest_missing"})
+            mismatched.append({**_partition_label(partition),
+                               "reason": "manifest_missing"})
             continue
         checked_dates += 1
         if metadata_id and metadata_id != remote.manifest_id:
             mismatched.append({
-                "trade_date": trade_date, "reason": "metadata_id_mismatch",
+                **_partition_label(partition), "reason": "metadata_id_mismatch",
                 "metadata_id": metadata_id, "body_id": remote.manifest_id,
             })
         local: dict[str, str] | None = None
-        if trade_date in local_dates:
+        if partition in local_partitions:
             local = {}
             try:
                 for source in sources:
-                    local.update(source.local_index(trade_date))
+                    index, _counts, _shards = source.local_snapshot(partition)
+                    local.update(index)
             except Exception as exc:
                 mismatched.append({
-                    "trade_date": trade_date,
+                    **_partition_label(partition),
                     "reason": f"local_read_error: {type(exc).__name__}: {exc}",
                 })
                 local = None
         else:
-            local_absent.append(trade_date)
+            local_absent.append(partition)
         if local:
             diff = _diff_keys(local, remote)
             if diff:
                 mismatched.append({
-                    "trade_date": trade_date, "reason": "local_diff", "keys": diff})
-        entries.extend((trade_date, key, entry)
+                    **_partition_label(partition), "reason": "local_diff",
+                    "keys": diff})
+        entries.extend((partition, key, entry)
                        for key, entry in sorted(remote.assets.items()))
 
     checked_blobs = 0
     md5_details: list[dict] = []
     if deep:
         chosen = entries if samples is None else _sample(entries, samples)
-        for trade_date, key, entry in chosen:
+        for partition, key, entry in chosen:
             try:
                 blob = backend.get(entry.blob)
                 content = _load_blob(entry, blob)
             except (IntegrityError, NotFoundError, StorageError, OSError) as exc:
                 mismatched.append({
-                    "trade_date": trade_date, "key": key,
+                    **_partition_label(partition), "key": key,
                     "reason": f"blob_invalid: {exc}"})
                 continue
             checked_blobs += 1
             if show_md5:
                 md5_details.append({
-                    "trade_date": trade_date, "key": key,
+                    **_partition_label(partition), "key": key,
                     "md5": codec.hashes(content)[1],
                 })
 
@@ -840,6 +1053,7 @@ def verify(backend, sources, *, date_from=None, date_to=None, samples=None,
         "local_absent": local_absent,
         "deep": bool(deep),
         "samples": samples,
+        "period_excluded": excluded,
     }
     if show_md5:
         summary["md5"] = md5_details

@@ -30,7 +30,8 @@ class AssetsDbTestBase(unittest.TestCase):
     def tearDown(self):
         self.assertEqual(
             _signature(ASSETS_DB_PATH), self._real_sig,
-            "测试写入了真实 assets.db：请检查 patch 目标是否失效",
+            "测试写入了数据目录的 assets.db：请检查 patch 目标是否失效"
+            "（pytest 下该路径已被 conftest 重定向到临时目录）",
         )
         self._tmpdir.cleanup()
 

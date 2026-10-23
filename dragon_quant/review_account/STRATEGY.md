@@ -123,7 +123,8 @@ stateDiagram-v2
 
 - **P（prep 推荐）**：快照 `verdict ∈ {strong,light}` → True；`ignore/unrated` → False；缺 verdict（旧快照）→ Unknown。
 - **A（竞价）**：有行 ∧ `unverified=False` ∧ `is_weak=False` → True；有行 ∧ verified ∧ `is_weak=True` → False；无行/损坏/`unverified`/空 items 哨兵 → Unknown。
-- **排序**：`tier(A,P)`（True<Unknown<False）→ composite desc → priority desc → code。`TradingEngine` 与 `SignalEngine` 共用 `rank_key`；`buy` 的 buy-all 语义不变。
+- **排序**：`tier(A,P)`（True<Unknown<False）→ `factor_rank`（0 有分 / 1 缺失）→ `factor_score` desc → composite desc → priority desc → code。`TradingEngine` 与 `SignalEngine` 共用 `rank_key`；`buy` 的 buy-all 语义不变。
+- **因子分量（P2）**：`factor_ranking_enabled` 默认 False。关闭时 `key_components` 强制 `factor_rank=0 / factor_score=0.0 / factor_mode="off"`，插入的两个零分量对所有候选相同 → 排序与旧实现逐位等价。开启时缺失候选进 `factor_rank=1` 桶排在有分者之后（缺失 ≠ 中性）；整日 `degraded`（无模型快照 / 读取失败 / 覆盖率 < `factor_min_coverage`）完全回退为关闭态。`key_components` 是唯一归零/缺失判定处，`rank_key` 只消费其输出；`priority_key` 落库携带 `factor_mode`，事后可判定当日排序是否受因子影响。
 - **候选池**：`prep_verdict_filter_enabled=True` 时 `ignore` 出池；推荐集为空/快照缺失/读取异常 → 回退 legacy，回退池不再应用 ignore 过滤；P 仍按快照如实标注。
 - **开关**：`auction_ranking_enabled`（A 参与排序）/ `auction_veto_enabled`（D3 否决）均默认 False；任一开启才读取 `auction_snapshots`，两者皆关时零读取/零否决/A 恒 Unknown（AC8'）。
 - **否决**：`auction_veto_enabled=True` 且 A=False → `BuyRejected("auction_veto")`；`auction_veto_exempt_signals` 按买点类型豁免。`entry_veto` 仍是无调用方的通用前置钩子。
@@ -155,3 +156,13 @@ stateDiagram-v2
 **JSON**：`buy --json` 的 `details[].checks[]` 字段为 `rule` / `label` / `window` / `status` / `selected` / `reason`；detail 另带 `observed_at` / `phase`。`checks` 只进 detail JSON，不写 `buy_sell_signals`。
 
 **window_closed 的一致性**：③ 诊断固定传 `intraday_bars[:N]`，因此 14:55（`late`）重算出的原因与 10:00 判定一致；①/②/④ 的输入为时间不变量（open/prev_row/hist_rows/first_bar）。`_no_pattern_reason` 为 phase 无关的四规则摘要，Web UI 的 `reason_text` 在 `late` 帧不再退化为兜底文案。
+
+---
+
+## 9. 候选池读源与回退池窗口（2026-10-23）
+
+- **读源**：`review-account` / `buy` / `sell` 的候选池优先读 T-1 `prep_snapshots`；回退池读 **`assets.db.dragons` 镜像**（`market.candidate_loader("v2")`）。`--source v1` 是显式例外，经 `candidate_loader` 分派回 `dragon.db.dragons_v1`（镜像只承载 v2）。
+- **回退池默认 5 日**：`StrategyConfig.candidate_lookback_days` 默认 `3 → 5`，与 prep 窗口一致。
+- **不可比基线声明**：默认值变更是**策略默认参数变更**，本基线下的 `review-account` 结果与历史 3 日基线**不可直接比较**；复现旧基线请显式 `candidate_lookback_days=3`（`--config` 传入）。prep 命中路径不受该参数影响。
+- **失败语义**：镜像 `/` 当日缺行会让池 loader fail-fast（`DragonsMirrorStale`），`review-account` 与 `buy` 中止并提示 `assets backfill-dragons`；`sell` 降级为「仅按持仓判定」并在 `degraded` 输出 `candidate_pool_unavailable`。
+- **运维**：`assets backfill-dragons --dry-run` 体检；对账是单向下限，孤儿行只能靠 `--dry-run` 的 `orphan_rows` 或 `--prune` 发现。

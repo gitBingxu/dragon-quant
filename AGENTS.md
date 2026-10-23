@@ -204,13 +204,13 @@ dragon_quant/
 
 ## 执行流程
 
-编排器 `orchestrator.scan()` 分 6 个阶段：
+编排器 `orchestrator.scan()` 分 6 个阶段（最近交易日判定 `_get_trade_date` 为 TDX 指数K线优先、雪球兜底，不依赖雪球 Cookie）：
 
 | Phase | 做什么 |
 |-------|--------|
 | **A** 板块排行 | TDX/THS 三维板块榜（行业/概念/地区）融合取 Top8 + **行业**领跌 Top20，过滤 DB 黑名单；逐维度 TDX→THS 回退，单维度失败标 `degraded`、不中断扫描 |
 | **B** 候选筛选 | 每个入选板块取当日所有涨停股(pct≥9.9)，过滤 ST+双创+北交所；跨板块同 code 去重，`primary_sector` = 总榜排名最高板块 |
-| **C** 连板+排序 | 雪球日K 算连板天数，写 `Candidate.fived_pct`，按(连板,概念数)降序，候选池全部评分 |
+| **C** 连板+排序 | TDX 日K 算连板天数（雪球回退），写 `Candidate.fived_pct`，按(连板,概念数)降序，候选池全部评分 |
 | **D** 并发加载 | 板块历史10日5分K + 板块当日1分K + 大盘1分K + 全候选1分K + 腾讯批量行情 |
 | **E** 打分 | `_score_one` 调 `scorers.aggregator.evaluate()`，五维门槛+加权 → DragonVerdict |
 | **F** 输出+持久化 | 所有候选保留诊断分与明细，仅通过者排名；Top N 真龙报告/入库 + 5日去重，保留原始排名 |

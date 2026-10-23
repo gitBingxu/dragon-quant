@@ -365,32 +365,46 @@ def _print_cached_output(output_data: dict, top_n: int):
 
 
 def _get_trade_date() -> Optional[str]:
-    """通过雪球API确定最近交易日（A股）。
+    """确定最近交易日（A股）。TDX 优先（无 Cookie），雪球兜底。
 
-    先尝试分时K线，失败回退日K线。返回 "YYYY-MM-DD" 或 None。
+    先分时K线（能精确反映当日是否有交易），失败回退日K线（latest bar 即最近交易日）。
+    返回 "YYYY-MM-DD" 或 None。
     """
-    from dragon_quant.providers import create_providers
     providers = create_providers()
-    xq = providers.get("xueqiu")
-    if not xq:
-        return None
     bj_tz = timezone(timedelta(hours=8))
-    # 优先分时K线（能精确反映当日是否有交易）
-    try:
-        bars = xq.get_minute_kline("600519")
-        if bars:
-            ts = bars[-1].timestamp / 1000
-            return datetime.fromtimestamp(ts, tz=bj_tz).strftime("%Y-%m-%d")
-    except Exception:
-        pass
-    # 回退日K线（latest bar 即最近交易日）
-    try:
-        klines = xq.get_kline("600519", days=5)
-        if klines:
-            ts = klines[-1].timestamp / 1000
-            return datetime.fromtimestamp(ts, tz=bj_tz).strftime("%Y-%m-%d")
-    except Exception:
-        pass
+
+    def _last_bar_date(bars) -> Optional[str]:
+        if not bars:
+            return None
+        return datetime.fromtimestamp(bars[-1].timestamp / 1000, tz=bj_tz).strftime("%Y-%m-%d")
+
+    # 优先 TDX 上证指数（与 prep 日期门禁同源，不依赖雪球 Cookie）。
+    # 契约：TDX KBar 的 timestamp 是本机墙钟解释（providers/tdx.py 的 time.mktime），
+    # 此处再用固定 +08 反解日期——依赖运行机器时区为 Asia/Shanghai（项目运行环境约定）。
+    tdx = providers.get("tdx")
+    if tdx:
+        for fetch in (lambda: tdx.get_minute_kline(R.MARKET_SYMBOL),
+                      lambda: tdx.get_kline(R.MARKET_SYMBOL, days=5)):
+            try:
+                d = _last_bar_date(fetch())
+                if d:
+                    return d
+            except Exception:
+                pass
+
+    # 回退雪球（600519 历史口径，需 Cookie）
+    xq = providers.get("xueqiu")
+    if xq:
+        for fetch in (lambda: xq.get_minute_kline("600519"),
+                      lambda: xq.get_kline("600519", days=5)):
+            try:
+                d = _last_bar_date(fetch())
+                if d:
+                    return d
+            except Exception:
+                pass
+    print("  ⚠️ 无法确定最近交易日（TDX/雪球均不可用），缓存与日期判定回退自然日",
+          file=sys.stderr)
     return None
 
 
@@ -455,7 +469,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             from dragon_quant.storage import db
             # Step 1: 精确匹配当天日期
             cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n, source=source)
-            # Step 2: 当天无记录 → 用雪球分时K确定最近交易日，查历史记录
+            # Step 2: 当天无记录 → 确定最近交易日（TDX 优先，雪球兜底），查历史记录
             if not cached_scan:
                 trade_date = _get_trade_date()
                 if trade_date and trade_date != scan_date_fmt:
@@ -495,7 +509,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                           provider_delays={"ths": (0.3, 0.6)})
 
     # provider 磁盘缓存命名空间：按交易日复用，避免每次命令重打满同花顺。
-    #   trade_date 优先用雪球分时K确定的最近交易日，失败回退自然日。
+    #   trade_date 优先用 TDX 确定的最近交易日（雪球兜底），失败回退自然日。
     #   volatile：--force 闯入交易时段时，provider 缓存只用内存不落盘，
     #             防止盘中波动数据冻结进当日交易日目录污染收盘后复用。
     trade_date = _get_trade_date() or now.strftime("%Y-%m-%d")

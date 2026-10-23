@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/gitBingxu/dragon-quant/feat/factor-framework/assets/icon.png" width="120" alt="dragon-quant icon">
 </p>
 
-<h1 align="center">dragon-quant A 股涨停板龙头识别工</h1>
+<h1 align="center">dragon-quant 缅A龙头识别工具</h1>
 
 <p align="center">
   <a href="https://pypi.org/project/dragon-quant/"><img src="https://img.shields.io/pypi/v/dragon-quant" alt="PyPI version"></a>

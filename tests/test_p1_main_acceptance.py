@@ -86,12 +86,13 @@ class TestMainAcceptance(TempDbBase):
         meta = financial.compute_roe_factor(ctx).meta
         self.assertEqual(meta["skipped"], {"invalid_denominator": 1})
 
-    def test_assets_status_marks_factor_and_fin_not_synced(self):
+    def test_assets_status_marks_factor_and_fin_synced(self):
+        # M6 breaking 变更：factor_* / fin_* 已纳入同步，not_synced 恒为 {}。
         from dragon_quant import cli  # noqa: F401 — 先走正常入口，规避 cli↔cli_commands 循环
         from dragon_quant.cli_commands import _assets_human_summary
         text = _assets_human_summary("assets status", {"summary": {}})
-        self.assertIn("factor_*: not_synced", text)
-        self.assertIn("fin_*: not_synced", text)
+        self.assertIn("已纳入同步", text)
+        self.assertNotIn("not_synced", text)
 
 
 if __name__ == "__main__":

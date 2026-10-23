@@ -463,20 +463,49 @@ def _assets_human_summary(command: str, result: dict) -> str:
                 f"blobs={summary.get('blobs_uploaded', 0)} "
                 f"manifests={summary.get('manifests_uploaded', 0)}")
     if command.endswith("pull"):
-        return (f"恢复：restored={summary.get('restored', 0)} "
+        text = (f"恢复：restored={summary.get('restored', 0)} "
                 f"skipped={summary.get('skipped', 0)} "
-                f"conflicts={len(summary.get('conflicts') or [])} "
+                f"已判定冲突={len(summary.get('conflicts') or [])} "
                 f"source={summary.get('manifest_source', 'remote')}")
+        pending = int(summary.get("merge_pending") or 0)
+        if pending:
+            text += (f"\n待判定：{pending} 个行级分片需 --apply 下载后逐行比对"
+                     "（dry-run 不代表 0 冲突）")
+        deferred = summary.get("deferred") or []
+        if deferred:
+            text += f"\n延后补齐：{len(deferred)} 条 raw_blob（元数据行缺失）"
+        return text
     if command.endswith("status"):
-        return (f"状态：missing={len(summary.get('dates_missing') or [])} "
+        tables = summary.get("tables") or {}
+        synced = sum(1 for item in tables.values() if item.get("remote_entries"))
+        text = (f"状态：missing={len(summary.get('dates_missing') or [])} "
                 f"mismatched={len(summary.get('dates_mismatched') or [])} "
+                f"drift={len(summary.get('dates_drift') or [])} "
                 f"local={summary.get('bytes_local', 0)}B "
                 f"remote={summary.get('bytes_remote', 0)}B\n"
-                "factor_*: not_synced\n"
-                "fin_*: not_synced")
+                f"同步覆盖：{synced}/{len(tables)} 个同步单元有远端数据")
+        if summary.get("not_synced"):
+            for name, state in summary["not_synced"].items():
+                text += f"\n{name}: {state}"
+        else:
+            text += "\nfactor_* / fin_*: 已纳入同步"
+        if summary.get("dates_drift"):
+            text += "\ndrift 仅为弱信号（本地行数更多）；定性请用 verify"
+        return text
     return (f"校验：dates={summary.get('checked_dates', 0)} "
             f"blobs={summary.get('checked_blobs', 0)} "
             f"mismatched={len(summary.get('mismatched') or [])}")
+
+
+def _period_filter_hint(summary: dict) -> str | None:
+    """显式 --from/--to 排除报告期分区时的一行人读提示（不失败、不改退出码）。"""
+    excluded = summary.get("period_excluded") or []
+    if not excluded:
+        return None
+    names = "、".join(item["partition"] for item in excluded[:3])
+    suffix = " 等" if len(excluded) > 3 else ""
+    return (f"提示：--from/--to 按报告期末过滤，已排除 {len(excluded)} 个报告期分区"
+            f"（{names}{suffix}）；如需同步请放宽区间。")
 
 
 def _cmd_assets_sync(args) -> None:
@@ -557,6 +586,9 @@ def _cmd_assets_sync(args) -> None:
         return
 
     print(_assets_human_summary(command, result), file=sys.stderr)
+    hint = _period_filter_hint(result.get("summary") or {})
+    if hint:
+        print(hint, file=sys.stderr)
     exit_code = 2 if result.get("fatal") else (0 if result.get("ok") else 1)
     _emit_assets({
         "ok": result.get("ok", False),

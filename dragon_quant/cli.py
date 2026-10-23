@@ -399,7 +399,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "assets",
         help="数据资产云端同步（备份/恢复）",
         usage="dragon-quant assets <action> [action-options]",
-        description="把 prep/auction 产出的原始数据资产备份到 S3 兼容对象存储，或从云端恢复。",
+        description="把 assets.db 全部 14 张表的行级数据资产备份到 S3 兼容对象存储，"
+                    "或从云端恢复（prep/auction 原始资产 + 快照/因子/财务表）。",
         epilog="""Examples:
   dragon-quant assets push --profile r2
   dragon-quant assets pull --from 20261020 --to 20261022 --apply
@@ -432,13 +433,14 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "push",
         help="上传本地原始数据资产",
         usage="dragon-quant assets push [--from D] [--to D] [--all] [--dry-run]",
-        description="增量上传 assets.db 的 prep/auction 原始资产；无变化时零上传。",
+        description="增量上传 assets.db 全部表；按分区 + 来源判水位，volatile 单元强制重读。\n"
+                    "--from/--to 对 fin 表按报告期末过滤，static 分区始终参与。",
     )
     _assets_common(assets_push)
     assets_push.add_argument("--from", dest="from_date", default=None,
-                             help="起始交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
+                             help="起始日期 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)；fin 表按报告期末比较")
     assets_push.add_argument("--to", dest="to_date", default=None,
-                             help="结束交易日 (同 --from 格式)")
+                             help="结束日期 (同 --from 格式)；static 分区不受区间影响")
     assets_push.add_argument("--all", dest="all_dates", action="store_true",
                              help="忽略 state 水位，重算全部本地日期")
     assets_push.add_argument("--dry-run", dest="dry_run", action="store_true",
@@ -450,13 +452,14 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "pull",
         help="从云端恢复原始数据资产",
         usage="dragon-quant assets pull --from D --to D [--apply] [--force]",
-        description="默认 dry-run；--apply 下载、逐片校验后写入 assets.db。",
+        description="默认 dry-run；--apply 下载、逐片校验后写入 assets.db。"
+                    "新表按行级合并（缺则补、冲突需 --force），prep/auction 保持分片级门禁。",
     )
     _assets_common(assets_pull)
     assets_pull.add_argument("--from", dest="from_date", required=False, default=None,
-                             help="起始交易日（必填）")
+                             help="起始日期（必填）；fin 表按报告期末比较")
     assets_pull.add_argument("--to", dest="to_date", required=False, default=None,
-                             help="结束交易日（必填）")
+                             help="结束日期（必填）；static 分区始终参与")
     assets_pull.add_argument("--apply", action="store_true",
                              help="执行下载与写库（默认只输出计划）")
     assets_pull.add_argument("--force", action="store_true",
@@ -470,11 +473,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "status",
         help="展示本地/云端差异",
         usage="dragon-quant assets status [--all] [--orphans]",
-        description="逐日比较本地与云端 manifest，输出缺失/不一致/体积。",
+        description="逐分区比较本地与云端 manifest，输出缺失/不一致/drift/体积与同步覆盖图。"
+                    "not_synced 已恒为空对象（factor_*/fin_* 已纳入同步）。",
     )
     _assets_common(assets_status)
     assets_status.add_argument("--all", dest="all_dates", action="store_true",
-                               help="检查全部日期（默认最近 30 个）")
+                               help="检查全部分区（默认最近 30 个 date + 全部 period/static）")
     assets_status.add_argument("--orphans", action="store_true",
                                help="额外统计未被 manifest 引用的孤儿 blob")
 
@@ -482,7 +486,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "verify",
         help="校验 manifest / blob 完整性",
         usage="dragon-quant assets verify [--from D --to D | --samples N] [--deep]",
-        description="默认校验 manifest 哈希；--deep 下载并解压校验分片内容。",
+        description="默认校验 manifest 哈希；--deep 下载并解压校验分片内容。"
+                    "不做 drift 豁免：字节级差异一律报告。",
     )
     _assets_common(assets_verify)
     assets_verify.add_argument("--from", dest="from_date", default=None,

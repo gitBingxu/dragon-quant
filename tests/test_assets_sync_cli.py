@@ -164,5 +164,28 @@ class TestAssetsCliTargetDir(unittest.TestCase):
             self.assertFalse((main_data / "assets_sync.lock").exists())
 
 
+class TestPeriodFilterHint(unittest.TestCase):
+    def test_hint_when_period_partitions_excluded(self):
+        from dragon_quant.cli_commands import _period_filter_hint
+        hint = _period_filter_hint({"period_excluded": [
+            {"partition": "fin-2025-12-31", "sort_date": "2025-12-31"},
+            {"partition": "finraw-2025-12-31", "sort_date": "2025-12-31"},
+        ]})
+        self.assertIsNotNone(hint)
+        self.assertIn("报告期", hint)
+        self.assertIn("fin-2025-12-31", hint)
+        self.assertIsNone(_period_filter_hint({"period_excluded": []}))
+        self.assertIsNone(_period_filter_hint({}))
+
+    def test_pull_summary_distinguishes_pending_from_zero_conflict(self):
+        from dragon_quant.cli_commands import _assets_human_summary
+        text = _assets_human_summary("assets pull", {"summary": {
+            "restored": 0, "skipped": 0, "conflicts": [],
+            "manifest_source": "remote", "merge_pending": 2}})
+        self.assertIn("已判定冲突=0", text)
+        self.assertIn("待判定", text)
+        self.assertIn("--apply", text)
+
+
 if __name__ == "__main__":
     unittest.main()

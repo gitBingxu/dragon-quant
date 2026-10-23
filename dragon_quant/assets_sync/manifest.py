@@ -1,9 +1,10 @@
-"""manifest 构建、远端读取与从 blob 重建。
+"""manifest 构建、远端读取与从 blob 重建（分区化，M6）。
 
-约定见技术方案 §5.2 / §6.1 / §6.3：
-  - manifest 每日一份，重采覆盖；``manifest_id`` 只对逻辑身份字段计算。
+约定见技术方案 §6 / §8：
+  - manifest 每分区一份，重采覆盖；``manifest_id`` 只对逻辑身份字段计算。
+  - date 分区写 schema 1，period / period_raw / static 写 schema 2。
   - 重建优先使用 blob 的 ``x-amz-meta-*``；元数据缺失时 GET + gunzip + 重算哈希。
-  - 同日同 ``source:type`` 多候选（重采留下的旧 blob）默认判定歧义，
+  - 同分区同 ``source:type`` 多候选（重采留下的旧 blob）默认判定歧义，
     只有显式 ``pick_latest`` 才按 ``last_modified`` 选择并标 degraded。
   - 重建出的 manifest 不用于 push 幂等 skip。
 """
@@ -17,14 +18,28 @@ from dragon_quant.assets_sync.models import Manifest, ManifestEntry, ObjectMeta
 _HEX = set("0123456789abcdef")
 
 
-def build_manifest(trade_date: str, shards, *, generated_at: str = "",
-                   generator_version: str = "") -> Manifest:
+def build_manifest(partition: str, shards, *, generated_at: str = "",
+                   generator_version: str = "", rows=None) -> Manifest:
+    """由分片构建 manifest；``rows`` 为 ``{key: row_count}`` 诊断映射。"""
+    row_counts = dict(rows or {})
     entries: dict[str, ManifestEntry] = {}
     for shard in shards:
-        entries[f"{shard.source}:{shard.asset_type}"] = codec.make_entry(
-            shard, codec.compress(shard.content))
+        key = f"{shard.source}:{shard.asset_type}"
+        entries[key] = codec.make_entry(
+            shard, codec.compress(shard.content), rows=row_counts.get(key))
     return codec.manifest_from_entries(
-        trade_date, entries,
+        partition, entries,
+        generated_at=generated_at,
+        generator_version=generator_version,
+        manifest_source="push",
+    )
+
+
+def manifest_from_entries(partition: str, entries: dict[str, ManifestEntry], *,
+                          generated_at: str = "",
+                          generator_version: str = "") -> Manifest:
+    return codec.manifest_from_entries(
+        partition, entries,
         generated_at=generated_at,
         generator_version=generator_version,
         manifest_source="push",
@@ -32,40 +47,44 @@ def build_manifest(trade_date: str, shards, *, generated_at: str = "",
 
 
 def manifest_metadata(manifest: Manifest) -> dict[str, str]:
-    return {"manifest-id": manifest.manifest_id, "schema": str(manifest.schema)}
+    return {
+        "manifest-id": manifest.manifest_id,
+        "schema": str(manifest.schema),
+        "partition": manifest.partition,
+    }
 
 
-def remote_manifest_id(backend, trade_date: str) -> tuple[str | None, bool]:
+def remote_manifest_id(backend, partition: str) -> tuple[str | None, bool]:
     """返回 ``(manifest_id, metadata_supported)``。
 
     优先 HEAD 的 ``x-amz-meta-manifest-id``；缺失时降级 GET body 重算。
     """
-    meta = backend.head(codec.manifest_key(trade_date))
+    meta = backend.head(codec.manifest_key(partition))
     if meta is None:
         return None, True
     manifest_id = (meta.metadata or {}).get("manifest-id")
     if manifest_id:
         return manifest_id, True
     manifest = codec.manifest_from_bytes(
-        backend.get(codec.manifest_key(trade_date)),
-        expected_trade_date=trade_date)
+        backend.get(codec.manifest_key(partition)),
+        expected_partition=partition)
     return manifest.manifest_id, False
 
 
-def read_remote_manifest(backend, trade_date: str) -> Manifest | None:
-    """读取正式 manifest；不存在返回 None，损坏/日期错配抛 IntegrityError。"""
-    key = codec.manifest_key(trade_date)
+def read_remote_manifest(backend, partition: str) -> Manifest | None:
+    """读取正式 manifest；不存在返回 None，损坏/分区错配抛 IntegrityError。"""
+    key = codec.manifest_key(partition)
     if backend.head(key) is None:
         return None
     return codec.manifest_from_bytes(
-        backend.get(key), expected_trade_date=trade_date)
+        backend.get(key), expected_partition=partition)
 
 
-def parse_blob_key(key: str, trade_date: str) -> tuple[str, str, str]:
-    """解析 ``blobs/<date>/<source>_<type>.<sha>.json.gz``。"""
-    prefix = f"blobs/{trade_date}/"
+def parse_blob_key(key: str, partition: str) -> tuple[str, str, str]:
+    """解析 ``blobs/<partition>/<source>_<type>.<sha>.json.gz``。"""
+    prefix = f"blobs/{partition}/"
     if not key.startswith(prefix):
-        raise ValueError(f"blob 键不属于该日期: {key}")
+        raise ValueError(f"blob 键不属于该分区: {key}")
     name = key[len(prefix):]
     if not name.endswith(".json.gz"):
         raise ValueError(f"blob 键后缀非法: {key}")
@@ -120,18 +139,18 @@ def _entry_from_object(backend, meta: ObjectMeta, source: str,
     )
 
 
-def rebuild_manifest(backend, trade_date: str, *,
+def rebuild_manifest(backend, partition: str, *,
                      pick_latest: bool = False) -> tuple[Manifest | None, bool]:
-    """用 ``LIST blobs/<date>/`` + HEAD 重建 manifest。
+    """用 ``LIST blobs/<partition>/`` + HEAD 重建 manifest。
 
-    返回 ``(manifest, degraded)``；当天没有 blob 时返回 ``(None, False)``。
-    同日同 ``source:type`` 多候选且未 ``pick_latest`` → ``AmbiguousError``。
+    返回 ``(manifest, degraded)``；该分区没有 blob 时返回 ``(None, False)``。
+    同分区同 ``source:type`` 多候选且未 ``pick_latest`` → ``AmbiguousError``。
     """
-    objects = backend.list(f"blobs/{trade_date}/")
+    objects = backend.list(f"blobs/{partition}/")
     grouped: dict[tuple[str, str], list[tuple[ObjectMeta, str]]] = {}
     for meta in objects:
         try:
-            source, asset_type, sha256 = parse_blob_key(meta.key, trade_date)
+            source, asset_type, sha256 = parse_blob_key(meta.key, partition)
         except ValueError:
             continue
         grouped.setdefault((source, asset_type), []).append((meta, sha256))
@@ -142,7 +161,7 @@ def rebuild_manifest(backend, trade_date: str, *,
         if len(candidates) > 1:
             if not pick_latest:
                 raise AmbiguousError(
-                    "同日存在多个候选 blob: "
+                    "同分区存在多个候选 blob: "
                     + ", ".join(meta.key for meta, _ in candidates)
                 )
             candidates.sort(key=lambda item: (item[0].last_modified or "", item[0].key))
@@ -155,5 +174,5 @@ def rebuild_manifest(backend, trade_date: str, *,
     if not entries:
         return None, False
     manifest = codec.manifest_from_entries(
-        trade_date, entries, manifest_source="rebuilt")
+        partition, entries, manifest_source="rebuilt")
     return manifest, degraded

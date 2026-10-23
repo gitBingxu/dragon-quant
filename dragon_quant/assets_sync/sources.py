@@ -17,6 +17,13 @@ import re
 from dragon_quant.assets_sync import codec
 from dragon_quant.assets_sync.errors import IntegrityError
 from dragon_quant.assets_sync.models import AssetShard, RestoreReport, ShardBatch
+from dragon_quant.assets_sync.tables import (
+    AuctionsnapAssetSource,
+    DragonsAssetSource,
+    FactorAssetSource,
+    FinAssetSource,
+    PrepsnapAssetSource,
+)
 from dragon_quant.storage import assets_db
 
 _ASSET_TYPE_RE = re.compile(r"^[a-z0-9_]+$")
@@ -31,9 +38,34 @@ class PrepAssetSource:
     """``assets.db / prep_assets``：每个 (trade_date, asset_type) 一个分片。"""
 
     name = "prep"
+    merge_granularity = "shard"
 
     def __init__(self, db_path=None):
         self.db_path = db_path
+
+    # ── 分区协议（M6）：legacy 源只参与 date 分区，行为零变化 ──────────────
+    def partitions(self) -> list[str]:
+        return self.list_dates()
+
+    def partition_kind(self, partition: str) -> str:
+        return codec.partition_kind(partition)
+
+    def read_partition(self, partition: str) -> ShardBatch:
+        return self.read_date(partition)
+
+    def volatile_partitions(self) -> set[str]:
+        return set()
+
+    def merge_granularity_for(self, asset_type: str) -> str:
+        return "shard"
+
+    def local_snapshot(self, partition: str):
+        batch = self.read_date(partition)
+        if batch.failed:
+            raise IntegrityError(
+                f"本地 {self.name} 资产损坏: {batch.failed[0].get('reason')}")
+        return ({f"{shard.source}:{shard.asset_type}": shard.sha256
+                 for shard in batch.shards}, {}, list(batch.shards))
 
     def list_dates(self) -> list[str]:
         return assets_db.list_prep_asset_dates(db_path=self.db_path)
@@ -102,9 +134,34 @@ class AuctionAssetSource:
 
     name = "auction"
     asset_type = "assets"
+    merge_granularity = "shard"
 
     def __init__(self, db_path=None):
         self.db_path = db_path
+
+    # ── 分区协议（M6）：legacy 源只参与 date 分区，行为零变化 ──────────────
+    def partitions(self) -> list[str]:
+        return self.list_dates()
+
+    def partition_kind(self, partition: str) -> str:
+        return codec.partition_kind(partition)
+
+    def read_partition(self, partition: str) -> ShardBatch:
+        return self.read_date(partition)
+
+    def volatile_partitions(self) -> set[str]:
+        return set()
+
+    def merge_granularity_for(self, asset_type: str) -> str:
+        return "shard"
+
+    def local_snapshot(self, partition: str):
+        batch = self.read_date(partition)
+        if batch.failed:
+            raise IntegrityError(
+                f"本地 {self.name} 资产损坏: {batch.failed[0].get('reason')}")
+        return ({f"{shard.source}:{shard.asset_type}": shard.sha256
+                 for shard in batch.shards}, {}, list(batch.shards))
 
     def list_dates(self) -> list[str]:
         return assets_db.list_auction_asset_dates(db_path=self.db_path)
@@ -190,7 +247,15 @@ class AuctionAssetSource:
         return RestoreReport(**result)
 
 
-SOURCE_CLASSES = (PrepAssetSource, AuctionAssetSource)
+SOURCE_CLASSES = (
+    PrepAssetSource,
+    AuctionAssetSource,
+    PrepsnapAssetSource,
+    AuctionsnapAssetSource,
+    DragonsAssetSource,
+    FactorAssetSource,
+    FinAssetSource,
+)
 
 
 def _validate_registry() -> None:

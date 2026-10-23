@@ -1,80 +1,60 @@
-"""龙头物化 / 回测 / VPA / Review 查询（dragons / vpa_analysis）持久化。"""
+"""龙头物化 / 回测 / VPA / Review 查询（dragons / vpa_analysis）持久化。
+
+**双写契约**（见技术方案 §4.3）：
+  - ``dragon.db.dragons_v2`` 是权威，主写在 ``with _lock:`` 内提交；
+  - ``assets.db.dragons`` 是镜像，fan-out **在锁退出之后**执行（禁止持
+    ``dragon._lock`` 时调用任何 assets.db 写，避免跨库锁序与 5s busy_timeout
+    阻塞整库写入）；
+  - 镜像失败只 stderr 警告 + 主流程继续，绝不回滚主写；``assets backfill-dragons``
+    幂等修复。
+  - v1 不进镜像（镜像只承载 v2），``source="v1"`` 时跳过 fan-out。
+
+SQL 规则只有一份：``storage/dragons_sql.py``（表名参数化，两库共用）。
+"""
 
 import json
+import sys
 from typing import Optional
 
+from dragon_quant.storage import dragons_sql
 from dragon_quant.storage._base import _connect, _ensure_schema, _lock, _normalize_source, _tables
+
+
+def _mirror_write(label: str, source: str, action) -> None:
+    """锁外 best-effort 镜像写：失败只警告（含修复命令），不阻断主流程。"""
+    if source != "v2":
+        return
+    try:
+        from dragon_quant.storage import dragons_mirror
+        action(dragons_mirror)
+    except Exception as exc:  # 镜像任何失败都不得影响主写结果
+        print(f"[mirror] assets.db.dragons 写入失败（{label}）："
+              f"{type(exc).__name__}: {exc}"
+              "（可运行 assets backfill-dragons 修复）", file=sys.stderr)
 
 
 def save_dragons(trade_date: str, dragons: list[dict], version: str = "",
                  source: str = "v2"):
     """保存或更新 dragons（UPSERT，不覆盖 review 字段）。
 
-    source: 本次评分器体系（"v1"/"v2"），写入对应 dragons_v1 / dragons_v2。
+    source: 本次评分器体系（"v1"/"v2"），写入对应 dragons_v1 / dragons_v2；
+    v2 主写提交后锁外镜像到 assets.db.dragons。
     """
+    source = _normalize_source(source)
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            source = _normalize_source(source)
             t = _tables(source)
-            
-            rows = []
-            for i, s in enumerate(dragons):
-                concepts = s.get("concepts", [])
-                rows.append((
-                    trade_date,
-                    s.get("code", ""),
-                    s.get("name", ""),
-                    s.get("scan_id", ""),
-                    s.get("rank", i + 1),
-                    s.get("composite_score", 0),
-                    s.get("board_count", 0),
-                    s.get("open_px"),
-                    s.get("close_px"),
-                    s.get("high_px"),
-                    s.get("low_px"),
-                    s.get("pct"),
-                    s.get("turnover_rate"),
-                    s.get("amount"),
-                    s.get("market_cap"),
-                    json.dumps(concepts, ensure_ascii=False),
-                    s.get("report_text", ""),
-                    1 if s.get("is_true_dragon") else 0 if "is_true_dragon" in s else None,
-                    version,
-                    source,
-                ))
-            
-            conn.executemany(
-                f"INSERT INTO {t['dragons']}("
-                "trade_date, code, name, scan_id, rank, composite_score, board_count, "
-                "open_px, close_px, high_px, low_px, pct, turnover_rate, amount, market_cap, "
-                "concepts_json, report_text, is_true_dragon, version, source"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(trade_date, code) DO UPDATE SET "
-                "name=excluded.name, "
-                "scan_id=excluded.scan_id, "
-                "rank=excluded.rank, "
-                "composite_score=excluded.composite_score, "
-                "board_count=excluded.board_count, "
-                f"open_px=COALESCE(excluded.open_px, {t['dragons']}.open_px), "
-                f"close_px=COALESCE(excluded.close_px, {t['dragons']}.close_px), "
-                f"high_px=COALESCE(excluded.high_px, {t['dragons']}.high_px), "
-                f"low_px=COALESCE(excluded.low_px, {t['dragons']}.low_px), "
-                f"pct=COALESCE(excluded.pct, {t['dragons']}.pct), "
-                f"turnover_rate=COALESCE(excluded.turnover_rate, {t['dragons']}.turnover_rate), "
-                f"amount=COALESCE(excluded.amount, {t['dragons']}.amount), "
-                f"market_cap=COALESCE(excluded.market_cap, {t['dragons']}.market_cap), "
-                "concepts_json=excluded.concepts_json, "
-                "report_text=excluded.report_text, "
-                "is_true_dragon=excluded.is_true_dragon, "
-                "version=excluded.version, "
-                "source=excluded.source",
-                rows,
-            )
+            dragons_sql.upsert_dragons(conn, t["dragons"], trade_date, dragons,
+                                       version, source)
             conn.commit()
         finally:
             conn.close()
+    _mirror_write(
+        "save_dragons", source,
+        lambda mirror: mirror.save_dragons(trade_date, dragons,
+                                           version=version, source="v2"))
 
 
 def get_dragon_meta(trade_date: str, code: str, source: str = "v2") -> Optional[dict]:
@@ -96,32 +76,25 @@ def get_dragon_meta(trade_date: str, code: str, source: str = "v2") -> Optional[
 
 
 def delete_pending_dragons_not_in(trade_date: str, keep_codes: set[str], source: str = "v2") -> int:
-    """删除某 trade_date 下不在 keep_codes 内且 review_status='pending' 的记录。"""
+    """删除某 trade_date 下不在 keep_codes 内且 review_status='pending' 的记录。
+
+    镜像必须同步删除，否则残留 pending 行会被窗口重新当成候选（静默污染买点）。
+    """
+    source = _normalize_source(source)
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            source = _normalize_source(source)
             t = _tables(source)
-            if not keep_codes:
-                cur = conn.execute(
-                    f"DELETE FROM {t['dragons']} WHERE trade_date = ? AND review_status = 'pending'",
-                    (trade_date,),
-                )
-                conn.commit()
-                return cur.rowcount
-
-            placeholders = ",".join(["?"] * len(keep_codes))
-            params = [trade_date] + sorted(keep_codes)
-            cur = conn.execute(
-                f"DELETE FROM {t['dragons']} WHERE trade_date = ? "
-                f"AND review_status = 'pending' AND code NOT IN ({placeholders})",
-                params,
-            )
+            deleted = dragons_sql.delete_pending_not_in(
+                conn, t["dragons"], trade_date, keep_codes)
             conn.commit()
-            return cur.rowcount
         finally:
             conn.close()
+    _mirror_write(
+        "delete_pending_dragons_not_in", source,
+        lambda mirror: mirror.delete_pending_dragons_not_in(trade_date, keep_codes))
+    return deleted
 
 
 def rebuild_dragons_for_date(
@@ -459,28 +432,38 @@ def update_dragon_review(trade_date: str, code: str,
                          max_return_hold_days: Optional[int] = None,
                          review_status: str = "completed",
                          source: str = "v2"):
-    """更新单条 dragon 的 review 字段。"""
+    """更新单条 dragon 的 review 字段（主写 + 锁外镜像）。
+
+    镜像影响 0 行 → 记 ``mirror_missing_row`` 警告（回填可补齐），不抛异常。
+    """
+    source = _normalize_source(source)
+    fields = {
+        "buy_date": buy_date,
+        "buy_price": buy_price,
+        "max_return_5d": max_return_5d,
+        "max_drawdown_5d": max_drawdown_5d,
+        "max_return_hold_days": max_return_hold_days,
+        "review_status": review_status,
+    }
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            source = _normalize_source(source)
             t = _tables(source)
-            conn.execute(
-                f"UPDATE {t['dragons']} SET "
-                "buy_date = ?, "
-                "buy_price = ?, "
-                "max_return_5d = ?, "
-                "max_drawdown_5d = ?, "
-                "max_return_hold_days = ?, "
-                "review_status = ? "
-                "WHERE trade_date = ? AND code = ?",
-                (buy_date, buy_price, max_return_5d, max_drawdown_5d,
-                 max_return_hold_days, review_status, trade_date, code),
-            )
+            dragons_sql.update_review(conn, t["dragons"], trade_date, code, **fields)
             conn.commit()
         finally:
             conn.close()
+
+    if source == "v2":
+        def _mirror(mirror):
+            rowcount = mirror.update_dragon_review(trade_date, code, **fields)
+            if rowcount == 0:
+                print(f"[mirror] mirror_missing_row: assets.db.dragons 缺行 "
+                      f"{trade_date}/{code}（review 字段未镜像，可用 "
+                      "assets backfill-dragons 修复）", file=sys.stderr)
+
+        _mirror_write("update_dragon_review", source, _mirror)
 
 
 def upsert_vpa(trade_date: str, code: str,
@@ -513,6 +496,46 @@ def upsert_vpa(trade_date: str, code: str,
             conn.commit()
         finally:
             conn.close()
+
+
+def list_vpa_analysis(trade_date: str) -> list[dict]:
+    """读取某日的量价分析结果（因子层 vpa 迁移的只读源）。
+
+    ``factors_json`` 逐行解析为 list；损坏时返回空列表并带 ``factors_error``，
+    不中断整批读取（因子层按「name 缺失」处理，不静默取第一个）。
+    """
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT trade_date, code, name, source, health_score, signal, summary, "
+            "factors_json, version, created_at FROM vpa_analysis "
+            "WHERE trade_date = ? ORDER BY code",
+            (trade_date,),
+        ).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for r in rows:
+        raw = r[7]
+        factors, error = [], None
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                error = f"{type(exc).__name__}: {exc}"
+            else:
+                if isinstance(parsed, list):
+                    factors = parsed
+                else:
+                    error = "factors_json 不是数组"
+        result.append({
+            "trade_date": r[0], "code": r[1], "name": r[2], "source": r[3],
+            "health_score": r[4], "signal": r[5], "summary": r[6],
+            "factors": factors, "factors_error": error,
+            "version": r[8] or "", "created_at": r[9],
+        })
+    return result
 
 
 def _parse_version(v: str, parts: Optional[int] = None) -> Optional[tuple]:

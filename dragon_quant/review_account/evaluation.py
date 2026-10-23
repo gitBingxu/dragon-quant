@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
+from typing import Optional
 
 from dragon_quant.review_account.market import DataCoverageError
 from dragon_quant.review_account.models import BUY_SIGNAL_CODES, StrategyConfig
@@ -8,6 +10,9 @@ from dragon_quant.review_account.simulator import AccountSimulator
 from dragon_quant.review_account.strategy import BUY_CHECK_LABELS
 
 TOTAL_ROW_CODE = "__total__"
+
+# A/B 因子 variant 的前置门禁：区间内有因子值的交易日占比门槛（方案 §11 P2）。
+FACTOR_BUILD_COMPLETION_MIN = 0.95
 
 
 def _num(value) -> float:
@@ -73,13 +78,137 @@ def entry_reason_stats(positions: list[dict], initial_cash: float) -> dict:
     return {"initial_cash": cash, "total_trades": len(closed), "rows": rows}
 
 
+def sharpe_ratio(equities, *, periods_per_year: int = 252,
+                 risk_free: float = 0.0) -> Optional[float]:
+    """日频权益曲线 → 年化 Sharpe（样本 < 2 / std=0 / 非有限 → None，绝不返回 0）。
+
+    ``returns[t] = equities[t] / equities[t-1] - 1``；
+    ``sharpe = (mean(returns) - risk_free / periods) / std(returns, ddof=1) * sqrt(periods)``。
+    纯 Python 实现（零 numpy/pandas/scipy），与项目既有回测口径一致（默认无风险利率 0）。
+    """
+    try:
+        series = [float(value) for value in (equities or ())]
+        periods = int(periods_per_year)
+        annual_rf = float(risk_free)
+    except (TypeError, ValueError):
+        return None
+    if len(series) < 2 or periods <= 0:
+        return None
+    if any(not math.isfinite(value) for value in series) or not math.isfinite(annual_rf):
+        return None
+    returns = []
+    for previous, current in zip(series, series[1:]):
+        if previous == 0:
+            return None
+        returns.append(current / previous - 1.0)
+    if len(returns) < 2:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
+    if not math.isfinite(variance) or variance <= 0:
+        return None
+    std = math.sqrt(variance)
+    daily_rf = annual_rf / periods
+    value = (mean - daily_rf) / std * math.sqrt(periods)
+    return value if math.isfinite(value) else None
+
+
+def _position_field(position, name: str):
+    if isinstance(position, dict):
+        return position.get(name)
+    return getattr(position, name, None)
+
+
+def _position_weight(position, weight: str) -> float:
+    try:
+        value = float(_position_field(position, weight))
+        if math.isfinite(value) and value >= 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    try:
+        return max(0.0, float(_position_field(position, "entry_price"))
+                   * float(_position_field(position, "qty")))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def industry_exposure(positions, sector_map: Optional[dict] = None, *,
+                      weight: str = "market_value",
+                      sector_loader=None) -> dict:
+    """行业暴露（方案 §4.8）：只统计 ``category == "hy"``，其余计入 unattributed。
+
+    - 归属日**必须用 ``entry_date`` 的 ``factor_sector_snapshots``**；未注入
+      ``sector_loader`` / ``sector_map`` 时按 entry_date 惰性读取（禁止用最新板块
+      回填历史，避免前视）；
+    - ``unattributed_ratio`` 是结构性指标（``primary_sector`` 可能是概念/地区），
+      首次全量 build 后应把实测基线写回方案文档；
+    - ``weight`` 缺省取 ``market_value``，缺失时回退 ``entry_price × qty``；
+      空池返回 ``coverage/unattributed_ratio/hhi = None``（不伪造 0 覆盖率）。
+    """
+    if sector_loader is None and sector_map is None:
+        def sector_loader(entry_date: str) -> dict:   # 函数内惰性 import（分层约束）
+            from dragon_quant.factors import storage as fstore
+            return fstore.get_sector_map(entry_date)
+
+    fallback_map = sector_map or {}
+    cache: dict[str, dict] = {}
+    by_industry: dict[str, dict] = {}
+    reasons = {"non_hy_primary": 0, "no_snapshot": 0}
+    total_weight = 0.0
+    attributed_weight = 0.0
+    for position in positions or []:
+        value = _position_weight(position, weight)
+        total_weight += value
+        code = str(_position_field(position, "code") or "")
+        entry_date = str(_position_field(position, "entry_date") or "")
+        current = fallback_map
+        if sector_loader is not None and entry_date:
+            if entry_date not in cache:
+                cache[entry_date] = sector_loader(entry_date) or {}
+            current = cache[entry_date]
+        info = current.get(code)
+        if not isinstance(info, dict):
+            reasons["no_snapshot"] += 1
+            continue
+        if str(info.get("category")) != "hy":
+            reasons["non_hy_primary"] += 1
+            continue
+        name = str(info.get("name") or info.get("code") or code)
+        row = by_industry.setdefault(name, {"weight": 0.0, "count": 0})
+        row["weight"] += value
+        row["count"] += 1
+        attributed_weight += value
+
+    industries = [
+        {"name": name,
+         "weight": (row["weight"] / total_weight) if total_weight > 0 else 0.0,
+         "count": row["count"]}
+        for name, row in by_industry.items()
+    ]
+    industries.sort(key=lambda item: (-item["weight"], item["name"]))
+    has_weight = total_weight > 0
+    coverage = (attributed_weight / total_weight) if has_weight else None
+    return {
+        "by_industry": industries,
+        "unattributed_ratio": (1.0 - coverage) if coverage is not None else None,
+        "coverage": coverage,
+        "hhi": (sum(item["weight"] ** 2 for item in industries)
+                if industries else None),
+        "basis": "entry_date_snapshot",
+        "unattributed_reasons": reasons,
+    }
+
+
 def metrics(result: dict) -> dict:
     closed = [p for p in result["positions"] if p.status == "closed"]
     gains = sum(max(0, p.realized_return) for p in closed)
     losses = -sum(min(0, p.realized_return) for p in closed)
     sell_pnl = [t.realized_pnl for t in result["trades"] if t.side == "SELL"]
     profit = sum(max(0, v) for v in sell_pnl)
+    equities = [snapshot.total_equity for snapshot in result.get("snapshots") or []]
     return {"total_return": result["total_return"], "max_drawdown": result["max_drawdown"],
+            "sharpe": sharpe_ratio(equities),
             "trade_count": result["trade_count"], "closed_count": len(closed),
             "win_rate": result["win_rate"], "profit_factor_returns": gains / losses if losses else None,
             "fees": sum(t.fee for t in result["trades"]),
@@ -114,6 +243,20 @@ def compare_strategies(date_from: str, date_to: str, data, cfg=None, variant_gri
     report = {"status": "evaluated", "splits": splits, "variants": {}, "promoted": False,
               "method": "chronological_60_20_20_fresh_accounts_mark_open_positions",
               "minimum_closed_trades_per_split": 10, "trial_count": len(variants)}
+    # 因子 variant 前置门禁：区间内 build 完成率 < 95% → 不评估（结论标 insufficient_data）。
+    # 只在该 variant 真正开启 factor_ranking_enabled 时检查；纯基线不读因子表。
+    factor_variants = [name for name, variant in variants.items()
+                       if getattr(variant, "factor_ranking_enabled", False)]
+    if factor_variants:
+        from dragon_quant.factors.decision import build_completion_rate   # 分层：函数内惰性 import
+        completion = build_completion_rate(days)
+        report["factor_build_completion"] = completion
+        if completion is None or completion < FACTOR_BUILD_COMPLETION_MIN:
+            return {**report, "status": "insufficient_data",
+                    "reason": (f"factor_build_completion: 区间内因子 build 完成率 "
+                               f"{completion if completion is not None else 0.0:.0%} "
+                               f"< {FACTOR_BUILD_COMPLETION_MIN:.0%}，"
+                               "不评估因子 variant")}
     for name, variant in variants.items():
         report["variants"][name] = {}
         for split in ("train", "validation"):

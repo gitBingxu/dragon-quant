@@ -388,7 +388,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p.add_argument("--pool", choices=["prep", "legacy"], default="prep",
                            help="候选池来源：prep=盘后复盘推荐（默认），legacy=最近 N 日龙头并集")
     auction_p.add_argument("--days", type=int, default=None,
-                           help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 3）")
+                           help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 5）")
     auction_p.add_argument("--recompute", metavar="DATE", default=None,
                            help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
     auction_p.add_argument("--json", dest="json", action="store_true",
@@ -399,13 +399,15 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "assets",
         help="数据资产云端同步（备份/恢复）",
         usage="dragon-quant assets <action> [action-options]",
-        description="把 prep/auction 产出的原始数据资产备份到 S3 兼容对象存储，或从云端恢复。",
+        description="把 assets.db 全部 15 张表的行级数据资产备份到 S3 兼容对象存储，"
+                    "或从云端恢复（prep/auction 原始资产 + 快照/因子/财务表 + dragons 镜像）。",
         epilog="""Examples:
   dragon-quant assets push --profile r2
   dragon-quant assets pull --from 20261020 --to 20261022 --apply
   dragon-quant assets status --orphans
   dragon-quant assets verify --from 20261020 --to 20261022 --deep
   dragon-quant assets doctor --profile r2 --samples 50
+  dragon-quant assets backfill-dragons --dry-run
 """,
     )
     assets_subs = assets_p.add_subparsers(dest="assets_action")
@@ -432,13 +434,14 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "push",
         help="上传本地原始数据资产",
         usage="dragon-quant assets push [--from D] [--to D] [--all] [--dry-run]",
-        description="增量上传 assets.db 的 prep/auction 原始资产；无变化时零上传。",
+        description="增量上传 assets.db 全部表；按分区 + 来源判水位，volatile 单元强制重读。\n"
+                    "--from/--to 对 fin 表按报告期末过滤，static 分区始终参与。",
     )
     _assets_common(assets_push)
     assets_push.add_argument("--from", dest="from_date", default=None,
-                             help="起始交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
+                             help="起始日期 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)；fin 表按报告期末比较")
     assets_push.add_argument("--to", dest="to_date", default=None,
-                             help="结束交易日 (同 --from 格式)")
+                             help="结束日期 (同 --from 格式)；static 分区不受区间影响")
     assets_push.add_argument("--all", dest="all_dates", action="store_true",
                              help="忽略 state 水位，重算全部本地日期")
     assets_push.add_argument("--dry-run", dest="dry_run", action="store_true",
@@ -450,13 +453,14 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "pull",
         help="从云端恢复原始数据资产",
         usage="dragon-quant assets pull --from D --to D [--apply] [--force]",
-        description="默认 dry-run；--apply 下载、逐片校验后写入 assets.db。",
+        description="默认 dry-run；--apply 下载、逐片校验后写入 assets.db。"
+                    "新表按行级合并（缺则补、冲突需 --force），prep/auction 保持分片级门禁。",
     )
     _assets_common(assets_pull)
     assets_pull.add_argument("--from", dest="from_date", required=False, default=None,
-                             help="起始交易日（必填）")
+                             help="起始日期（必填）；fin 表按报告期末比较")
     assets_pull.add_argument("--to", dest="to_date", required=False, default=None,
-                             help="结束交易日（必填）")
+                             help="结束日期（必填）；static 分区始终参与")
     assets_pull.add_argument("--apply", action="store_true",
                              help="执行下载与写库（默认只输出计划）")
     assets_pull.add_argument("--force", action="store_true",
@@ -470,11 +474,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "status",
         help="展示本地/云端差异",
         usage="dragon-quant assets status [--all] [--orphans]",
-        description="逐日比较本地与云端 manifest，输出缺失/不一致/体积。",
+        description="逐分区比较本地与云端 manifest，输出缺失/不一致/drift/体积与同步覆盖图。"
+                    "not_synced 已恒为空对象（factor_*/fin_* 已纳入同步）。",
     )
     _assets_common(assets_status)
     assets_status.add_argument("--all", dest="all_dates", action="store_true",
-                               help="检查全部日期（默认最近 30 个）")
+                               help="检查全部分区（默认最近 30 个 date + 全部 period/static）")
     assets_status.add_argument("--orphans", action="store_true",
                                help="额外统计未被 manifest 引用的孤儿 blob")
 
@@ -482,7 +487,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "verify",
         help="校验 manifest / blob 完整性",
         usage="dragon-quant assets verify [--from D --to D | --samples N] [--deep]",
-        description="默认校验 manifest 哈希；--deep 下载并解压校验分片内容。",
+        description="默认校验 manifest 哈希；--deep 下载并解压校验分片内容。"
+                    "不做 drift 豁免：字节级差异一律报告。",
     )
     _assets_common(assets_verify)
     assets_verify.add_argument("--from", dest="from_date", default=None,
@@ -495,6 +501,232 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                                help="下载并解压校验 blob 内容")
     assets_verify.add_argument("--md5", dest="show_md5", action="store_true",
                                help="展示校验分片的 md5")
+
+    assets_backfill = assets_subs.add_parser(
+        "backfill-dragons",
+        help="把 dragon.db.dragons_v2 幂等回填到 assets.db.dragons（本地，不触网）",
+        usage="dragon-quant assets backfill-dragons [--from D] [--to D] "
+              "[--dry-run] [--prune] [--json]",
+        description="按交易日区间把源库 dragons_v2 逐行 UPSERT 到镜像表。"
+                    "--dry-run 只体检并区分 missing_rows（源有镜像无）/ "
+                    "orphan_rows（源无镜像有）；--prune 删除源库已不存在的镜像行"
+                    "（就地 pull 后的收敛命令）。源库是权威，镜像行可由源库重建。",
+        epilog="""Examples:
+  dragon-quant assets backfill-dragons --dry-run
+  dragon-quant assets backfill-dragons
+  dragon-quant assets backfill-dragons --from 20261001 --to 20261031
+  dragon-quant assets backfill-dragons --prune
+""",
+    )
+    assets_backfill.add_argument("--from", dest="from_date", default=None,
+                                 help="起始交易日（默认全部）")
+    assets_backfill.add_argument("--to", dest="to_date", default=None,
+                                 help="结束交易日（默认全部）")
+    assets_backfill.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                 help="只体检不写库（区分 missing_rows / orphan_rows）")
+    assets_backfill.add_argument("--prune", action="store_true",
+                                 help="删除源库不存在的镜像行（源库为权威）")
+    assets_backfill.add_argument("--json", dest="json", action="store_true",
+                                 help="输出完整 JSON（默认人读摘要）")
+
+    # factor 子命令（因子层：只读迁移 scan/vpa 产物，落 assets.db）
+    factor_p = sub.add_parser(
+        "factor",
+        help="因子层：构建 / 查询 / 状态",
+        usage="dragon-quant factor <action> [action-options]",
+        description="因子层（长表 + 注册表 + PIT 时点）。P0 只读迁移既有扫描/量价结果，"
+                    "不重算、不接入决策（默认零影响）。",
+        epilog="""Examples:
+  dragon-quant factor list
+  dragon-quant factor build --date 20260519
+  dragon-quant factor build --from 20260501 --to 20260531
+  dragon-quant factor query --date 20260519 --name five_dim_composite
+  dragon-quant factor status
+""",
+    )
+    factor_subs = factor_p.add_subparsers(dest="factor_action")
+    factor_subs.title = "Actions"  # type: ignore[assignment]
+    factor_subs.metavar = "<action>"
+
+    factor_build = factor_subs.add_parser(
+        "build",
+        help="构建因子值（只读迁移现有 scan / vpa 产物）",
+        usage="dragon-quant factor build --date D | --from D --to D [options]",
+        description="单日或区间构建。区间按「区间内有扫描记录的交易日」逐日展开，"
+                    "每日独立事务与审计报告；缺失源不删除既有因子行。",
+    )
+    factor_build.add_argument("--date", default=None,
+                              help="交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
+    factor_build.add_argument("--from", dest="from_date", default=None,
+                              help="区间起始日（与 --to 成对）")
+    factor_build.add_argument("--to", dest="to_date", default=None,
+                              help="区间结束日（与 --from 成对）")
+    factor_build.add_argument("--only", default=None,
+                              help="只构建指定因子（逗号分隔，如 five_dim_drive,vpa_breakout）")
+    factor_build.add_argument("--all", dest="all_factors", action="store_true",
+                              help="构建全部注册因子（含默认关；与 --only 互斥）")
+    factor_build.add_argument("--json", dest="json", action="store_true",
+                              help="输出完整 JSON（默认人读摘要）")
+
+    factor_list = factor_subs.add_parser(
+        "list", help="列出注册表中的因子", usage="dragon-quant factor list [--json]")
+    factor_list.add_argument("--json", dest="json", action="store_true",
+                             help="输出完整 JSON")
+
+    factor_query = factor_subs.add_parser(
+        "query", help="查询因子值（点查或单因子时序）",
+        usage="dragon-quant factor query --date D [--name N] [--code C] | "
+              "dragon-quant factor query --from D --to D --name N [options]",
+        description="按日点查（可按因子/代码过滤）或查询单因子区间时序；"
+                    "输出始终带 resolved_versions（版本=None 绝不静默）。",
+    )
+    factor_query.add_argument("--date", default=None, help="交易日（点查）")
+    factor_query.add_argument("--from", dest="from_date", default=None,
+                              help="区间起始日（与 --to + --name 配合）")
+    factor_query.add_argument("--to", dest="to_date", default=None,
+                              help="区间结束日（与 --from + --name 配合）")
+    factor_query.add_argument("--name", default=None, help="因子名（区间查询必填）")
+    factor_query.add_argument("--code", default=None, help="股票代码过滤")
+    factor_query.add_argument("--version", default=None,
+                              help="因子版本（默认按注册表最新版本）")
+    factor_query.add_argument("--json", dest="json", action="store_true",
+                              help="输出完整 JSON（默认人读表格）")
+
+    factor_status = factor_subs.add_parser(
+        "status", help="查看因子存储/注册表/build 状态",
+        usage="dragon-quant factor status [--json]")
+    factor_status.add_argument("--json", dest="json", action="store_true",
+                               help="输出完整 JSON")
+
+    # 矩阵导出（P1）
+    factor_export = factor_subs.add_parser(
+        "export", help="导出 date × code 因子矩阵（CSV/JSON + sidecar）",
+        usage="dragon-quant factor export --from D --to D --name N [--name N2] "
+              "[--format csv|json] --out FILE [options]",
+        description="长表 → 矩阵派生视图（不落主存储）。默认导出原始值；--clean 才按 "
+                    "CleanConfig 在当日截面内缩尾/归一（MAD=0 跳过并记 mad_zero）。",
+        epilog="""Examples:
+  dragon-quant factor export --from 20260501 --to 20260531 \\
+      --name five_dim_composite --out /tmp/matrix.csv
+  dragon-quant factor export --from 20260501 --to 20260531 \\
+      --name five_dim_composite --name vpa_breakout --clean --normalize rank \\
+      --format json --out /tmp/matrix.json
+""",
+    )
+    factor_export.add_argument("--from", dest="from_date", required=True,
+                               help="区间起始日")
+    factor_export.add_argument("--to", dest="to_date", required=True,
+                               help="区间结束日")
+    factor_export.add_argument("--name", dest="names", action="append", default=None,
+                               help="因子名（可重复；逗号分隔也支持）")
+    factor_export.add_argument("--code", dest="codes", action="append", default=None,
+                               help="股票代码过滤（可重复）")
+    factor_export.add_argument("--version", default=None,
+                               help="统一版本（默认按注册表逐因子解析）")
+    factor_export.add_argument("--format", dest="fmt", choices=("csv", "json"),
+                               default="csv", help="输出格式（默认 csv）")
+    factor_export.add_argument("--out", dest="out_path", required=True,
+                               help="输出文件路径（sidecar 为 <out>.meta.json）")
+    factor_export.add_argument("--clean", action="store_true",
+                               help="启用清洗（默认 --winsorize mad + --normalize rank）")
+    factor_export.add_argument("--missing", choices=("nan", "drop"), default=None,
+                               help="缺失处理（drop = complete-case 丢行）")
+    factor_export.add_argument("--winsorize", choices=("none", "mad", "quantile"),
+                               default=None, help="缩尾方式")
+    factor_export.add_argument("--normalize", choices=("none", "rank", "zscore"),
+                               default=None, help="归一方式")
+    factor_export.add_argument("--limits", default="0.05,0.95",
+                               help="quantile 缩尾分位（默认 0.05,0.95）")
+    factor_export.add_argument("--json", dest="json", action="store_true",
+                               help="输出完整 JSON（默认人读摘要）")
+
+    # 因子评估（P1）
+    factor_eval = factor_subs.add_parser(
+        "eval", help="单因子评估（RankIC / ICIR / NW-t / 分组 / 覆盖率）",
+        usage="dragon-quant factor eval --name N --from D --to D [options]",
+        description="按 available_at 之后第一个可成交日开盘起算前向收益；样本不足返回 "
+                    "insufficient_data。财务因子额外输出 PIT 口径与 1q 修正。",
+        epilog="""Examples:
+  dragon-quant factor eval --name five_dim_composite --from 20260501 --to 20260831
+  dragon-quant factor eval --name fin_roe --from 20260101 --to 20260930 \\
+      --pit-policy research --groups 3 --json
+""",
+    )
+    factor_eval.add_argument("--name", required=True, help="因子名")
+    factor_eval.add_argument("--from", dest="from_date", required=True,
+                             help="区间起始日")
+    factor_eval.add_argument("--to", dest="to_date", required=True,
+                             help="区间结束日")
+    factor_eval.add_argument("--horizon", type=int, default=1,
+                             help="前向收益交易日数（默认 1；nw_lag=horizon-1）")
+    factor_eval.add_argument("--groups", type=int, default=2,
+                             help="分组数（只允许 2 / 3）")
+    factor_eval.add_argument("--version", default=None,
+                             help="因子版本（默认按注册表最新版本）")
+    factor_eval.add_argument("--min-days", dest="min_days", type=int, default=20,
+                             help="最少有效交易日（默认 20）")
+    factor_eval.add_argument("--min-cross-section", dest="min_cross_section",
+                             type=int, default=10, help="单日最少有效截面（默认 10）")
+    factor_eval.add_argument("--pit-policy", dest="pit_policy",
+                             choices=("strict", "research"), default="strict",
+                             help="PIT 口径（strict 默认剔除 statutory_backfilled）")
+    factor_eval.add_argument("--json", dest="json", action="store_true",
+                             help="输出完整 JSON（默认人读摘要）")
+
+    # 财务链接（P0.5）：观测 / 回填 / 校准 / 状态
+    factor_fin = factor_subs.add_parser(
+        "fin", help="财务原始链路：观测/回填/校准/状态",
+        usage="dragon-quant factor fin <sync|calibrate|status> [options]",
+        description="财务原始数据（fin_* 五表，落 assets.db）。观测仅当日可采；"
+                    "回填按报告期追加式 vintage；字段映射未校准即财务因子 fail-closed。",
+        epilog="""Examples:
+  dragon-quant factor fin sync --snapshot
+  dragon-quant factor fin sync --backfill --from-period 20250331
+  dragon-quant factor fin calibrate --sample 20
+  dragon-quant factor fin status
+""",
+    )
+    fin_subs = factor_fin.add_subparsers(dest="fin_action")
+    fin_subs.title = "Actions"  # type: ignore[assignment]
+    fin_subs.metavar = "<action>"
+
+    fin_sync = fin_subs.add_parser(
+        "sync", help="同步财务数据（当日观测或按报告期回填）",
+        usage="dragon-quant factor fin sync --snapshot [--date D] | "
+              "dragon-quant factor fin sync --backfill [options]")
+    fin_sync.add_argument("--snapshot", action="store_true",
+                          help="当日观测（same_day_only，历史日直接拒绝）")
+    fin_sync.add_argument("--backfill", action="store_true",
+                          help="按 gpcw 报告期回填（可历史、可重复）")
+    fin_sync.add_argument("--date", default=None,
+                          help="观测日（默认今天；仅当日可采）")
+    fin_sync.add_argument("--from-period", dest="from_period", default=None,
+                          help="回填起始报告期（YYYYMMDD / YYYY-MM-DD）")
+    fin_sync.add_argument("--to-period", dest="to_period", default=None,
+                          help="回填结束报告期")
+    fin_sync.add_argument("--force", action="store_true",
+                          help="同 md5 也重新下载解析")
+    fin_sync.add_argument("--host", default=None,
+                          help="覆盖 gpcw 计算服务器地址")
+    fin_sync.add_argument("--json", dest="json", action="store_true",
+                          help="输出完整 JSON")
+
+    fin_calibrate = fin_subs.add_parser(
+        "calibrate", help="字段映射校准（恒等式 + 层级不等式锚定）",
+        usage="dragon-quant factor fin calibrate [--sample N] [--period D] [--json]")
+    fin_calibrate.add_argument("--sample", type=int, default=20,
+                               help="校准样本数（默认 20）")
+    fin_calibrate.add_argument("--period", default=None,
+                               help="指定报告期对应的 gpcw 文件（默认最新）")
+    fin_calibrate.add_argument("--host", default=None, help="覆盖计算服务器地址")
+    fin_calibrate.add_argument("--json", dest="json", action="store_true",
+                               help="输出完整 JSON")
+
+    fin_status = fin_subs.add_parser(
+        "status", help="财务账本/校准/观测状态",
+        usage="dragon-quant factor fin status [--json]")
+    fin_status.add_argument("--json", dest="json", action="store_true",
+                            help="输出完整 JSON")
 
     # buy 子命令
     buy_p = sub.add_parser(
@@ -613,6 +845,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         _cmd_auction(args)
     elif args.command == "assets":
         _cmd_assets(args)
+    elif args.command == "factor":
+        _cmd_factor(args)
     elif args.command == "buy":
         _cmd_buy(args)
     elif args.command == "sell":
@@ -641,6 +875,7 @@ from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循�
     _cmd_prep,
     _cmd_auction,
     _cmd_assets,
+    _cmd_factor,
     _cmd_buy,
     _cmd_sell,
     _cmd_vpa,

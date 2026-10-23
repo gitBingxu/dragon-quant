@@ -374,17 +374,40 @@ def _cmd_prep(args):
     默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--json 输出完整 JSON。
     """
     from dragon_quant.review_account.prep import PrepError, run_prep
-    from dragon_quant.storage import db
+    from dragon_quant.storage import dragons_mirror
 
     as_json = getattr(args, "json", False)
     auto_date = not args.date
     if args.date:
         trade_date = _normalize_cli_date(args.date)
     else:
-        dates = db.list_dragon_trade_dates(source="v2")
+        # 读源切 assets.db.dragons 镜像（AC5）；最新日源库有行而镜像缺行时直接报错，
+        # **不得**静默回退到上一交易日（池会静默换日且变小）。
+        dates = dragons_mirror.list_dragon_trade_dates(source="v2")
         if not dates:
-            _emit_prep_error({"error": "无 v2 龙头记录，无法确定复盘日"}, as_json)
+            # 镜像为空但源库有行 = 尚未回填（事实错误不能报成「无龙头记录」）
+            try:
+                dragons_mirror.ensure_populated()
+            except dragons_mirror.DragonsMirrorEmpty as exc:
+                _emit_prep_error({"error": str(exc)}, as_json)
+            except Exception as exc:   # 源库不可用/schema 异常：统一错误通道，不抛栈
+                _emit_prep_error(
+                    {"error": f"龙头镜像检查失败：{type(exc).__name__}: {exc}"}, as_json)
+            _emit_prep_error(
+                {"error": "无 v2 龙头记录，无法确定复盘日"
+                          f"（assets.db.dragons 为空；请运行 {dragons_mirror.BACKFILL_HINT}）"},
+                as_json)
         trade_date = dates[-1]
+        try:
+            stale = dragons_mirror.stale_dates([trade_date])
+        except Exception as exc:
+            _emit_prep_error(
+                {"error": f"龙头镜像对账失败：{type(exc).__name__}: {exc}"}, as_json)
+        if stale:
+            _emit_prep_error(
+                {"error": f"最新交易日 {trade_date} 源库有龙头记录而镜像缺行"
+                          "（assets.db.dragons），请运行 assets backfill-dragons；"
+                          "已拒绝静默回退到上一交易日"}, as_json)
 
     try:
         result = run_prep(trade_date, recompute=args.recompute,
@@ -463,18 +486,49 @@ def _assets_human_summary(command: str, result: dict) -> str:
                 f"blobs={summary.get('blobs_uploaded', 0)} "
                 f"manifests={summary.get('manifests_uploaded', 0)}")
     if command.endswith("pull"):
-        return (f"恢复：restored={summary.get('restored', 0)} "
+        text = (f"恢复：restored={summary.get('restored', 0)} "
                 f"skipped={summary.get('skipped', 0)} "
-                f"conflicts={len(summary.get('conflicts') or [])} "
+                f"已判定冲突={len(summary.get('conflicts') or [])} "
                 f"source={summary.get('manifest_source', 'remote')}")
+        pending = int(summary.get("merge_pending") or 0)
+        if pending:
+            text += (f"\n待判定：{pending} 个行级分片需 --apply 下载后逐行比对"
+                     "（dry-run 不代表 0 冲突）")
+        deferred = summary.get("deferred") or []
+        if deferred:
+            text += f"\n延后补齐：{len(deferred)} 条 raw_blob（元数据行缺失）"
+        return text
     if command.endswith("status"):
-        return (f"状态：missing={len(summary.get('dates_missing') or [])} "
+        tables = summary.get("tables") or {}
+        synced = sum(1 for item in tables.values() if item.get("remote_entries"))
+        text = (f"状态：missing={len(summary.get('dates_missing') or [])} "
                 f"mismatched={len(summary.get('dates_mismatched') or [])} "
+                f"drift={len(summary.get('dates_drift') or [])} "
                 f"local={summary.get('bytes_local', 0)}B "
-                f"remote={summary.get('bytes_remote', 0)}B")
+                f"remote={summary.get('bytes_remote', 0)}B\n"
+                f"同步覆盖：{synced}/{len(tables)} 个同步单元有远端数据")
+        if summary.get("not_synced"):
+            for name, state in summary["not_synced"].items():
+                text += f"\n{name}: {state}"
+        else:
+            text += "\nfactor_* / fin_*: 已纳入同步"
+        if summary.get("dates_drift"):
+            text += "\ndrift 仅为弱信号（本地行数更多）；定性请用 verify"
+        return text
     return (f"校验：dates={summary.get('checked_dates', 0)} "
             f"blobs={summary.get('checked_blobs', 0)} "
             f"mismatched={len(summary.get('mismatched') or [])}")
+
+
+def _period_filter_hint(summary: dict) -> str | None:
+    """显式 --from/--to 排除报告期分区时的一行人读提示（不失败、不改退出码）。"""
+    excluded = summary.get("period_excluded") or []
+    if not excluded:
+        return None
+    names = "、".join(item["partition"] for item in excluded[:3])
+    suffix = " 等" if len(excluded) > 3 else ""
+    return (f"提示：--from/--to 按报告期末过滤，已排除 {len(excluded)} 个报告期分区"
+            f"（{names}{suffix}）；如需同步请放宽区间。")
 
 
 def _cmd_assets_sync(args) -> None:
@@ -555,6 +609,9 @@ def _cmd_assets_sync(args) -> None:
         return
 
     print(_assets_human_summary(command, result), file=sys.stderr)
+    hint = _period_filter_hint(result.get("summary") or {})
+    if hint:
+        print(hint, file=sys.stderr)
     exit_code = 2 if result.get("fatal") else (0 if result.get("ok") else 1)
     _emit_assets({
         "ok": result.get("ok", False),
@@ -564,14 +621,81 @@ def _cmd_assets_sync(args) -> None:
     }, exit_code)
 
 
+def _backfill_dragons_human_summary(result: dict) -> str:
+    prefix = "体检（dry-run）" if result.get("dry_run") else "回填"
+    text = (f"{prefix}：dates={len(result.get('dates') or [])} "
+            f"rows_source={result.get('rows_source', 0)} "
+            f"inserted={result.get('inserted', 0)} "
+            f"updated={result.get('updated', 0)} "
+            f"unchanged={result.get('unchanged', 0)} "
+            f"missing={result.get('missing_rows', 0)} "
+            f"orphan={result.get('orphan_rows', 0)}")
+    if result.get("pruned"):
+        text += f" pruned={result['pruned']}"
+    if result.get("failed"):
+        text += f" failed={len(result['failed'])}"
+    return text
+
+
+def _cmd_assets_backfill_dragons(args) -> None:
+    """``assets backfill-dragons``：dragons_v2 → assets.db.dragons 幂等回填（本地）。
+
+    退出码：0 成功 / 1 部分日期失败 / 2 参数错误或库不可用。
+    错误通道：默认模式写 stderr；``--json`` 保持 ``{ok: false, error}`` 到 stdout。
+    """
+    from dragon_quant.storage import dragons_mirror
+
+    as_json = getattr(args, "json", False)
+    command = "assets backfill-dragons"
+
+    def _emit(payload: dict, exit_code: int) -> None:
+        if as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        elif not payload.get("ok"):
+            reasons = [item.get("reason") for item in payload.get("failed") or []
+                       if isinstance(item, dict) and item.get("reason")]
+            detail = "；".join(reasons[:3]) or payload.get("error") or "未知错误"
+            print(f"❌ {command} 失败：{detail}", file=sys.stderr)
+        sys.exit(exit_code)
+
+    try:
+        date_from = _parse_asset_date(getattr(args, "from_date", None), "--from")
+        date_to = _parse_asset_date(getattr(args, "to_date", None), "--to")
+        result = dragons_mirror.backfill_dragons(
+            date_from=date_from, date_to=date_to,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            prune=bool(getattr(args, "prune", False)))
+    except ValueError as exc:      # 参数错误 / 日期非法 / --from 晚于 --to
+        _emit({"ok": False, "error": str(exc)}, 2)
+        return
+    except Exception as exc:       # 库不可用（schema / IO）
+        _emit({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 2)
+        return
+
+    if not as_json:
+        print(_backfill_dragons_human_summary(result), file=sys.stderr)
+        for item in result.get("failed") or []:
+            if isinstance(item, dict):
+                print(f"  - {item.get('date') or '(全局)'}: {item.get('reason')}",
+                      file=sys.stderr)
+    # 全局失败（如 assets.db 不可用，failed[].date is None）属「库不可用」→ exit 2；
+    # 单日失败 → exit 1。两种模式都输出完整汇总（含 failed[]）。
+    fatal = any(isinstance(item, dict) and item.get("date") is None
+                for item in result.get("failed") or [])
+    exit_code = 2 if fatal else (0 if result.get("ok") else 1)
+    _emit(result, exit_code)
+
+
 def _cmd_assets(args):
-    """数据资产云端同步：doctor / push / pull / status / verify。"""
+    """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。"""
     from dragon_quant.assets_sync.backends.s3 import S3Backend
     from dragon_quant.assets_sync.credentials import load_config
     from dragon_quant.assets_sync.doctor import run_doctor
     from dragon_quant.assets_sync.errors import AssetsSyncError
 
     action = getattr(args, "assets_action", None)
+    if action == "backfill-dragons":
+        return _cmd_assets_backfill_dragons(args)
     if action in ("push", "pull", "status", "verify"):
         return _cmd_assets_sync(args)
     if action != "doctor":
@@ -853,7 +977,7 @@ def _cmd_auction(args):
 
     默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。
     """
-    from dragon_quant.storage import db, assets_db
+    from dragon_quant.storage import assets_db, dragons_mirror
     from dragon_quant.data import get_auction
     from dragon_quant.auction.serialize import quote_to_payload, quote_from_payload
 
@@ -867,7 +991,7 @@ def _cmd_auction(args):
     trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
     pool_mode = getattr(args, "pool", "prep")
     days_arg = getattr(args, "days", None)
-    days = days_arg or 3
+    days = days_arg or 5
 
     ctx = {
         "pool_source": "legacy",
@@ -894,12 +1018,14 @@ def _cmd_auction(args):
             print(f"⚠️ T-1 交易日历不可用（{type(exc).__name__}: {exc}），回退 legacy 池",
                   file=sys.stderr)
         if calendar:
-            from dragon_quant.review_account.market import candidate_dates, collect_candidates_ex
+            from dragon_quant.review_account.market import (
+                candidate_dates, candidate_loader, collect_candidates_ex,
+            )
             from dragon_quant.review_account.models import StrategyConfig
             cfg = StrategyConfig(source=source, candidate_lookback_days=days)
             try:
                 candidates, ctx = collect_candidates_ex(
-                    calendar, trade_date, cfg, db.get_dragons_by_date)
+                    calendar, trade_date, cfg, candidate_loader(source))
             except Exception as exc:
                 candidates = []
                 ctx = {**ctx, "fallback_reason": "candidate_pool_error",
@@ -915,21 +1041,41 @@ def _cmd_auction(args):
 
     if not by_code:
         # 显式 legacy，或 prep 路径回退后仍无候选：走旧口径（最近 N 日龙头并集）。
-        dates = db.list_dragon_trade_dates(source=source)
-        if dates:
-            recent_dates = dates[-days:]
-            for d in recent_dates:
-                for dr in db.get_dragons(d, source=source):
-                    code = dr.get("code")
-                    if not code:
-                        continue
-                    name = dr.get("name") or ""
-                    if code not in by_code or name:
-                        by_code[code] = name
-            if ctx.get("fallback_reason") is None and pool_mode == "prep":
-                ctx["fallback_reason"] = "pool_unavailable"
-        elif pool_mode == "legacy":
-            _emit_auction_error({"error": "最近 N 日无龙头，无需采集"}, as_json)
+        # 读源 = assets.db.dragons 镜像（AC5）；枚举型读路径必须逐日对账，
+        # 否则镜像整体缺行会让日期集合前移、池静默换日 + 变小。
+        try:
+            dates = dragons_mirror.list_dragon_trade_dates(source=source)
+            if dates:
+                recent_dates = dates[-days:]
+                stale = dragons_mirror.stale_dates(recent_dates)
+                if stale:
+                    # auction 本就有回退路径：不硬失败，但让缺行与缺日原因可见
+                    if "dragons_mirror_missing_day" not in ctx["degraded"]:
+                        ctx["degraded"].append("dragons_mirror_missing_day")
+                    ctx["fallback_reason"] = "mirror_stale_day"
+                for d in recent_dates:
+                    for dr in dragons_mirror.get_dragons(d, source=source):
+                        code = dr.get("code")
+                        if not code:
+                            continue
+                        name = dr.get("name") or ""
+                        if code not in by_code or name:
+                            by_code[code] = name
+                if ctx.get("fallback_reason") is None and pool_mode == "prep":
+                    ctx["fallback_reason"] = "pool_unavailable"
+            elif pool_mode == "legacy":
+                _emit_auction_error({"error": "最近 N 日无龙头，无需采集"}, as_json)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            # 镜像不可用时 auction 不硬失败（无候选则走空池分支），但必须可见。
+            ctx["degraded"].append(
+                f"dragons_mirror_unavailable: {type(exc).__name__}: {exc}")
+            if ctx.get("fallback_reason") is None:
+                ctx["fallback_reason"] = "mirror_read_error"
+            if pool_mode == "legacy":
+                _emit_auction_error(
+                    {"error": f"龙头镜像读取失败：{type(exc).__name__}: {exc}"}, as_json)
 
     if not by_code:
         ignore_reasons = ctx.get("ignore_reasons") or []
@@ -1124,6 +1270,315 @@ def _cmd_auction(args):
                 detail += f"，快照错误：{snapshot_error}"
             print(f"❌ 集合竞价失败：{detail}（详情加 --json）", file=sys.stderr)
         sys.exit(1)
+
+
+def _emit_factor_error(payload: dict, as_json: bool, exit_code: int) -> None:
+    """factor 错误输出：默认人读一行到 stderr；--json 保持 JSON 到 stdout。
+
+    与 prep/auction 同策略：参数错误 exit 2，运行时失败 exit 1。
+    """
+    body = {"ok": False, **payload}
+    if as_json:
+        print(json.dumps(body, ensure_ascii=False, indent=2))
+    else:
+        print(f"❌ 因子操作失败：{body.get('error', '未知错误')}", file=sys.stderr)
+    sys.exit(exit_code)
+
+
+def _print_factor_human(action: str, payload: dict) -> None:
+    """factor 子命令的人读输出（默认模式；JSON 契约不受影响）。"""
+    if action == "list":
+        print(f"{'因子':28s} {'版本':14s} {'源':6s} {'阶段':8s} {'PIT':10s} 默认")
+        print("-" * 78)
+        for item in payload.get("factors") or []:
+            print(f"{item['name']:28s} {item['version']:14s} {item['source']:6s} "
+                  f"{item['available_phase']:8s} {item['pit_rule']:10s} "
+                  f"{'开' if item['default_enabled'] else '关'}")
+        return
+
+    if action == "build":
+        for report in payload.get("reports") or []:
+            entries = list((report.get("factors") or {}).values())
+            counts: dict[str, int] = {}
+            for entry in entries:
+                counts[entry.get("status", "?")] = counts.get(entry.get("status", "?"), 0) + 1
+            status_text = " ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "-"
+            rows = sum(int(entry.get("rows") or 0) for entry in entries)
+            sector = report.get("sector_snapshot") or {}
+            print(f"{report.get('trade_date')}: 因子 {len(entries)} 个 / 行 {rows} "
+                  f"[{status_text}] 主板块 {sector.get('rows', 0)} "
+                  f"build_id={report.get('build_id')}")
+            for warning in report.get("warnings") or []:
+                print(f"  ⚠️ {warning}")
+        if not payload.get("reports"):
+            print("(区间内无扫描记录，未执行 build)")
+        if payload.get("mode") == "range":
+            print(f"合计 {len(payload.get('dates') or [])} 个交易日，"
+                  f"build_ids={payload.get('build_ids')}")
+        for warning in payload.get("warnings") or []:
+            print(f"⚠️ {warning}")
+        return
+
+    if action == "query":
+        if payload.get("mode") == "day":
+            values = payload.get("values") or {}
+            if not values:
+                print(f"{payload.get('trade_date')}: (无因子值)")
+            for code in sorted(values):
+                for name in sorted(values[code]):
+                    available = ((payload.get("available_at") or {}).get(code) or {}).get(name)
+                    print(f"{payload.get('trade_date')} {code} {name} "
+                          f"{values[code][name]:g} available_at={available}")
+        else:
+            rows = payload.get("rows") or []
+            if not rows:
+                print(f"{payload.get('factor')}: (区间内无因子值)")
+            for row in rows:
+                print(f"{row['trade_date']} {row['code']} {row['factor_version']} "
+                      f"{row['value']:g} available_at={row['available_at']}")
+        print(f"resolved_versions={payload.get('resolved_versions')}")
+        return
+
+    if action == "status":
+        values = payload.get("factor_values") or {}
+        registry = payload.get("factor_registry") or {}
+        sector = payload.get("factor_sector_snapshots") or {}
+        runs = payload.get("build_runs") or {}
+        last = runs.get("last") or {}
+        print(f"因子值：{values.get('rows', 0)} 行 / {values.get('factors', 0)} 因子 / "
+              f"{values.get('dates', 0)} 交易日 "
+              f"({values.get('first_date')} ~ {values.get('last_date')})")
+        print(f"注册表快照：{registry.get('rows', 0)} 行 / {registry.get('factors', 0)} 因子")
+        print(f"主板块快照：{sector.get('rows', 0)} 行 / {sector.get('dates', 0)} 交易日 "
+              f"{sector.get('by_category') or {}}")
+        print(f"build 审计：{runs.get('rows', 0)} 次"
+              + (f"，最近 build_id={last.get('id')} @ {last.get('trade_date')}" if last else ""))
+        missing = [f["name"] for f in payload.get("factors") or []
+                   if not f.get("registered_version")]
+        if missing:
+            print(f"未注册（尚未 build）：{', '.join(missing)}")
+        return
+
+    if action == "export":
+        print(f"导出矩阵：{payload.get('date_from')} ~ {payload.get('date_to')}，"
+              f"{len(payload.get('dates') or [])} 日 × {len(payload.get('codes') or [])} 只，"
+              f"列 {len(payload.get('columns') or [])} 个")
+        print(f"resolved_versions={payload.get('resolved_versions')}")
+        print(f"missing_rate_by_factor={payload.get('missing_rate_by_factor')}")
+        if payload.get("winsorize_skipped"):
+            print(f"⚠️ winsorize_skipped={payload.get('winsorize_skipped')}")
+        if payload.get("normalize_skipped"):
+            print(f"⚠️ normalize_skipped={payload.get('normalize_skipped')}")
+        if payload.get("dropped_rows"):
+            print(f"drop 缺失行：{payload.get('dropped_rows')} 行")
+        print(f"out={payload.get('out_path')} meta={payload.get('meta_path')}")
+        for warning in payload.get("warnings") or []:
+            print(f"⚠️ {warning}")
+        return
+
+    if action == "eval":
+        print(f"评估 {payload.get('factor')}@{payload.get('resolved_version')}："
+              f"{payload.get('status')}"
+              + (f"（{payload.get('reason')}）" if payload.get("reason") else ""))
+        print(f"horizon={payload.get('horizon')} nw_lag={payload.get('nw_lag')} "
+              f"days={payload.get('days')} obs={payload.get('observations')} "
+              f"effective_days={payload.get('effective_independent_days')}")
+        ic = payload.get("ic") or {}
+        print(f"RankIC mean={ic.get('mean')} std={ic.get('std')} "
+              f"ICIR={ic.get('icir')} t={ic.get('t_stat')} nw_t={ic.get('nw_t_stat')}")
+        coverage = payload.get("coverage") or {}
+        print(f"coverage mean={coverage.get('mean')} min={coverage.get('min')} "
+              f"missing_rate={coverage.get('missing_rate')}")
+        for group in payload.get("groups") or []:
+            print(f"  group={group.get('group')} n={group.get('n')} "
+                  f"mean_return={group.get('mean_return')} "
+                  f"hit_rate={group.get('hit_rate')}")
+        print(f"pit_policy={payload.get('pit_policy')} "
+              f"pit_basis_mix={payload.get('pit_basis_mix')}")
+        for warning in payload.get("warnings") or []:
+            print(f"⚠️ {warning}")
+        for item in payload.get("degraded") or []:
+            print(f"⚠️ degraded: {item}")
+        return
+
+
+def _cmd_factor(args):
+    """因子层命令：build / list / query / status / fin。"""
+    from dragon_quant.factors import service
+
+    action = getattr(args, "factor_action", None)
+    if action == "fin":
+        _cmd_factor_fin(args)
+        return
+    as_json = getattr(args, "json", False)
+    try:
+        if action == "build":
+            payload = service.build(
+                date=args.date,
+                date_from=getattr(args, "from_date", None),
+                date_to=getattr(args, "to_date", None),
+                only=args.only,
+                all_factors=getattr(args, "all_factors", False),
+            )
+        elif action == "list":
+            payload = {"ok": True, "factors": service.list_factors()}
+        elif action == "query":
+            payload = service.query(
+                date=args.date,
+                date_from=getattr(args, "from_date", None),
+                date_to=getattr(args, "to_date", None),
+                name=args.name,
+                code=args.code,
+                version=args.version,
+            )
+        elif action == "status":
+            payload = service.status()
+        elif action == "export":
+            from dragon_quant.factors.matrix import CleanConfig, identity_clean
+            names = service.parse_only(args.names)
+            if not names:
+                raise ValueError("export 至少需要一个 --name")
+            low, high = (float(part) for part in str(args.limits).split(",", 1))
+            if args.clean:
+                clean = CleanConfig(
+                    missing=args.missing or "nan",
+                    winsorize=args.winsorize or "mad",
+                    limits=(low, high),
+                    normalize=args.normalize or "rank")
+            elif args.missing or args.winsorize or args.normalize:
+                clean = CleanConfig(
+                    missing=args.missing or "nan",
+                    winsorize=args.winsorize or "none",
+                    limits=(low, high),
+                    normalize=args.normalize or "none")
+            else:
+                clean = identity_clean()
+            payload = service.export_matrix(
+                args.from_date, args.to_date, names=names,
+                version=args.version, codes=service.parse_only(args.codes),
+                clean=clean, fmt=args.fmt, out_path=args.out_path)
+        elif action == "eval":
+            from dragon_quant.review_account.data import MarketData
+            payload = service.evaluate_factor(
+                args.name, args.from_date, args.to_date, data=MarketData(),
+                horizon=args.horizon, groups=args.groups, version=args.version,
+                min_days=args.min_days, min_cross_section=args.min_cross_section,
+                pit_policy=args.pit_policy)
+        else:
+            _emit_factor_error(
+                {"error": "未知 factor 子命令（build/list/query/status/export/eval/fin）"},
+                as_json, 2)
+            return
+    except ValueError as exc:
+        _emit_factor_error({"error": str(exc)}, as_json, 2)
+        return
+    except Exception as exc:  # schema/IO 等运行时失败：不抛栈
+        _emit_factor_error({"error": f"{type(exc).__name__}: {exc}"}, as_json, 1)
+        return
+
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        _print_factor_human(action, payload)
+    if not payload.get("ok"):
+        sys.exit(1)
+
+
+def _cmd_factor_fin(args):
+    """``factor fin``：sync（snapshot/backfill）/ calibrate / status。"""
+    from dragon_quant.factors import service
+
+    sub = getattr(args, "fin_action", None)
+    as_json = getattr(args, "json", False)
+    try:
+        if sub == "sync":
+            payload = service.fin_sync(
+                snapshot=getattr(args, "snapshot", False),
+                backfill=getattr(args, "backfill", False),
+                date=getattr(args, "date", None),
+                from_period=getattr(args, "from_period", None),
+                to_period=getattr(args, "to_period", None),
+                force=getattr(args, "force", False),
+                host=getattr(args, "host", None),
+            )
+        elif sub == "calibrate":
+            payload = service.fin_calibrate(
+                sample=getattr(args, "sample", 20),
+                period=getattr(args, "period", None),
+                host=getattr(args, "host", None),
+            )
+        elif sub == "status":
+            payload = service.fin_status()
+        else:
+            _emit_factor_error(
+                {"error": "未知 factor fin 子命令（sync/calibrate/status）"},
+                as_json, 2)
+            return
+    except ValueError as exc:
+        _emit_factor_error({"error": str(exc)}, as_json, 2)
+        return
+    except Exception as exc:
+        _emit_factor_error({"error": f"{type(exc).__name__}: {exc}"}, as_json, 1)
+        return
+
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        _print_fin_human(sub, payload)
+    if not payload.get("ok"):
+        sys.exit(1)
+
+
+def _print_fin_human(action: str, payload: dict) -> None:
+    if action == "sync":
+        mode = payload.get("mode")
+        if mode == "snapshot":
+            print(f"财务观测 {payload.get('trade_date')}：候选 {payload.get('codes', 0)} 只，"
+                  f"成功 {payload.get('ok', 0)}，状态 {payload.get('status')}")
+            for updated, count in sorted((payload.get("updated_dates") or {}).items()):
+                print(f"  updated_date={updated}: {count}")
+            for error in payload.get("errors") or []:
+                print(f"  ❌ {error.get('code')}: {error.get('error')}")
+            return
+        print(f"财务回填：报告期 {payload.get('periods') or '-'}")
+        print(f"  下载 {payload.get('downloaded', 0)} / 跳过 {payload.get('skipped', 0)} / "
+              f"新增行 {payload.get('inserted', 0)} / 值未变 {payload.get('unchanged', 0)} / "
+              f"撤销 {payload.get('retracted', 0)} / 观测失配 {payload.get('observed_unmatched', 0)}")
+        if payload.get("layouts"):
+            print(f"  布局：{payload.get('layouts')}")
+        for failure in payload.get("failed") or []:
+            print(f"  ❌ {failure.get('period')} {failure.get('md5')}: {failure.get('error')}")
+        return
+
+    if action == "calibrate":
+        print(f"字段校准 {payload.get('layout_key')}：{payload.get('status')} "
+              f"(sample={payload.get('sample_n')}, period={payload.get('report_period')})")
+        anchors = payload.get("anchors") or {}
+        print(f"  锚定：恒等式={anchors.get('identity')} 层级不等式={anchors.get('hierarchy')}")
+        for field, spec in sorted((payload.get("mapping") or {}).items()):
+            print(f"  {field}: index={spec.get('index')} scale={spec.get('scale')}")
+        return
+
+    if action == "status":
+        observed = payload.get("observed") or {}
+        files = payload.get("report_files") or {}
+        records = payload.get("report_records") or {}
+        mix = payload.get("pit_basis_mix") or {}
+        print(f"观测快照：{observed.get('rows', 0)} 行 / {observed.get('dates', 0)} 日 "
+              f"(最近 {observed.get('last_date')})")
+        print(f"期文件：{files.get('rows', 0)} 行 / {files.get('periods', 0)} 期 "
+              f"{files.get('by_status') or {}}")
+        print(f"账本：{records.get('rows', 0)} 行 / {records.get('periods', 0)} 期 / "
+              f"{records.get('codes', 0)} code / 撤销 {records.get('retracted', 0)} "
+              f"{records.get('by_basis') or {}}")
+        print(f"PIT 口径：observed 占比 {mix.get('observed_ratio')}，"
+              f"回填不可证伪 {mix.get('restatement_unverifiable', 0)} 行")
+        print(f"校准布局：{payload.get('verified_layouts') or '-'}")
+        print(f"最近报告期：{payload.get('latest_period') or '-'}"
+              f"（下一截止日 {payload.get('next_deadline') or '-'}，"
+              f"逾期={payload.get('overdue')}）")
+        print(f"依赖：pandas={((payload.get('dependencies') or {}).get('pandas'))}")
+        return
 
 
 def _cmd_buy(args):

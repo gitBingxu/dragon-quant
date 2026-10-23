@@ -126,20 +126,27 @@ def _default_auction_loader(day: str, source: str = "v2") -> list[dict]:
 
 
 def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
-                          auction_loader=None) -> tuple[list[dict], dict]:
+                          auction_loader=None, factor_loader=None) -> tuple[list[dict], dict]:
     """候选池 + P/A 三值注解 + 上下文（排序模式/回退原因/降级）。
 
     池语义（与 auction 采集池共用）：
     - 优先 T-1 prep 快照（strict T-1）；
-    - 快照缺失/读取异常/无候选/无资格（min_score/真龙）→ legacy 3 日真龙；
+    - 快照缺失/读取异常/无候选/无资格（min_score/真龙）→ legacy 5 日真龙；
     - 快照有候选但推荐集（strong/light）为空 → **D7 回退 legacy**，回退池不再应用
       ignore 出池；P 仍按快照 verdict 标注（ignore→False、无该 code→None）；
     - 旧快照完全不含 verdict → 使用快照候选、P 全 Unknown（C7）。
+
+    因子注解（P2）：``factor_ranking_enabled`` 关闭 → 零读取（``factor_mode="off"``）；
+    开启 → ``factors.decision.annotate_pool`` 按**每只候选自己的 trade_date** 读因子值，
+    写 ``entry_priority.factor``，并把 ``factor_mode`` / ``factor_model`` /
+    ``factor_coverage`` / ``factor_degraded`` 只增地放回 ``ctx``。读取失败或覆盖率
+    不足只降级整日排序，绝不中断 buy/review-account。
     """
     source = getattr(cfg, "source", "v2")
     min_score = getattr(cfg, "min_score", 50.0)
     ranking_on = bool(getattr(cfg, "auction_ranking_enabled", False))
     veto_on = bool(getattr(cfg, "auction_veto_enabled", False))
+    factor_on = bool(getattr(cfg, "factor_ranking_enabled", False))
     ctx = {
         "ranking_mode": "legacy",
         "pool_source": "legacy",
@@ -157,6 +164,11 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
         "ignore_reasons": [],
         "prep_degraded": False,
         "degraded": [],
+        # 因子决策接入（只增键；关闭时保持 off/None/[]）
+        "factor_mode": "off",
+        "factor_model": None,
+        "factor_coverage": None,
+        "factor_degraded": [],
     }
 
     snap = snapshot_date = reason = None
@@ -241,6 +253,32 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
             if block["state"] is False:
                 ctx["would_veto_count"] += 1
 
+    # 因子注解（P2）：关闭 → 零读取；开启 → 按每只候选自己的 trade_date 读因子值。
+    # 任何失败只把整日排序降级，绝不中断回测/buy。
+    if factor_on:
+        from dragon_quant.factors import decision as factor_decision
+        if source != "v2":
+            reason = "factor_source_not_v2: 只有 v2 池支持因子接入"
+            factor_decision.annotate_degraded(
+                pool, model_name=getattr(cfg, "factor_model_name",
+                                         factor_decision.DEFAULT_MODEL_NAME),
+                model_version=getattr(cfg, "factor_model_version", ""),
+                reason=reason)
+            ctx["factor_mode"] = "degraded"
+            ctx["factor_degraded"] = [reason]
+        else:
+            result = factor_decision.annotate_pool(
+                pool, decision_date=day,
+                model_name=getattr(cfg, "factor_model_name",
+                                   factor_decision.DEFAULT_MODEL_NAME),
+                model_version=getattr(cfg, "factor_model_version", ""),
+                min_coverage=getattr(cfg, "factor_min_coverage", 0.6),
+                factor_loader=factor_loader)
+            ctx["factor_mode"] = result["factor_mode"]
+            ctx["factor_model"] = result["factor_model"]
+            ctx["factor_coverage"] = result["factor_coverage"]
+            ctx["factor_degraded"] = list(result["factor_degraded"])
+
     pool = sorted(pool, key=candidate_key)
     ctx["pool_empty"] = not pool
     ctx["ranking_mode"] = ranking_mode(
@@ -252,13 +290,31 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
 
 
 def collect_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
-    """候选池（兼容包装）：优先 T-1 盘后复盘快照；必要时回退旧 3 日真龙并集。"""
+    """候选池（兼容包装）：优先 T-1 盘后复盘快照；必要时回退 5 日真龙并集。"""
     return collect_candidates_ex(calendar, day, cfg, loader)[0]
 
 
+def candidate_loader(source: str = "v2"):
+    """候选池 loader 分派：v2 → assets.db 镜像；v1 → dragon.db.dragons_v1。
+
+    ``--source v1`` 是 AC5 的显式例外（v1 已废弃，仅历史查询；镜像只承载 v2）。
+    返回签名与 ``db.get_dragons_by_date(date, top_n=None, source=...)`` 兼容。
+    """
+    if (source or "v2").lower().strip() == "v1":
+        from dragon_quant.storage import db
+        return db.get_dragons_by_date
+    from dragon_quant.storage import dragons_mirror
+    return dragons_mirror.get_dragons_by_date
+
+
 def _legacy_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
-    """旧逻辑：前 candidate_lookback_days 个交易日的全部真龙并集去重。"""
-    lookback = getattr(cfg, "candidate_lookback_days", 3)
+    """旧逻辑：前 candidate_lookback_days 个交易日的全部真龙并集去重。
+
+    默认 5 日（与 prep 窗口一致）。注意：默认值 3→5 改变了回测基线，
+    历史 run 与本基线**不可直接比较**；复现旧基线请显式
+    ``candidate_lookback_days=3``。
+    """
+    lookback = getattr(cfg, "candidate_lookback_days", 5)
     min_score = getattr(cfg, "min_score", 50.0)
     source = getattr(cfg, "source", "v2")
     merged = {}

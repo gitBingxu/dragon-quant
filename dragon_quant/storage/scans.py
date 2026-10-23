@@ -164,6 +164,32 @@ def get_scans_by_date(scan_date: str, source: str = "v2") -> list[dict]:
         conn.close()
 
 
+def list_scan_dates(date_from: Optional[str] = None,
+                    date_to: Optional[str] = None,
+                    source: str = "v2") -> list[str]:
+    """返回 scans 表中有扫描记录的日期列表（升序），供区间 build 逐日展开。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        sql = f"SELECT DISTINCT scan_date FROM {t['scans']}"
+        params: list = []
+        conditions: list[str] = []
+        if date_from:
+            conditions.append("scan_date >= ?")
+            params.append(date_from)
+        if date_to:
+            conditions.append("scan_date <= ?")
+            params.append(date_to)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY scan_date ASC"
+        return [r[0] for r in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.close()
+
+
 def delete_scans_by_date_topn(scan_date: str, top_n: int, source: str = "v2") -> int:
     """删除指定日期 + top_n 的所有扫描 run（硬删除）。
 

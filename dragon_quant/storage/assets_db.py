@@ -10,6 +10,10 @@
   - ``prep_snapshots``    盘后复盘计算结果（UNIQUE(trade_date, source)）
   - ``auction_snapshots`` 竞价强度计算结果（UNIQUE(trade_date, code, source)），
                           由 ``auction`` 采集/``auction --recompute`` 写入。
+  - ``dragons``           ``dragon.db.dragons_v2`` 的全量镜像（列 schema 一致），
+                          由存储门面锁外 best-effort 双写 + ``assets backfill-dragons``
+                          回填；权威仍是 dragon.db，本表供 prep / review-account /
+                          buy / sell / auction 的候选池读取。
 
 设计要点（沿用原 prep.db 门面约定）：
   - 独立 ``_connect/_ensure_schema/_lock``（WAL + busy_timeout + 每操作独立连接 +
@@ -104,6 +108,197 @@ CREATE TABLE IF NOT EXISTS auction_snapshots (
     created_at    TEXT DEFAULT (datetime('now','localtime')),
     UNIQUE(trade_date, code, source)
 );
+
+-- ─── dragons 全量镜像（dragon.db.dragons_v2 → assets.db）─────────────────────
+-- 列 schema 与 dragons_v2 **完全一致**（含 id / source），同一行可直接对拷；
+-- 权威仍是 dragon.db，镜像 best-effort 写入、可经 `assets backfill-dragons` 自愈。
+-- id 为本库自增（与源库不保证相等），created_at 为本库写入时间，两者均不参与
+-- 一致性判定、不进入 assets_sync 语义列（见 assets_sync/tables.py）。
+CREATE TABLE IF NOT EXISTS dragons (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date            TEXT NOT NULL,
+    code                  TEXT NOT NULL,
+    name                  TEXT,
+    scan_id               TEXT,
+    rank                  INTEGER,
+    composite_score       REAL,
+    board_count           INTEGER,
+    open_px               REAL,
+    close_px              REAL,
+    high_px               REAL,
+    low_px                REAL,
+    pct                   REAL,
+    turnover_rate         REAL,
+    amount                REAL,
+    market_cap            REAL,
+    concepts_json         TEXT,
+    report_text           TEXT,
+    is_true_dragon        INTEGER,
+    version               TEXT DEFAULT '',
+    created_at            TEXT DEFAULT (datetime('now','localtime')),
+    buy_date              TEXT,
+    buy_price             REAL,
+    max_return_5d         REAL,
+    max_drawdown_5d       REAL,
+    max_return_hold_days  INTEGER,
+    review_status         TEXT DEFAULT 'pending',
+    source                TEXT DEFAULT 'v2',
+    UNIQUE(trade_date, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_dragons_date   ON dragons(trade_date);
+CREATE INDEX IF NOT EXISTS idx_assets_dragons_code   ON dragons(code);
+CREATE INDEX IF NOT EXISTS idx_assets_dragons_review ON dragons(review_status, trade_date);
+
+-- ─── 因子层（factors/，P0）──────────────────────────────────────────────
+-- 权威源：一个交易日的每只标的每个因子一行；缺失 = 无行（绝不写 0 / 中性分）。
+CREATE TABLE IF NOT EXISTS factor_values (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date       TEXT NOT NULL,
+    code             TEXT NOT NULL,
+    factor_name      TEXT NOT NULL,
+    factor_version   TEXT NOT NULL,
+    value            REAL NOT NULL,
+    available_at     TEXT NOT NULL,
+    source           TEXT NOT NULL,
+    source_scan_id   TEXT,                      -- 血缘：canonical scan id（source=scan 时）
+    source_meta_json TEXT,                      -- 所有 source 都写 frame.meta 诊断血缘
+                                                -- （覆盖率/样本数/跳过计数；fin 额外含
+                                                --  period/file_md5/pit_basis）
+    computed_at      TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, code, factor_name, factor_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_factor_values_date_name
+    ON factor_values(trade_date, factor_name, factor_version);
+CREATE INDEX IF NOT EXISTS idx_factor_values_code_date
+    ON factor_values(code, trade_date);
+
+-- 元数据快照：同一 (name, version) 语义不可变；版本升级 = 新行。
+CREATE TABLE IF NOT EXISTS factor_registry (
+    factor_name     TEXT NOT NULL,
+    factor_version  TEXT NOT NULL,
+    label           TEXT,
+    frequency       TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    depends_on_json TEXT,
+    lookback        INTEGER DEFAULT 0,
+    direction       TEXT NOT NULL,
+    unit            TEXT,
+    available_phase TEXT NOT NULL,
+    pit_rule        TEXT NOT NULL,
+    scope_json      TEXT,
+    params_json     TEXT,
+    default_enabled INTEGER DEFAULT 0,
+    valid_from      TEXT,
+    deprecated_at   TEXT,
+    owner           TEXT,
+    description     TEXT,
+    spec_hash       TEXT NOT NULL,
+    created_at      TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY(factor_name, factor_version)
+);
+
+-- 模型快照：可复现一次决策所需的全部确定性输入（P2 写入方）。
+CREATE TABLE IF NOT EXISTS factor_model_snapshots (
+    model_name           TEXT NOT NULL,
+    model_version        TEXT NOT NULL,
+    params_json          TEXT NOT NULL,
+    factor_versions_json TEXT NOT NULL,
+    created_at           TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY(model_name, model_version)
+);
+
+-- build 审计：单因子失败不中断，逐因子状态在此留档。
+CREATE TABLE IF NOT EXISTS factor_build_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date  TEXT NOT NULL,
+    started_at  TEXT,
+    finished_at TEXT,
+    report_json TEXT NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_factor_build_runs_date ON factor_build_runs(trade_date);
+
+-- 主板块快照：从 scans.raw_output 派生（不是「行业归属」）。
+-- category 可能是 gn/dq —— 只有 category='hy' 才算真实行业。
+CREATE TABLE IF NOT EXISTS factor_sector_snapshots (
+    trade_date    TEXT NOT NULL,
+    code          TEXT NOT NULL,
+    industry_code TEXT,
+    industry_name TEXT,
+    category      TEXT NOT NULL,
+    source        TEXT,
+    scan_id       TEXT,
+    created_at    TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, code, category)
+);
+CREATE INDEX IF NOT EXISTS idx_factor_sector_date
+    ON factor_sector_snapshots(trade_date, category);
+
+-- ─── 财务原始链路（factors/finance.py，P0.5）──────────────────────────────
+-- 日度观测：get_finance_info 的最新单期命名快照（不可再生，same_day_only）。
+CREATE TABLE IF NOT EXISTS fin_observed_snapshots (
+    trade_date   TEXT NOT NULL,              -- 观测日 YYYY-MM-DD（= 采集当日）
+    code         TEXT NOT NULL,
+    updated_date INTEGER,                    -- TDX 财务更新日期 YYYYMMDD（可空）
+    period       TEXT,                       -- 与账本值级哈希匹配得出；匹配不到为 NULL
+    values_json  TEXT NOT NULL,              -- 命名语义字段（本方案需要的子集）
+    values_hash  TEXT NOT NULL,              -- 语义字段规范化后的 sha256
+    captured_at  TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, code)
+);
+
+-- 回填期文件元数据：身份 = (报告期, md5)；md5 变即新行，旧行保留供审计。
+CREATE TABLE IF NOT EXISTS fin_report_files (
+    report_period TEXT NOT NULL,             -- YYYY-MM-DD（报告期末）
+    filename      TEXT NOT NULL,             -- tdxfin/gpcwYYYYMMDD.zip
+    md5           TEXT NOT NULL,
+    filesize      INTEGER,
+    first_seen_at TEXT NOT NULL,
+    status        TEXT NOT NULL,             -- ok / parse_error / layout_unverified
+    records_count INTEGER DEFAULT 0,
+    raw_blob      BLOB,                      -- layout_unverified 时原始 float 数组（gzip）
+    error         TEXT,
+    PRIMARY KEY(report_period, md5)
+);
+
+-- 报告期账本：追加式 vintage。修订 = 新行，绝不覆盖旧行。
+CREATE TABLE IF NOT EXISTS fin_report_records (
+    report_period TEXT NOT NULL,
+    code          TEXT NOT NULL,
+    file_md5      TEXT NOT NULL,             -- vintage 身份
+    layout_key    TEXT NOT NULL,             -- gpcw_<num_fields>
+    values_json   TEXT NOT NULL,             -- 映射后的语义字段
+    available_at  TEXT NOT NULL,             -- YYYY-MM-DDTHH:MM:SS（§6.4）
+    pit_basis     TEXT NOT NULL,             -- observed / statutory_backfilled / revised
+    first_seen_at TEXT,
+    retracted_at  TEXT,                      -- 新版文件删除该 code 时的撤销时刻
+    PRIMARY KEY(report_period, code, file_md5)
+);
+CREATE INDEX IF NOT EXISTS idx_fin_records_code_period
+    ON fin_report_records(code, report_period, available_at);
+
+-- 字段映射校准：按布局一行的最新结果（fail-closed 的唯一开关）。
+CREATE TABLE IF NOT EXISTS fin_field_calibrations (
+    layout_key      TEXT PRIMARY KEY,        -- gpcw_<num_fields>
+    num_fields      INTEGER NOT NULL,
+    mapping_json    TEXT NOT NULL,
+    confidence_json TEXT NOT NULL,
+    status          TEXT NOT NULL,           -- verified / unverified
+    sample_n        INTEGER NOT NULL,
+    calibrated_at   TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- 除权除息（旁路资产，本期不进因子）。
+CREATE TABLE IF NOT EXISTS fin_xdxr_records (
+    code         TEXT NOT NULL,
+    ex_date      TEXT NOT NULL,              -- YYYY-MM-DD
+    category     INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at   TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE(code, ex_date, category)
+);
 """
 
 # 形状探针（读路径 / wrong-DB 识别）：只校验 NOT NULL 核心列，旧库缺 quote_json 也能读。
@@ -112,6 +307,24 @@ _REQUIRED_COLUMNS = {
     "prep_snapshots": ("trade_date", "source", "result_json"),
     "auction_assets": ("trade_date", "code", "items_json"),
     "auction_snapshots": ("trade_date", "code", "source", "analysis_json"),
+    # dragons 镜像：只登记核心列，用于 wrong-DB 识别（写路径全量断言自动继承）。
+    "dragons": ("trade_date", "code", "name", "composite_score", "review_status"),
+    # 因子层（P0）：只登记核心列，用于 wrong-DB 识别。
+    "factor_values": ("trade_date", "code", "factor_name", "factor_version",
+                      "value", "available_at", "source"),
+    "factor_registry": ("factor_name", "factor_version", "frequency", "source",
+                        "direction", "available_phase", "pit_rule", "spec_hash"),
+    "factor_model_snapshots": ("model_name", "model_version", "params_json",
+                               "factor_versions_json"),
+    "factor_build_runs": ("trade_date", "report_json"),
+    "factor_sector_snapshots": ("trade_date", "code", "category"),
+    # 财务原始链路（P0.5）
+    "fin_observed_snapshots": ("trade_date", "code", "values_json", "values_hash"),
+    "fin_report_files": ("report_period", "filename", "md5", "status"),
+    "fin_report_records": ("report_period", "code", "file_md5", "layout_key",
+                           "values_json", "available_at", "pit_basis"),
+    "fin_field_calibrations": ("layout_key", "num_fields", "mapping_json", "status"),
+    "fin_xdxr_records": ("code", "ex_date", "category", "payload_json"),
 }
 
 # 写路径探针：迁移后必须包含可空新增列，补列失败立即以 AssetsDbSchemaError 暴露。
@@ -314,18 +527,29 @@ def save_prep_snapshot(trade_date: str, result: dict, source: str = "v2") -> Non
             conn.close()
 
 
-def get_prep_snapshot(trade_date: str, source: str = "v2") -> Optional[dict]:
-    """读取某复盘日的快照，无记录返回 None。"""
+def get_prep_snapshot(trade_date: str, source: str = "v2",
+                      with_meta: bool = False):
+    """读取某复盘日的快照，无记录返回 None。
+
+    ``with_meta=True`` 时返回 ``(result | None, {"created_at": ...})``；默认
+    ``False`` 保持原返回值，既有调用方零影响（因子层血缘读取用，方案 §15.2）。
+    """
     conn = _connect(create=False)
     if conn is None:
-        return None
+        return (None, {"created_at": None}) if with_meta else None
     try:
         _ensure_schema(conn, migrate=False)
         row = conn.execute(
-            "SELECT result_json FROM prep_snapshots WHERE trade_date = ? AND source = ?",
+            "SELECT result_json, created_at FROM prep_snapshots "
+            "WHERE trade_date = ? AND source = ?",
             (trade_date, source),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if row is None:
+            return (None, {"created_at": None}) if with_meta else None
+        payload = json.loads(row[0])
+        if with_meta:
+            return payload, {"created_at": row[1]}
+        return payload
     finally:
         conn.close()
 
@@ -477,22 +701,30 @@ def _snapshot_row(trade_date: str, code: str, analysis, error) -> dict:
     return row
 
 
-def list_auction_snapshots(trade_date: str, source: str = "v2") -> list[dict]:
-    """列出某日竞价强度快照，按 code 排序；逐行 JSON 损坏只标 ``error``，不中断整批。"""
+def list_auction_snapshots(trade_date: str, source: str = "v2",
+                           with_meta: bool = False) -> list[dict]:
+    """列出某日竞价强度快照，按 code 排序；逐行 JSON 损坏只标 ``error``，不中断整批。
+
+    ``with_meta=True`` 时逐行追加 ``created_at`` 键（因子层血缘读取，方案 §15.2）；
+    默认 ``False`` 返回形状保持不变。
+    """
     conn = _connect(create=False)
     if conn is None:
         return []
     try:
         _ensure_schema(conn, migrate=False)
         rows = conn.execute(
-            "SELECT trade_date, code, analysis_json FROM auction_snapshots "
+            "SELECT trade_date, code, analysis_json, created_at FROM auction_snapshots "
             "WHERE trade_date = ? AND source = ? ORDER BY code",
             (trade_date, source),
         ).fetchall()
         result = []
         for r in rows:
             analysis, error = _load_json(r[2], {})
-            result.append(_snapshot_row(r[0], r[1], analysis, error))
+            item = _snapshot_row(r[0], r[1], analysis, error)
+            if with_meta:
+                item["created_at"] = r[3]
+            result.append(item)
         return result
     finally:
         conn.close()

@@ -5,13 +5,12 @@ from dragon_quant.review_account.data import MarketData, historical_events
 from dragon_quant.review_account.engine import TradingEngine
 from dragon_quant.review_account.indicators import post_exit_stats
 from dragon_quant.review_account.market import (
-    calendar_start, collect_candidates_ex, load_market_sentiment,
+    calendar_start, candidate_loader, collect_candidates_ex, load_market_sentiment,
 )
 from dragon_quant.review_account.models import (
     AccountState, ClosedPosition, Snapshot, StrategyConfig, TimelineEvent,
     UNAVAILABLE_SUSPENDED,
 )
-from dragon_quant.storage import db
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ class AccountSimulator:
             raise DataCoverageError("回测区间没有完整交易日")
         for day in days:
             candidates, ctx = collect_candidates_ex(
-                self._calendar, day, self.cfg, db.get_dragons_by_date)
+                self._calendar, day, self.cfg, candidate_loader(self.cfg.source))
             self._ranking_modes[day] = ctx["ranking_mode"]
             self._pool_sources[day] = ctx["pool_source"]
             self._fallback_reasons[day] = ctx["fallback_reason"]

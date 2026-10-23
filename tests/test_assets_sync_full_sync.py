@@ -102,6 +102,14 @@ class FullSyncBase(unittest.TestCase):
                 "INSERT INTO prep_snapshots(trade_date, source, result_json, created_at) "
                 "VALUES (?,?,?,?)",
                 (day, "v2", _dumps({"sentiment": 0.8}), "2026-10-21 17:05:00"))
+            # dragons 镜像（AC6：第 15 张表 / volatile 单元，date 分区）
+            conn.execute(
+                "INSERT INTO dragons(trade_date, code, name, rank, composite_score, "
+                "concepts_json, is_true_dragon, version, created_at, review_status, "
+                "source) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (day, "600172", "黄河旋风", 1, 80.5,
+                 _dumps(["培育钻石"]), 1, "1.0", "2026-10-21 15:06:00",
+                 "pending", "v2"))
             conn.execute(
                 "INSERT INTO auction_snapshots(trade_date, code, source, analysis_json, "
                 "created_at) VALUES (?,?,?,?,?)",
@@ -201,7 +209,7 @@ class TestRoundTrip(FullSyncBase):
 
         counts = {
             "prep_assets": 2, "auction_assets": 1, "prep_snapshots": 1,
-            "auction_snapshots": 2, "factor_values": 2,
+            "auction_snapshots": 2, "dragons": 1, "factor_values": 2,
             "factor_build_runs": 1,
             "factor_sector_snapshots": 1, "factor_registry": 1,
             "factor_model_snapshots": 1, "fin_observed_snapshots": 1,

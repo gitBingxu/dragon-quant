@@ -6,7 +6,7 @@ from dragon_quant.live_trade.shadow import build_shadow_state
 from dragon_quant.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.data import MarketData, historical_events
 from dragon_quant.review_account.market import (
-    SHANGHAI, at, bar_times, calendar_start, collect_candidates,
+    SHANGHAI, at, bar_times, calendar_start, candidate_loader, collect_candidates,
     collect_candidates_ex, load_market_sentiment,
 )
 from dragon_quant.review_account.models import UNAVAILABLE_SUSPENDED
@@ -116,7 +116,7 @@ class LiveTrader:
         positions = shadow.positions
         held_codes = {p.code for p in positions}
         candidates, ctx = collect_candidates_ex(
-            calendar, day, self.cfg, db.get_dragons_by_date)
+            calendar, day, self.cfg, candidate_loader(self.cfg.source))
         candidate_codes = {c["code"] for c in candidates}
         degraded: list[str] = []
         usable_positions = self._usable(day, held_codes - candidate_codes, degraded, "持仓")
@@ -186,10 +186,11 @@ class LiveTrader:
         positions = shadow.positions
         degraded: list[str] = []
         try:
-            candidates = collect_candidates(calendar, day, self.cfg, db.get_dragons_by_date)
+            candidates = collect_candidates(
+                calendar, day, self.cfg, candidate_loader(self.cfg.source))
         except Exception as exc:  # 卖出是风控路径，不因候选池问题整体失败
             candidates = []
-            degraded.append(f"候选池读取失败（{exc}），仅按持仓判定")
+            degraded.append(f"candidate_pool_unavailable: {exc}（仅按持仓判定）")
         position_codes = {p.code for p in positions}
         candidate_codes = self._usable(day, {c["code"] for c in candidates} - position_codes,
                                        degraded, "候选")

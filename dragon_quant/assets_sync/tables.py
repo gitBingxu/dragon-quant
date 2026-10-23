@@ -79,6 +79,23 @@ TABLE_SPECS: tuple[TableSpec, ...] = (
         order_by=("source", "code"), volatile=True,
         clock_column="created_at", size_expr="LENGTH(analysis_json)",
     ),
+    # ── dragons 镜像（volatile：review 回写只 UPDATE、不刷新 created_at）──────
+    TableSpec(
+        source="dragons", asset_type="mirror", table="dragons",
+        partition_kind="date", partition_column="trade_date",
+        columns=("trade_date", "code", "name", "scan_id", "rank", "composite_score",
+                 "board_count", "open_px", "close_px", "high_px", "low_px", "pct",
+                 "turnover_rate", "amount", "market_cap", "concepts_json",
+                 "report_text", "is_true_dragon", "version", "buy_date", "buy_price",
+                 "max_return_5d", "max_drawdown_5d", "max_return_hold_days",
+                 "review_status", "source"),
+        identity=("trade_date", "code"),
+        side_columns=("created_at",), json_columns=("concepts_json",),
+        order_by=("code",), volatile=True,
+        clock_column="created_at",
+        size_expr="LENGTH(COALESCE(report_text,''))"
+                  "+LENGTH(COALESCE(concepts_json,''))",
+    ),
     # ── 因子表（非 volatile：DELETE+INSERT 必刷新时钟列）─────────────────────
     TableSpec(
         source="factor", asset_type="values", table="factor_values",
@@ -804,6 +821,12 @@ class PrepsnapAssetSource(CompositeTableSource):
 
 class AuctionsnapAssetSource(CompositeTableSource):
     name = "auctionsnap"
+
+
+class DragonsAssetSource(CompositeTableSource):
+    """``assets.db / dragons``：dragon.db.dragons_v2 的镜像（volatile 单元）。"""
+
+    name = "dragons"
 
 
 class FactorAssetSource(CompositeTableSource):

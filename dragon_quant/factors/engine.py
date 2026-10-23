@@ -307,7 +307,9 @@ def _load_fin_source(trade_date: str, cache: dict, *, calendar: Iterable[str] = 
 
 
 _PREP_DRAGONS_DEGRADED_TOKENS = frozenset(
-    {"dragons", "dragons_partial", "dragons_window_short"})
+    {"dragons", "dragons_partial", "dragons_window_short",
+     "dragons_window_stale", "dragons_mirror_missing_day",
+     "dragons_window_widened_dependents_stale"})
 
 
 def _prep_empty_is_degraded(snapshot: dict) -> bool:

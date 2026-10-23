@@ -374,17 +374,40 @@ def _cmd_prep(args):
     默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--json 输出完整 JSON。
     """
     from dragon_quant.review_account.prep import PrepError, run_prep
-    from dragon_quant.storage import db
+    from dragon_quant.storage import dragons_mirror
 
     as_json = getattr(args, "json", False)
     auto_date = not args.date
     if args.date:
         trade_date = _normalize_cli_date(args.date)
     else:
-        dates = db.list_dragon_trade_dates(source="v2")
+        # 读源切 assets.db.dragons 镜像（AC5）；最新日源库有行而镜像缺行时直接报错，
+        # **不得**静默回退到上一交易日（池会静默换日且变小）。
+        dates = dragons_mirror.list_dragon_trade_dates(source="v2")
         if not dates:
-            _emit_prep_error({"error": "无 v2 龙头记录，无法确定复盘日"}, as_json)
+            # 镜像为空但源库有行 = 尚未回填（事实错误不能报成「无龙头记录」）
+            try:
+                dragons_mirror.ensure_populated()
+            except dragons_mirror.DragonsMirrorEmpty as exc:
+                _emit_prep_error({"error": str(exc)}, as_json)
+            except Exception as exc:   # 源库不可用/schema 异常：统一错误通道，不抛栈
+                _emit_prep_error(
+                    {"error": f"龙头镜像检查失败：{type(exc).__name__}: {exc}"}, as_json)
+            _emit_prep_error(
+                {"error": "无 v2 龙头记录，无法确定复盘日"
+                          f"（assets.db.dragons 为空；请运行 {dragons_mirror.BACKFILL_HINT}）"},
+                as_json)
         trade_date = dates[-1]
+        try:
+            stale = dragons_mirror.stale_dates([trade_date])
+        except Exception as exc:
+            _emit_prep_error(
+                {"error": f"龙头镜像对账失败：{type(exc).__name__}: {exc}"}, as_json)
+        if stale:
+            _emit_prep_error(
+                {"error": f"最新交易日 {trade_date} 源库有龙头记录而镜像缺行"
+                          "（assets.db.dragons），请运行 assets backfill-dragons；"
+                          "已拒绝静默回退到上一交易日"}, as_json)
 
     try:
         result = run_prep(trade_date, recompute=args.recompute,
@@ -598,14 +621,81 @@ def _cmd_assets_sync(args) -> None:
     }, exit_code)
 
 
+def _backfill_dragons_human_summary(result: dict) -> str:
+    prefix = "体检（dry-run）" if result.get("dry_run") else "回填"
+    text = (f"{prefix}：dates={len(result.get('dates') or [])} "
+            f"rows_source={result.get('rows_source', 0)} "
+            f"inserted={result.get('inserted', 0)} "
+            f"updated={result.get('updated', 0)} "
+            f"unchanged={result.get('unchanged', 0)} "
+            f"missing={result.get('missing_rows', 0)} "
+            f"orphan={result.get('orphan_rows', 0)}")
+    if result.get("pruned"):
+        text += f" pruned={result['pruned']}"
+    if result.get("failed"):
+        text += f" failed={len(result['failed'])}"
+    return text
+
+
+def _cmd_assets_backfill_dragons(args) -> None:
+    """``assets backfill-dragons``：dragons_v2 → assets.db.dragons 幂等回填（本地）。
+
+    退出码：0 成功 / 1 部分日期失败 / 2 参数错误或库不可用。
+    错误通道：默认模式写 stderr；``--json`` 保持 ``{ok: false, error}`` 到 stdout。
+    """
+    from dragon_quant.storage import dragons_mirror
+
+    as_json = getattr(args, "json", False)
+    command = "assets backfill-dragons"
+
+    def _emit(payload: dict, exit_code: int) -> None:
+        if as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        elif not payload.get("ok"):
+            reasons = [item.get("reason") for item in payload.get("failed") or []
+                       if isinstance(item, dict) and item.get("reason")]
+            detail = "；".join(reasons[:3]) or payload.get("error") or "未知错误"
+            print(f"❌ {command} 失败：{detail}", file=sys.stderr)
+        sys.exit(exit_code)
+
+    try:
+        date_from = _parse_asset_date(getattr(args, "from_date", None), "--from")
+        date_to = _parse_asset_date(getattr(args, "to_date", None), "--to")
+        result = dragons_mirror.backfill_dragons(
+            date_from=date_from, date_to=date_to,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            prune=bool(getattr(args, "prune", False)))
+    except ValueError as exc:      # 参数错误 / 日期非法 / --from 晚于 --to
+        _emit({"ok": False, "error": str(exc)}, 2)
+        return
+    except Exception as exc:       # 库不可用（schema / IO）
+        _emit({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 2)
+        return
+
+    if not as_json:
+        print(_backfill_dragons_human_summary(result), file=sys.stderr)
+        for item in result.get("failed") or []:
+            if isinstance(item, dict):
+                print(f"  - {item.get('date') or '(全局)'}: {item.get('reason')}",
+                      file=sys.stderr)
+    # 全局失败（如 assets.db 不可用，failed[].date is None）属「库不可用」→ exit 2；
+    # 单日失败 → exit 1。两种模式都输出完整汇总（含 failed[]）。
+    fatal = any(isinstance(item, dict) and item.get("date") is None
+                for item in result.get("failed") or [])
+    exit_code = 2 if fatal else (0 if result.get("ok") else 1)
+    _emit(result, exit_code)
+
+
 def _cmd_assets(args):
-    """数据资产云端同步：doctor / push / pull / status / verify。"""
+    """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。"""
     from dragon_quant.assets_sync.backends.s3 import S3Backend
     from dragon_quant.assets_sync.credentials import load_config
     from dragon_quant.assets_sync.doctor import run_doctor
     from dragon_quant.assets_sync.errors import AssetsSyncError
 
     action = getattr(args, "assets_action", None)
+    if action == "backfill-dragons":
+        return _cmd_assets_backfill_dragons(args)
     if action in ("push", "pull", "status", "verify"):
         return _cmd_assets_sync(args)
     if action != "doctor":
@@ -887,7 +977,7 @@ def _cmd_auction(args):
 
     默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。
     """
-    from dragon_quant.storage import db, assets_db
+    from dragon_quant.storage import assets_db, dragons_mirror
     from dragon_quant.data import get_auction
     from dragon_quant.auction.serialize import quote_to_payload, quote_from_payload
 
@@ -901,7 +991,7 @@ def _cmd_auction(args):
     trade_date = _resolve_trade_date(None)  # get_auction 仅返回当日竞价数据
     pool_mode = getattr(args, "pool", "prep")
     days_arg = getattr(args, "days", None)
-    days = days_arg or 3
+    days = days_arg or 5
 
     ctx = {
         "pool_source": "legacy",
@@ -928,12 +1018,14 @@ def _cmd_auction(args):
             print(f"⚠️ T-1 交易日历不可用（{type(exc).__name__}: {exc}），回退 legacy 池",
                   file=sys.stderr)
         if calendar:
-            from dragon_quant.review_account.market import candidate_dates, collect_candidates_ex
+            from dragon_quant.review_account.market import (
+                candidate_dates, candidate_loader, collect_candidates_ex,
+            )
             from dragon_quant.review_account.models import StrategyConfig
             cfg = StrategyConfig(source=source, candidate_lookback_days=days)
             try:
                 candidates, ctx = collect_candidates_ex(
-                    calendar, trade_date, cfg, db.get_dragons_by_date)
+                    calendar, trade_date, cfg, candidate_loader(source))
             except Exception as exc:
                 candidates = []
                 ctx = {**ctx, "fallback_reason": "candidate_pool_error",
@@ -949,21 +1041,41 @@ def _cmd_auction(args):
 
     if not by_code:
         # 显式 legacy，或 prep 路径回退后仍无候选：走旧口径（最近 N 日龙头并集）。
-        dates = db.list_dragon_trade_dates(source=source)
-        if dates:
-            recent_dates = dates[-days:]
-            for d in recent_dates:
-                for dr in db.get_dragons(d, source=source):
-                    code = dr.get("code")
-                    if not code:
-                        continue
-                    name = dr.get("name") or ""
-                    if code not in by_code or name:
-                        by_code[code] = name
-            if ctx.get("fallback_reason") is None and pool_mode == "prep":
-                ctx["fallback_reason"] = "pool_unavailable"
-        elif pool_mode == "legacy":
-            _emit_auction_error({"error": "最近 N 日无龙头，无需采集"}, as_json)
+        # 读源 = assets.db.dragons 镜像（AC5）；枚举型读路径必须逐日对账，
+        # 否则镜像整体缺行会让日期集合前移、池静默换日 + 变小。
+        try:
+            dates = dragons_mirror.list_dragon_trade_dates(source=source)
+            if dates:
+                recent_dates = dates[-days:]
+                stale = dragons_mirror.stale_dates(recent_dates)
+                if stale:
+                    # auction 本就有回退路径：不硬失败，但让缺行与缺日原因可见
+                    if "dragons_mirror_missing_day" not in ctx["degraded"]:
+                        ctx["degraded"].append("dragons_mirror_missing_day")
+                    ctx["fallback_reason"] = "mirror_stale_day"
+                for d in recent_dates:
+                    for dr in dragons_mirror.get_dragons(d, source=source):
+                        code = dr.get("code")
+                        if not code:
+                            continue
+                        name = dr.get("name") or ""
+                        if code not in by_code or name:
+                            by_code[code] = name
+                if ctx.get("fallback_reason") is None and pool_mode == "prep":
+                    ctx["fallback_reason"] = "pool_unavailable"
+            elif pool_mode == "legacy":
+                _emit_auction_error({"error": "最近 N 日无龙头，无需采集"}, as_json)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            # 镜像不可用时 auction 不硬失败（无候选则走空池分支），但必须可见。
+            ctx["degraded"].append(
+                f"dragons_mirror_unavailable: {type(exc).__name__}: {exc}")
+            if ctx.get("fallback_reason") is None:
+                ctx["fallback_reason"] = "mirror_read_error"
+            if pool_mode == "legacy":
+                _emit_auction_error(
+                    {"error": f"龙头镜像读取失败：{type(exc).__name__}: {exc}"}, as_json)
 
     if not by_code:
         ignore_reasons = ctx.get("ignore_reasons") or []
@@ -1306,6 +1418,7 @@ def _cmd_factor(args):
                 date_from=getattr(args, "from_date", None),
                 date_to=getattr(args, "to_date", None),
                 only=args.only,
+                all_factors=getattr(args, "all_factors", False),
             )
         elif action == "list":
             payload = {"ok": True, "factors": service.list_factors()}

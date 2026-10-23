@@ -63,34 +63,47 @@ def _resolve_dates(date: Optional[str], date_from: Optional[str],
 
 
 def build(date: Optional[str] = None, date_from: Optional[str] = None,
-          date_to: Optional[str] = None, only=None, *, db_path=None) -> dict:
+          date_to: Optional[str] = None, only=None, *, all_factors: bool = False,
+          db_path=None) -> dict:
     """单日 / 区间 build。
 
     区间按「区间内有扫描记录的交易日」逐日展开（无扫描的日期无法产出因子，
     不伪造空跑记录）；每日独立事务、独立审计报告，单日失败不影响其他日。
 
-    财务因子需要真实交易日历做 stale 逾期判定：只有本次确实构建 ``fin`` 因子时
-    才经 ``finance.load_trade_calendar`` 取 TDX 指数日K（获取失败 → 空日历 +
-    ``stale_calendar_missing`` 警告，绝不阻断 build）。
+    ``all_factors=True``（``--all``）展开为**显式全量名单**（含默认关因子），
+    与 ``--only`` 互斥；``enabled_only`` 只在 ``names is None`` 时生效。
+
+    财务因子需要真实交易日历做 stale 逾期判定。**触网边界**：只有本地已存在
+    财务原始数据（``storage.finance.has_any_fin_data()``）时才经
+    ``finance.load_trade_calendar`` 取 TDX 指数日K；无数据时 fin 因子必然
+    fail-closed（``missing_source``），加载日历纯属多余网络请求。
+    已有财务数据时仍读日历，失败只记 ``stale_calendar_missing`` 警告，不阻断 build。
     """
     names = parse_only(only)
+    if all_factors:
+        if names is not None:
+            raise ValueError("--all 与 --only 互斥，请只指定其中一个")
+        names = list(spec_names())          # 显式全量 → enabled_only 不再生效
     dates, mode = _resolve_dates(date, date_from, date_to)
     calendar: tuple[str, ...] = ()
     warnings: list[str] = []
     specs = resolve_specs(names, enabled_only=names is None)
     if any(spec.source == "fin" for spec in specs):
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
+        from dragon_quant.storage import finance as fin_store
 
-        from dragon_quant.factors import finance
-        # 日历必须覆盖到最早构建日（+ 缓冲），否则 stale 逾期日数被截断。
-        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
-        earliest = dates[0] if dates else today.isoformat()
-        span = (today - datetime.strptime(earliest, "%Y-%m-%d").date()).days
-        loaded, error = finance.load_trade_calendar(days=max(180, span + 60))
-        calendar = tuple(loaded)
-        if error:
-            warnings.append(error)
+        if fin_store.has_any_fin_data(db_path=db_path):
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            from dragon_quant.factors import finance
+            # 日历必须覆盖到最早构建日（+ 缓冲），否则 stale 逾期日数被截断。
+            today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+            earliest = dates[0] if dates else today.isoformat()
+            span = (today - datetime.strptime(earliest, "%Y-%m-%d").date()).days
+            loaded, error = finance.load_trade_calendar(days=max(180, span + 60))
+            calendar = tuple(loaded)
+            if error:
+                warnings.append(error)
     reports = [
         engine.build_date(trade_date, names=names, db_path=db_path,
                           calendar=calendar)

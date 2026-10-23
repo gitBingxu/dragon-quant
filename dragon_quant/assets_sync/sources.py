@@ -19,6 +19,7 @@ from dragon_quant.assets_sync.errors import IntegrityError
 from dragon_quant.assets_sync.models import AssetShard, RestoreReport, ShardBatch
 from dragon_quant.assets_sync.tables import (
     AuctionsnapAssetSource,
+    DragonsAssetSource,
     FactorAssetSource,
     FinAssetSource,
     PrepsnapAssetSource,
@@ -251,6 +252,7 @@ SOURCE_CLASSES = (
     AuctionAssetSource,
     PrepsnapAssetSource,
     AuctionsnapAssetSource,
+    DragonsAssetSource,
     FactorAssetSource,
     FinAssetSource,
 )

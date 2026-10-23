@@ -158,6 +158,27 @@ def has_observed_snapshots(trade_date: str, *, db_path=None) -> bool:
         conn.close()
 
 
+def has_any_fin_data(*, db_path=None) -> bool:
+    """是否存在任何财务原始数据（``fin_report_records`` / ``fin_observed_snapshots``）。
+
+    ``factor build`` 的触网边界：只有已存在财务数据时才值得加载 TDX 交易日历做
+    stale 逾期判定；无数据时 fin 因子必然 fail-closed（``missing_source``），
+    加载日历纯属多余网络请求。只读探针，库不存在返回 False（绝不建库）。
+    """
+    conn = _open_read(db_path)
+    if conn is None:
+        return False
+    try:
+        assets_db._ensure_schema(conn, migrate=False)
+        for table in ("fin_observed_snapshots", "fin_report_records"):
+            row = conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+            if row:
+                return True
+        return False
+    finally:
+        conn.close()
+
+
 def find_observed_match(code: str, values_hash: str, *, before: str,
                         db_path=None) -> Optional[str]:
     """``captured_at ≤ before`` 且哈希相等的**最早**观测时刻（值级 PIT 证据）。"""

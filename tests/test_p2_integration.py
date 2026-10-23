@@ -133,8 +133,8 @@ class TempDbBase(unittest.TestCase):
 
 class TestReviewAccountEquivalence(TempDbBase):
     def _run(self, cfg, loader):
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
-                   side_effect=lambda *args, **kwargs: [dict(loader)]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader",
+                   side_effect=lambda *a, **k: (lambda *a2, **k2: [dict(loader)])):
             return AccountSimulator(cfg, data=FakeData()).run(DAY, DAY)
 
     def test_switch_off_equals_baseline_even_with_residual_annotation(self):
@@ -151,8 +151,8 @@ class TestReviewAccountEquivalence(TempDbBase):
         on = self._run(StrategyConfig(factor_ranking_enabled=True), CAND)
         self.assertEqual(self._summary(on), self._summary(baseline))
         # 同条件下的注解必须是整日降级（覆盖率 0 < 0.6）
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
-                   side_effect=lambda *args, **kwargs: [dict(CAND)]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader",
+                   side_effect=lambda *a, **k: (lambda *a2, **k2: [dict(CAND)])):
             pool, ctx = collect_candidates_ex(
                 FakeData().calendar("2026-07-01", DAY), DAY,
                 StrategyConfig(factor_ranking_enabled=True),
@@ -194,8 +194,8 @@ class TestCompareStrategiesGate(TempDbBase):
                             source="scan")])
 
     def _run(self, days):
-        with patch("dragon_quant.review_account.simulator.db.get_dragons_by_date",
-                   return_value=[]):
+        with patch("dragon_quant.review_account.simulator.candidate_loader",
+                   return_value=(lambda *a, **k: [])):
             return compare_strategies(
                 days[0], days[-1], FlatData(days), StrategyConfig(),
                 variant_grid={"factor_on": {"factor_ranking_enabled": True}})

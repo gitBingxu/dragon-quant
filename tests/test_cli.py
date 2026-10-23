@@ -404,9 +404,14 @@ class TestCmdAuctionStorage(unittest.TestCase):
             _save = _persist
 
         with ExitStack() as stack:
+            from dragon_quant.storage import dragons_mirror
             stack.enter_context(
-                patch.object(db, "list_dragon_trade_dates", return_value=["2026-10-20"]))
-            stack.enter_context(patch.object(db, "get_dragons", return_value=dragons))
+                patch.object(dragons_mirror, "list_dragon_trade_dates",
+                             return_value=["2026-10-20"]))
+            stack.enter_context(patch.object(dragons_mirror, "get_dragons",
+                                             return_value=dragons))
+            stack.enter_context(patch.object(dragons_mirror, "stale_dates",
+                                             return_value={}))
             stack.enter_context(
                 patch.object(cli_commands, "_resolve_trade_date",
                              return_value="2026-10-20"))
@@ -917,6 +922,176 @@ class TestBuyJson(unittest.TestCase):
         self.assertEqual(payload["trade_date"], "2026-09-07")
         self.assertIn("bad date", payload["error"])
         self.assertEqual(cm.exception.code, 1)
+
+
+class TestCliBackfillDragons(unittest.TestCase):
+    """``assets backfill-dragons``：退出码 0/1/2 与 ``--json`` 错误通道（方案 §5.1）。"""
+
+    RESULT = {
+        "ok": True, "mode": "backfill-dragons", "dry_run": True,
+        "from": None, "to": None, "dates": ["2026-10-20"],
+        "rows_source": 2, "inserted": 1, "updated": 0, "unchanged": 1,
+        "missing_rows": 1, "orphan_rows": 0, "pruned": 0,
+        "failed": [], "warnings": [],
+    }
+
+    def test_json_error_channel_exit_2(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
+                                "--from", "20261340", "--json"]), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 2)
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("error", payload)
+
+    def test_dry_run_json_contract(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
+                                "--dry-run", "--json"]), \
+             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+                   return_value=dict(self.RESULT)) as backfill, \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 0)
+        backfill.assert_called_once_with(date_from=None, date_to=None,
+                                         dry_run=True, prune=False)
+        payload = json.loads(buf.getvalue())
+        for key in ("ok", "mode", "dry_run", "from", "to", "dates", "rows_source",
+                    "inserted", "updated", "unchanged", "missing_rows",
+                    "orphan_rows", "pruned", "failed", "warnings"):
+            self.assertIn(key, payload)
+
+    def test_prune_and_range_flags_forwarded(self):
+        with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
+                                "--from", "20260901", "--to", "20260930",
+                                "--prune"]), \
+             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+                   return_value=dict(self.RESULT)) as backfill, \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(backfill.call_args.kwargs,
+                         {"date_from": "2026-09-01", "date_to": "2026-09-30",
+                          "dry_run": False, "prune": True})
+
+    def test_partial_failure_exits_1_with_full_summary(self):
+        result = {**self.RESULT, "ok": False,
+                  "failed": [{"date": "2026-10-20", "reason": "boom"}]}
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
+                                "--json"]), \
+             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+                   return_value=result), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 1)
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["failed"][0]["reason"], "boom")
+
+    def test_partial_failure_human_output_lists_reason(self):
+        result = {**self.RESULT, "ok": False,
+                  "failed": [{"date": "2026-10-20", "reason": "boom"}]}
+        err = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons"]), \
+             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+                   return_value=result), \
+             redirect_stdout(io.StringIO()), redirect_stderr(err):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("boom", err.getvalue())          # 不得只给 failed=N 计数
+
+    def test_global_failure_exits_2(self):
+        """assets.db 不可用（failed[].date is None）属库不可用 → exit 2。"""
+        result = {**self.RESULT, "ok": False,
+                  "failed": [{"date": None, "reason": "assets.db 不存在"}]}
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
+                                "--json"]), \
+             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+                   return_value=result), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 2)
+        self.assertEqual(json.loads(buf.getvalue())["failed"][0]["date"], None)
+
+
+class TestCliPrepDefaultDate(unittest.TestCase):
+    def test_latest_stale_errors_instead_of_falling_back(self):
+        """枚举型读路径：最新日镜像缺行 → 报错，不得静默回退上一交易日。"""
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "prep", "--json"]), \
+             patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+                   return_value=["2026-05-18", "2026-05-19"]), \
+             patch("dragon_quant.storage.dragons_mirror.stale_dates",
+                   return_value={"2026-05-19": 3}), \
+             patch("dragon_quant.review_account.prep.run_prep") as run, \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 1)
+        run.assert_not_called()
+        self.assertIn("backfill-dragons", json.loads(buf.getvalue())["error"])
+
+    def test_empty_mirror_reports_backfill_hint(self):
+        """镜像为空但源库有行 → 报错并给出回填命令，不得说成「无龙头记录」。"""
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "prep", "--json"]), \
+             patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+                   return_value=[]), \
+             patch("dragon_quant.storage.dragons_mirror.ensure_populated"), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("backfill-dragons", json.loads(buf.getvalue())["error"])
+
+    def test_uses_mirror_latest_date(self):
+        buf = io.StringIO()
+        result = {"version": "0.6", "sentiment": {}, "candidates": []}
+        with patch("sys.argv", ["dragon-quant", "prep", "--json"]), \
+             patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+                   return_value=["2026-05-18", "2026-05-19"]), \
+             patch("dragon_quant.storage.dragons_mirror.stale_dates",
+                   return_value={}), \
+             patch("dragon_quant.review_account.prep.run_prep",
+                   return_value=result) as run, \
+             redirect_stdout(buf):
+            cli.main()
+        self.assertEqual(run.call_args.args[0], "2026-05-19")
+        self.assertEqual(json.loads(buf.getvalue())["version"], "0.6")
+
+
+class TestCliFactorBuildAll(unittest.TestCase):
+    def test_all_flag_forwarded(self):
+        payload = {"ok": True, "mode": "date", "dates": ["2026-05-19"],
+                   "build_ids": [1], "reports": [], "warnings": []}
+        with patch("sys.argv", ["dragon-quant", "factor", "build", "--all",
+                                "--date", "20260519", "--json"]), \
+             patch("dragon_quant.factors.service.build",
+                   return_value=payload) as build, \
+             redirect_stdout(io.StringIO()):
+            cli.main()
+        self.assertTrue(build.call_args.kwargs["all_factors"])
+
+    def test_all_and_only_exit_2(self):
+        buf = io.StringIO()
+        with patch("sys.argv", ["dragon-quant", "factor", "build", "--all",
+                                "--only", "five_dim_composite",
+                                "--date", "20260519", "--json"]), \
+             redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(cm.exception.code, 2)
+        self.assertFalse(json.loads(buf.getvalue())["ok"])
 
 
 if __name__ == "__main__":

@@ -131,7 +131,7 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
 
     池语义（与 auction 采集池共用）：
     - 优先 T-1 prep 快照（strict T-1）；
-    - 快照缺失/读取异常/无候选/无资格（min_score/真龙）→ legacy 3 日真龙；
+    - 快照缺失/读取异常/无候选/无资格（min_score/真龙）→ legacy 5 日真龙；
     - 快照有候选但推荐集（strong/light）为空 → **D7 回退 legacy**，回退池不再应用
       ignore 出池；P 仍按快照 verdict 标注（ignore→False、无该 code→None）；
     - 旧快照完全不含 verdict → 使用快照候选、P 全 Unknown（C7）。
@@ -290,13 +290,31 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
 
 
 def collect_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
-    """候选池（兼容包装）：优先 T-1 盘后复盘快照；必要时回退旧 3 日真龙并集。"""
+    """候选池（兼容包装）：优先 T-1 盘后复盘快照；必要时回退 5 日真龙并集。"""
     return collect_candidates_ex(calendar, day, cfg, loader)[0]
 
 
+def candidate_loader(source: str = "v2"):
+    """候选池 loader 分派：v2 → assets.db 镜像；v1 → dragon.db.dragons_v1。
+
+    ``--source v1`` 是 AC5 的显式例外（v1 已废弃，仅历史查询；镜像只承载 v2）。
+    返回签名与 ``db.get_dragons_by_date(date, top_n=None, source=...)`` 兼容。
+    """
+    if (source or "v2").lower().strip() == "v1":
+        from dragon_quant.storage import db
+        return db.get_dragons_by_date
+    from dragon_quant.storage import dragons_mirror
+    return dragons_mirror.get_dragons_by_date
+
+
 def _legacy_candidates(calendar: list[str], day: str, cfg, loader) -> list[dict]:
-    """旧逻辑：前 candidate_lookback_days 个交易日的全部真龙并集去重。"""
-    lookback = getattr(cfg, "candidate_lookback_days", 3)
+    """旧逻辑：前 candidate_lookback_days 个交易日的全部真龙并集去重。
+
+    默认 5 日（与 prep 窗口一致）。注意：默认值 3→5 改变了回测基线，
+    历史 run 与本基线**不可直接比较**；复现旧基线请显式
+    ``candidate_lookback_days=3``。
+    """
+    lookback = getattr(cfg, "candidate_lookback_days", 5)
     min_score = getattr(cfg, "min_score", 50.0)
     source = getattr(cfg, "source", "v2")
     merged = {}

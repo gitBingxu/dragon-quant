@@ -388,7 +388,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p.add_argument("--pool", choices=["prep", "legacy"], default="prep",
                            help="候选池来源：prep=盘后复盘推荐（默认），legacy=最近 N 日龙头并集")
     auction_p.add_argument("--days", type=int, default=None,
-                           help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 3）")
+                           help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 5）")
     auction_p.add_argument("--recompute", metavar="DATE", default=None,
                            help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
     auction_p.add_argument("--json", dest="json", action="store_true",
@@ -399,14 +399,15 @@ Use \"dragon-quant <command> -h\" for command-specific help.
         "assets",
         help="数据资产云端同步（备份/恢复）",
         usage="dragon-quant assets <action> [action-options]",
-        description="把 assets.db 全部 14 张表的行级数据资产备份到 S3 兼容对象存储，"
-                    "或从云端恢复（prep/auction 原始资产 + 快照/因子/财务表）。",
+        description="把 assets.db 全部 15 张表的行级数据资产备份到 S3 兼容对象存储，"
+                    "或从云端恢复（prep/auction 原始资产 + 快照/因子/财务表 + dragons 镜像）。",
         epilog="""Examples:
   dragon-quant assets push --profile r2
   dragon-quant assets pull --from 20261020 --to 20261022 --apply
   dragon-quant assets status --orphans
   dragon-quant assets verify --from 20261020 --to 20261022 --deep
   dragon-quant assets doctor --profile r2 --samples 50
+  dragon-quant assets backfill-dragons --dry-run
 """,
     )
     assets_subs = assets_p.add_subparsers(dest="assets_action")
@@ -501,6 +502,33 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     assets_verify.add_argument("--md5", dest="show_md5", action="store_true",
                                help="展示校验分片的 md5")
 
+    assets_backfill = assets_subs.add_parser(
+        "backfill-dragons",
+        help="把 dragon.db.dragons_v2 幂等回填到 assets.db.dragons（本地，不触网）",
+        usage="dragon-quant assets backfill-dragons [--from D] [--to D] "
+              "[--dry-run] [--prune] [--json]",
+        description="按交易日区间把源库 dragons_v2 逐行 UPSERT 到镜像表。"
+                    "--dry-run 只体检并区分 missing_rows（源有镜像无）/ "
+                    "orphan_rows（源无镜像有）；--prune 删除源库已不存在的镜像行"
+                    "（就地 pull 后的收敛命令）。源库是权威，镜像行可由源库重建。",
+        epilog="""Examples:
+  dragon-quant assets backfill-dragons --dry-run
+  dragon-quant assets backfill-dragons
+  dragon-quant assets backfill-dragons --from 20261001 --to 20261031
+  dragon-quant assets backfill-dragons --prune
+""",
+    )
+    assets_backfill.add_argument("--from", dest="from_date", default=None,
+                                 help="起始交易日（默认全部）")
+    assets_backfill.add_argument("--to", dest="to_date", default=None,
+                                 help="结束交易日（默认全部）")
+    assets_backfill.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                 help="只体检不写库（区分 missing_rows / orphan_rows）")
+    assets_backfill.add_argument("--prune", action="store_true",
+                                 help="删除源库不存在的镜像行（源库为权威）")
+    assets_backfill.add_argument("--json", dest="json", action="store_true",
+                                 help="输出完整 JSON（默认人读摘要）")
+
     # factor 子命令（因子层：只读迁移 scan/vpa 产物，落 assets.db）
     factor_p = sub.add_parser(
         "factor",
@@ -535,6 +563,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                               help="区间结束日（与 --from 成对）")
     factor_build.add_argument("--only", default=None,
                               help="只构建指定因子（逗号分隔，如 five_dim_drive,vpa_breakout）")
+    factor_build.add_argument("--all", dest="all_factors", action="store_true",
+                              help="构建全部注册因子（含默认关；与 --only 互斥）")
     factor_build.add_argument("--json", dest="json", action="store_true",
                               help="输出完整 JSON（默认人读摘要）")
 

@@ -46,7 +46,7 @@ class StrategyConfig:
     strategy_name: str = "dragon_pullback_daily"
     initial_cash: float = 100_000.0
     candidate_top_n: int = 5
-    candidate_lookback_days: int = 3
+    candidate_lookback_days: int = 5
     max_positions: int = 5
     min_score: float = 50.0
     min_amount: float = 200_000_000.0

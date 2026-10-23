@@ -53,7 +53,7 @@ class _DropData(FakeData):
 
 class TestLiveTradeIntegration(IntegrationBase):
     def test_buy_end_to_end_records_signal(self):
-        with patch("dragon_quant.storage.db.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.storage.dragons_mirror.get_dragons_by_date", return_value=[CAND]):
             result = LiveTrader(StrategyConfig(), source="v2", data=FakeData()).buy(DAY, "10:00")
         self.assertEqual(result["action"], "buy")
         self.assertEqual([b["code"] for b in result["buys"]], [CAND["code"]])
@@ -101,7 +101,7 @@ class TestReviewAccountIntegration(IntegrationBase):
         self.assertEqual(rows[0]["post_exit_window_days"], 2)
 
     def test_entry_stats_win_rate_matches_simulator_result(self):
-        with patch("dragon_quant.storage.db.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.storage.dragons_mirror.get_dragons_by_date", return_value=[CAND]):
             result = AccountSimulator(StrategyConfig(), data=_DropData()).run(
                 "2026-09-04", "2026-09-08")
         stats = entry_reason_stats([p.__dict__ for p in result["positions"]],

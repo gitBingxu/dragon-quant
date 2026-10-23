@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from dragon_quant.factors.builtin import financial, five_dim, vpa
+from dragon_quant.factors.builtin import auction, financial, five_dim, prep, vpa
 
-BUILTIN_MODULES = (five_dim, vpa, financial)
+BUILTIN_MODULES = (five_dim, vpa, financial, prep, auction)
 
 
 def all_specs():
@@ -19,4 +19,5 @@ def all_specs():
     return tuple(specs)
 
 
-__all__ = ["BUILTIN_MODULES", "all_specs", "five_dim", "vpa", "financial"]
+__all__ = ["BUILTIN_MODULES", "all_specs", "five_dim", "vpa", "financial",
+           "prep", "auction"]

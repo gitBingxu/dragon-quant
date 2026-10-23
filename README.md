@@ -246,6 +246,8 @@ dragon-quant factor list                                  # 列出注册表（�
 dragon-quant factor build --date 20260519                 # 单日构建
 dragon-quant factor build --from 20260501 --to 20260531   # 区间：按有扫描记录的交易日逐日展开
 dragon-quant factor build --date 20260519 --only five_dim_drive,vpa_breakout
+# P1.5 prep/auction 族默认关，必须显式 --only 才会产出
+dragon-quant factor build --date 20260519 --only prep_verdict,prep_composite,auction_strength
 dragon-quant factor query --date 20260519 --name five_dim_composite
 dragon-quant factor query --from 20260501 --to 20260531 --name vpa_breakout --code 600001
 dragon-quant factor status
@@ -269,7 +271,8 @@ dragon-quant factor fin status                            # 账本/校准/观测
 ```
 
 - **只读迁移、不重算**：P0 首批 12 个因子 = 五维系 7 个（6 个维度分 + `is_true_dragon`）+ vpa 系 5 个（`health_score` + 4 个量价因子），值全部从既有 `scan_stocks_v2` / `vpa_analysis` 复制。
-- **默认启用集**：不带 `--only` 只构建 `default_enabled=True` 因子；P0.5 的 6 个 `fin_*` 默认关，必须显式 `--only` 才计算。
+- **默认启用集**：不带 `--only` 只构建 `default_enabled=True` 因子；P0.5 的 6 个 `fin_*` 与 P1.5 的 15 个 `prep_*`/`auction_*` 默认关，必须显式 `--only` 才计算。
+- **prep / auction 因子族（P1.5）**：`prep` 7 个（评级档位 / 综合分 / T 日连板高度 / 涨幅 / 换手 / 封板成功率 0-1 比率 / 涨停池成员）+ `auction` 8 个（强度 / 否决旗标 / 方向 -1/0/1 / 池内排名 + 四维子分），全部默认关、`pit_rule=derived`，`available_at` 分别为 T@16:40 / T@09:25；因子行 `trade_date` = 观测日（不按候选入选日拆行），快照版本/时间进 `source_meta_json` 血缘。`unrated` 不写行（ignore 写 0）；auction 公共门槛排除 JSON 损坏行、`unverified` 与「竞价明细缺失」哨兵；真实否决只写强度 0 / 旗标 1，方向、四维、排名不写行。`SEMANTICS_VERIFIED=False` 期间 auction 族零产出（报告按 `unverified_rows` 计数），需 `auction --recompute DATE` 后再 build 补历史。**重复计数警告**：`auction_*` 与 A 维/竞价否决同源、`prep_verdict` 与 P 维同源、`prep_composite` 与 `five_dim_composite` 同源，同一信号只进模型一次；`auction_*` 结构性零覆盖，仅供研究，不入生产快照。
 - **缺失 = 无行**：`is_true_dragon IS NULL`、维度分 NULL、vpa 因子缺失、财务分母非正/缺期都不写行，绝不写 0 / 50 / 中性分；`factor query` 看不到某只标的的某因子即为「当日无值」。
 - **PIT 时点**：每行带 `available_at`（Asia/Shanghai）。`recorded` 源取 `max(phase, created_at)`；`created_at.date() != trade_date` 的 vpa 行（`review.py` 跨日回填污染）整行跳过并计入 `skipped_backfilled`；`asof` 源（财务）按账本可用时刻硬门禁。
 - **写入语义**：整日整因子原子替换；同日重 build 幂等；候选集合变小时旧 code 被 prune；源整体不可用（无扫描/读取失败）**不删旧行**，源可用但当日无值则删除该因子当日行。版本缺省时按注册表解析并由 SQL 过滤，输出始终带 `resolved_versions`。
@@ -281,7 +284,7 @@ dragon-quant factor fin status                            # 账本/校准/观测
 - **A/B**：`compare_strategies` 的 `variant_grid` 可跑 `factor_ranking_enabled=True/False`，但区间内因子 build 完成率必须 ≥ 95%，否则结论标 `insufficient_data`；`trial_count` 计入所有 variant。
 - **默认零影响**：因子层不进入 `scan` / `prep` 候选池；决策层只有 `rank_key` 单一注入点，`factor_ranking_enabled` 默认关。
 - **存储**：落 `assets.db` 的 `factor_*` 与 `fin_*` 表，**不纳入 `assets_sync`**（派生/可重取数据）；`assets status` 固定输出 `factor_*: not_synced` 与 `fin_*: not_synced`。
-- 当前进度：P0 + P0.5 + P1 + P2（决策接入 / Sharpe / 行业暴露）已完成；P3（替换五维、行业中性化、ML）不在本期。
+- 当前进度：P0 + P0.5 + P1 + P1.5（prep/auction 因子化）+ P2（决策接入 / Sharpe / 行业暴露）已完成；P3（替换五维、行业中性化、ML）不在本期。
 
 ### `review` — 龙头回测
 

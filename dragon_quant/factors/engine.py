@@ -306,6 +306,152 @@ def _load_fin_source(trade_date: str, cache: dict, *, calendar: Iterable[str] = 
     return result
 
 
+_PREP_DRAGONS_DEGRADED_TOKENS = frozenset(
+    {"dragons", "dragons_partial", "dragons_window_short"})
+
+
+def _prep_empty_is_degraded(snapshot: dict) -> bool:
+    """``candidates == []`` 是否来自 dragons 降级（R32）。
+
+    快照在 dragons 资产不可用（``window_days=0``）或窗口降级时同样会写出空
+    列表；把它当「真实空」会 DELETE 掉不可再生的历史因子行。无法确认健康时
+    一律按降级处理（fail-closed）。
+    """
+    dragon = snapshot.get("dragon_source")
+    if not isinstance(dragon, dict):
+        return True
+    window_days = dragon.get("window_days")
+    if isinstance(window_days, bool) or not isinstance(window_days, int) or window_days < 1:
+        return True
+    dates = dragon.get("dates")
+    if not isinstance(dates, list) or not dates:
+        return True
+    if any(not isinstance(day, dict) or day.get("status") != "ok" for day in dates):
+        return True
+    sentiment = snapshot.get("sentiment")
+    if not isinstance(sentiment, dict):
+        return True
+    raw = sentiment.get("degraded")
+    tokens = {str(item) for item in raw} if isinstance(raw, (list, tuple, set)) else set()
+    return bool(tokens & _PREP_DRAGONS_DEGRADED_TOKENS)
+
+
+def _load_prep_source(trade_date: str, cache: dict) -> dict:
+    """prep 快照源：只读 ``assets.db``（``create=False``），损坏整族 skip 不删旧行。"""
+    key = ("prep", trade_date)
+    if key in cache:
+        return cache[key]
+
+    def _missing(reason: str) -> dict:
+        return {
+            "status": "missing_source", "reason": reason,
+            "snapshot_date": trade_date, "snapshot_version": None,
+            "snapshot_created_at": None, "candidates": [],
+            "candidates_by_code": {}, "codes": (), "as_of": None,
+        }
+
+    try:
+        from dragon_quant.storage import assets_db
+        snapshot, meta = assets_db.get_prep_snapshot(
+            trade_date, source="v2", with_meta=True)
+    except Exception as exc:      # 单列 JSON 无逐行隔离：整族 skip（R30）
+        result = _missing(f"读取 prep_snapshots 失败: {type(exc).__name__}: {exc}")
+        cache[key] = result
+        return result
+    if not isinstance(snapshot, dict):
+        result = _missing(f"{trade_date} 无 prep_snapshots 记录")
+        cache[key] = result
+        return result
+
+    candidates = snapshot.get("candidates")
+    if not isinstance(candidates, list):
+        result = _missing("prep_snapshots.candidates 不是数组（malformed）")
+        cache[key] = result
+        return result
+    if not candidates and _prep_empty_is_degraded(snapshot):
+        result = _missing(
+            "empty_degraded_source: candidates 为空且 dragons 血缘不可用/降级，"
+            "不能当作当日无值")
+        cache[key] = result
+        return result
+
+    by_code: dict[str, dict] = {}
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        code = candidate.get("code")
+        if code:
+            by_code[str(code)] = candidate
+    result = {
+        "status": "ok",
+        "snapshot_date": trade_date,
+        "snapshot_version": snapshot.get("version"),
+        "snapshot_created_at": (meta or {}).get("created_at"),
+        "candidates": candidates,
+        "candidates_by_code": by_code,
+        "codes": tuple(sorted(by_code)),
+        "as_of": None,
+    }
+    cache[key] = result
+    return result
+
+
+def _load_auction_source(trade_date: str, cache: dict) -> dict:
+    """竞价快照源：``list_auction_snapshots`` 已逐行隔离 JSON 损坏。"""
+    key = ("auction", trade_date)
+    if key in cache:
+        return cache[key]
+
+    def _missing(reason: str) -> dict:
+        return {
+            "status": "missing_source", "reason": reason,
+            "snapshot_date": trade_date, "snapshot_version": None,
+            "snapshot_created_at": None, "rows_by_code": {}, "codes": (),
+            "corrupt_rows": [], "as_of": None,
+        }
+
+    try:
+        from dragon_quant.storage import assets_db
+        rows = assets_db.list_auction_snapshots(
+            trade_date, source="v2", with_meta=True)
+    except Exception as exc:
+        result = _missing(f"读取 auction_snapshots 失败: {type(exc).__name__}: {exc}")
+        cache[key] = result
+        return result
+    rows = [row for row in (rows or []) if isinstance(row, dict)]
+    if not rows:
+        # 空池与「命令未运行」在库中不可区分（R33）：按源未产出 skip、不删旧行。
+        result = _missing(f"{trade_date} 无 auction_snapshots 记录")
+        cache[key] = result
+        return result
+
+    corrupt = [
+        str(row.get("code")) for row in rows
+        if row.get("code") and "error" in row
+    ]
+    usable = [row for row in rows if row.get("code") and "error" not in row]
+    if not usable:
+        result = _missing("all_corrupt: auction_snapshots 全部行 JSON 损坏")
+        cache[key] = result
+        return result
+
+    rows_by_code = {str(row["code"]): row for row in usable}
+    created = [str(row["created_at"]) for row in usable if row.get("created_at")]
+    versions = [str(row["version"]) for row in usable if row.get("version")]
+    result = {
+        "status": "ok",
+        "snapshot_date": trade_date,
+        "snapshot_version": versions[0] if versions else "1",
+        "snapshot_created_at": max(created) if created else None,
+        "rows_by_code": rows_by_code,
+        "codes": tuple(sorted(rows_by_code)),
+        "corrupt_rows": corrupt,
+        "as_of": None,
+    }
+    cache[key] = result
+    return result
+
+
 def _load_source(spec: FactorSpec, trade_date: str, cache: dict, *,
                  calendar: Iterable[str] = (), db_path=None) -> dict:
     if spec.source == "scan":
@@ -314,9 +460,13 @@ def _load_source(spec: FactorSpec, trade_date: str, cache: dict, *,
         return _load_vpa_source(trade_date, cache)
     if spec.source == "fin":
         return _load_fin_source(trade_date, cache, calendar=calendar, db_path=db_path)
+    if spec.source == "prep":
+        return _load_prep_source(trade_date, cache)
+    if spec.source == "auction":
+        return _load_auction_source(trade_date, cache)
     return {
         "status": "missing_source",
-        "reason": f"P0 未接入 source={spec.source!r}（竞价/复盘源属后续里程碑）",
+        "reason": f"未接入 source={spec.source!r}",
         "rows": [], "codes": [],
     }
 
@@ -326,6 +476,25 @@ def _load_source(spec: FactorSpec, trade_date: str, cache: dict, *,
 
 def _elapsed_ms(started: float) -> float:
     return round((time.monotonic() - started) * 1000, 1)
+
+
+def _absence_expected(meta: dict, codes: int) -> bool:
+    """空结果是否可由 counters 完全解释（R26）：全部未校准 / 全部预期缺席。"""
+    meta = meta or {}
+    if meta.get("expected_empty") is True:
+        return True
+    counters = meta.get("counters") or {}
+    unverified = counters.get("unverified_rows")
+    return (isinstance(unverified, int) and not isinstance(unverified, bool)
+            and codes > 0 and unverified == codes)
+
+
+def _absence_warning(meta: dict, codes: int) -> str:
+    counters = (meta or {}).get("counters") or {}
+    unverified = counters.get("unverified_rows")
+    if isinstance(unverified, int) and not isinstance(unverified, bool) and unverified == codes:
+        return f"unverified_rows={unverified}"
+    return "expected_empty（缺失可由 counters 解释）"
 
 
 def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[dict] = None,
@@ -483,7 +652,10 @@ def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[di
         if text not in entry["warnings"]:
             entry["warnings"].append(text)
     if not rows:
-        entry["warnings"].append("empty_unexpected")
+        if _absence_expected(frame.meta, len(codes)):
+            entry["warnings"].append(_absence_warning(frame.meta, len(codes)))
+        else:
+            entry["warnings"].append("empty_unexpected")
     if entry["invalid_value"]:
         entry["warnings"].append(f"invalid_value={entry['invalid_value']}")
     entry["elapsed_ms"] = _elapsed_ms(started)
@@ -620,7 +792,13 @@ def build_date(trade_date: str, *, names: Optional[Iterable[str]] = None,
         if entry.get("status") == "error":
             warnings.append(f"{name}: {entry.get('reason')}")
         if entry.get("status") == "empty":
-            warnings.append(f"{name}: empty（源可用但当日无值）")
+            meta = entry.get("meta") or {}
+            codes = int(entry.get("codes") or 0)
+            if _absence_expected(meta, codes):
+                # 全量未校准 / 预期缺席：只报计数器，避免每天刷 empty 告警（R26）。
+                warnings.append(f"{name}: {_absence_warning(meta, codes)}")
+            else:
+                warnings.append(f"{name}: empty（源可用但当日无值）")
 
     finished_at = _now_str()
     has_error = (

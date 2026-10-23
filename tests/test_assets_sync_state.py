@@ -33,19 +33,45 @@ class TestStateFile(StateTestBase):
     def test_roundtrip_and_atomic_replace(self):
         path = self.root / "assets_sync" / "state.json"
         state = new_state(hostname="host")
-        state["dates"]["2026-10-21"] = {"manifest_id": "x"}
+        state["partitions"]["2026-10-21"] = {"manifest_id": "x", "kind": "date"}
         save_state(path, state)
         loaded = load_state(path)
-        self.assertEqual(loaded["dates"]["2026-10-21"]["manifest_id"], "x")
+        self.assertEqual(loaded["schema"], 2)
+        self.assertEqual(loaded["partitions"]["2026-10-21"]["manifest_id"], "x")
         self.assertEqual([p.name for p in path.parent.iterdir()], ["state.json"])
 
     def test_missing_and_corrupt_reset(self):
-        self.assertEqual(load_state(self.root / "missing.json")["dates"], {})
+        self.assertEqual(load_state(self.root / "missing.json")["partitions"], {})
         path = self.root / "state.json"
         path.write_text("{bad", encoding="utf-8")
-        self.assertEqual(load_state(path)["schema"], 1)
+        self.assertEqual(load_state(path)["schema"], 2)
         path.write_text(json.dumps({"schema": 99, "dates": {"x": {}}}), encoding="utf-8")
-        self.assertEqual(load_state(path)["dates"], {})
+        self.assertEqual(load_state(path)["partitions"], {})
+
+    def test_schema1_migrates_dates_to_partitions(self):
+        path = self.root / "state.json"
+        path.write_text(json.dumps({
+            "schema": 1,
+            "hostname": "old-host",
+            "updated_at": "2026-10-21T20:00:00+08:00",
+            "last_success_trade_date": "2026-10-21",
+            "dates": {"2026-10-21": {
+                "manifest_id": "m1", "codec": 1,
+                "sources": {"prep": {"watermark": "w|1|2"}}}},
+        }), encoding="utf-8")
+        loaded = load_state(path)
+        self.assertEqual(loaded["schema"], 2)
+        self.assertEqual(loaded["hostname"], "old-host")
+        self.assertEqual(loaded["last_success_trade_date"], "2026-10-21")
+        entry = loaded["partitions"]["2026-10-21"]
+        self.assertEqual(entry["kind"], "date")
+        self.assertEqual(entry["codec"], 1)
+        self.assertEqual(entry["sources"]["prep"]["watermark"], "w|1|2")
+        # 迁移后保存一律写 schema 2，不再写 dates
+        save_state(path, loaded)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(raw["schema"], 2)
+        self.assertNotIn("dates", raw)
 
     def test_now_iso_has_shanghai_offset(self):
         self.assertTrue(now_iso().endswith("+08:00"))

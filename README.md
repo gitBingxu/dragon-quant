@@ -227,17 +227,26 @@ dragon-quant assets verify --from 20261020 --to 20261022
 dragon-quant assets verify --deep --samples 20
 ```
 
-- 上传单元：`prep_assets`（按 `trade_date + asset_type`）与 `auction_assets`（按日聚合，含 `quote_json`）；`prep_snapshots` / `auction_snapshots` 不同步。
-- 云端布局：`blobs/<date>/<source>_<type>.<sha256>.json.gz` + `manifests/<date>.json`（每日覆盖写）。
-- 幂等：`state.json` 水位 + `x-amz-meta-manifest-id` 一致 → 零远端 PUT；仅采集时间变化时只重写 manifest（0 blob PUT）。
-- 恢复：默认只补本地缺失，哈希不一致只报告；`--force` 才覆盖（本地权威）。`created_at` 在新插入行还原，已存在行保留本地时间；auction 的 `quote_json` 在远端为 `null` 时不会被抹掉。
-- 校验：`verify` 的 `--from/--to` 必须成对（单边退出码 2）；`--deep` 才下载校验 blob。`status --orphans` 在远端 manifest 缺失的日期把 `orphan_blobs` 置 `null` 并附 `orphan_reason`。
+- 同步范围：`assets.db` 全部 14 张表（`prep_assets` / `auction_assets` + 快照 / 因子 / 财务表），行级身份 + 规范化 JSON，不做整库文件直传；`dragon.db` 不同步。
+- 同步单元：`assets_sync/tables.py` 的 `TableSpec` 注册表驱动 12 张新表（`fin_report_files` 拆成元数据 `fin_report_files` + 原始 blob `fin_report_raw` 两个单元）；prep/auction 两个既有适配器行为不变。
+- 分区模型：`YYYY-MM-DD`（date）/ `fin-YYYY-MM-DD`（period）/ `finraw-YYYY-MM-DD`（period_raw）/ `static-<domain>`（static）。date 分区 manifest 继续写 schema 1（旧客户端可读），其余 schema 2。
+- 云端布局：`blobs/<partition>/<source>_<type>.<sha256>.json.gz` + `manifests/<partition>.json`（每分区覆盖写）。
+- 幂等：`state.json`（schema 2）按 **(分区, 来源)** 记录水位与条目集合；watermark + 远端条目集合 ⊇ 上次集合 → 复用（0 本地读）。volatile 单元（快照 / fin 全部）每次强制重读，用内容哈希精确判定。仅采集时间变化时只重写 manifest（0 blob PUT）。
+- 恢复：新表采用**行级合并**（缺则补、已存在且不同 → conflict，`--force` 才更新语义列，旁路列保留本地值）；prep/auction 保持分片级门禁。`fin_report_raw` 的 `raw_blob` 走 NULL-fill：本地为 NULL 直接补，无需 `--force`（空库 `--target-dir --apply` 可完整恢复）。
+- dry-run：行级冲突必须下载后才能判定，dry-run 以 `merge_pending` 标注，人读输出区分「已判定冲突」与「未判定（需 `--apply`）」。
+- `--from/--to` 语义：date 分区 = 交易日；period / period_raw 按**报告期末日期**比较（跨年报告期需放宽 `--from`）；static 分区**始终参与**。显式给区间且排除了报告期分区时，人读输出打印一行提示（不失败、不改退出码）。
+- `status`：默认最近 30 个 date 分区 + 全部 period/period_raw/static；新增 `dates_drift`（仅追加式单元、本地行数严格更多，`reason=row_count_only`，弱信号不计失败）与 `tables` 覆盖图；`not_synced` 恒为 `{}`（**breaking 值变更**：factor_*/fin_* 已纳入同步）。
+- `verify`：分区化；`--from/--to` 含范围内 period/period_raw 与全部 static；不做 drift 豁免（字节级差异一律报告）。单边 `--from/--to` 退出码 2。
+- 分片阈值：未压缩 > 16 MiB 记 `shard_large` 告警（仍上传）；> 32 MiB 该分区失败（`shard_too_large`，不写 manifest）。`raw_blob` 独立 `finraw-*` 分区，超限不阻断账本。
+- **运维契约**：本地是权威副本，就地 pull 只补缺不删除、不覆盖；权威恢复走 `pull --target-dir <新目录> --apply`。禁止在主库执行 `pull --force`（恢复侧不刷新 prep/auction 的 `created_at`，会造成下次 push 的水位盲区）。
+- 回滚提示：旧版本读 date 分区 manifest 会把新表条目当作「本地缺失」，status 会持续 `mismatched`；**回滚期间不要用 status 判断健康**（旧版 push 仍受收缩保护，不会破坏远端）。
 - `--target-dir DIR` 恢复到隔离目录（`DIR/assets.db`），不读写主 `state.json`。
 - 进程锁：`<DQ_DATA_DIR>/assets_sync.lock`；并发 push/restore 的第二个进程退出码 1。
-- 退出码：`0` 成功/无差异；`1` 部分失败、收缩被拒、pull 冲突；`2` 配置/网络/manifest 不可读/参数错误。
+- 退出码：`0` 成功/无差异/仅 drift；`1` 部分失败、收缩被拒、pull 冲突；`2` 配置/网络/manifest 不可读/参数错误。
 - 配置样例：`docs/assets_sync.example.json`（占位符，凭据建议用 `${ENV}` 注入）。
 - 凭据文件：`<DQ_DATA_DIR>/secrets/assets_sync.json`（POSIX 0600），结构为 `default_profile + profiles{r2,b2}`；也可用 `DQ_ASSETS_*` 环境变量覆盖当前 profile。凭据不进入仓库、日志、manifest 或 state。
-- 当前里程碑：M2 数据层 / M3 同步层 / M4 CLI 已完成；M5（launchd / `assets_daily.sh` / 门槛 B）待做。B2 通道尚未验证，v1 以 R2 为主通道。
+- 当前里程碑：M2 数据层 / M3 同步层 / M4 CLI / **M6 全表同步** 已完成；M5（launchd / `assets_daily.sh` / 门槛 B）待做。B2 通道尚未验证，v1 以 R2 为主通道。
+- 方案与实现记录：`archived_md/assets_sync/2026-10-23-assets-db-full-sync-design.md`（M6，分区 manifest + TableSpec 注册表 + 行级合并）。
 
 ### `factor` — 因子层（P0/P0.5/P1/P2：只读迁移 + 长表 + 财务链路 + 矩阵/评估 + 决策接入）
 
@@ -283,7 +292,7 @@ dragon-quant factor fin status                            # 账本/校准/观测
 - **决策接入（P2，默认关）**：`StrategyConfig.factor_ranking_enabled=True` 时，`review-account` / `buy` 在 tier(A,P) 内插入因子分量（`factor_rank` → `-factor_score` → `-composite` → `-priority` → code）；关闭时零读取，排序与旧实现逐位等价。`factors/decision.py` 的 `EqualWeightRankModel` 按**每只候选自己的 `trade_date`** 读因子值、组内 rank 归一；模型快照存 `factor_model_snapshots`（`factor_model_version=""` 取最新，无快照 → 整日 `degraded(model_snapshot_missing)`，不隐式兜底）。任一必需因子缺值 → 该候选进 `factor_rank=1` 桶排在所有有分者之后；覆盖率低于 `factor_min_coverage`（默认 0.6）/ 读取失败 → 整日排序回退，绝不中断回测或 buy。`metrics` 新增 `sharpe`（只增键）；`industry_exposure` 只统计 `category="hy"` 并输出 `unattributed_ratio` / `unattributed_reasons`（归属日用 `entry_date` 快照）。
 - **A/B**：`compare_strategies` 的 `variant_grid` 可跑 `factor_ranking_enabled=True/False`，但区间内因子 build 完成率必须 ≥ 95%，否则结论标 `insufficient_data`；`trial_count` 计入所有 variant。
 - **默认零影响**：因子层不进入 `scan` / `prep` 候选池；决策层只有 `rank_key` 单一注入点，`factor_ranking_enabled` 默认关。
-- **存储**：落 `assets.db` 的 `factor_*` 与 `fin_*` 表，**不纳入 `assets_sync`**（派生/可重取数据）；`assets status` 固定输出 `factor_*: not_synced` 与 `fin_*: not_synced`。
+- **存储**：落 `assets.db` 的 `factor_*` 与 `fin_*` 表；M6 起**全部纳入 `assets_sync`**（`factor` / `fin` 两个 domain source，行级合并），`assets status` 的 `not_synced` 恒为 `{}`，覆盖图见 `summary.tables`。真正不可再生的财务原始资产（`fin_report_files.raw_blob`、`fin_observed_snapshots`、vintage 时刻）随全表同步一并备份。
 - 当前进度：P0 + P0.5 + P1 + P1.5（prep/auction 因子化）+ P2（决策接入 / Sharpe / 行业暴露）已完成；P3（替换五维、行业中性化、ML）不在本期。
 
 ### `review` — 龙头回测
@@ -471,7 +480,7 @@ dragon_quant/
 ├── review.py             # 龙头回测
 ├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
 ├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/shadow/trader/service，复用 review_account 策略）
-├── assets_sync/          # 数据资产云端同步（codec/models/credentials/doctor/sources/manifest/state/service/backends）
+├── assets_sync/          # 数据资产云端同步（codec/models/tables/sources/manifest/state/service/backends）
 ├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
 └── models/types.py      # 数据模型
 ```

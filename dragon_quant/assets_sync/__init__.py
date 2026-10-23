@@ -1,13 +1,14 @@
 """数据资产云端同步。
 
 模块边界：
-  - codec      规范化 JSON / gzip / 哈希
+  - codec      规范化 JSON / gzip / 哈希 / 分区键 / manifest schema
   - models     值对象与报告
   - backends   Strategy：S3Backend / LocalDirBackend
-  - sources    Adapter：assets.db 的 prep_assets / auction_assets（M2）
-  - manifest   每日 manifest 构建 / 解析 / 重建（M3）
-  - state      state.json 原子读写 + 进程锁（M3）
-  - service    push / pull / status / verify（M3）
+  - sources    Adapter：assets.db 的 prep / auction / 快照 / 因子 / 财务表
+  - tables     TableSpec 注册表 + CompositeTableSource（M6）
+  - manifest   分区 manifest 构建 / 解析 / 重建
+  - state      state.json（schema 2）原子读写 + 进程锁
+  - service    push / pull / status / verify（分区编排 + 行级合并）
 """
 
 from dragon_quant.assets_sync.errors import (

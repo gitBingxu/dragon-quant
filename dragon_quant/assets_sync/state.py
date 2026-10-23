@@ -21,7 +21,7 @@ from pathlib import Path
 
 from dragon_quant.assets_sync.errors import LockBusyError
 
-STATE_SCHEMA = 1
+STATE_SCHEMA = 2
 LOCK_STALE_SECONDS = 6 * 3600
 
 
@@ -55,12 +55,34 @@ def new_state(hostname: str | None = None) -> dict:
         "hostname": hostname or socket.gethostname(),
         "updated_at": "",
         "last_success_trade_date": "",
-        "dates": {},
+        "partitions": {},
+    }
+
+
+def _migrate_v1(data: dict) -> dict:
+    """schema 1（``dates``）→ schema 2（``partitions``），不丢历史水位。"""
+    partitions = {}
+    for key, value in (data.get("dates") or {}).items():
+        if not isinstance(value, dict):
+            continue
+        item = dict(value)
+        item.setdefault("kind", "date")
+        partitions[key] = item
+    return {
+        "schema": STATE_SCHEMA,
+        "hostname": data.get("hostname") or socket.gethostname(),
+        "updated_at": data.get("updated_at", "") or "",
+        "last_success_trade_date": data.get("last_success_trade_date", "") or "",
+        "partitions": partitions,
     }
 
 
 def load_state(path) -> dict:
-    """读取 state；缺失/损坏/schema 未知 → 空骨架（state 只是缓存）。"""
+    """读取 state；缺失/损坏/schema 未知 → 空骨架（state 只是缓存）。
+
+    schema 1 在线迁移为 schema 2（``dates`` 原样映射为 ``partitions``）；
+    ``save_state`` 一律写 schema 2。
+    """
     if path is None:
         return new_state()
     path = Path(path)
@@ -70,11 +92,16 @@ def load_state(path) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return new_state()
-    if not isinstance(data, dict) or data.get("schema") != STATE_SCHEMA:
+    if not isinstance(data, dict):
         return new_state()
-    data.setdefault("dates", {})
-    if not isinstance(data["dates"], dict):
-        data["dates"] = {}
+    schema = data.get("schema")
+    if schema == 1:
+        data = _migrate_v1(data)
+    elif schema != STATE_SCHEMA:
+        return new_state()
+    data.setdefault("partitions", {})
+    if not isinstance(data["partitions"], dict):
+        data["partitions"] = {}
     return data
 
 

@@ -12,6 +12,39 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 待发布
+
+> 草稿：覆盖 `v0.7.0`（`f051fbd`）之后 `feat/factor-framework` 分支的 9 个提交（`4d58519..80668c7`）。因子层与资产同步均为**默认零影响**，升级后 `scan`/`review` 行为与 0.7.0 等价；但因 `prep` 窗口与候选池读源变更，历史回测结果不可直接与 0.7.0 比较。
+
+### Added
+- **量化因子框架（P0–P2）**：新增 `factors/` 包与 `factor` CLI 全家桶（`build`/`list`/`query`/`status`/`export`/`eval`/`fin`）。P0 以只读方式迁移五维 7 + vpa 5 共 12 因子到 `assets.db` 的 `factor_values` 长表（主键 `(trade_date, code, factor_name, factor_version)`，缺失即无行，绝不写 0/中性分），带内容哈希版本、`canonical_scan` 同日归并与 `recorded`/`derived`/`asof` 三套 PIT 语义；P0.5 打通 TDX 财务链路（`providers/tdx.py` 财务接口、`fin_*` 五表追加式 vintage 账本、法定截止日三桶 PIT、6 个财务因子默认关且 fail-closed 校准）；P1 提供 `factor export`（`date × code` 矩阵 + `.meta.json` sidecar、当日截面清洗）与 `factor eval`（RankIC/ICIR/Newey-West/分组/换手/覆盖率，`--pit-policy strict|research`）；P2 加入决策接入 `factor_ranking_enabled`（默认关，关闭时排序逐位等价）与 `EqualWeightRankModel` 模型快照、`sharpe_ratio`、`industry_exposure`、`compare_strategies` 因子 A/B 门禁。
+- **prep / auction 因子化（P1.5）**：新增 prep 族 7 因子（verdict/composite/high_days/t_pct/t_turnover/limit_up_suc_rate/in_pool_today）与 auction 族 8 因子（strength/is_weak/direction/rank + 四维子分），全部 `default_enabled=False`、`pit_rule=derived`；因子注册表 18 → 33。`unverified`/明细缺失/真实否决路径按哨兵语义不写行，避免把未验证数据当有效信号。
+- **`assets.db` 全表云端同步（M6）**：同步范围从 prep/auction 扩展到 `assets.db` 全部 15 张表（含 5 张 `factor_*` 与 5 张 `fin_*`），由 `assets_sync/tables.py` 的 `TableSpec` 注册表驱动 13 张表、14 个同步单元（`fin_report_files` 拆为元数据与原始 blob 两个单元）；新增 `date` / `fin-YYYY-MM-DD`（period）/ `finraw-*`（period_raw）/ `static-<domain>` 四类分区；`pull` 对新表改为行级合并（缺则补、冲突需 `--force`），`fin:report_raw.raw_blob` 走 NULL-fill；`status` 新增 `dates_drift` 弱信号与 `tables` 覆盖图。
+- **`dragons` 镜像与 5 日复盘窗口**：`assets.db` 新增 `dragons` 表（与 `dragons_v2` 同构），写门面采用「锁内主写 dragon.db → 锁外 best-effort 镜像」，失败只告警不回滚主写；新增 `assets backfill-dragons [--from/--to/--dry-run/--prune/--json]` 幂等回填与逐日对账（`stale_dates` 单向下限）；`prep` 复盘窗口由 3 个交易日扩为 5 个，快照升至 `version=0.6`，旧资产按 `dragons_window_stale` 自动升级。
+- **`factor build --all`**：一次性构建全部注册因子（含默认关因子），与 `--only` 互斥（exit 2）；无本地财务数据时跳过 TDX 日历加载，保持零触网。
+- **测试隔离基建**：新增 `tests/conftest.py`（pytest 启动时把 `DQ_DATA_DIR` 重定向到临时目录）与 `tests/support.patch_storage_dbs()`（同时隔离 dragon.db 与 assets.db 连接），并补 `tests/test_isolation.py` 回归覆盖。
+
+### Changed
+- **候选池读源切换到 `assets.db.dragons` 镜像**：`prep` 采集器、`review-account` / `buy` / `sell` 回退池、`auction` legacy 池、`prep` 默认日期解析统一读镜像；`--source v1` 例外仍回源库，`review` 回测 / `dragons` CLI / Web UI 继续读 dragon.db。
+- **回测基线变更**：`prep` 窗口 3 → 5 个交易日，`candidate_lookback_days` 默认值同步 3 → 5，历史 run 与新基线**不可直接比较**；复现旧基线需显式传 `candidate_lookback_days=3`（prep 命中路径不受该参数影响）。
+- **`assets status` 输出语义**（脚本侧 breaking）：`not_synced` 恒为 `{}`（原按来源列出未同步项），新增 `summary.dates_drift` 与 `summary.tables`。
+- **`assets push` 状态文件升级**：`state.json` 由 schema 1 迁至 schema 2（按 `(分区, 来源)` 记录水位与条目集合），旧状态在线迁移；`date` 分区 manifest 仍写 schema 1，其余分区写 schema 2。
+- **`factor build` 默认集合**：不带 `--only` 时只构建 `default_enabled=True` 的因子，默认关因子（全部 `fin_*` / `prep_*` / `auction_*`）必须显式指定。
+- **依赖约定**：`AGENTS.md` 解除「仅标准库」约束，改为「许可证 MIT 兼容 + 活跃维护 + 文档同步」三条底线（因子层零新增运行时依赖，pandas 仍由 tmdx 传递）。
+
+### Fixed
+- `scan` 交易日判定改为 TDX 上证指数（`SH000001`）优先、雪球降级兜底，消除每次扫描固定两次访问雪球导致的 Cookie 过期告警；全链路失败时补 stderr 提示，不再静默回退自然日。
+- 单测写穿真实 `assets.db`：`save_dragons` 新增镜像 fan-out 后，只 patch `db._connect` 的用例把脏数据写进开发者真实库（清理 16 行孤儿并回填 285 行）；现已通过双连接隔离 + 进程级 `DQ_DATA_DIR` 重定向根治，并补回归测试。
+
+### Docs
+- `README.md` 增加居中图标与 6 枚 shields 徽章（PyPI 版本、Python `>=3.10`、License、下载量、Stars、稳定度），新增「成熟度声明」（当前仅 `scan` 与 `review` 稳定，其余功能处于探索验证阶段）；文档相对链接改为 GitHub 绝对地址，修复 PyPI 渲染无法打开的问题，评分规范链接同步到归档路径。
+- 归档因子框架调研/方案、`assets.db` 全表同步方案、dragons 镜像与 5 日窗口方案；`AGENTS.md` 增补「算法演进约定」段（新增/修改选股与买卖规则前先查因子注册表）。
+
+### 升级提示
+- 首次升级到 0.7.1 后**必须执行一次** `python -m dragon_quant assets backfill-dragons`：`prep` / `review-account` / `buy` / `sell` / `auction` 已改读 `assets.db.dragons` 镜像，镜像缺行会触发 `DragonsMirrorStale` / `DragonsMirrorEmpty`。可先跑 `--dry-run` 体检（`missing_rows` / `orphan_rows`）。
+- 就地 `pull` 后如需收敛，用 `assets backfill-dragons --prune`，不要在镜像上手工删行。
+- 因子层保持默认关闭：不显式设置 `factor_ranking_enabled=True` 时排序与 0.7.0 逐位等价；`factor_values` 需自行 `factor build` 才有数据。
+
 ## [0.7.0] - 待发布
 
 > 草稿：覆盖 v0.6.2（`a94a907`）之后 `feat/reviewa-account-op` 与 `feat/assets-sync-m2` 分支的全部变更（提交 `3610e98`…`533df8d`）。按记录口径，合入 main 并完成版本提交后补记日期与 MR 编号。

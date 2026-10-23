@@ -15,6 +15,13 @@
 - **事实边界（避免把假设当已验证）**：已验证——`easy_tdx` 公开方法名与返回形状、`FinanceInfo` 命名字段、`FinancialRecord.fields` 为**无名 float 数组**、`MacClient` **不含**财务方法（需另建 `TdxClient`）、`tmdx` 传递安装 pandas、`pyproject.toml` 仅声明 `playwright` + `tmdx`。**未验证（实现阶段实测）**——`gpcw` 的字段索引/单位/布局随报告期的差异、`gpcw.txt` 的历史期数、单期文件大小、计算服务器可用性。
 - **P1 实现补充（2026-10-22，实现偏离登记）**：①每日收盘后的 `available_at` 在日频口径下**只能**用次一交易日开盘起算；同日开盘仅当 `available_at < 09:30`（竞价）才可成交，因此实际实现为「第一个开盘晚于 `available_at` 的交易日」，比 §4.6 文字更严格、无前视。②评估返回的分组数参数键为 `group_count`，`groups` 专指分组统计列表（避免 JSON 同名键冲突）。③`missing="drop"` 具体语义定为 **complete-case**（任一请求因子缺失即丢该 `(date, code)` 行）；`winsorize="mad"` 用 `median ± 3 × 1.4826 × MAD`。④`cohort_excluded_profile` 的规模代理取 `scan_stocks_v2.market_cap`；综合分分位按整个当日池计算（0-100，并列平均名次）。⑤`stale` 日历经 `factors/finance.load_trade_calendar` 取 TDX 指数日K；失败时 `stale_calendar_missing` 警告 + 工作日近似（不阻断 build）。⑥`factor_values.source_meta_json` 新增 `basis_by_code` / `period_by_code` / `finance_data_versions` / `retracted_count` / `layout_unverified`，评估按逐 code 口径统计 `pit_basis_mix`。⑦`retracted_count` 是当日因子级常量，评估按日期去重后求和（不被 code 数放大）；`fin` 因子跨报告期拼接时输出 `report_period_mixed` + warning；rank 归一在单只截面跳过（`insufficient_cross_section`）；`export_matrix(clean=None)` 默认原始值。
 
+### Delta 2 修订记录（2026-10-23）
+
+- **触发**：P0-P2 已落地（PR #30）后，用户决策——把盘后复盘判定（`prep_snapshots`）与集合竞价强度（`auction_snapshots`）纳入因子层：**聚合分 + 子维度全量（约 15 个因子）**，全部 `default_enabled=False`；与既有 A/P 排序维度的重复计数风险**只在文档写警告、不加互斥检测**；`unverified` / 缺字段 → 不写行（缺失 ≠ 中性）。
+- **改动范围**：§1.1 新增 P1.5；§4.3 增加指向；§11 新增 P1.5 里程碑与验收；§12 新增 R26-R33；§13 文档同步；新增 **§15**（因子清单 / 源适配契约 / enum 映射与版本哈希 / 重复计数警告 / 模型成员指引 / PIT / 错误处理 / 测试 / 验收 / 设计模式 / 未考虑点）。
+- **未改动**：D1-D4、A/P 排序契约、`prep` / `auction` 的计算与采集链路、`FactorSpec` 枚举集合、版本哈希算法、因子表结构、`rank_key` 注入点。Delta 2 是**纯新增的源适配 + 计算函数 + 注册行**。
+- **待裁决**：`prep_verdict` 的 `unrated` 是否写行（阶段 0 已确认「不写行」，本 delta 主选同为不写行；备选 `unrated=1` 的理由与代价见 §15.3，交 main 终审裁决）。
+
 ---
 
 ## 1. 目标、范围与硬性决策结论
@@ -33,6 +40,7 @@
 | P1 | 因子评估 | RankIC / ICIR / 2-3 分组收益 / 因子换手 / 覆盖率 / HAC 修正 |
 | P2 | 决策接入 | `rank_key` 新增可选分量，单开关 + 可回退 + 降级 |
 | P2 | 组合指标补全 | Sharpe（权益曲线）、行业暴露统计 |
+| P1.5（delta 2） | prep / auction 因子化 | `builtin/prep.py` 7 个 + `builtin/auction.py` 8 个因子（聚合分 + 子维度，全部 `default_enabled=False`）；`engine` 两个源适配 loader；见 §15 |
 
 ### 1.2 明确非目标（本期不做）
 
@@ -570,6 +578,8 @@ class FactorFrame:
 | `vpa_trend_verify` | vpa | 同上 `trend_verify` | close | higher_better |
 | `vpa_breakout` | vpa | 同上 `breakout` | close | higher_better |
 | `vpa_divergence` | vpa | 同上 `divergence` | close | higher_better |
+
+> `prep` / `auction` 两族（共 15 个因子）见 **§15（Delta 2，P1.5）**：同签名、同纯函数约束，`source` 分别取 `prep` / `auction`，`pit_rule` 均为 `derived`，`available_phase` 分别为 `prep` / `auction`。
 
 迁移注意事项：
 
@@ -1490,6 +1500,17 @@ flowchart LR
 | 1q 评估（由 P0.5 移入） | `effective_independent_observations`、报告期 block bootstrap、IC 一阶自相关三者必须输出；naive 日频 t 标 `pseudo_independent` |
 | no-lookahead 回归测试 | 构造未来信息样本，必须被排除 |
 
+### P1.5 prep / auction 因子化（delta 2，约 380-480 行）
+
+| 交付 | 验收标准 |
+|---|---|
+| `builtin/prep.py`（7 因子） | `prep_verdict` / `prep_composite` / `prep_high_days` / `prep_t_pct` / `prep_t_turnover` / `prep_limit_up_suc_rate` / `prep_in_pool_today` 按 §15.1 落库；`high_days` 字符串解析失败不写行；`pool_available=False` 时 `prep_in_pool_today` 不写行；旧版快照缺 `facts` 时只有可取值因子有行 |
+| `builtin/auction.py`（8 因子） | `auction_strength` / `auction_is_weak` / `auction_direction` / `auction_rank` + 四维子分；`unverified=True` → 该 code 全部 auction 因子不写行；**明细缺失哨兵不得落成 `strength=0` / `is_weak=1`**；`rank=None` 只缺 `auction_rank` 一行 |
+| `engine` 源适配 | `_load_prep_source` / `_load_auction_source` 只经 `storage.assets_db` 读取；`factors/*` 不 import `review_account/*`、`auction/*`；源故障 → `missing_source` 且**不删旧行**；快照存在但候选为空 → `empty` + DELETE |
+| 版本与映射 | enum→数值映射存活在 `spec.params` 且 `compute` 从 `ctx.params` 读取（改映射必产生新版本）；`FactorSpec` 枚举与哈希算法零改动 |
+| 默认零影响 | 全部 `default_enabled=False`；`default_snapshot()` 成员与现状逐项相同；`rank_key` / 五维 / A/P 行为不变 |
+| 测试 | §15.8 全部用例；现有测试无回归 |
+
 ### P2 决策接入 + 组合指标（约 300-500 行）
 
 | 交付 | 验收标准 |
@@ -1535,6 +1556,14 @@ flowchart LR
 | R23 | **历史期首次回填可能已含重述，却被当作截止日已知**（delta，CRITICAL） | 回填期 IC 系统性偏乐观，前向验证结论失真 | 单列 `statutory_backfilled` 桶；`--pit-policy` 默认 strict、research 模式标 `restatement_unverifiable` 且不得进模型快照；正文声明回填期不构成可证伪 PIT 证据 |
 | R24 | 观测值无时间门禁会回填到同日 16:40 的因子行（delta） | 第二条前视路径 | `source_rows.observed` 带 `available_at=captured_at`，`captured_at ≤ T@16:40` 才可用；§8.1 与 §11 各有回归用例 |
 | R25 | 严格 cohort 剔除与基本面相关的候选（delta） | 切换窗口 IC 系统性偏移，方向随披露分布变化 | 输出 `cohort_excluded_profile`；提供 `cohort_policy="deadline_switch"` 统一全池切换；`warnings` 标 `cohort_selection_bias` |
+| R26 | `auction` 语义未实测时全量 `unverified=True`（delta 2） | auction 族上线后**零产出**，被误判为实现失效或数据缺失 | 文档明示 fail-closed 意图；build 报告/`factor status` 输出 `unverified_rows`；语义固化后按「先 `auction --recompute` 再 `factor build`」补历史 |
+| R27 | 空明细哨兵 `reject_reason="竞价明细缺失"` 携带 `strength=0.0` 且 `unverified=False`（delta 2） | 「没有数据」被写成「最弱 / 确定弱」，是因子层最严重的缺失≠中性违反 | `_usable_row` 显式排除该文案；与 `auction.registry.AUCTION_ITEMS_MISSING` 的联动断言测试守护 |
+| R28 | prep/auction 族与 P 维、A 维、`five_dim_composite` 重复计数（delta 2） | 排序与打分同源，A/B 归因失真 | 不加互斥检测（用户决策）；`default_enabled=False`；§15.4 文档警告 + 模型成员指引；实现阶段同步进 `AGENTS.md` |
+| R29 | prep/auction 因子覆盖仅限「当日快照/竞价池代码」且 `EqualWeightRankModel` 要求必需因子齐全（delta 2） | 入模后覆盖率骤降，`factor_min_coverage` 整日 degraded | `neutral`（权重 0）只保成员、不打分也不诊断；诊断靠 `factor eval` / `factor query`；入模前实测覆盖率，成员数受控 |
+| R30 | `prep_snapshots` 是**单列 JSON**，不像 `auction_snapshots` 可逐行隔离（delta 2） | 一行损坏导致整日 prep 族跳过 | engine 捕获解析异常 → `missing_source`（源故障 ≠ 当日无值），不删旧行；报告写原因 |
+| R31 | auction 竞价池取严格 T-1 推荐集，而决策按 `candidate_trade_date` 读因子（delta 2） | `auction_*` 在候选自身日期上**结构性缺失**，入模即整日 `degraded` | 文档写死「auction 族仅供研究，不入生产快照」；如要入模需单独立项改决策日读取（§15.5.6） |
+| R32 | `prep_snapshots.candidates == []` 可能来自 dragons 降级而非真实空（delta 2） | 降级重算 + build 会 DELETE 不可再生的历史因子行 | 空判定必须结合 `dragon_source.window_days` 与降级标记；降级空 → `missing_source` 不删行（§15.2） |
+| R33 | `auction` 空池时正常退出且不写快照，与「命令未运行」不可区分（delta 2） | 旧因子行可能长期滞留，评估口径被陈旧值污染 | 登记为已知残留风险；`factor status` 展示快照日期/行数，必要时人工确认后清理 |
 
 ---
 
@@ -1551,6 +1580,8 @@ flowchart LR
 | `storage/manager.py` | `storage status/size` 展示因子行数与财务表行数/期数（仅统计，不清理） |
 | `review_account/STRATEGY.md` | `rank_key` 新增分量与 `factor_ranking_enabled` 语义（排序规则唯一来源变更） |
 | `dragon_quant/assets_sync` + `assets status` 输出 | **代码改动（非文档）**：`assets status` 固定输出一行 `factor_*: not_synced` 与一行 `fin_*: not_synced`。因子表与 `fin_*` 和 `prep_assets`/`auction_assets` 同库但永不上传，运维必须能一眼看到，不能靠文档记忆 |
+| `AGENTS.md`（delta 2 追加） | ⑩ 因子段落补 `prep` / `auction` 两族 15 个因子、全部默认关、`derived` PIT；⑪ **重复计数警告**：auction 族与 A 维（`auction_ranking_enabled`）/ 竞价否决、prep 族与 P 维 / `five_dim_composite` 同开时同源信号被计两次；⑫ auction 语义未实测时该族零产出（fail-closed）与「先 `recompute` 再 `build`」的补历史口径 |
+| `README.md`（delta 2 追加） | `factor build` 覆盖的源清单补 `prep` / `auction`；模型成员选择建议（同信号只进一次、先评估后入模） |
 | `docs/solutions/` 本文件 | 实现偏离方案时，按项目 §6 在同一 commit 更新本文档（归档后同样适用） |
 
 ---
@@ -1567,3 +1598,334 @@ flowchart LR
 8. **财务原始资产云端同步（delta）**：`fin_report_*` 在 gpcw 清单仍可得时可重下；但 `fin_observed_snapshots` **不可再生**（`same_day_only`）。是否把它并入 `assets_sync` 的独立 `source`（manifest 键含 `trade_date`）需单独评估；当前与 `factor_*` 一样标记 `not_synced`。
 9. **估值类因子（PE / PB / PS）（delta）**：需要价格与财务的统一口径（收盘价 vs 实时价、复权口径、流通市值口径），且与 `Quote.pe` 缓存口径不一致，需单独决策后再做（`fin_bps` 已提供原值作为输入）。
 10. **财报文本 / 公告事件因子（delta）**：业绩预告、股东变化、审计意见、分红方案等需要 `get_company_info_*` 文本接口与解析（可能再次引入新依赖），超出本期；`fin_xdxr_records` 已为将来的分红/除权因子预落库。
+
+---
+
+## 15. Delta 2：prep / auction 因子化（P1.5，2026-10-23）
+
+### 15.0 触发、范围与结论
+
+- **触发**：P0-P2 已落地，`prep_snapshots`（盘后复盘逐只参与判定）与 `auction_snapshots`（集合竞价强度）是系统里唯一还没被因子层观测到的两个**决策辅助信号**。把它们因子化，才能进 `factor eval` 做 IC / 分组 / 换手检验。
+- **粒度**：用户确认的**封闭清单 15 项**（prep 7 + auction 8），覆盖两族的聚合分与子维度，全部 `default_enabled=False`。`prep` 的 `facts` 里另有 `t_amount` / `open_num` / `main_net_amount` 三个数值字段**刻意不纳入**：它们分别属资金流与板型，与 A/P 及其它因子重复度更高，且不在用户确认清单内——不是「全量」口径的遗漏。
+- **非目标**：不新增数据采集、不改 `prep` / `auction` 的计算与写入、不改 A/P 排序、不加因子互斥检测（重复计数只在文档警告，用户已拍板）、不做当日竞价实时决策接入（`buy` 在 09:30 后才需要当日竞价，属于未来的独立里程碑）。
+- **结论**：Delta 2 只新增 **2 个 `builtin` 模块 + 2 个源适配 loader + `builtin/__init__.py` 两行注册**。`FactorSpec` 枚举、版本哈希算法、`factor_values` 表结构、`rank_key` 注入点**零改动**——`SOURCES` 已含 `prep` / `auction`，`PIT_RULES` 已含 `derived`，`AVAILABLE_PHASES` 已含 `auction` / `prep`。
+
+```mermaid
+flowchart LR
+    subgraph DB["assets.db（只读，create=False）"]
+        PS["prep_snapshots.result_json"]
+        AS["auction_snapshots.analysis_json"]
+    end
+    E["factors/engine.py<br/>build_factor 模板方法（不变）"]
+    LP["_load_prep_source<br/>Adapter"]
+    LA["_load_auction_source<br/>Adapter"]
+    BP["builtin/prep.py<br/>7 × FactorSpec"]
+    BA["builtin/auction.py<br/>8 × FactorSpec"]
+    FV[("factor_values")]
+    PS --> LP --> E
+    AS --> LA --> E
+    E -->|"FactorContext（纯 dict）"| BP
+    E -->|"FactorContext（纯 dict）"| BA
+    BP --> FV
+    BA --> FV
+```
+
+---
+
+### 15.1 因子清单
+
+**公共字段**（两族相同）：`frequency="1d"`、`scope=("candidate",)`、`lookback=0`、`default_enabled=False`、`owner="factors"`；`pit_rule="derived"`。`frequency` 取 `1d` 而非 `5m` / `event`：一个交易日的因子值只有一个观测（竞价一次、复盘一次），`5m` 会误导下游以为一天多值。
+
+#### 15.1.1 prep 族（`source="prep"`，`available_phase="prep"`）
+
+| `factor_name` | label | unit | direction | 取值来源与口径 | 缺失规则（**不写行**） |
+|---|---|---|---|---|---|
+| `prep_verdict` | 复盘评级 | score | higher_better | `candidates[].verdict` → `strong=3` / `light=2` / `ignore=0`；`unrated` 见 §15.3 | `verdict` 缺失、未知枚举、`unrated`（主选） |
+| `prep_composite` | 复盘综合分 | score | higher_better | `candidates[].composite_score`（候选**入选日**的五维综合分） | 缺失 / 非有限 |
+| `prep_high_days` | T 日连板高度 | count | higher_better | `facts.high_days` 字符串按 `(\d+)天(\d+)板` 解析，取**板数**（"3天3板" → 3） | `facts` 缺失 / 不在 T 日涨停池（`high_days=None`）/ 格式无法解析 |
+| `prep_t_pct` | T 日涨幅 | pct | higher_better | `facts.t_pct`（% 数值，非 0-1） | 缺失 / 非有限 |
+| `prep_t_turnover` | T 日换手率 | pct | higher_better | `facts.t_turnover`（%） | 缺失 / 非有限 |
+| `prep_limit_up_suc_rate` | 封板成功率 | ratio | higher_better | `facts.limit_up_suc_rate`，**0-1 比率**（展示层 `× 100`，见 `verdicts.build_dimensions`） | 缺失 / 非有限 / 不在 T 日涨停池 |
+| `prep_in_pool_today` | T 日涨停池成员 | flag | neutral | `facts.in_pool_today` → 1 / 0；**仅当 `facts.pool_available is True`** | `pool_available` 缺失或 `False` |
+
+口径与取舍（写死，避免实现阶段再猜）：
+
+- **`prep_in_pool_today` 必须看 `pool_available`**：`compute_candidates` 在涨停池缺失时仍写 `"in_pool_today": False`（因为 `p is None`），此时 0 **不代表**「没进池」，而是「无法判断」。缺失 ≠ 中性，也 ≠ 否。
+- **`prep_high_days` 是字符串解析**：`facts.high_days` 的源值是 THS 的 `"2天2板"` 文本，**不是数字**（已核对 `tests/test_prep.py` 夹具）。解析用 `re.compile(r"(\d+)天(\d+)板")`，取第二组；`0` 天/缺组的异常文本（如 "首板"）一律不写行并计 `unparsed_high_days`，不猜 1。
+- **`prep_limit_up_suc_rate` 是比率不是百分数**：`review_account/verdicts.py` 用它时 `rate * 100` 展示，故 `unit="ratio"`。写成 `pct` 会让导出层与其它 pct 因子混算。
+- **`prep_composite` 的观测日 ≠ 候选的入选日**：该分是候选**入选日**的 scan 产物，但因子行落在**快照日 T**（`available_at = T@16:40`）。这是刻意的保守记法：值更早已知，按 T 记只会低估可用性、不构成前视。`source_meta_json` 记 `candidate_trade_date` 保留血缘。
+- **`ignore` 候选也要写行**（`prep_verdict=0`）：ignore 是快照的**真实最低档**，不是缺失；只要它在 `candidates[]` 里就要有值，否则 IC 只能用「推荐集」算，样本被截断。
+- **`unrated` 的处置见 §15.3 决策点**（主选：不写行）。
+- **方向是待验证假设**：`prep_high_days` / `prep_t_pct` / `prep_t_turnover` 的 `higher_better` 未经实证（高连板/大涨幅/高换手对次日收益可能均值回复）。入模前必须由 `factor eval` 的 IC 符号确认；符号为负就改 `lower_better`（产生新版本），不要反向解读因子分（§15.5-8）。
+
+#### 15.1.2 auction 族（`source="auction"`，`available_phase="auction"`）
+
+| `factor_name` | label | unit | direction | 取值来源与口径 | 缺失规则（**不写行**） |
+|---|---|---|---|---|---|
+| `auction_strength` | 竞价强度 | score | higher_better | `strength`（0-100）；否决闸门命中时 `0.0` 为**序关系地板值**（非加权计算分，所有否决原因坍缩为 0） | 行损坏 / `unverified` / 明细缺失哨兵 / 非有限 |
+| `auction_is_weak` | 竞价否决旗标 | flag | neutral | `is_weak` → 1 / 0 | 同上 |
+| `auction_direction` | 竞价方向 | score | higher_better | `bull=1` / `neutral=0` / `bear=-1`；**仅非否决路径**（`dims` 含 `direction` 子维度） | 同上 / 未知方向字符串 / **否决路径（`dims={}`，`direction` 是占位值）** |
+| `auction_rank` | 竞价池内排名 | count | lower_better | `rank`（1 起）；仅「通过否决且已验证」者有值 | 同上 / `rank=None` |
+| `auction_dim_direction` | 方向表态分 | score | higher_better | `dims.direction.score`（0-100） | 同上 / 该子维度缺失（否决路径 `dims={}`） |
+| `auction_dim_supply` | 供需结构分 | score | higher_better | `dims.supply.score` | 同上 / 该子维度缺失 |
+| `auction_dim_vol_price` | 量价配合分 | score | higher_better | `dims.vol_price.score` | 同上 / 该子维度缺失 |
+| `auction_dim_tail_grab` | 末段抢筹分 | score | higher_better | `dims.tail_grab.score` | 同上 / 该子维度缺失 |
+
+**`_usable_row(row)` 是 auction 族唯一的可用性判定**（实现于 `builtin/auction.py`，纯函数）：
+
+```
+row 存在
+且 row 无 "error" 键（list_auction_snapshots 逐行 JSON 损坏标记）
+且 row.get("unverified") is False      # 缺键视为不可用（fail-closed），不当作 False
+且 row.get("reject_reason") != "竞价明细缺失"
+```
+
+`_usable_row` 是**所有 auction 因子的公共门槛**；`auction_direction` 在此之上还有一条**逐因子**条件：`"direction" in row.get("dims", {})`（即必须走非否决路径）。否决分支的 `direction="neutral"` 是硬编码占位，不是观测——若只靠公共门槛，被高位否决的股票会得到「中性 0」，这是本 delta 最隐蔽的「缺失 ≠ 中性」违反（见 §15.11-9）。
+
+口径与取舍：
+
+- **明细缺失哨兵必须排除（本 delta 最高优先级的正确性约束）**：`auction.strength.evaluate` 在 `items` 为空时返回 `AuctionVerdict(is_weak=True, strength=0.0, unverified=<默认 False>, reject_reason="竞价明细缺失")`。若因子层只看 `unverified`，就会把「没有竞价数据」写成「强度 0 / 确定否决」——这是因子层「缺失 ≠ 中性」最严重的违反，且会系统性污染 IC（缺数据的股票被当成最弱）。
+- **`strength=0` 与缺失的区分（序关系编码，不是计算分）**：真实否决（如 `reject_reason="高位"`）时 `unverified=False`、`strength=0.0`——该 0 由 `strength.evaluate` 的否决分支**硬编码**，未走加权计算，是「否决 = 最弱」的**序关系地板值**，与正常路径的 0-100 加权分不同尺度，且所有否决原因坍缩为同一个 0。作为 `higher_better` 因子的地板值成立，必须写 0（只有明细缺失哨兵不写）。同理 `auction_is_weak` 在真实否决时写 1。**但 `direction` 不同**：否决分支的 `direction="neutral"` 同样是硬编码占位（该分支从未调用 `_resolve_direction`），不是观测，**必须不写行**。
+- **`rank` 天然稀疏**：`rank_auctions` 只给「未否决且未 unverified」的 verdict 赋排名，其余 `rank=None`。`rank=None` → 只缺 `auction_rank` 一行，其余 auction 因子照常成立。
+- **子维度天然稀疏**：否决路径提前 return，`dims={}` → 四个子维度因子全部不写行；这是「没有子分数」而非「子分数 0」。
+- **`auction_direction` 与 `auction_dim_direction` 是两回事**：前者是有符号三值方向，后者是方向表态子分（0-100）。名字相近但语义不同，不得合并，不得把方向值当分数权重用。
+- **负值是合法的**：`auction_direction=-1` 会写入 `factor_values.value REAL`（无符号约束），`matrix` 的 MAD / rank 归一与符号无关（已核对 `_clean_cross_section`）。但下游不得对方向取绝对值当强度。
+
+**事实边界（实现阶段必须知情）**：`auction/registry.py::SEMANTICS_VERIFIED` 当前为 `False`，`evaluate` 的正常路径恒 `unverified=True`。因此 **P1.5 上线后 auction 族默认零产出**——这是 fail-closed 的设计意图，不是实现缺陷。语义实测固化后需对历史日执行 `auction --recompute DATE`（重标 `unverified`）再 `factor build --date DATE` 才能补出历史行。build 报告的 `unverified_rows` 计数就是这件事的可见性出口。
+
+---
+
+### 15.2 源适配契约（`engine` 新增两个 loader）
+
+`builtin/*` 仍然**只读 `ctx.source_rows`、零 I/O**（§4.3）；取数、JSON 解析、损坏隔离全部在 `engine`。新增 `_load_prep_source` / `_load_auction_source`，并在 `_load_source` 的 `spec.source` 分派里各加一个分支。
+
+```python
+# source="prep"（engine 组装；只经 storage.assets_db 读取）
+{
+  "status": "ok",                     # 另有 missing_source（源缺失/损坏）
+  "snapshot_date": "2026-10-23",
+  "snapshot_version": 0.5,            # prep_snapshots.result_json.version（诊断/血缘）
+  "snapshot_created_at": "2026-10-23 17:02:11",   # 快照行 created_at（血缘，不参与 PIT）
+  "candidates": [ {...}, ... ],       # 原样保留
+  "candidates_by_code": {code: cand}, # 只收 code 非空的 dict
+  "codes": tuple(sorted(...)),
+  "as_of": None,                      # derived 不看 created_at（但 meta 必须留血缘）
+}
+
+# source="auction"（engine 组装；list_auction_snapshots 已逐行隔离 JSON 损坏）
+{
+  "status": "ok",                     # 另有 missing_source（无行 / 全行损坏）
+  "snapshot_date": "2026-10-23",
+  "snapshot_version": "1",
+  "snapshot_created_at": "2026-10-23 09:26:03",   # 快照行 created_at 的最大值
+  "rows_by_code": {code: row},        # 已剔除带 "error" 的行
+  "codes": tuple(sorted(...)),
+  "corrupt_rows": ["000001", ...],    # 诊断：损坏 code 列表
+  "as_of": None,
+}
+```
+
+> **血缘缺口与只增读取扩展**：`engine.build_factor` 的 `source_scan_id` 只认 `scan_id`，两个快照源没有 scan id，因此 `factor_values.source_scan_id` 对两族恒 `NULL`。快照又是可被覆盖重算的，仅靠因子版本（只哈希 compute）无法回答「这个值来自哪一版快照」。P1.5 实现时必须做两件小事：① `assets_db` 增加只读能力（**只增不改**，返回形状写死）：`get_prep_snapshot(trade_date, source="v2", with_meta=True) -> tuple[dict | None, dict]`（第二项 `{"created_at": ...}`）；`list_auction_snapshots(trade_date, source="v2", with_meta=True) -> list[dict]`（逐行追加 `created_at` 键）。默认 `with_meta=False` 保持现返回值，现有调用（`market._default_auction_loader` / `priority` 等）零影响。② loader 把 `snapshot_version` / `snapshot_created_at` 放进 source dict（**对外键名统一为 `snapshot_created_at`**，不直接复用库字段名 `created_at`，避免与快照内的 `version` 混淆），compute 原样写入 `FactorFrame.meta`，随 `source_meta_json` 落库；`snapshot_created_at.date() > trade_date` 时额外记 `snapshot_backfilled=true`（不阻断，但可审计）。
+
+装配规则：
+
+| 情形 | `status` | 结果 |
+|---|---|---|
+| `prep_snapshots` 无该日记录 / 表不存在 / 空库 | `missing_source` | 跳过，**不删旧行** |
+| `get_prep_snapshot` 抛异常（单列 JSON 损坏 / DB 错误） | `missing_source` | 跳过，**不删旧行**（单列 JSON 无逐行隔离，见 R30） |
+| 快照存在但 `candidates` 不是 list | `missing_source`（`malformed`） | 跳过，不删旧行 |
+| `candidates == []` **且** `dragon_source.window_days >= 1` **且** 无 dragons 降级标记（`dragon_source.dates[].status` 全为 `ok`，且 `sentiment.degraded` 与 `{"dragons", "dragons_partial", "dragons_window_short"}` 交集为空——裸 `dragons` token 表示资产整体不可用，必须一并查） | `ok` + `codes=()` | 视为**真实空**：`empty` + DELETE + `empty_unexpected` |
+| `candidates == []` 但 `dragon_source.window_days == 0` / 含 dragons 降级 / `dragon_source` 缺失 | `missing_source`（`empty_degraded_source`） | 降级快照 ≠ 当日无值：跳过，**不删旧行**（R32） |
+| `list_auction_snapshots` 返回 `[]` | `missing_source` | 跳过，不删旧行（沿用 `_load_vpa_source` 的「无记录 = 源未产出」口径；空池与未运行不可区分，见 R33） |
+| 有行但全部带 `error` | `missing_source`（`all_corrupt`） | 跳过，不删旧行 |
+| 部分行损坏 | `ok` | 损坏 code 不进 `rows_by_code`，计 `corrupt_rows` |
+
+> **为什么 prep 族不按候选自己的 `trade_date` 拆行**：快照日 T 的 verdict / facts 是 T 日盘后一次算出来的观测，把 `prep_verdict` 写到候选入选日（T-1/T-2）会声称「T-1 就知道 T 日的评级」——这是真实前视。因子行的 `trade_date` 必须 = 观测日。候选自身日期只进 `source_meta_json.candidate_trade_date` 作血缘（§15.5 讨论它对决策读取的影响）。
+
+---
+
+### 15.3 enum → 数值映射的论证与版本哈希
+
+#### 15.3.1 为什么是 3 / 2 / 1 档整数，而不是 100 分制
+
+1. **RankIC / ICIR / 分组统计只看序**：对任意严格单调变换不变。`strong=3` 与 `strong=100` 给出**逐位相同**的 RankIC、ICIR、分组收益与换手率。既然只有序被用到，就没有理由发明间距。
+2. **100 分制会伪造精度**：`matrix export` 会把原始值导出给研究/模型看。`strong=100 / light=66.7 / ignore=0` 会被读成「strong 与 light 差 33 分」这种没有证据的度量；3/2/1 明确表达「这只是档位序」。
+3. **模型层本来就用 rank 归一**：`EqualWeightRankModel` 对每个因子做 `rank_pct_by_candidate_date`（§4.4 / `decision.py`），raw spacing 不进入打分。100 分制在模型里等于没用，只会在导出与人工阅读时误导。
+4. **`0` 是真值不是哨兵**：`ignore=0` 是快照能给出的**真实最低档**。若把 0 也用作「缺失」，IC 会把「最差」与「未知」混在一起——所以缺失一律用**无行**表达（§7 铁律）。
+5. **`auction_direction` 的 -1/0/1 同理**：有符号三值是有序档位；`REAL` 列与清洗链路对负数无假设（已核对），负号只表示 bear。
+
+#### 15.3.2 映射必须参与版本哈希，且已由 `direction` + `params` 覆盖
+
+- 版本哈希的语义字段（`spec_payload`）已含 `direction` / `unit` / `pit_rule` / `available_phase` / `source` / `frequency` / `scope` / `depends_on` / `lookback` / `params` / `impl`。**不需要新增哈希字段**。
+- **但有一个实现陷阱**：`impl = source_fingerprint(compute)` 只对 **compute 函数体**做 token 级哈希，**看不到模块级常量**。若把 `{"strong": 3.0, ...}` 定义成模块常量、`params` 留空，改动映射不会产生新版本 → 同一 `(name, version)` 下语义漂移，违反 §4.2「版本一旦生成即不可变」。
+- **规则（写死）**：enum 映射放进 `spec.params["mapping"]`，且 `compute` **从 `ctx.params["mapping"]` 读取**，不得闭包引用模块常量。这样「被哈希的配置」与「被执行的配置」是同一份对象。
+
+```python
+_VERDICT_MAPPING = {"strong": 3.0, "light": 2.0, "ignore": 0.0}
+_DIRECTION_MAPPING = {"bull": 1.0, "neutral": 0.0, "bear": -1.0}
+FactorSpec(
+    name="prep_verdict", ...,
+    direction="higher_better", unit="score",
+    params={"mapping": _VERDICT_MAPPING,
+            "unrated_policy": "skip"},      # 见 15.3.3；改策略 = 新版本
+)
+FactorSpec(
+    name="auction_direction", ...,
+    direction="higher_better", unit="score",
+    params={"mapping": _DIRECTION_MAPPING},  # 同样必须进 params，不得只做模块常量
+)
+# compute 内：mapping = ctx.params["mapping"]；policy = ctx.params["unrated_policy"]
+```
+
+`direction` 的覆盖情况单独确认：`auction_rank` 用 `lower_better`（评估时取反）、两个 flag 用 `neutral`（不参与打分与必需集）——三者都已在哈希内，改方向必产生新版本。**回归用例**：构造两个仅 `params.mapping` 不同的 spec，`compute_version` 必须不同；并断言 `compute` 实际从 `ctx.params["mapping"]` 取值（把模块常量改掉但这些 spec 的 params 不变，输出必须不变）。
+
+#### 15.3.3 决策点：`prep_verdict` 的 `unrated` 写不写行
+
+| 选项 | 内容 | 论据 | 代价 |
+|---|---|---|---|
+| **A（主选，与阶段 0 已确认需求一致）** | `unrated` **不写行** | ① `unrated` 的唯一产生路径是 `verdicts.evaluate_one` 抛异常 / 评级字段畸形，语义是「**无法评级**」而非「评级较差」；② P 层把 `unrated` 与 `ignore` 同放 `PREP_NOT_RECOMMENDED`（同为 `False`），映射成 1 会让因子层说「优于 ignore」、P 层说「同档最差」，两套语义直接冲突；③ 符合「缺失 ≠ 中性」铁律 | 少一类样本；`unrated` 占比进 build 报告即可观察 |
+| **B（delta 建议的备选）** | `unrated = 1` | `unrated` 是快照的**确定产物**（有 key、有值），不是数据缺失；不写会降低覆盖 | 1 分的位置没有任何实证支撑；与 P 层排序语义不一致；且「评级字段畸形」本质是缺陷信号，把它排在 ignore 之上等于奖励数据缺陷 |
+
+**本方案主选 A**（不改阶段 0 已拍板的「unrated 不写行」）。若 main 终审选择 B，实现侧只改 `params.mapping` + `params.unrated_policy` 两处并补一条用例，不影响其它设计。无论选哪个，都要把 `unrated` 计数写进 build 报告，避免「悄悄少样本」。
+
+---
+
+### 15.4 重复计数警告（文档级，**不加互斥检测**）
+
+用户已明确：不做互斥检测，只在文档警告。实现阶段把下表同步进 `AGENTS.md` 的因子段落。
+
+| 重复对 | 机制 | 失真方式 | 建议 |
+|---|---|---|---|
+| `auction_*` ↔ **A 维**（`auction_ranking_enabled`） | A 维三值直接来自同一 `auction_snapshots` 行的 `is_weak` / `strength` / `rank` | 同一信号既进 tier 又进 `factor_score`，A 的增量被误归因给因子 | 开 A 时**不要**把任何 `auction_*` 放进模型快照 |
+| `auction_*` ↔ **竞价否决**（`auction_veto_enabled`） | 否决已在 `evaluate_buy` 后置闸门生效 | 弱/否决被表达两次 | 同上 |
+| `auction_strength` ↔ 四个 `auction_dim_*` | `strength = Σ weight_d × dim_score_d`（`strength.py` 精确线性组合） | 同时入模 = 把一个因子计 5 次 | 只取聚合分**或**只取子分（推荐子分，信息量更高）；不要并存 |
+| `auction_is_weak` / `auction_rank` ↔ `auction_strength` | 非否决路径恒 `is_weak=False`；同日内 `rank` 是 `strength` 的单调函数（否决除外） | 确定性派生 / 零额外信息 | 两者只作诊断，**不进模型快照**（`is_weak` 保留为因子是为了评估否决样本） |
+| `prep_verdict` ↔ `prep_composite` | `verdict` 由 composite + facts + 公告分档派生 | 同源分档 | 二选一，推荐 `prep_composite` |
+| `prep_verdict` ↔ **P 维** | `verdict` 是 P 三值的**单调编码** | 排序与打分同源，`prep_verdict` 在池内几乎与 P 的 tier 完全共线 | 生产快照不含 `prep_verdict`；要看评级用 `prep_composite` / facts |
+| `prep_composite` ↔ **`five_dim_composite`**（及五个 `five_dim_*`） | 同一个 `composite_score`，只是观测日不同（入选日 scan vs 快照日中转） | 完全共线，trial 数被浪费 | 沿用 `default_snapshot(exclude=...)`，把 `prep_composite` 一并排除 |
+| `prep_high_days` ↔ `five_dim_leadership` | 领涨性内含「连板最多」，`high_days` 是其输入 | 部分重复 | 看相关性后再定权重，不同权入模 |
+| `prep_t_pct` / `prep_t_turnover` ↔ 五维带动性 / 流动性 | T 日涨跌幅与换手是这两维的输入 | 部分重复 | 同上 |
+| `prep_*` ↔ `prep_*` | `facts` 各字段同源于 T 日 THS 池行 | 同源簇内高相关 | 每簇取 1-2 个代表进模 |
+
+---
+
+### 15.5 模型成员指引
+
+1. **默认快照不含两族**：15 个 spec 全部 `default_enabled=False`，`default_snapshot()` 输出与 P2 交付逐项相同（成员集合、权重、`lower_better` / `neutral` 列表都不变）。这是硬验收项。
+2. **先评估、后入模**：单因子 `factor eval` 的 IC / ICIR / 覆盖率 / 换手稳定之前，不进生产模型快照；财务因子同一条纪律（R22）。
+3. **同一信号只进一次**：`{prep_verdict, P}` 二选一；**auction 族一律不入模**（见第 6 条 / R31）——A 维按决策日读取、auction 因子按入选日读取，二者不构成替代关系。
+4. **优先颗粒度事实**：`prep_t_pct` / `prep_t_turnover` / `prep_limit_up_suc_rate` / 四维子分比聚合枚举更有信息量，且与 A/P 的重复更弱。
+5. **覆盖率陷阱（必须知道）**：`EqualWeightRankModel` 要求**所有必需因子都有值**才给该候选打分。`prep_*` 只在候选出现在该日 `prep_snapshots` 时才有行，`auction_*` 只在当日竞价池代码才有行。把稀疏因子设为 required，会把池外代码整只踢出打分，`factor_min_coverage=0.6` 直接整日 `degraded`。`neutral`（权重 0）的真实作用只是「保留成员、不计入必需集、不参与打分」，**它本身不产生任何排序信息**——诊断要靠单独的 `factor eval` / `factor query`。实测覆盖率达标后，权重从 0.3-0.5 起试。
+6. **读取日期语义与 auction 的结构性错配（关键）**：
+   - `prep_*`：P2 按候选自己的 `candidate_trade_date` 读因子（§4.5），因此值是「**入选日当天**的复盘观测」，不是决策日观测；候选越老值越旧。截面是 `pool_mixed_vintage_by_candidate_date`，不要按「决策日截面」解释 IC。
+   - `auction_*`：**存在结构性零覆盖，不是普通稀疏**。竞价池默认取**严格 T-1 的 prep 推荐集**，而一只股票是在某个交易日收盘后才成为真龙并进入因子池的——它在**自己的 factor_date 当日 09:25 几乎不可能出现在竞价池里**。只有「前一日已在推荐集、当日继续连板」的延续型标的才会有行。把任一 `auction_*` 设为 required，覆盖率会长期远低于 `factor_min_coverage`，结果是「加了因子反而让整日因子排序全线失效」。
+   - **结论（写死）**：`auction_*` 仅用于 `factor eval` / 研究，**不得进入任何生产模型快照**；A 维（`auction_ranking_enabled`）仍按决策日读取，二者读取日期语义不同，不能互相替代。若将来要把竞价信号入模，需要单独立项改「决策日读取」路径（R31）。
+7. **`auction_direction` 不要取绝对值**，也不要用它替代 `auction_strength`；`auction_rank` 是 `lower_better`，模型侧必须同时声明 `lower_better`。
+8. **方向假设待验证**：`prep_high_days` / `prep_t_pct` / `prep_t_turnover` 的 `higher_better` 是**未经验证的单调假设**（高位连板、T 日大涨幅/高换手对次日收益常呈均值回复）。`direction` 参与版本哈希并直接决定入模时是否取反；入模前必须用 `factor eval` 的 IC 符号确认，符号为负时改 `lower_better`（自然产生新版本），不要反向解读因子分。
+
+---
+
+### 15.6 PIT 与事实边界
+
+- **`derived` 的成立依据**（§6.1）：`prep_snapshots` 是 `prep_assets`（按 `trade_date` 键）的纯函数，`auction_snapshots` 是 `auction_assets` 的纯函数，`--recompute` 只重放算法、不引入新信息。因此 `available_at` 恒为 `phase_ts`：prep 族 `T@16:40`、auction 族 `T@09:25`，**不看 `created_at` / `computed_at` / 快照重算时刻**。
+- **`unverified` 是校准状态，不是数据**：语义常量翻转后，`auction --recompute` 会把同一批数据重标为 `unverified=False`。这不是前视（数据当日可见），但意味着历史行需要**显式补建**：`auction --recompute DATE` → `factor build --date DATE`。build 报告必须输出 `unverified_rows`，否则「零产出」会被误读为故障（R26）。
+- **旧快照的降级是可预期的**：`prep_snapshots.version < 0.5` 或无 `facts` → 只有 `prep_verdict` / `prep_composite` 可能有行，facts 族全部不写；无 `verdict` 键 → `prep_verdict` 不写。这些是**正确结果**（那时确实没有该信息），不是缺陷；`coverage` 会如实反映。
+- **`auction_rank` 是截面值**：排名依赖当日竞价池全体，PIT 上仍是 T@09:25 可知，无前视；但它天然不可跨日比较（池变了），评估时不要做跨日差分。
+- **`derived` 不看 `created_at`，但血缘必须落 meta**：两族快照都可被重算覆盖（`prep --recompute` / `auction --recompute`），仅靠因子版本（只哈希 compute）无法定位「这个值来自哪一版快照」。因此 `FactorFrame.meta` 必须写 `snapshot_version` / `snapshot_created_at`，`snapshot_created_at.date() > trade_date` 时追加 `snapshot_backfilled=true`。这不是 PIT 判据（不改变 `available_at`），是审计证据（§15.2 的只增读取扩展）。
+
+---
+
+### 15.7 错误处理（delta 行，补充 §7）
+
+| 场景 | 处理 | 理由 |
+|---|---|---|
+| 单行 `analysis_json` 损坏 | 该 code 全部 auction 因子不写行，计 `corrupt_rows`；其余 code 继续 | `list_auction_snapshots` 已逐行隔离，本层只需跳过 |
+| `prep_snapshots.result_json` 损坏 | 整个 prep 族 `missing_source`，跳过、不删旧行 | 单列 JSON 无逐行隔离；源故障 ≠ 当日无值 |
+| auction 行 `unverified=True` | 该 code 全部 auction 因子不写行，计 `unverified_rows`（**不是 error**） | 未校准的口径禁止进入评估/决策 |
+| `reject_reason` 为明细缺失哨兵 | 不写行（即使 `strength=0` / `is_weak=True` 存在） | 缺失 ≠ 最弱（R27） |
+| 真实否决路径 | `auction_strength` / `auction_is_weak` 写行；`auction_direction`、四维、`auction_rank` **不写行** | 否决分支的 `direction` 是占位 `neutral`，不是观测 |
+| 快照 `candidates == []` 且 dragons 血缘健康（`window_days >= 1`、无降级标记） | `empty` + DELETE + `empty_unexpected` | 真实空（当日无候选）应清空旧值 |
+| 快照 `candidates == []` 但 dragons 不可用/降级 | `missing_source`（`empty_degraded_source`），跳过、**不删旧行** | 降级快照 ≠ 当日无值；`same_day_only` 历史资产不可再生（R32） |
+| auction 当日无行（空池或命令未跑） | `missing_source`，跳过、不删旧行 | 两者在库中不可区分，旧行可能滞留（R33）；需人工确认后清理 |
+| `facts.high_days` 格式无法解析 | 该 code 的 `prep_high_days` 不写行，计 `unparsed_high_days` | 不猜「首板 = 1」 |
+| enum 值未知（verdict / direction） | 不写该行，计 `unknown_enum` | 不静默映射到中性档 |
+| `unverified_rows == codes`（全部 code 未校准） | 抑制 `empty_unexpected`，只报 `unverified_rows` | 避免长年误报把运维的告警敏感度磨平（R26） |
+
+**计数的落点（写死）**：`corrupt_rows` / `unverified_rows` / `unparsed_high_days` / `unknown_enum` / `snapshot_backfilled` 一律放进 `FactorFrame.meta["counters"]`，随 `source_meta_json` 落库；`build_factor` 可选择性提升到 entry，但**不得新增 entry 白名单字段**。这与现有 `meta` 只增不改的契约一致。
+
+**`empty_unexpected` 的抑制必须覆盖两处出口**：`build_factor` 的 entry 级 warning 与 `build_date` 的汇总行（`engine.py` 的 `empty` 汇总）是两条独立路径。对 `counters.unverified_rows == codes` 的因子，两处都只报 `unverified_rows`，不报 `empty`——否则 `SEMANTICS_VERIFIED=False` 期间 8 个 auction 因子每天刷 8+8 行告警，会把运维的告警敏感度磨平（R26）。
+
+---
+
+### 15.8 测试策略（`tests/test_factors_prep_auction.py`）
+
+全部**无网络**；集成用例用临时 `assets.db`（`DQ_DATA_DIR` 指向 `tmpdir`，沿用 `tests/test_factors_integration.py` 的写法）。
+
+1. **映射正确性**：`strong/light/ignore → 3/2/0`；`bull/neutral/bear → 1/0/-1`；未知枚举 → 无行 + 计数；两份仅 `params.mapping` 不同的 spec → `compute_version` 不同，且 compute 实际读 `ctx.params`。
+2. **`unrated` 行为**：按 §15.3.3 选定的策略断言（主选 = 无行）。
+3. **缺失规则（参数化）**：
+   - `unverified=True` / `unverified` 缺键 → 该 code 全部 auction 因子 0 行；
+   - `assert SENTINEL == auction.registry.AUCTION_ITEMS_MISSING`（factors 侧只能复制字面量，联动断言必须存在）；
+   - 明细缺失哨兵（`reject_reason="竞价明细缺失"`, `strength=0.0`, `is_weak=True`, `unverified=False`）→ **0 行**（防 `strength=0` 伪最低分，R27）；
+   - 真实否决（`reject_reason="高位"`, `unverified=False`, `dims={}`）→ `auction_strength=0`、`auction_is_weak=1` 有行；**`auction_direction`、四维、`auction_rank` 全部无行**（`direction` 是占位值，CRITICAL 回归项）；
+   - `rank=None` → 仅 `auction_rank` 无行；
+   - `pool_available=False` → `prep_in_pool_today` 无行；`high_days=None` / `"首板"` → `prep_high_days` 无行；
+   - 旧版快照无 `facts` → 只有 verdict / composite 有行。
+4. **derived PIT 与血缘**：`available_at` 恰为 `T@16:40:00` / `T@09:25:00`；把快照 `created_at` 造到 T+3 再 build，`available_at` 不变，但 `source_meta_json` 含 `snapshot_version` / `snapshot_created_at` / `snapshot_backfilled=true`；同日重跑幂等（行集合与值不变）。
+5. **源故障不删旧行**：先 build 一天得到行，再让表缺失 / JSON 损坏重跑 → 旧行仍在，`status=missing_source`；**`candidates=[]` 但 `window_days=0` → 旧行仍在**（`empty_degraded_source`）；`candidates=[]` 且 dragons 健康 → 旧行被 DELETE（**healthy-empty 是防御性分支**：`window_days>=1` 且三日 status 全 ok 时 `prep` 实际产不出空候选，夹具须直接手写 `prep_snapshots` JSON，不依赖 `prep` 产出）。
+6. **隔离性**：
+   - `prep` 构建在 `auction_snapshots` 缺失时仍成功，`auction` 反之；
+   - 构建两族不改 `five_dim_*` / `vpa_*` / `fin_*` 任何行；
+   - `factors/*` 不 import `review_account/*` / `auction/*`：用 **AST 源码扫描**（`ast.walk` 查 `Import` / `ImportFrom`），不要用 `sys.modules` 断言——测试进程为取哨兵常量必然先 import `dragon_quant.auction`，模块缓存会误报；
+   - `prep_high_days` 的板数解析与 `review_account.verdicts._board_height` **及** `review_account.prep._LIANBAN_RE` 在同一组夹具上结果一致（两处生产者正则都要联动，防止第三份实现漂移）。
+7. **默认零影响**：`default_snapshot()` 成员集合与权重快照 fixture 逐项比对；`rank_key` 在 `factor_ranking_enabled=False` 时输出与旧实现逐位相同（复用 `tests/test_priority_factor.py` 范式）。
+8. **注册表**：`validate_registry` 通过；15 个 spec 的 `default_enabled is False`；`source` / `pit_rule` / `available_phase` 取值正确。
+9. **报告与告警**：`meta["counters"]` 含 `corrupt_rows` / `unverified_rows` / `unparsed_high_days` / `unknown_enum`；全量 unverified 时**不出现** `empty_unexpected`。
+
+---
+
+### 15.9 里程碑 P1.5 与工作量
+
+| 交付 | 文件 | 估算 |
+|---|---|---|
+| prep 族 7 因子 | `dragon_quant/factors/builtin/prep.py` | ~110 行 |
+| auction 族 8 因子 | `dragon_quant/factors/builtin/auction.py` | ~130 行 |
+| 源适配 + 分派 | `dragon_quant/factors/engine.py`（新增两个 loader + 2 个分支 + `empty_unexpected` 双出口抑制） | ~70 行 |
+| 只读扩展（血缘） | `dragon_quant/storage/assets_db.py`（`with_meta=True` 返回 `created_at`，默认行为不变） | ~15 行 |
+| 注册 | `dragon_quant/factors/builtin/__init__.py` | ~5 行 |
+| 测试 | `tests/test_factors_prep_auction.py` | ~120-180 行 |
+
+合计约 **400-500 行**（生产 ~330、测试 ~120-180）。任务包估算 300-400 行偏下限，偏差主要来自 15 条 `FactorSpec` 声明、血缘读取扩展、双出口告警抑制与缺失规则用例；不新增依赖、不改表结构。
+
+**运维口径（必须写进 README/命令帮助）**：15 个 spec 全部 `default_enabled=False`，而 `factor build --date D` 默认 `enabled_only=True`——直接跑**不会产出任何 P1.5 行**。研究或补历史必须显式指定：`factor build --date D --only prep_verdict,prep_composite,...`（`--only` 不受 `default_enabled` 影响）；只有决定入模时才修改 `default_enabled` 或把它加入模型快照。
+
+---
+
+### 15.10 设计模式与动机
+
+| 模式 | 落点 | 动机 |
+|---|---|---|
+| **模板方法** | `engine.build_factor` 骨架不变，只加源分派 | 15 个新因子共享「取数→校验→计算→PIT→落库→报告」，不复制任何一条 |
+| **策略（Strategy）** | 每个家族一个 `builtin` 模块，统一 `compute(ctx) -> FactorFrame` | 两族数据形状完全不同，但引擎无需感知；新增家族 = 新模块 + 注册 |
+| **适配器（Adapter）** | `_load_prep_source` / `_load_auction_source` 把两种异构快照归一成 `source_rows` | `builtin/*` 保持纯函数、零 I/O、零 import 上层包；存储格式变化只改一个 loader |
+| **注册表（Registry）** | 每条因子一个 `FactorSpec`，加入 `SPECS` 即生效 | 因子数量线性增长，零改动 CLI/存储/评估 |
+| **显式缺失（缺行）语义** | `FactorFrame.values` 缺 code = 缺失，绝不填 0 / 中性 | 唯一能表达「缺失 ≠ 中性」的结构；与 `ABS_NEUTRAL=50` 刻意不同。它不是 Null Object 模式（那是用空对象**替代**缺失），恰恰相反：缺失必须保持「无值」 |
+
+权衡：没有为「15 个字段」引入通用因子表达式或字段映射 DSL——三行相似的读取代码比一层元数据抽象更可读（全局约定 §3「优先简单」）。唯一抽象是 `_usable_row` 与 `params.mapping`，两者都因为「有语义、会被评审追问」才存在。
+
+---
+
+### 15.11 需求方未考虑但影响设计的点（Delta 2 新发现）
+
+1. **auction 族当前会零产出**：`SEMANTICS_VERIFIED=False` 使所有快照 `unverified=True`。若不提前说明，「上线后查不到行」会被当成 bug。需要 build 报告的 `unverified_rows` + 补历史口径（`recompute` → `build`）。
+2. **空明细哨兵带 `strength=0.0` 且 `unverified=False`**：这是最隐蔽的缺失陷阱，比 `unverified` 更容易漏（R27）。
+3. **`facts.high_days` 是字符串不是数字**：直接 `float()` 会整族抛错或写空；必须按 `(\d+)天(\d+)板` 解析，且与 `verdicts._board_height` **及** `prep._LIANBAN_RE`（第三份实现）两处生产者联动断言。
+4. **`limit_up_suc_rate` 是 0-1 比率**：误标 `pct` 会让它与涨幅/换手混算，量纲差 100 倍。
+5. **`prep_composite` 与 `five_dim_composite` 同源**：前者只是后者在快照日的「中转站」，两者同权入模是完全重复计数；`default_snapshot` 现有 `exclude=("five_dim_composite",)` 需要扩到 prep 族。
+6. **决策读取日期是 `candidate_trade_date`**：prep / auction 因子表达的是「入选日当天」的信号，不是决策日信号；用 IC 解释时必须写明截面是混合 vintage。
+7. **`EqualWeightRankModel` 的 complete-case 特性**：稀疏因子一旦设为 required，会把整批候选踢出打分并触发整日 degraded；「加一个因子」在因子层是加法，在决策层可能是覆盖率悬崖。
+8. **`prep_snapshots` 单列 JSON 无逐行隔离**：与 `auction_snapshots` 的容错能力不同，损坏即整族跳过；必须归入 `missing_source` 而非 `empty`，否则会删掉历史值。
+9. **否决分支的 `direction` 是硬编码占位**：`strength.evaluate` 的否决路径直接返回 `direction="neutral"`（从未调用 `_resolve_direction`）。只看 `unverified` 会把「被高位否决」写成「中性 0」——比空明细哨兵更隐蔽。`auction_direction` 必须额外要求 `dims` 含 `direction` 子维度（CRITICAL 回归项）。
+10. **`candidates == []` 不等于「当日无候选」**：`prep_snapshots` 在 dragons 资产不可用（`dragon_source.window_days=0`）或窗口降级时同样会写出空列表。把它当真实空会 DELETE 掉不可再生的历史因子行；必须结合 `dragon_source` 的血缘/降级标记判定（R32）。
+11. **auction 的「空池」与「命令没跑」在库中不可区分**：`auction` 空池时正常退出且不写快照，`list_auction_snapshots` 返回 `[]` 无法归因。旧因子行可能长期滞留，需人工确认后清理（R33）。
+12. **`factor build` 默认只跑 `default_enabled` 因子**：15 个新 spec 全关，直接 `factor build --date D` 不会产出任何 P1.5 行；研究/补历史必须用 `--only`（§15.9）。

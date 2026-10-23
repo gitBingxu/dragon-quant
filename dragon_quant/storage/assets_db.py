@@ -480,18 +480,29 @@ def save_prep_snapshot(trade_date: str, result: dict, source: str = "v2") -> Non
             conn.close()
 
 
-def get_prep_snapshot(trade_date: str, source: str = "v2") -> Optional[dict]:
-    """读取某复盘日的快照，无记录返回 None。"""
+def get_prep_snapshot(trade_date: str, source: str = "v2",
+                      with_meta: bool = False):
+    """读取某复盘日的快照，无记录返回 None。
+
+    ``with_meta=True`` 时返回 ``(result | None, {"created_at": ...})``；默认
+    ``False`` 保持原返回值，既有调用方零影响（因子层血缘读取用，方案 §15.2）。
+    """
     conn = _connect(create=False)
     if conn is None:
-        return None
+        return (None, {"created_at": None}) if with_meta else None
     try:
         _ensure_schema(conn, migrate=False)
         row = conn.execute(
-            "SELECT result_json FROM prep_snapshots WHERE trade_date = ? AND source = ?",
+            "SELECT result_json, created_at FROM prep_snapshots "
+            "WHERE trade_date = ? AND source = ?",
             (trade_date, source),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if row is None:
+            return (None, {"created_at": None}) if with_meta else None
+        payload = json.loads(row[0])
+        if with_meta:
+            return payload, {"created_at": row[1]}
+        return payload
     finally:
         conn.close()
 
@@ -643,22 +654,30 @@ def _snapshot_row(trade_date: str, code: str, analysis, error) -> dict:
     return row
 
 
-def list_auction_snapshots(trade_date: str, source: str = "v2") -> list[dict]:
-    """列出某日竞价强度快照，按 code 排序；逐行 JSON 损坏只标 ``error``，不中断整批。"""
+def list_auction_snapshots(trade_date: str, source: str = "v2",
+                           with_meta: bool = False) -> list[dict]:
+    """列出某日竞价强度快照，按 code 排序；逐行 JSON 损坏只标 ``error``，不中断整批。
+
+    ``with_meta=True`` 时逐行追加 ``created_at`` 键（因子层血缘读取，方案 §15.2）；
+    默认 ``False`` 返回形状保持不变。
+    """
     conn = _connect(create=False)
     if conn is None:
         return []
     try:
         _ensure_schema(conn, migrate=False)
         rows = conn.execute(
-            "SELECT trade_date, code, analysis_json FROM auction_snapshots "
+            "SELECT trade_date, code, analysis_json, created_at FROM auction_snapshots "
             "WHERE trade_date = ? AND source = ? ORDER BY code",
             (trade_date, source),
         ).fetchall()
         result = []
         for r in rows:
             analysis, error = _load_json(r[2], {})
-            result.append(_snapshot_row(r[0], r[1], analysis, error))
+            item = _snapshot_row(r[0], r[1], analysis, error)
+            if with_meta:
+                item["created_at"] = r[3]
+            result.append(item)
         return result
     finally:
         conn.close()

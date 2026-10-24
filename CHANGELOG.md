@@ -12,8 +12,15 @@
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-24
+
+> 草稿：覆盖 `feat/skills` 分支的 `d71abcb` 与 `96dadc8`；合入 main 后补记 MR 编号。
+
 ### Added
-- **Agent Skill 包（issue #29，未发布）**：新增单主 skill `skills/dragon-quant/`（`SKILL.md` + `references/{commands,outputs,playbooks,operations,safety}.md`）与根目录零运行时依赖安装器 `dragon-quant-skills`（`bin/` + `lib/`，Node ≥22.20）。`npx dragon-quant-skills install|doctor|uninstall` 默认安装到项目 `.claude/skills/dragon-quant`，`--global` 才写用户目录；manifest + 内容哈希做幂等/升级/冲突/卸载保护，`--force` 先备份。安装器与 Python CLI 诊断解耦：CLI 缺失只警告，`doctor` 才失败。skill 只做路由/预检/解读/异常/写操作门禁，不复制评分权重、策略参数或表结构；安全矩阵覆盖全部 15 个顶层命令。新增 `test/*.test.mjs` 与 `tests/test_skill_{package,content,routes}.py`，含 `npm pack` 白名单与本地 tarball E2E。本期不执行 `npm publish`，远端通用安装与 Windows 路径未实测。
+- **Agent Skill 包（issue #29）**：新增单主 skill `skills/dragon-quant/`（`SKILL.md` + `references/{commands,outputs,playbooks,operations,safety}.md`）与根目录零运行时依赖安装器 `dragon-quant-skills`（`bin/` + `lib/`，Node ≥22.20）。`npx dragon-quant-skills install|doctor|uninstall` 默认安装到项目 `.claude/skills/dragon-quant`，`--global` 才写用户目录；manifest + 内容哈希做幂等/升级/冲突/卸载保护，`--force` 先备份。安装器与 Python CLI 诊断解耦：CLI 缺失只警告，`doctor` 才失败。skill 只做路由/预检/解读/异常/写操作门禁，不复制评分权重、策略参数或表结构；安全矩阵覆盖全部 15 个顶层命令。新增 `test/*.test.mjs` 与 `tests/test_skill_{package,content,routes}.py`，含 `npm pack` 白名单与本地 tarball E2E。npm 包已发布，官方 registry 与 npmmirror 的仓库外 `npx` dry-run 均已实测；通用 `npx skills add` 与 Windows 路径未实测。
+
+### Docs
+- **main–execute 自审工作流**：`AGENTS.md` 引入两角色阶段门禁（阶段 0 → 1 → 2 → 3 → 3.5），明确任务包、单次验收、self-review 门禁、节点报告与快速通道；新增对应方案文档。
 
 ## [0.7.1] - 2026-10-24
 

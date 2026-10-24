@@ -322,7 +322,7 @@ dragon_quant/
 - **内容边界**：skill 只做路由/预检/解读/异常/门禁，**不复制评分权重、策略参数数值、SQLite 表结构**；`AGENTS.md` 与 `review_account/STRATEGY.md` 是权威。`tests/test_skill_content.py` 用禁用模式与 `StrategyConfig` 字段表强制校验。
 - **兼容通道**：`npx skills add gitBingxu/dragon-quant` 与手工复制均不校验 CLI 版本、无 manifest；安装器会把无 manifest 的目录判为 `foreign`，不静默覆盖。远端通用安装与 Windows 路径本期未实测。
 - **测试**：`npm test` 跑 Node 全量；`.venv/bin/python -m pytest tests/test_skill_package.py tests/test_skill_content.py tests/test_skill_routes.py` 跑内容/路由对齐。`test/packaging.test.mjs` 做 `npm pack` 白名单与本地 tarball `npm exec` E2E（隔离 HOME/目标目录）。
-- **不发布**：本期不执行 `npm publish`、不配置 provenance/Trusted Publishing、不自动提交 git。方案与残余风险见 `docs/solutions/2026-10-24-agent-skills-design.md`。
+- **发布**：npm 包 `dragon-quant-skills` 已发布，可通过 `npx dragon-quant-skills install` 安装；官方 registry 与 npmmirror 的仓库外 dry-run 已实测。未配置 provenance/Trusted Publishing，不自动提交 git。方案与残余风险见 `docs/solutions/2026-10-24-agent-skills-design.md`。
 
 ### 龙头回测
 ```bash

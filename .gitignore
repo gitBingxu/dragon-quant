@@ -39,3 +39,10 @@ logs/
 dragon_quant/providers/east_money.md
 
 .codebase-memory/
+
+# Node / npm skill package
+node_modules/
+*.tgz
+
+# superpowers plan workspace (scratch)
+.superpowers/

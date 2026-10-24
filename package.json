@@ -1,0 +1,13 @@
+{
+  "name": "dragon-quant-skills",
+  "version": "0.7.1",
+  "description": "Agent Skills for the dragon-quant A-share dragon scanner CLI",
+  "type": "module",
+  "license": "MIT",
+  "bin": { "dragon-quant-skills": "bin/dragon-quant-skills.mjs" },
+  "files": ["bin/", "lib/", "skills/", "README.md", "LICENSE"],
+  "engines": { "node": ">=22.20.0" },
+  "scripts": { "test": "node --test" },
+  "keywords": ["agent-skills", "dragon-quant", "a-share", "cli"],
+  "repository": { "type": "git", "url": "https://github.com/gitBingxu/dragon-quant.git" }
+}

@@ -309,6 +309,21 @@ dragon_quant/
 
 ## 开发注意事项
 
+### Agent Skill 包（npx 安装）
+
+仓库内置单主 Agent Skill 与零运行时依赖的 npm 安装器，让 agent 不必读完整 `AGENTS.md` 就能完成命令路由、前置自检、输出解读、异常分流与写操作确认。
+
+- **布局**：`skills/dragon-quant/SKILL.md`（薄路由层）+ `references/{commands,outputs,playbooks,operations,safety}.md`（按需加载）；根 `package.json`（`name=dragon-quant-skills`）+ `bin/dragon-quant-skills.mjs` + `lib/*.mjs`（安装器）；`test/*.test.mjs`（`node:test`，零依赖）；Python 侧 `tests/test_skill_{package,content,routes}.py`。
+- **安装**：`npx dragon-quant-skills install` 默认写项目 `.claude/skills/dragon-quant`；`--global` 才写用户目录；`--target-dir DIR` 表示项目根；`--dry-run` 不写盘并打印最终绝对路径。`doctor` 检查安装完整性、CLI 版本、多 scope 遮蔽与外来源 lockfile；`uninstall` 只删 manifest 内文件。
+- **状态机**：`absent/foreign/corrupt/clean/modified/up-to-date` 由 `lib/manifest.mjs` 单一分类，install/uninstall/doctor 共用。manifest（`.dragon-quant-skill.json`）记录内容 SHA-256、包版本与 `min_cli_version`；默认拒绝覆盖用户修改，`--force` 先整目录备份再替换；卸载不删用户新增文件。
+- **版本策略**：npm `MAJOR.MINOR` 跟随 Python 包，`PATCH` 可独立；兼容性唯一契约是 `metadata.min-cli-version`，不是版本相等。测试校验 npm major.minor == pyproject major.minor、skill-version == package version。
+- **安装与 CLI 解耦**：安装器只读探测 Python CLI（`--python` > `DQ_PYTHON` > PATH > `python3 -m` > `python -m`），绝不执行 pip；CLI 缺失/过低时 install 仍 exit 0 并警告，doctor exit 1 并给修复命令。
+- **安全边界**：skill 安全矩阵覆盖全部 15 个顶层命令；T0 只读、T1 写本地/远端探针需确认、T2 外发/破坏性需 dry-run + 二次确认。`assets doctor` 会远端写探针（T1），`storage clear` 不删 `.db` 但属破坏性（T2）。
+- **内容边界**：skill 只做路由/预检/解读/异常/门禁，**不复制评分权重、策略参数数值、SQLite 表结构**；`AGENTS.md` 与 `review_account/STRATEGY.md` 是权威。`tests/test_skill_content.py` 用禁用模式与 `StrategyConfig` 字段表强制校验。
+- **兼容通道**：`npx skills add gitBingxu/dragon-quant` 与手工复制均不校验 CLI 版本、无 manifest；安装器会把无 manifest 的目录判为 `foreign`，不静默覆盖。远端通用安装与 Windows 路径本期未实测。
+- **测试**：`npm test` 跑 Node 全量；`.venv/bin/python -m pytest tests/test_skill_package.py tests/test_skill_content.py tests/test_skill_routes.py` 跑内容/路由对齐。`test/packaging.test.mjs` 做 `npm pack` 白名单与本地 tarball `npm exec` E2E（隔离 HOME/目标目录）。
+- **发布**：npm 包 `dragon-quant-skills` 已发布，可通过 `npx dragon-quant-skills install` 安装；官方 registry 与 npmmirror 的仓库外 dry-run 已实测。未配置 provenance/Trusted Publishing，不自动提交 git。方案与残余风险见 `docs/solutions/2026-10-24-agent-skills-design.md`。
+
 ### 龙头回测
 ```bash
 python -m dragon_quant review                        # 自动筛 5~20 交易日内 pending 票全回测
@@ -513,6 +528,108 @@ python -m dragon_quant factor fin status
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scorers/` 与 `*_v2` 表，不再保留旧四维评分代码。
 - **因子分层依赖（强制）**：`factors/*` **禁止 import** `scorers/*`、`providers/*`、`review_account/*`、`auction/*`（P0.5 仅 `factors/finance.py` 允许 import providers）；`storage/*` 禁止 import `factors/*`；`factors` 读五维/vpa/prep/auction 产物只走既有 `storage` 查询 API。项目代码零 `import pandas`（tmdx 传递依赖，仅经 `df.to_dict("records")` 适配）。
 - **provider 接口兼容**：`StockProvider` 新增板块 K 线方法用默认 `raise NotImplementedError`（非 `@abstractmethod`），否则 `create_providers()` 一次实例化全部 4 个 provider 时会崩。
+
+### 需求落地标准工作流（§4）
+
+#### 概述
+
+采用两角色、阶段门禁工作流（阶段 0 → 1 → 2 → 3 → 3.5）。**main** 负责需求澄清、任务拆分、验收标准、各阶段单次验收与终审；**execute** 每个会话闭环一个阶段节点：执行调研 / 方案 / 编码，并在**本会话内**加载同名 self-review skill 完成独立 review pass，再回报 main。主路径**不派生任何 subagent**。
+
+```mermaid
+flowchart LR
+    U["用户"] <--> M["main：澄清 / 规划 / 单次验收 / 终审"]
+    M -->|"任务包：目标 + 验收标准 + 约束 + 阶段"| E["execute：调研 / 方案 / 编码 + 自测 + 自审"]
+    E --> S["self-review skill<br>（同会话独立 review pass）"]
+    S --> E
+    E -->|"节点报告：产物 + verdict + 证据"| M
+    M -->|"单次验收意见（必须修改 / 建议）"| E
+    M -->|"终审通过"| U
+```
+
+阶段流转：`阶段0(main × 用户) → 阶段1(execute 调研 + research-self-review → main 单次验收) → 阶段2(execute 方案 + solution-self-review → main 单次验收) → 阶段3(execute 编码 + 自测 + code-self-review → main 单次验收) → 阶段3.5(main 终审 → 用户)`。不触发调研时阶段 0 直进阶段 2。
+
+**角色与委派**：
+
+- **main**：目标、框架、验收标准、单次节点验收、阶段 3.5 终审与最终汇报。不亲手调研 / 写方案细节 / 编码 / 跑测试（唯一例外见「快速通道」）。
+- **execute**：无状态新会话，**一个会话只闭环一个节点**；main 委派必须携带完整上下文（需求拆解、已验收产物、验收意见、文件范围）。自审必须加载对应 skill；Skill 工具不可用时 Read `~/.claude/skills/<name>/SKILL.md` 降级执行。
+- **禁止派生 subagent**：execute 不得调用 reviewer、general-purpose 或测试类 subagent。唯一例外：用户显式要求独立审查时，由 main 调用对应 reviewer。
+
+#### main 阶段验收规则（阶段 1/2/3 通用）
+
+- **时机**：execute 完成自审并回报节点报告后，main 做**单次验收**。
+- **视角**：对照任务包与阶段 0 验收标准做方向性把关；不逐行重审（细节信任 self-review）。
+- **单次性**：每阶段只验收一次，一次性给出「必须修改」与「建议」两级意见。
+- **必须修改不可拒绝**：execute 直接执行，不讨论；修订完毕自动进入下一阶段，main 不复审。仅当与高优先级约束冲突或客观不可行时，才以 `NEED_DECISION` 上报。
+- **留痕**：execute 在交付报告 `main_acceptance` 中逐条记录处置；「必须修改」必须落实，「建议」级可不采纳并记录理由；阶段 3.5 核对。
+- 自审触发的 `NEED_DECISION` 上报不受单次限制。
+
+#### 阶段 0：需求澄清与验收标准
+
+**触发条件**：所有非快速通道需求，尤其是模糊需求。
+
+main 把需求拆解为用户故事、可测试验收标准、约束、明确非目标；主动发散边界场景、隐含假设、扩展可能、与现有系统冲突和风险；**必须获得用户确认**后才能进入阶段 1 / 2。
+
+#### 阶段 1：技术调研（execute + research-self-review）
+
+**触发条件**：引入新技术、评估第三方库或重大架构变更。
+
+1. 按任务包范围调研；优先查代码 / 文档 / 项目记录，必要时外部取证。由 execute 自行完成，不派生搜索 subagent。
+2. 产出调研报告后加载 `research-self-review`，在同一会话完成独立 review pass。
+3. 门禁：`APPROVE` → 回报 main 单次验收；`REVISE`（仅含 CRITICAL）→ 按 CRITICAL 返工，最多「首审 + 1 次复审」，复审只核 delta；MAJOR / MINOR 记入 `known_issues` 不阻塞。`REJECT` 表示根本性错误，停止执行并以 `NEED_DECISION` 上报（不计入普通返工轮次）。
+
+#### 阶段 2：技术方案（execute + solution-self-review）
+
+**触发条件**：调研通过（未触发调研时直接基于任务包）。
+
+1. 方案必须包含：架构设计（架构 / 事件流 / 数据流 / 状态机 / 多模块交互**必须附 Mermaid 图**）、接口定义、数据模型、错误处理、测试策略、风险与缓解。
+2. **发散要求**：≥2 个候选设计（至少 1 个非常规 / 反直觉路径）并给出推荐理由；主动指出需求方未考虑的边界、隐含假设、扩展性与系统冲突；采用设计模式时点明模式与动机。
+3. 加载 `solution-self-review` 自审；门禁同阶段 1（APPROVE / REVISE / REJECT，CRITICAL / MAJOR / MINOR）。
+
+#### 阶段 3：代码实现（execute + code-self-review）
+
+**触发条件**：技术方案通过。
+
+1. 按已批准方案实现；偏离方案必须在提交信息说明原因并登记交付报告 `deviations`。
+2. **自测前置**：自行运行相关测试 / 构建，保留真实命令与输出摘要。
+3. 加载 `code-self-review` 自审，必须附自测证据；无证据首条 finding 为 BLOCKER。
+4. 门禁：`SAFE_TO_MERGE` → 回报 main 单次验收；`NEEDS_CHANGES` / `BLOCK` 仅在含 BLOCKER 时返工，最多「首审 + 1 次复审」；WARNING / NIT 记入 `known_issues`。
+
+#### 阶段 3.5：轻量终审（main）
+
+1. 核对节点报告：无未解决 CRITICAL / BLOCKER、自测证据齐全、偏离已登记且理由成立。
+2. 核对 `main_acceptance`：「必须修改」意见均已落实；未落实 → 附指示打回。
+3. 裁决 `known_issues` 与 `rejected_findings`（后者仅指 execute 对**自审** finding 的不采纳说明）。
+4. 逐条核对「验收标准 → 实现位置（文件 / 函数）→ 验证方式（测试 / 命令输出 / 人工确认）」；缺失 → 打回补齐。
+5. 通过后交付用户；产生的调研 / 方案文档在合入 / 提 PR 前询问是否归档。
+
+#### 自审与收敛规则
+
+- **项目检查清单注入**：自审前从项目 `AGENTS.md` / `CLAUDE.md` 提取硬性要求（文档同步、Mermaid 配图、提交规范、依赖约束），作为附加审查维度。
+- **刻度**：调研 / 方案用 CRITICAL / MAJOR / MINOR；代码用 BLOCKER / WARNING / NIT。先高级别后低级别；门禁只卡 CRITICAL / BLOCKER。
+- **轮次**：每道自审最多 2 轮（首审 + 1 次复审）；复审只验证上轮高级别 finding 是否解决及修复引入的新问题，禁止重复已解决项或补提旧存低级别问题。
+- **提前收敛**：高级别 finding 清零即通过，剩余低级别转 `known_issues`。
+- **硬上限**：复审后仍有未解决高级别 finding → 停止执行，以 `NEED_DECISION` 上报 main。
+- `rejected_findings` 只用于自审 finding；main 的「必须修改」不可拒绝。
+
+| 阶段 | 自审 skill | 严重级 | 最大轮次 | 超限动作 |
+|------|-----------|--------|---------|---------|
+| 调研 | research-self-review | CRITICAL / MAJOR / MINOR | 2 | NEED_DECISION |
+| 方案 | solution-self-review | CRITICAL / MAJOR / MINOR | 2 | NEED_DECISION |
+| 代码 | code-self-review | BLOCKER / WARNING / NIT | 2 | NEED_DECISION |
+| main 单次验收 | main | 必须修改 / 建议 | 1 | 未落实 → 阶段 3.5 打回 |
+
+#### 节点报告（精简）
+
+每个 execute 会话回报：产物路径、self-review verdict、高级别 findings 摘要、自测证据、`known_issues`、`deviations`、验收标准映射、`main_acceptance` 处置。不强制 artifact 哈希 / sidecar / 交付回执机制。
+
+#### 快速通道
+
+以下情况可跳过完整工作流，由 main 直接动手：
+
+- **单行修改**（typo、注释修正、日志级别调整）：免审。
+- **小范围修改**（单文件 / 单函数逻辑调整、非安全配置）：main 修改后加载 `code-self-review` 自审。
+- 判断标准：不涉及新接口、新依赖、数据模型变更或安全边界。
+- **治理配置例外**：`~/.claude/**`、全局 `AGENTS.md` / `CLAUDE.md` 等工作流治理配置**禁止**快速通道，必须走 execute + 自审 + main 验收。
 
 ### AI Agent 协作规范
 > **任何代码修改或破坏性操作前，先输出技术方案（改动范围、涉及文件、风险点），等待用户确认后再执行。** 纯查询类操作（读文件、查数据库、搜索代码）不受此限。

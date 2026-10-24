@@ -70,6 +70,31 @@ cd dragon-quant && pip install -e .
 
 > 要求 Python ≥3.10；`tmdx`（通达信 TDX）为默认依赖，随 `pip install dragon-quant` 自动安装。
 
+### Agent Skill（npx 安装）
+
+仓库内置一个单主 Agent Skill，把常见中文/英文意图路由到 `dragon-quant` 命令，并提供前置自检、输出解读、异常分流与写操作确认门禁。**`AGENTS.md` 与 `review_account/STRATEGY.md` 仍是规则权威**，skill 只是薄路由层，不复制评分权重、策略参数或表结构。
+
+前置条件分开：**Python ≥3.10** 是 CLI 的运行要求；**Node ≥22.20** 只在安装 skill 时需要，运行 CLI 不需要 Node。
+
+```bash
+# 主通道：默认安装到当前项目的 .claude/skills/dragon-quant
+npx dragon-quant-skills install
+# 安装到用户目录（显式 --global；与 --target-dir 互斥）
+npx dragon-quant-skills install --global
+# 诊断：安装完整性、CLI 版本、多 scope 遮蔽、外来源 lockfile
+npx dragon-quant-skills doctor
+# 卸载（默认只删本安装器写入的文件；用户改过的目录会被拒绝）
+npx dragon-quant-skills uninstall
+```
+
+- `--target-dir DIR` 表示**项目根目录**，最终路径是 `<DIR>/.claude/skills/dragon-quant`；`--dry-run` 会打印最终绝对路径。
+- 安装器默认复制，不创建 symlink；用 manifest + 内容哈希做幂等、升级、冲突检测。用户改过文件后默认拒绝覆盖，`--force` 会先把整个目录移到备份再替换。
+- 安装成功不依赖 Python CLI：Python/CLI 缺失或版本过低只给警告；`doctor` 才会失败并给修复命令。
+- 版本关系：npm 的 `MAJOR.MINOR` 跟随 Python 包，`PATCH` 可独立；兼容性以 skill frontmatter 的 `metadata.min-cli-version` 为准。
+- 兼容通道：`npx skills add gitBingxu/dragon-quant --skill dragon-quant -a claude-code`（不校验 Python CLI 版本）；或手工 `cp -r skills/dragon-quant .claude/skills/`（无 manifest、无升级/卸载保护，`doctor` 会标为 foreign）。
+- 写安全：`scan`/`prep`/`auction`/`review`/`review-account`/`buy`/`sell`/`factor build`/`factor fin sync` 都会写库；`storage clear`/`assets push`/`assets pull --apply`/`backfill-dragons --prune` 属破坏性或外发操作，执行前必须确认，T2 操作先 dry-run。
+- 安装或升级后，在 Claude Code 运行 `/reload-skills` 或重启会话。远端 `npx skills add owner/repo` 与 Windows 路径本期未实测，见方案残余风险。
+
 ## 快速开始
 
 ```bash

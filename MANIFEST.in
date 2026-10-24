@@ -1,0 +1,6 @@
+exclude package.json
+prune bin
+prune lib
+prune skills
+prune test
+prune node_modules

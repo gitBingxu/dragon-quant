@@ -20,10 +20,10 @@ from datetime import datetime, time, timedelta
 from typing import Mapping, Optional
 from zoneinfo import ZoneInfo
 
-from dragon_quant.factors import engine
-from dragon_quant.factors import stats as fstats
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.registry import FactorRegistryError, get_spec
+from . import engine
+from . import stats as fstats
+from . import storage as fstore
+from .registry import FactorRegistryError, get_spec
 from dragon_quant.storage import db as _db
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -35,7 +35,7 @@ OPEN_TIME = time(9, 30)
 
 
 def _normalize_date(raw: str) -> str:
-    from dragon_quant.factors.service import normalize_date
+    from .service import normalize_date
     return normalize_date(raw)
 
 

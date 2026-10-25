@@ -12,6 +12,9 @@
   ASSETS_DB_PATH    — assets.db（原始数据资产 + 算法快照，独立库）
   LEGACY_PREP_DB_PATH — 旧 prep.db（仅 status 展示，不再读写）
 
+导入本模块只解析路径常量，**不创建任何目录**；首次真实存储访问时由
+``ensure_data_dirs()`` 幂等创建（B1：``import dragon_quant`` / ``-h`` 零副作用）。
+
 跨平台兼容：macOS / Linux / Windows
 """
 
@@ -45,5 +48,18 @@ DB_PATH = DATA_DIR / "dragon.db"
 ASSETS_DB_PATH = DATA_DIR / "assets.db"        # 数据资产独立库（prep + auction）
 LEGACY_PREP_DB_PATH = DATA_DIR / "prep.db"     # 旧资产库，仅 status 展示，不再读写
 
-for _d in [COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR]:
-    _d.mkdir(parents=True, exist_ok=True)
+# 数据根下的子目录列在 ``ensure_data_dirs()`` 内按模块全局动态解析（导入期只
+# 计算常量，绝不 mkdir；运行期 patch 目录常量也能生效）。
+
+
+def ensure_data_dirs() -> tuple[Path, ...]:
+    """按需创建数据根与全部子目录（幂等）。
+
+    导入 ``dragon_quant`` / ``-h`` / ``-v`` 不得触发；由首次真实存储访问
+    （``storage.db._connect``、``assets_db._connect(create=True)``、
+    ``app.ensure_storage``、报告写入等）调用。
+    """
+    directories = (COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR)
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+    return directories

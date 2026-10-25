@@ -102,9 +102,13 @@ npx dragon-quant-skills uninstall
 # 查看 Linux 风格帮助提示
 dragon-quant -h
 dragon-quant scan -h
+# 不带子命令同样只打印帮助（exit 0），不会执行扫描
+dragon-quant
 
 # 五维「识别真龙」扫榜 — 找 top5 龙头
 dragon-quant scan --top 5
+# 读取历史扫描记录（不触网）
+dragon-quant scan --date 20260519 --top 5
 
 # 龙头回测 + Web UI
 dragon-quant review --ui
@@ -121,6 +125,7 @@ dragon-quant review-account --ui-only
 
 ```bash
 dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cache]
+dragon-quant scan --date 20260519 [--top 5]   # 读取历史扫描记录，不执行实时扫描
 ```
 
 | 参数 | 默认 | 说明 |
@@ -130,6 +135,7 @@ dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cach
 | `--workers` | 2 | 并发线程数 |
 | `--force` | - | 跳过交易时段拦截与 DB 缓存 |
 | `--no-cache` | - | 刷新 Provider 缓存；重新评分时与 `--force` 一起使用 |
+| `--date` | - | 指定 `YYYYMMDD` 时读取历史扫描记录并输出 JSON，不触网、不重新评分 |
 
 `scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到数据目录的 `*_v2` 表（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
 
@@ -179,7 +185,7 @@ dragon-quant prep --json                      # 输出完整复盘 JSON（默认
    - 候选池 = 窗口内真龙并集，同 code 去重保留综合分更优者，每只保留**真实入选日**（`trade_date`，下游 `candidate_trade_date` 血缘）。
    - 每只候选新增 `facts` 块（今日是否在池、今日涨幅/换手/成交额、炸板/连板/封板率、资金/公告可用性、风险公告）与 `verdict`（强烈建议/轻仓博弈/忽略/未评级）+ 2-3 行维度明细 + 忽略原因；`in_pool_today` 与入选日解耦，T-2 入选、T 日再涨停的龙回头也能进买入组。默认 `prep_verdict_filter_enabled=True`：`ignore` 出池，`strong/light/unrated` 保留（unrated 仅 P=False 排序垫底）；推荐集为空时回退 legacy 且不再应用 ignore 过滤。
    - THS 入选日归因字段（涨停原因/板型/炸板次数等）保持既有契约：跨日候选为 `null`；今日封板事实在 `facts` 内按 T 日池口径提供。
-   - 快照 `version=0.5`，顶层 `macro`（日经/A50期指 + 美债/黄金；`available`/`session`/`instruments`/`degraded`/`sources`，口径血缘在逐品种 `caliber`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
+   - 快照 `version=0.6`，顶层 `macro`（日经/A50期指 + 美债/黄金；`available`/`session`/`instruments`/`degraded`/`sources`，口径血缘在逐品种 `caliber`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
 
 **默认输出**：4 行市场摘要（是否建议买入 / 建议仓位 / 建议等级 / 买入理由，理由内含外围/美债/黄金片段）+ 空行 + 逐只标的清单：
 
@@ -342,6 +348,8 @@ dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 
 `review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
 
+Web UI 入口为 `web_ui.start_server(...) -> HTTPServer`：CLI（`--ui` / `--ui-only`）默认 `block=True` 阻塞运行；`--port 0` 由操作系统分配端口并打印真实 URL；测试或嵌入场景可传 `block=False`，拿到 server 后自行 `shutdown()` / `server_close()`。
+
 ### `review-account` — 账户级模拟交易
 
 ```bash
@@ -408,11 +416,14 @@ dragon-quant data minute --code 600172                 # 个股 1 分 K（分时
 dragon-quant data quote --code 600172                  # 实时行情
 dragon-quant data batch-quote --codes 600172,000001    # 批量行情
 dragon-quant data cookie-status                        # Cookie 状态
+dragon-quant data cookie-fetch                         # 自动获取雪球 Cookie（需 playwright）
+dragon-quant data cookie-set --cookie "xq_a_token=...; xq_is_login=1; u=..."  # 手动设置
 ```
 
 ### `logs` / `storage` — 日志与数据管理
 
 ```bash
+dragon-quant logs list
 dragon-quant logs tail [-n 20]
 dragon-quant logs --source v2 query [--date 20260513] [--category scorer:drive] [--level error] [--code 600172]
 dragon-quant logs --source v2 summary
@@ -420,7 +431,10 @@ dragon-quant logs clear --days 7
 
 dragon-quant storage status      # 存储状态
 dragon-quant storage size        # 磁盘占用
-dragon-quant storage clear --all # 清理全部
+dragon-quant storage clear --all # 清理 cache+results+logs（数据库文件不清理）
+dragon-quant storage clear --cache             # 只清理缓存
+dragon-quant storage clear --results           # 只清理结果
+dragon-quant storage clear --logs --days 7     # 只清理 N 天前日志
 ```
 
 ## Programmatic API
@@ -498,26 +512,38 @@ quote = get_quote("600172")
 
 ```
 dragon_quant/
-├── cli.py                # CLI 门面（解析树 + main() + 共享 helper）
-├── cli_commands.py       # 各子命令 _cmd_* 处理函数
+├── __init__.py / __main__.py  # 入口（PEP 562 惰性导出 scan / run_review）
+├── cli.py                # CLI 门面（解析树 + main()；分发走 commands.dispatch）
+├── app.py                # Composition Root（RuntimeConfig / Services / build_services / ensure_storage）
+├── commands/             # 每个顶层命令一个 handler 模块（dispatch 唯一分发入口；buy/sell 共用 buy_sell.py）
+├── runtime/              # runtime/clock.py（SystemClock/FixedClock）+ runtime/providers.py（ProviderBundle）
 ├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
 ├── data.py               # 原子数据查询 API
 ├── rate_limit.py         # 并发限流器
-├── providers/            # 数据源适配（tdx/ths/xueqiu/tencent/macro/cookie）
+├── sectors.py            # 板块键/成分股/板块 K 线缓存键统一构造
+├── providers/            # 数据源适配（tdx/ths/xueqiu/tencent/macro/cookie/cookie_cli）
 ├── scorers/           # 五维评分器 + registry + aggregator
-├── factors/              # 因子层（registry/engine/storage/decision/builtin/service；只读迁移 + 决策注解，不 import scorers）
+├── factors/              # 因子层（13 个批准出口 + builtin；只读迁移 + 决策注解，不 import scorers）
+├── auction/              # 集合竞价（service/collect/recompute/scoring/dates + strength/serialize/report）
 ├── vpa/                  # 量价分析（插件式因子）
 ├── cache/                # 内存+本地双缓存
 ├── logging/              # ScanLogger + ReportBuilder + query
-├── storage/              # paths / db（SQLite 门面 + 领域模块）/ manager
+├── storage/              # paths / db / assets_db / dragons_mirror / finance / factors / manager（惰性初始化）
 ├── utils/trading.py     # 交易日历工具
 ├── review.py             # 龙头回测
-├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
+├── review_account/       # 账户级模拟交易回测 + prep/ 盘后复盘包（service/collectors/compute/rebuild）
 ├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/shadow/trader/service，复用 review_account 策略）
-├── assets_sync/          # 数据资产云端同步（codec/models/tables/sources/manifest/state/service/backends）
-├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
+├── assets_sync/          # 数据资产云端同步（cli_service/service/sources/tables/manifest/state/codec/backends）
 └── models/types.py      # 数据模型
+
+# 同级仓库包（不是 dragon_quant 的子包）
+web_ui/                   # 回测 Web UI（Vite+React+TS / stdlib HTTPServer；web_ui.start_server）
 ```
+
+> `cli.py` 只负责 argparse 解析，随后调用 `commands.dispatch(name, args)`；各顶层命令实现在
+> `commands/<name>.py`。`app.py` 只是 commands 按需调用的装配支路，不在导航链上多一跳。
+> 刻意保留的兼容例外（factors lazy 旧名、`storage/_base`、prep `legacy()`、`trader.datetime`、
+> scan provider 例外）见 `AGENTS.md`「刻意保留的兼容例外」。
 
 ## 设计原则
 
@@ -527,7 +553,27 @@ dragon_quant/
 4. **结构化日志**：`ScanLogger` 全链路打点，支持按类别/级别/代码查询。
 5. **历史兼容**：主流程固定写 `*_v2` 表；旧 `*_v1` 表保留显式查询能力，不参与新扫描。
 
+## 测试
+
+```bash
+# M0 harness 自检（不跑业务用例）
+python tests/e2e/harness/runner.py --self-check
+
+# 全量离线 E2E（真实 CLI 子进程 + golden；51 个 parser 节点 / 15 个顶层命令）
+python -m pytest tests/e2e -q
+
+# 单元 / 集成测试（排除 e2e 与需要真实网络的 smoke）
+python -m pytest tests -q --ignore=tests/e2e --ignore=tests/smoke
+
+# Node 安装器测试（隔离 HOME/TMPDIR/npm cache，不访问 registry）
+npm test
+```
+
+E2E 的安全边界：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟并拦截 socket/DNS，禁止真实网络、Cookie、R2/B2。`tests/e2e/coverage-map.json` 强制每个 parser 节点映射到真实测试，新增命令必须同步更新。
+
 ## 持久化
+
+存储采用**惰性初始化**：`import dragon_quant`、`python -m dragon_quant -h`、`-v` 以及纯查询类导入都不创建任何数据目录或数据库文件；首次真实存储访问（扫描/回测/日志/黑名单等命令真正读写数据库、`assets.db` 写入、扫描报告落盘）才按 `DQ_DATA_DIR`（或平台默认目录）幂等创建目录与 schema。`db.init_db()` 仍保留为公开的幂等初始化 API。
 
 SQLite 表分为三类：
 

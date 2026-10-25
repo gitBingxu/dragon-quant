@@ -1,0 +1,14 @@
+{
+  "run": {
+    "source": "v2",
+    "strategy_name": "dragon_pullback_daily",
+    "date_from": "2026-09-04",
+    "date_to": "2026-09-08",
+    "initial_cash": 100000.0,
+    "final_equity": 99750.149,
+    "total_return": -0.24985099999998983,
+    "max_drawdown": -0.24985099999998983,
+    "trade_count": 2,
+    "win_rate": 0.0
+  }
+}

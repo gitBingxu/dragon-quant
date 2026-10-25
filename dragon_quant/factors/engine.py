@@ -14,20 +14,20 @@ from __future__ import annotations
 
 import json
 import math
-import time
 from datetime import datetime
 from typing import Any, Iterable, Optional
 from zoneinfo import ZoneInfo
 
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.registry import compute_version_info, resolve_specs
-from dragon_quant.factors.types import (
+from . import storage as fstore
+from .registry import compute_version_info, resolve_specs
+from .types import (
     AsOfViolation,
     BackfilledSource,
     FactorContext,
     FactorSpec,
     FactorValue,
 )
+from dragon_quant.runtime import clock
 from dragon_quant.storage import db as _db
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -115,11 +115,15 @@ def resolve_available_at(spec: FactorSpec, trade_date: str,
 
 def timezone_warning() -> Optional[str]:
     """本机时区不是 +08:00 时返回警告文本（不阻断 build）。"""
-    offset = getattr(time.localtime(), "tm_gmtoff", None)
+    moment = clock.now()
+    offset = moment.utcoffset()
+    if offset is None:
+        offset = moment.astimezone().utcoffset()
     if offset is None:
         return None
-    if offset != 8 * 3600:
-        return f"timezone_warning: 本机 UTC 偏移 {offset // 3600:+d}h，项目要求 Asia/Shanghai (+8h)"
+    seconds = int(offset.total_seconds())
+    if seconds != 8 * 3600:
+        return f"timezone_warning: 本机 UTC 偏移 {seconds // 3600:+d}h，项目要求 Asia/Shanghai (+8h)"
     return None
 
 
@@ -262,11 +266,12 @@ def _load_vpa_source(trade_date: str, cache: dict) -> dict:
 
 
 def _load_fin_source(trade_date: str, cache: dict, *, calendar: Iterable[str] = (),
-                     db_path=None) -> dict:
+                     db_path=None, services=None) -> dict:
     """财务源：候选池取自 canonical scan，账本 as-of 解析交给 ``factors/finance.py``。
 
     ``finance`` 是分层规则允许的唯一 provider 触点（方案 §3.4 修订）；engine 只
-    组装缓存与降级状态，不直接 import providers。
+    组装缓存与降级状态，不直接 import providers。``services`` 原样透传，保证
+    当日观测自动补采复用注入的 bundle（不另起默认 ``TdxProvider``）。
     """
     key = ("fin", trade_date)
     if key in cache:
@@ -291,10 +296,10 @@ def _load_fin_source(trade_date: str, cache: dict, *, calendar: Iterable[str] = 
         for code, row in (scan.get("rows_by_code") or {}).items()
     }
     try:
-        from dragon_quant.factors import finance
+        from . import finance
         result = finance.load_fin_source(
             trade_date, scan.get("codes") or (), calendar=tuple(calendar),
-            pool_profile=pool_profile, db_path=db_path)
+            pool_profile=pool_profile, db_path=db_path, services=services)
     except Exception as exc:      # 源故障 ≠ 当日无值
         result = {
             "status": "missing_source",
@@ -455,13 +460,15 @@ def _load_auction_source(trade_date: str, cache: dict) -> dict:
 
 
 def _load_source(spec: FactorSpec, trade_date: str, cache: dict, *,
-                 calendar: Iterable[str] = (), db_path=None) -> dict:
+                 calendar: Iterable[str] = (), db_path=None,
+                 services=None) -> dict:
     if spec.source == "scan":
         return _load_scan_source(trade_date, cache)
     if spec.source == "vpa":
         return _load_vpa_source(trade_date, cache)
     if spec.source == "fin":
-        return _load_fin_source(trade_date, cache, calendar=calendar, db_path=db_path)
+        return _load_fin_source(trade_date, cache, calendar=calendar,
+                                db_path=db_path, services=services)
     if spec.source == "prep":
         return _load_prep_source(trade_date, cache)
     if spec.source == "auction":
@@ -477,7 +484,7 @@ def _load_source(spec: FactorSpec, trade_date: str, cache: dict, *,
 
 
 def _elapsed_ms(started: float) -> float:
-    return round((time.monotonic() - started) * 1000, 1)
+    return round((clock.monotonic() - started) * 1000, 1)
 
 
 def _absence_expected(meta: dict, codes: int) -> bool:
@@ -500,9 +507,10 @@ def _absence_warning(meta: dict, codes: int) -> str:
 
 
 def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[dict] = None,
-                 calendar: Iterable[str] = (), db_path=None) -> dict:
+                 calendar: Iterable[str] = (), db_path=None,
+                 services=None) -> dict:
     """单因子单日 build；异常逐因子隔离，永不向调用方抛（除编程错误外）。"""
-    started = time.monotonic()
+    started = clock.monotonic()
     version, version_source = compute_version_info(spec)
     entry: dict[str, Any] = {
         "name": spec.name,
@@ -527,7 +535,8 @@ def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[di
             "version_source=impl_key（源码不可得，已回退 impl_key）")
 
     cache = source_cache if source_cache is not None else {}
-    source = _load_source(spec, trade_date, cache, calendar=calendar, db_path=db_path)
+    source = _load_source(spec, trade_date, cache, calendar=calendar,
+                          db_path=db_path, services=services)
     entry["skipped_backfilled"] = int(source.get("skipped_backfilled") or 0)
     if source.get("status") != "ok":
         entry["status"] = source.get("status") or "missing_source"
@@ -745,15 +754,17 @@ def write_sector_snapshot(trade_date: str, *, source_cache: Optional[dict] = Non
 
 
 def _now_str() -> str:
-    return datetime.now(SHANGHAI).strftime(TS_FORMAT)
+    return clock.now(SHANGHAI).strftime(TS_FORMAT)
 
 
 def build_date(trade_date: str, *, names: Optional[Iterable[str]] = None,
-               db_path=None, calendar: Iterable[str] = ()) -> dict:
+               db_path=None, calendar: Iterable[str] = (),
+               services=None) -> dict:
     """构建某交易日全部（或指定）因子，写审计报告，返回报告 dict。
 
     - 逐因子隔离：单因子失败不中断，状态进 ``factors``；
-    - 区间调用方（service）逐日独立调用本函数，逐日独立事务。
+    - 区间调用方（service）逐日独立调用本函数，逐日独立事务；
+    - ``services`` 透传到财务源（当日观测自动补采使用注入的 provider）。
     """
     started_at = _now_str()
     cache: dict = {}
@@ -767,7 +778,8 @@ def build_date(trade_date: str, *, names: Optional[Iterable[str]] = None,
         version, _ = compute_version_info(spec)
         versions[spec.name] = version
         reports[spec.name] = build_factor(
-            spec, trade_date, source_cache=cache, calendar=calendar, db_path=db_path)
+            spec, trade_date, source_cache=cache, calendar=calendar,
+            db_path=db_path, services=services)
         derived = (reports[spec.name].get("meta") or {}).get("earliest_available")
         if spec.source == "fin" and derived and reports[spec.name].get("status") == "ok":
             fin_valid_from[spec.name] = derived

@@ -27,9 +27,9 @@ CLI 用法:
   python -m dragon_quant logs list
 """
 
-import time
 from typing import Optional
 
+from dragon_quant.runtime import clock
 from dragon_quant.storage import db as store
 
 
@@ -81,7 +81,7 @@ def clear_logs(days: int = 7, source: str = "v2") -> dict:
     Returns:
         {"cleared": count, "kept": count, "files_removed": [...]}
     """
-    cutoff_ts = time.time() - days * 86400
+    cutoff_ts = clock.now().timestamp() - days * 86400
     cleared = store.delete_old_scan_logs(cutoff_ts, source=source)
     return {"cleared": cleared, "kept": -1, "files_removed": []}
 

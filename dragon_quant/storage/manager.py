@@ -5,10 +5,10 @@ StorageManager — 统一持久化数据管理
 """
 
 import shutil
-import time
 from pathlib import Path
 from typing import Optional
 
+from dragon_quant.runtime import clock
 from dragon_quant.storage.paths import (
     DATA_DIR, COOKIE_DIR, CACHE_DIR, LOG_DIR, RESULTS_DIR, SHARED_DIR,
     DB_PATH, ASSETS_DB_PATH, LEGACY_PREP_DB_PATH,
@@ -56,7 +56,7 @@ def _clear_dir(path: Path, days: Optional[int] = None):
         return 0
 
     removed = 0
-    now = time.time()
+    now = clock.now().timestamp()
     cutoff = now - days * 86400 if days else None
 
     for f in path.iterdir():
@@ -108,10 +108,13 @@ class StorageManager:
 
     def clear_logs(self, days: Optional[int] = None) -> int:
         removed = _clear_dir(LOG_DIR, days=days)
+        # 库文件不存在时不得为了「清理日志」而凭空建一个空库（B1 惰性初始化）。
+        if not DB_PATH.exists():
+            return removed
         try:
             from dragon_quant.storage import db
             if days:
-                cutoff_ts = time.time() - days * 86400
+                cutoff_ts = clock.now().timestamp() - days * 86400
                 removed += db.delete_old_scan_logs(cutoff_ts, source="v1")
                 removed += db.delete_old_scan_logs(cutoff_ts, source="v2")
             else:

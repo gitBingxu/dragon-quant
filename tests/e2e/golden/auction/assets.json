@@ -1,0 +1,281 @@
+[
+  {
+    "code": "600001",
+    "name": "龙头A",
+    "items": [
+      {
+        "matched": 0,
+        "price": 10.4,
+        "time": "09:15:00",
+        "unmatched": 100
+      },
+      {
+        "matched": 5000,
+        "price": 10.45,
+        "time": "09:18:00",
+        "unmatched": 200
+      },
+      {
+        "matched": 12000,
+        "price": 10.5,
+        "time": "09:20:00",
+        "unmatched": 150
+      },
+      {
+        "matched": 16000,
+        "price": 10.52,
+        "time": "09:21:00",
+        "unmatched": 300
+      },
+      {
+        "matched": 21000,
+        "price": 10.55,
+        "time": "09:22:00",
+        "unmatched": 250
+      },
+      {
+        "matched": 26000,
+        "price": 10.58,
+        "time": "09:23:00",
+        "unmatched": 200
+      },
+      {
+        "matched": 32000,
+        "price": 10.62,
+        "time": "09:24:00",
+        "unmatched": 300
+      },
+      {
+        "matched": 38000,
+        "price": 10.66,
+        "time": "09:24:30",
+        "unmatched": 250
+      },
+      {
+        "matched": 43000,
+        "price": 10.68,
+        "time": "09:24:45",
+        "unmatched": 200
+      },
+      {
+        "matched": 50000,
+        "price": 10.7,
+        "time": "09:25:00",
+        "unmatched": 150
+      }
+    ],
+    "quote": {
+      "amount": 100000000.0,
+      "amplitude": 5.0,
+      "ask1_volume": 0.0,
+      "avg_price": 10.5,
+      "bid1_price": 0.0,
+      "bid1_volume": 0.0,
+      "chg": 0.5,
+      "code": "600001",
+      "float_market_cap": 800000000.0,
+      "high": 10.5,
+      "limit_down": 9.0,
+      "limit_up": 11.0,
+      "low": 10.0,
+      "main_net_amount": 12345600.0,
+      "market_cap": 1000000000.0,
+      "name": "龙头A",
+      "open_px": 10.0,
+      "pct": 5.0,
+      "pe": 20.0,
+      "prev_close": 10.0,
+      "price": 10.5,
+      "timestamp": 1789110000000,
+      "turnover_rate": 8.0,
+      "volume": 1000000.0,
+      "volume_ratio": 1.5
+    }
+  },
+  {
+    "code": "600002",
+    "name": "跟风B",
+    "items": [
+      {
+        "matched": 0,
+        "price": 10.0,
+        "time": "09:15:00",
+        "unmatched": -100
+      },
+      {
+        "matched": 2000,
+        "price": 9.95,
+        "time": "09:18:00",
+        "unmatched": -200
+      },
+      {
+        "matched": 5000,
+        "price": 9.9,
+        "time": "09:20:00",
+        "unmatched": -150
+      },
+      {
+        "matched": 7000,
+        "price": 9.88,
+        "time": "09:21:00",
+        "unmatched": -300
+      },
+      {
+        "matched": 9000,
+        "price": 9.86,
+        "time": "09:22:00",
+        "unmatched": -250
+      },
+      {
+        "matched": 11000,
+        "price": 9.84,
+        "time": "09:23:00",
+        "unmatched": -200
+      },
+      {
+        "matched": 13000,
+        "price": 9.82,
+        "time": "09:24:00",
+        "unmatched": -300
+      },
+      {
+        "matched": 15000,
+        "price": 9.8,
+        "time": "09:24:30",
+        "unmatched": -250
+      },
+      {
+        "matched": 16500,
+        "price": 9.79,
+        "time": "09:24:45",
+        "unmatched": -200
+      },
+      {
+        "matched": 18000,
+        "price": 9.78,
+        "time": "09:25:00",
+        "unmatched": -150
+      }
+    ],
+    "quote": {
+      "amount": 80000000.0,
+      "amplitude": 5.0,
+      "ask1_volume": 0.0,
+      "avg_price": 9.78,
+      "bid1_price": 0.0,
+      "bid1_volume": 0.0,
+      "chg": -0.22,
+      "code": "600002",
+      "float_market_cap": 800000000.0,
+      "high": 10.0,
+      "limit_down": 9.0,
+      "limit_up": 11.0,
+      "low": 9.78,
+      "main_net_amount": -5000000.0,
+      "market_cap": 1000000000.0,
+      "name": "跟风B",
+      "open_px": 10.0,
+      "pct": -2.2,
+      "pe": 20.0,
+      "prev_close": 10.0,
+      "price": 9.78,
+      "timestamp": 1789110000000,
+      "turnover_rate": 5.0,
+      "volume": 1000000.0,
+      "volume_ratio": 1.5
+    }
+  },
+  {
+    "code": "600003",
+    "name": "补涨C",
+    "items": [
+      {
+        "matched": 0,
+        "price": 10.0,
+        "time": "09:15:00",
+        "unmatched": -100
+      },
+      {
+        "matched": 500,
+        "price": 9.8,
+        "time": "09:18:00",
+        "unmatched": -200
+      },
+      {
+        "matched": 1000,
+        "price": 9.5,
+        "time": "09:20:00",
+        "unmatched": -300
+      },
+      {
+        "matched": 1500,
+        "price": 9.2,
+        "time": "09:21:00",
+        "unmatched": -400
+      },
+      {
+        "matched": 2000,
+        "price": 9.1,
+        "time": "09:22:00",
+        "unmatched": -500
+      },
+      {
+        "matched": 2500,
+        "price": 9.05,
+        "time": "09:23:00",
+        "unmatched": -600
+      },
+      {
+        "matched": 3000,
+        "price": 9.02,
+        "time": "09:24:00",
+        "unmatched": -700
+      },
+      {
+        "matched": 3500,
+        "price": 9.01,
+        "time": "09:24:30",
+        "unmatched": -800
+      },
+      {
+        "matched": 4000,
+        "price": 9.0,
+        "time": "09:24:45",
+        "unmatched": -900
+      },
+      {
+        "matched": 4500,
+        "price": 9.0,
+        "time": "09:25:00",
+        "unmatched": -1000
+      }
+    ],
+    "quote": {
+      "amount": 50000000.0,
+      "amplitude": 5.0,
+      "ask1_volume": 0.0,
+      "avg_price": 9.0,
+      "bid1_price": 0.0,
+      "bid1_volume": 0.0,
+      "chg": -1.0,
+      "code": "600003",
+      "float_market_cap": 800000000.0,
+      "high": 10.0,
+      "limit_down": 9.0,
+      "limit_up": 11.0,
+      "low": 9.0,
+      "main_net_amount": 2000000.0,
+      "market_cap": 1000000000.0,
+      "name": "补涨C",
+      "open_px": 10.0,
+      "pct": -10.0,
+      "pe": 20.0,
+      "prev_close": 10.0,
+      "price": 9.0,
+      "timestamp": 1789110000000,
+      "turnover_rate": 6.0,
+      "volume": 1000000.0,
+      "volume_ratio": 1.5
+    }
+  }
+]

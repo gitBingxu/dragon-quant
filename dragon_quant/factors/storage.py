@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Iterable, Optional
 
-from dragon_quant.factors.types import FactorValue
+from .types import FactorValue
 from dragon_quant.storage import factors as _sql
 
 
@@ -49,7 +49,7 @@ def save_registry_snapshots(specs: Iterable, versions: dict[str, str], *,
                             valid_from_overrides: Optional[dict] = None,
                             db_path=None) -> int:
     """按版本映射写注册表快照；已存在版本 DO NOTHING（默认版本不漂移）。"""
-    from dragon_quant.factors.registry import spec_to_registry_row
+    from .registry import spec_to_registry_row
 
     overrides = valid_from_overrides or {}
     rows = [

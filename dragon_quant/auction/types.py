@@ -25,3 +25,29 @@ class AuctionVerdict:
     reject_reason: Optional[str] = None  # 若被否决，卡在哪个信号
     unverified: bool = False             # 关键数据/口径未实测或缺失，禁止回测结论与决策消费
     rank: Optional[int] = None           # 通过否决且已验证的池内排名（其余 None）
+
+
+@dataclass
+class AuctionOutcome:
+    """一次 auction 用例调用的结果（CLI 负责渲染与退出码）。
+
+    ``mode`` 是**渲染模式**，与 payload 里的 ``mode`` 字段无关：
+
+    - ``collect``：采集成功（可能含空盘口/评分失败）；
+    - ``empty``：prep 与 legacy 均无候选（payload 为 16 键空池契约）；
+    - ``recompute``：重算成功；
+    - ``error``：错误通道（payload 只带 ``error`` 等错误键）。
+
+    ``warnings`` 是需要写 stderr 的提示行（保持旧命令的通道与时序语义）。
+    """
+
+    payload: dict
+    exit_code: int = 0
+    render_names: dict = field(default_factory=dict)
+    mode: str = "collect"
+    warnings: list = field(default_factory=list)
+
+    @classmethod
+    def error(cls, payload: dict) -> "AuctionOutcome":
+        """错误通道结果：CLI 按 ``--json``/人读分别写 stdout/stderr 并退出 1。"""
+        return cls(payload=payload, exit_code=1, mode="error")

@@ -10,7 +10,27 @@ from dragon_quant.review_account.market import (
     collect_candidates_ex, load_market_sentiment,
 )
 from dragon_quant.review_account.models import UNAVAILABLE_SUSPENDED
+from dragon_quant.runtime import clock
 from dragon_quant.storage import db
+
+#: 旧 patch 目标：``patch("dragon_quant.live_trade.trader.datetime")`` 仍必须改变
+#: 买卖时点闸门。导入期捕获本模块的 ``datetime`` 符号，调用期比较即可区分
+#: 「旧测试装上的假 datetime」与「未打补丁（生产 / E2E runtime 时钟）」。
+_DATETIME_CLASS = datetime
+
+
+def _current_moment(tz=None):
+    """当前时刻：默认走 ``runtime.clock``，旧 ``trader.datetime`` patch 仍生效。
+
+    生产与 E2E runtime 模式都经 ``runtime.clock``；legacy 模式虽冻结全局
+    ``datetime``，但本模块导入期捕获的符号与冻结类一致，仍走 clock
+    （``SystemClock`` 在冻结期同样返回固定时刻）。只有测试把模块属性替换成假
+    datetime 时才直接使用它，从而保留既有时间闸门用例的行为。
+    """
+    current = globals()["datetime"]
+    if current is not _DATETIME_CLASS:
+        return current.now(tz)
+    return clock.now(tz)
 
 
 class LiveTrader:
@@ -33,7 +53,7 @@ class LiveTrader:
         datetime.strptime(day, "%Y-%m-%d")
         if clock:
             datetime.strptime(clock, "%H:%M")
-        now = datetime.now(SHANGHAI)
+        now = _current_moment(SHANGHAI)
         today = now.strftime("%Y-%m-%d")
         calendar = self.data.calendar(calendar_start(day, self.cfg.candidate_lookback_days), day, include_today=True)
         if day not in calendar:

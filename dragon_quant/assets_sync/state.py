@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dragon_quant.assets_sync.errors import LockBusyError
+from dragon_quant.runtime import clock
 
 STATE_SCHEMA = 2
 LOCK_STALE_SECONDS = 6 * 3600
@@ -45,7 +46,7 @@ def default_paths(data_dir=None) -> SyncPaths:
 
 
 def now_iso(now: datetime | None = None) -> str:
-    moment = now or datetime.now(timezone(timedelta(hours=8)))
+    moment = now or clock.now(timezone(timedelta(hours=8)))
     return moment.isoformat(timespec="seconds")
 
 
@@ -201,12 +202,12 @@ class ProcessLock:
             started = datetime.fromisoformat(str(started_at))
             if started.tzinfo is None:
                 started = started.replace(tzinfo=timezone.utc)
-            now = self._now or datetime.now(timezone.utc)
+            now = self._now or clock.now(timezone.utc)
             return (now - started).total_seconds()
         except (TypeError, ValueError):
             try:
                 mtime = datetime.fromtimestamp(self.path.stat().st_mtime, tz=timezone.utc)
-                now = self._now or datetime.now(timezone.utc)
+                now = self._now or clock.now(timezone.utc)
                 return (now - mtime).total_seconds()
             except OSError:
                 return float("inf")

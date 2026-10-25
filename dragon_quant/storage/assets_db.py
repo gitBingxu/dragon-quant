@@ -359,6 +359,15 @@ def _connect(create: bool = True, path=None) -> Optional[sqlite3.Connection]:
     db_path = ASSETS_DB_PATH if path is None else path
     if not create and not Path(db_path).exists():
         return None
+    if create:
+        if path is None:
+            # 默认库：首次真实写访问才建数据根 + 子目录（B1 惰性初始化）。
+            from dragon_quant.storage.paths import ensure_data_dirs
+
+            ensure_data_dirs()
+        else:
+            # 显式路径（--target-dir / 测试隔离）：只建目标父目录，不碰主数据根。
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
     # 跨进程（prep/auction 定时任务重叠）可能出现短暂 BUSY，交由 SQLite 等待吸收。

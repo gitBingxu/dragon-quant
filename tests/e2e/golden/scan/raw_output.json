@@ -1,0 +1,1125 @@
+{
+  "timestamp": "20260911_153000",
+  "source": "v2",
+  "params": {
+    "top_n": 5,
+    "candidates_n": 3,
+    "workers": 1,
+    "scorers": "v2"
+  },
+  "sectors": {
+    "up": [
+      {
+        "code": "880001",
+        "name": "AI算力",
+        "pct": 13.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880002",
+        "name": "机器人",
+        "pct": 12.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880003",
+        "name": "算力租赁",
+        "pct": 11.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880004",
+        "name": "半导体设备",
+        "pct": 10.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880005",
+        "name": "数据要素",
+        "pct": 9.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880006",
+        "name": "银行科技",
+        "pct": 8.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880007",
+        "name": "医药商业",
+        "pct": 7.0,
+        "category": "gn",
+        "source": "tdx"
+      },
+      {
+        "code": "880008",
+        "name": "消费电子",
+        "pct": 6.0,
+        "category": "gn",
+        "source": "tdx"
+      }
+    ],
+    "down": [
+      {
+        "code": "881002",
+        "name": "银行",
+        "pct": -2.0,
+        "category": "hy",
+        "source": "tdx"
+      },
+      {
+        "code": "881003",
+        "name": "医药",
+        "pct": 1.0,
+        "category": "hy",
+        "source": "tdx"
+      },
+      {
+        "code": "881001",
+        "name": "半导体",
+        "pct": 5.0,
+        "category": "hy",
+        "source": "tdx"
+      }
+    ],
+    "degraded": [],
+    "sources": {
+      "hy": "tdx",
+      "gn": "tdx",
+      "dq": "tdx"
+    },
+    "collisions": []
+  },
+  "sector_cache_miss": false,
+  "ranking": [
+    {
+      "code": "600001",
+      "name": "龙头A",
+      "concepts": [
+        "AI算力"
+      ],
+      "board_count": 3,
+      "primary_sector": "880001",
+      "primary_sector_key": "tdx:gn:880001",
+      "primary_sector_category": "gn",
+      "primary_sector_source": "tdx",
+      "primary_sector_name": "AI算力",
+      "composite_score": 77.21,
+      "dimensions": {
+        "drive": {
+          "score": 89.5,
+          "weight": 0.3,
+          "details": {
+            "s_early": 100.0,
+            "early": {
+              "pool_size": 1,
+              "sample_size": 1,
+              "missing_codes": [],
+              "degraded": false,
+              "bid1_volume": 600000.0,
+              "bid1_price": 11.0,
+              "limit_up": 11.0,
+              "sealed": true,
+              "seal_minute": 29818179,
+              "seal_time": "09:39",
+              "rank": 1
+            },
+            "s_lead": 70.0,
+            "lead": {
+              "n_lead": 1,
+              "n_follow": 0,
+              "n_thrust": 1,
+              "bonus": 0.0,
+              "suspect_follower": false,
+              "lead_events": [
+                {
+                  "event_time": "09:32",
+                  "trigger_time": "09:34",
+                  "sector_event_time": "09:33",
+                  "sector_trigger_time": "09:34",
+                  "stock_follow_time": "09:32",
+                  "stock_gain_pct": 5.5,
+                  "sector_gain_pct": 0.4
+                }
+              ],
+              "follow_events": []
+            },
+            "s_voice": 100.0,
+            "voice": {
+              "n": 4,
+              "sample_size": 4,
+              "n_limit": 1,
+              "n_strong": 3,
+              "degraded": false,
+              "limit_ratio": 0.25,
+              "strong_ratio": 0.75
+            },
+            "degraded": false
+          }
+        },
+        "leadership": {
+          "score": 75.0,
+          "weight": 0.25,
+          "details": {
+            "s_board": 100.0,
+            "board_count": 3,
+            "b_max": 3,
+            "s_pct": 50.0,
+            "fived_pct": 23.6,
+            "pct_rank": 1,
+            "pct_n": 2,
+            "degraded": false
+          }
+        },
+        "anti_drop": {
+          "score": 60.0,
+          "weight": 0.15,
+          "details": {
+            "s_market": 60.0,
+            "s_sector": 60.0,
+            "market": {
+              "n_dip_seg": 1,
+              "s_hold": 100.0,
+              "s_rebound": 0.0,
+              "rebound_reason": "个股未确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": 0.0,
+                  "stock_drop_pct": 0.0,
+                  "hold_score": 100.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": 0.0,
+                "stock_drop_pct": 0.0,
+                "hold_score": 100.0,
+                "base_drop_abs": 0.6
+              }
+            },
+            "sector": {
+              "n_dip_seg": 1,
+              "s_hold": 100.0,
+              "s_rebound": 0.0,
+              "rebound_reason": "个股未确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": 0.0,
+                  "stock_drop_pct": 0.0,
+                  "hold_score": 100.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": 0.0,
+                "stock_drop_pct": 0.0,
+                "hold_score": 100.0,
+                "base_drop_abs": 0.6
+              }
+            }
+          }
+        },
+        "liquidity": {
+          "score": 88.75,
+          "weight": 0.2,
+          "details": {
+            "s_turnover": 77.5,
+            "turnover_rate": 12.0,
+            "s_to_abs": 80.0,
+            "s_to_rel": 75.0,
+            "s_seal": 100.0,
+            "s_seal_strength": 100.0,
+            "s_seal_stable": 100.0,
+            "n_open": 0,
+            "is_limit_up": true,
+            "degraded": false,
+            "reasons": [],
+            "turnover_sample_size": 4
+          }
+        },
+        "absorption": {
+          "score": 48.56,
+          "weight": 0.1,
+          "details": {
+            "raw_event_count": 1,
+            "event_count": 1,
+            "selected_event_count": 1,
+            "best_event": {
+              "start_bar": 0,
+              "end_bar": 5,
+              "start_timestamp": 1789090500000,
+              "end_timestamp": 1789092000000,
+              "dive_time": "9月11日 9:35",
+              "rally_time": "9月11日 9:35",
+              "time_diff_min": 0.0,
+              "target_pct": 1.5,
+              "yang_count": 6,
+              "fleeing_count": 3,
+              "fleeing_avg_drop": -0.84,
+              "fleeing_sectors": [
+                {
+                  "code": "tdx:hy:881001",
+                  "name": "半导体",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881002",
+                  "name": "银行",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881003",
+                  "name": "医药",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                }
+              ],
+              "drawdown_ratio": 0.0,
+              "sector_universe": 3,
+              "score": 48.56,
+              "age_trade_days": 0,
+              "recency_weight": 1.0,
+              "adjusted_score": 48.56,
+              "window_count": 1,
+              "group_start_timestamp": 1789090500000,
+              "group_end_timestamp": 1789092000000
+            },
+            "all_events": [
+              {
+                "start_bar": 0,
+                "end_bar": 5,
+                "start_timestamp": 1789090500000,
+                "end_timestamp": 1789092000000,
+                "dive_time": "9月11日 9:35",
+                "rally_time": "9月11日 9:35",
+                "time_diff_min": 0.0,
+                "target_pct": 1.5,
+                "yang_count": 6,
+                "fleeing_count": 3,
+                "fleeing_avg_drop": -0.84,
+                "fleeing_sectors": [
+                  {
+                    "code": "tdx:hy:881001",
+                    "name": "半导体",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881002",
+                    "name": "银行",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881003",
+                    "name": "医药",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  }
+                ],
+                "drawdown_ratio": 0.0,
+                "sector_universe": 3,
+                "score": 48.56,
+                "age_trade_days": 0,
+                "recency_weight": 1.0,
+                "adjusted_score": 48.56,
+                "window_count": 1,
+                "group_start_timestamp": 1789090500000,
+                "group_end_timestamp": 1789092000000
+              }
+            ],
+            "best_event_score": 48.56
+          }
+        }
+      },
+      "is_true_dragon": true,
+      "reject_reason": null,
+      "rank": 1,
+      "report_text": "龙头A(600001)——AI算力——3连板-77.2分-✓真龙\n- 🐉 带动性(90): 封板最早100：09:39封板，封单量60.0万手，涨停池第1/1；带动板块70：09:32个股拉升+5.50%，随后板块拉升+0.40%；板块共鸣100：涨停1只/强势3只\n- 📊 领涨性(75): 连板100(本3板/最高3板)/涨幅50(5日23.6%,排名1/2)\n- 🛡️ 抗跌性(60): 大盘维度60：13:30-13:33 大盘跳水-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹；板块维度60：13:30-13:33 AI算力回落-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹\n- 💧 流动性(89): 换手78(换手率12.0%)/封板100(强度100,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金"
+    },
+    {
+      "code": "600003",
+      "name": "补涨C",
+      "concepts": [
+        "机器人"
+      ],
+      "board_count": 1,
+      "primary_sector": "880002",
+      "primary_sector_key": "tdx:gn:880002",
+      "primary_sector_category": "gn",
+      "primary_sector_source": "tdx",
+      "primary_sector_name": "机器人",
+      "composite_score": 64.26,
+      "dimensions": {
+        "drive": {
+          "score": 53.0,
+          "weight": 0.3,
+          "details": {
+            "s_early": 0.0,
+            "early": {
+              "pool_size": 2,
+              "sample_size": 2,
+              "missing_codes": [],
+              "degraded": false,
+              "bid1_volume": 320000.0,
+              "bid1_price": 11.0,
+              "limit_up": 11.0,
+              "sealed": true,
+              "seal_minute": 29818205,
+              "seal_time": "10:05",
+              "rank": 2
+            },
+            "s_lead": 80.0,
+            "lead": {
+              "n_lead": 1,
+              "n_follow": 0,
+              "n_thrust": 1,
+              "bonus": 10.0,
+              "suspect_follower": false,
+              "lead_events": [
+                {
+                  "event_time": "09:58",
+                  "trigger_time": "10:00",
+                  "sector_event_time": "10:00",
+                  "sector_trigger_time": "10:01",
+                  "stock_follow_time": "09:58",
+                  "stock_gain_pct": 4.0,
+                  "sector_gain_pct": 0.4
+                }
+              ],
+              "follow_events": []
+            },
+            "s_voice": 100.0,
+            "voice": {
+              "n": 4,
+              "sample_size": 4,
+              "n_limit": 2,
+              "n_strong": 3,
+              "degraded": false,
+              "limit_ratio": 0.5,
+              "strong_ratio": 0.75
+            },
+            "degraded": false
+          }
+        },
+        "leadership": {
+          "score": 75.0,
+          "weight": 0.25,
+          "details": {
+            "s_board": 100.0,
+            "board_count": 1,
+            "b_max": 1,
+            "s_pct": 50.0,
+            "fived_pct": 23.53,
+            "pct_rank": 1,
+            "pct_n": 2,
+            "degraded": false
+          }
+        },
+        "anti_drop": {
+          "score": 60.0,
+          "weight": 0.15,
+          "details": {
+            "s_market": 60.0,
+            "s_sector": 60.0,
+            "market": {
+              "n_dip_seg": 1,
+              "s_hold": 100.0,
+              "s_rebound": 0.0,
+              "rebound_reason": "个股未确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": 0.0,
+                  "stock_drop_pct": 0.0,
+                  "hold_score": 100.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": 0.0,
+                "stock_drop_pct": 0.0,
+                "hold_score": 100.0,
+                "base_drop_abs": 0.6
+              }
+            },
+            "sector": {
+              "n_dip_seg": 1,
+              "s_hold": 100.0,
+              "s_rebound": 0.0,
+              "rebound_reason": "个股未确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": 0.0,
+                  "stock_drop_pct": 0.0,
+                  "hold_score": 100.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": 0.0,
+                "stock_drop_pct": 0.0,
+                "hold_score": 100.0,
+                "base_drop_abs": 0.6
+              }
+            }
+          }
+        },
+        "liquidity": {
+          "score": 78.75,
+          "weight": 0.2,
+          "details": {
+            "s_turnover": 57.5,
+            "turnover_rate": 6.0,
+            "s_to_abs": 40.0,
+            "s_to_rel": 75.0,
+            "s_seal": 100.0,
+            "s_seal_strength": 100.0,
+            "s_seal_stable": 100.0,
+            "n_open": 0,
+            "is_limit_up": true,
+            "degraded": false,
+            "reasons": [],
+            "turnover_sample_size": 4
+          }
+        },
+        "absorption": {
+          "score": 48.56,
+          "weight": 0.1,
+          "details": {
+            "raw_event_count": 1,
+            "event_count": 1,
+            "selected_event_count": 1,
+            "best_event": {
+              "start_bar": 0,
+              "end_bar": 5,
+              "start_timestamp": 1789090500000,
+              "end_timestamp": 1789092000000,
+              "dive_time": "9月11日 9:35",
+              "rally_time": "9月11日 9:35",
+              "time_diff_min": 0.0,
+              "target_pct": 1.5,
+              "yang_count": 6,
+              "fleeing_count": 3,
+              "fleeing_avg_drop": -0.84,
+              "fleeing_sectors": [
+                {
+                  "code": "tdx:hy:881001",
+                  "name": "半导体",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881002",
+                  "name": "银行",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881003",
+                  "name": "医药",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                }
+              ],
+              "drawdown_ratio": 0.0,
+              "sector_universe": 3,
+              "score": 48.56,
+              "age_trade_days": 0,
+              "recency_weight": 1.0,
+              "adjusted_score": 48.56,
+              "window_count": 1,
+              "group_start_timestamp": 1789090500000,
+              "group_end_timestamp": 1789092000000
+            },
+            "all_events": [
+              {
+                "start_bar": 0,
+                "end_bar": 5,
+                "start_timestamp": 1789090500000,
+                "end_timestamp": 1789092000000,
+                "dive_time": "9月11日 9:35",
+                "rally_time": "9月11日 9:35",
+                "time_diff_min": 0.0,
+                "target_pct": 1.5,
+                "yang_count": 6,
+                "fleeing_count": 3,
+                "fleeing_avg_drop": -0.84,
+                "fleeing_sectors": [
+                  {
+                    "code": "tdx:hy:881001",
+                    "name": "半导体",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881002",
+                    "name": "银行",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881003",
+                    "name": "医药",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  }
+                ],
+                "drawdown_ratio": 0.0,
+                "sector_universe": 3,
+                "score": 48.56,
+                "age_trade_days": 0,
+                "recency_weight": 1.0,
+                "adjusted_score": 48.56,
+                "window_count": 1,
+                "group_start_timestamp": 1789090500000,
+                "group_end_timestamp": 1789092000000
+              }
+            ],
+            "best_event_score": 48.56
+          }
+        }
+      },
+      "is_true_dragon": true,
+      "reject_reason": null,
+      "rank": 2,
+      "report_text": "补涨C(600003)——机器人——1连板-64.3分-✓真龙\n- 🐉 带动性(53): 封板最早0：10:05封板，封单量32.0万手，涨停池第2/2；带动板块80：09:58个股拉升+4.00%，随后板块拉升+0.40%；板块共鸣100：涨停2只/强势3只\n- 📊 领涨性(75): 连板100(本1板/最高1板)/涨幅50(5日23.5%,排名1/2)\n- 🛡️ 抗跌性(60): 大盘维度60：13:30-13:33 大盘跳水-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹；板块维度60：13:30-13:33 机器人回落-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹\n- 💧 流动性(79): 换手58(换手率6.0%)/封板100(强度100,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金"
+    },
+    {
+      "code": "600006",
+      "name": "一字F",
+      "concepts": [
+        "机器人"
+      ],
+      "board_count": 1,
+      "primary_sector": "880002",
+      "primary_sector_key": "tdx:gn:880002",
+      "primary_sector_category": "gn",
+      "primary_sector_source": "tdx",
+      "primary_sector_name": "机器人",
+      "composite_score": 54.22,
+      "dimensions": {
+        "drive": {
+          "score": 59.0,
+          "weight": 0.3,
+          "details": {
+            "s_early": 50.0,
+            "early": {
+              "pool_size": 2,
+              "sample_size": 2,
+              "missing_codes": [],
+              "degraded": false,
+              "bid1_volume": 50000.0,
+              "bid1_price": 11.0,
+              "limit_up": 11.0,
+              "sealed": true,
+              "seal_minute": 29818170,
+              "seal_time": "09:30",
+              "rank": 1
+            },
+            "s_lead": 40.0,
+            "lead": {
+              "degraded": true,
+              "reason": "个股全程平线，无法验证带动时序"
+            },
+            "s_voice": 100.0,
+            "voice": {
+              "n": 4,
+              "sample_size": 4,
+              "n_limit": 2,
+              "n_strong": 3,
+              "degraded": false,
+              "limit_ratio": 0.5,
+              "strong_ratio": 0.75
+            },
+            "degraded": true
+          }
+        },
+        "leadership": {
+          "score": 50.0,
+          "weight": 0.25,
+          "details": {
+            "s_board": 100.0,
+            "board_count": 1,
+            "b_max": 1,
+            "s_pct": 0.0,
+            "fived_pct": 9.43,
+            "pct_rank": 2,
+            "pct_n": 2,
+            "degraded": false
+          }
+        },
+        "anti_drop": {
+          "score": 60.0,
+          "weight": 0.15,
+          "details": {
+            "s_market": 60.0,
+            "s_sector": 60.0,
+            "market": {
+              "n_dip_seg": 1,
+              "s_hold": 100.0,
+              "s_rebound": 0.0,
+              "rebound_reason": "个股未确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": 0.0,
+                  "stock_drop_pct": 0.0,
+                  "hold_score": 100.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": 0.0,
+                "stock_drop_pct": 0.0,
+                "hold_score": 100.0,
+                "base_drop_abs": 0.6
+              }
+            },
+            "sector": {
+              "n_dip_seg": 1,
+              "s_hold": 100.0,
+              "s_rebound": 0.0,
+              "rebound_reason": "个股未确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": 0.0,
+                  "stock_drop_pct": 0.0,
+                  "hold_score": 100.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": 0.0,
+                "stock_drop_pct": 0.0,
+                "hold_score": 100.0,
+                "base_drop_abs": 0.6
+              }
+            }
+          }
+        },
+        "liquidity": {
+          "score": 50.83,
+          "weight": 0.2,
+          "details": {
+            "s_turnover": 1.67,
+            "turnover_rate": 0.5,
+            "s_to_abs": 3.33,
+            "s_to_rel": 0.0,
+            "s_seal": 100.0,
+            "s_seal_strength": 100.0,
+            "s_seal_stable": 100.0,
+            "n_open": 0,
+            "is_limit_up": true,
+            "degraded": false,
+            "reasons": [],
+            "turnover_sample_size": 4
+          }
+        },
+        "absorption": {
+          "score": 48.56,
+          "weight": 0.1,
+          "details": {
+            "raw_event_count": 1,
+            "event_count": 1,
+            "selected_event_count": 1,
+            "best_event": {
+              "start_bar": 0,
+              "end_bar": 5,
+              "start_timestamp": 1789090500000,
+              "end_timestamp": 1789092000000,
+              "dive_time": "9月11日 9:35",
+              "rally_time": "9月11日 9:35",
+              "time_diff_min": 0.0,
+              "target_pct": 1.5,
+              "yang_count": 6,
+              "fleeing_count": 3,
+              "fleeing_avg_drop": -0.84,
+              "fleeing_sectors": [
+                {
+                  "code": "tdx:hy:881001",
+                  "name": "半导体",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881002",
+                  "name": "银行",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881003",
+                  "name": "医药",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                }
+              ],
+              "drawdown_ratio": 0.0,
+              "sector_universe": 3,
+              "score": 48.56,
+              "age_trade_days": 0,
+              "recency_weight": 1.0,
+              "adjusted_score": 48.56,
+              "window_count": 1,
+              "group_start_timestamp": 1789090500000,
+              "group_end_timestamp": 1789092000000
+            },
+            "all_events": [
+              {
+                "start_bar": 0,
+                "end_bar": 5,
+                "start_timestamp": 1789090500000,
+                "end_timestamp": 1789092000000,
+                "dive_time": "9月11日 9:35",
+                "rally_time": "9月11日 9:35",
+                "time_diff_min": 0.0,
+                "target_pct": 1.5,
+                "yang_count": 6,
+                "fleeing_count": 3,
+                "fleeing_avg_drop": -0.84,
+                "fleeing_sectors": [
+                  {
+                    "code": "tdx:hy:881001",
+                    "name": "半导体",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881002",
+                    "name": "银行",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881003",
+                    "name": "医药",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  }
+                ],
+                "drawdown_ratio": 0.0,
+                "sector_universe": 3,
+                "score": 48.56,
+                "age_trade_days": 0,
+                "recency_weight": 1.0,
+                "adjusted_score": 48.56,
+                "window_count": 1,
+                "group_start_timestamp": 1789090500000,
+                "group_end_timestamp": 1789092000000
+              }
+            ],
+            "best_event_score": 48.56
+          }
+        }
+      },
+      "is_true_dragon": true,
+      "reject_reason": null,
+      "rank": 3,
+      "report_text": "一字F(600006)——机器人——1连板-54.2分-✓真龙\n- 🐉 带动性(59): 封板最早50：09:30封板，封单量5.0万手，涨停池第1/2；带动板块40：个股全程平线，无法验证带动时序；板块共鸣100：涨停2只/强势3只\n- 📊 领涨性(50): 连板100(本1板/最高1板)/涨幅0(5日9.4%,排名2/2)\n- 🛡️ 抗跌性(60): 大盘维度60：13:30-13:33 大盘跳水-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹；板块维度60：13:30-13:33 机器人回落-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹\n- 💧 流动性(51): 换手2(换手率0.5%)/封板100(强度100,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金"
+    },
+    {
+      "code": "600002",
+      "name": "跟风B",
+      "concepts": [
+        "AI算力"
+      ],
+      "board_count": 1,
+      "primary_sector": "880001",
+      "primary_sector_key": "tdx:gn:880001",
+      "primary_sector_category": "gn",
+      "primary_sector_source": "tdx",
+      "primary_sector_name": "AI算力",
+      "composite_score": 28.62,
+      "dimensions": {
+        "drive": {
+          "score": 25.0,
+          "weight": 0.3,
+          "details": {
+            "s_early": 0.0,
+            "early": {
+              "pool_size": 1,
+              "sample_size": 1,
+              "missing_codes": [],
+              "degraded": false,
+              "bid1_volume": 0.0,
+              "bid1_price": 0.0,
+              "limit_up": 11.0,
+              "sealed": false
+            },
+            "s_lead": 0.0,
+            "lead": {
+              "n_lead": 0,
+              "n_follow": 0,
+              "n_thrust": 1,
+              "bonus": 0.0,
+              "suspect_follower": false,
+              "lead_events": [],
+              "follow_events": []
+            },
+            "s_voice": 100.0,
+            "voice": {
+              "n": 4,
+              "sample_size": 4,
+              "n_limit": 1,
+              "n_strong": 3,
+              "degraded": false,
+              "limit_ratio": 0.25,
+              "strong_ratio": 0.75
+            },
+            "degraded": false
+          }
+        },
+        "leadership": {
+          "score": 40.0,
+          "weight": 0.25,
+          "details": {
+            "s_board": 80.0,
+            "board_count": 1,
+            "b_max": 3,
+            "s_pct": 0.0,
+            "fived_pct": 21.79,
+            "pct_rank": 2,
+            "pct_n": 2,
+            "degraded": false
+          }
+        },
+        "anti_drop": {
+          "score": 7.31,
+          "weight": 0.15,
+          "details": {
+            "s_market": 6.86,
+            "s_sector": 8.0,
+            "market": {
+              "n_dip_seg": 1,
+              "s_hold": 0.0,
+              "s_rebound": 17.14,
+              "rebound_reason": "基准与个股均确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": -0.6,
+                  "stock_drop_pct": 0.6,
+                  "hold_score": 0.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": -0.6,
+                "stock_drop_pct": 0.6,
+                "hold_score": 0.0,
+                "base_drop_abs": 0.6
+              }
+            },
+            "sector": {
+              "n_dip_seg": 1,
+              "s_hold": 0.0,
+              "s_rebound": 20.0,
+              "rebound_reason": "基准与个股均确认反弹",
+              "dip_events": [
+                {
+                  "start_time": "13:30",
+                  "bottom_time": "13:33",
+                  "base_drop_pct": -0.6,
+                  "stock_change_pct": -0.6,
+                  "stock_drop_pct": 0.6,
+                  "hold_score": 0.0,
+                  "base_drop_abs": 0.6
+                }
+              ],
+              "deepest_event": {
+                "start_time": "13:30",
+                "bottom_time": "13:33",
+                "base_drop_pct": -0.6,
+                "stock_change_pct": -0.6,
+                "stock_drop_pct": 0.6,
+                "hold_score": 0.0,
+                "base_drop_abs": 0.6
+              }
+            }
+          }
+        },
+        "liquidity": {
+          "score": 25.83,
+          "weight": 0.2,
+          "details": {
+            "s_turnover": 51.67,
+            "turnover_rate": 8.0,
+            "s_to_abs": 53.33,
+            "s_to_rel": 50.0,
+            "s_seal": 0.0,
+            "s_seal_strength": 0.0,
+            "s_seal_stable": 0.0,
+            "n_open": 0,
+            "is_limit_up": false,
+            "degraded": false,
+            "reasons": [],
+            "turnover_sample_size": 4
+          }
+        },
+        "absorption": {
+          "score": 48.56,
+          "weight": 0.1,
+          "details": {
+            "raw_event_count": 1,
+            "event_count": 1,
+            "selected_event_count": 1,
+            "best_event": {
+              "start_bar": 0,
+              "end_bar": 5,
+              "start_timestamp": 1789090500000,
+              "end_timestamp": 1789092000000,
+              "dive_time": "9月11日 9:35",
+              "rally_time": "9月11日 9:35",
+              "time_diff_min": 0.0,
+              "target_pct": 1.5,
+              "yang_count": 6,
+              "fleeing_count": 3,
+              "fleeing_avg_drop": -0.84,
+              "fleeing_sectors": [
+                {
+                  "code": "tdx:hy:881001",
+                  "name": "半导体",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881002",
+                  "name": "银行",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                },
+                {
+                  "code": "tdx:hy:881003",
+                  "name": "医药",
+                  "drop_pct": -0.84,
+                  "dive_timestamp": 1789090500000
+                }
+              ],
+              "drawdown_ratio": 0.0,
+              "sector_universe": 3,
+              "score": 48.56,
+              "age_trade_days": 0,
+              "recency_weight": 1.0,
+              "adjusted_score": 48.56,
+              "window_count": 1,
+              "group_start_timestamp": 1789090500000,
+              "group_end_timestamp": 1789092000000
+            },
+            "all_events": [
+              {
+                "start_bar": 0,
+                "end_bar": 5,
+                "start_timestamp": 1789090500000,
+                "end_timestamp": 1789092000000,
+                "dive_time": "9月11日 9:35",
+                "rally_time": "9月11日 9:35",
+                "time_diff_min": 0.0,
+                "target_pct": 1.5,
+                "yang_count": 6,
+                "fleeing_count": 3,
+                "fleeing_avg_drop": -0.84,
+                "fleeing_sectors": [
+                  {
+                    "code": "tdx:hy:881001",
+                    "name": "半导体",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881002",
+                    "name": "银行",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  },
+                  {
+                    "code": "tdx:hy:881003",
+                    "name": "医药",
+                    "drop_pct": -0.84,
+                    "dive_timestamp": 1789090500000
+                  }
+                ],
+                "drawdown_ratio": 0.0,
+                "sector_universe": 3,
+                "score": 48.56,
+                "age_trade_days": 0,
+                "recency_weight": 1.0,
+                "adjusted_score": 48.56,
+                "window_count": 1,
+                "group_start_timestamp": 1789090500000,
+                "group_end_timestamp": 1789092000000
+              }
+            ],
+            "best_event_score": 48.56
+          }
+        }
+      },
+      "is_true_dragon": false,
+      "reject_reason": "drive=25.0 < floor 40",
+      "rank": null,
+      "report_text": "跟风B(600002)——AI算力——1连板-28.6分-✗非真龙\n- ⛔ 一票否决: drive=25.0 < floor 40\n- 🐉 带动性(25): 封板最早0：未识别到稳定封板，涨停池1只；带动板块0：带动0次，被带0次；板块共鸣100：涨停1只/强势3只\n- 📊 领涨性(40): 连板80(本1板/最高3板)/涨幅0(5日21.8%,排名2/2)\n- 🛡️ 抗跌性(7): 大盘维度7：13:30-13:33 大盘跳水-0.60%，该股同期-0.60%（跟随回落）；基准与个股均确认反弹；板块维度8：13:30-13:33 AI算力回落-0.60%，该股同期-0.60%（跟随回落）；基准与个股均确认反弹\n- 💧 流动性(26): 换手52(换手率8.0%)/封板0(强度0,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金"
+    }
+  ],
+  "report_text": "龙头A(600001)——AI算力——3连板-77.2分-✓真龙\n- 🐉 带动性(90): 封板最早100：09:39封板，封单量60.0万手，涨停池第1/1；带动板块70：09:32个股拉升+5.50%，随后板块拉升+0.40%；板块共鸣100：涨停1只/强势3只\n- 📊 领涨性(75): 连板100(本3板/最高3板)/涨幅50(5日23.6%,排名1/2)\n- 🛡️ 抗跌性(60): 大盘维度60：13:30-13:33 大盘跳水-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹；板块维度60：13:30-13:33 AI算力回落-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹\n- 💧 流动性(89): 换手78(换手率12.0%)/封板100(强度100,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金\n\n补涨C(600003)——机器人——1连板-64.3分-✓真龙\n- 🐉 带动性(53): 封板最早0：10:05封板，封单量32.0万手，涨停池第2/2；带动板块80：09:58个股拉升+4.00%，随后板块拉升+0.40%；板块共鸣100：涨停2只/强势3只\n- 📊 领涨性(75): 连板100(本1板/最高1板)/涨幅50(5日23.5%,排名1/2)\n- 🛡️ 抗跌性(60): 大盘维度60：13:30-13:33 大盘跳水-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹；板块维度60：13:30-13:33 机器人回落-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹\n- 💧 流动性(79): 换手58(换手率6.0%)/封板100(强度100,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金\n\n一字F(600006)——机器人——1连板-54.2分-✓真龙\n- 🐉 带动性(59): 封板最早50：09:30封板，封单量5.0万手，涨停池第1/2；带动板块40：个股全程平线，无法验证带动时序；板块共鸣100：涨停2只/强势3只\n- 📊 领涨性(50): 连板100(本1板/最高1板)/涨幅0(5日9.4%,排名2/2)\n- 🛡️ 抗跌性(60): 大盘维度60：13:30-13:33 大盘跳水-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹；板块维度60：13:30-13:33 机器人回落-0.60%，该股同期+0.00%（明显少跌）；个股未确认反弹\n- 💧 流动性(51): 换手2(换手率0.5%)/封板100(强度100,开板0次)\n- 资金承接(49): 1个窗口合并为1次独立承接，取衰减后最强1次均值；代表事件原始48.56分，距最新样本0个交易日，衰减系数1.000，调整后48.56分；9月11日 9:35 半导体(-0.84%)、银行(-0.84%)、医药(-0.84%)板块跳水(平均-0.84%)，9月11日 9:35 目标板块拉升+1.50%，承接上述板块出逃资金",
+  "log_count": 65,
+  "api_stats": {
+    "total": 40,
+    "ok": 40,
+    "error": 0,
+    "by_provider": {
+      "tdx": {
+        "count": 40
+      }
+    }
+  },
+  "report_basename": "scan_report_v2_20260911_153000.txt",
+  "report_parent": "results"
+}

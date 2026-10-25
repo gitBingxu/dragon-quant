@@ -115,6 +115,20 @@ class TestBuildAllNetworkBoundary(BuildAllBase):
         self.assertTrue(any("stale_calendar_missing" in w
                             for w in out["warnings"]))
 
+    def test_build_forwards_services_to_calendar_and_engine(self):
+        services = object()
+        fake = {"ok": True, "build_id": 1, "factors": {}}
+        with patch("dragon_quant.storage.finance.has_any_fin_data",
+                   return_value=True), \
+             patch("dragon_quant.factors.finance.load_trade_calendar",
+                   return_value=(["2026-10-16"], None)) as calendar, \
+             patch("dragon_quant.factors.service.engine.build_date",
+                   return_value=fake) as build_date:
+            service.build(date="2026-10-19", all_factors=True, services=services)
+
+        self.assertIs(calendar.call_args.kwargs["services"], services)
+        self.assertIs(build_date.call_args.kwargs["services"], services)
+
 
 class TestBuildAllRealRun(BuildAllBase):
     def test_real_build_reports_every_factor(self):

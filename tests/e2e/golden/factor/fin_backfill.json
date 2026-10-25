@@ -1,0 +1,22 @@
+{
+  "downloaded": 1,
+  "failed": [],
+  "inserted": 4,
+  "layouts": {
+    "gpcw_10": "verified"
+  },
+  "mode": "backfill",
+  "observed_unmatched": 0,
+  "ok": true,
+  "periods": [
+    "2026-06-30"
+  ],
+  "retracted": 0,
+  "skipped": 0,
+  "unchanged": 0,
+  "window": {
+    "candidates": 1,
+    "from_period": "2026-06-30",
+    "to_period": "2026-06-30"
+  }
+}

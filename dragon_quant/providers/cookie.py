@@ -129,22 +129,6 @@ def fetch_xq() -> str:
 # ─── CLI ───
 
 if __name__ == "__main__":
-    import argparse
-    a = argparse.ArgumentParser()
-    a.add_argument("action", choices=["set", "fetch", "status"])
-    a.add_argument("--source", choices=["xq"], default="xq")
-    a.add_argument("--cookie", "-c")
-    a.add_argument("--show", action="store_true")
-    args = a.parse_args()
-    if args.action == "status":
-        items = [("雪球", get_xq())]
-        for k, v in items:
-            print(f"{k}: {'✅' if v else '❌'} ({len(v)}字符)")
-        if args.show:
-            for k, v in items:
-                if v:
-                    print(f"\n{k}: {v[:200]}...")
-    elif args.action == "set" and args.cookie:
-        set_xq(args.cookie)
-    elif args.action == "fetch":
-        fetch_xq()
+    from dragon_quant.providers.cookie_cli import main
+
+    raise SystemExit(main())

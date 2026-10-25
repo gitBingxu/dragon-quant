@@ -10,9 +10,9 @@ from typing import Optional
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import Candidate, ScoreResult
-from dragon_quant.scorers import registry as R
+from . import registry as R
 from dragon_quant.scorers.base import DragonVerdict
-from dragon_quant.scorers import (
+from . import (
     drive, leadership, anti_drop, liquidity, absorption)
 
 # 维度 → score 函数

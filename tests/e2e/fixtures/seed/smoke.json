@@ -1,0 +1,35 @@
+{
+  "case": "smoke",
+  "note": "M1A synthetic seed used by test_harness_helpers; temporary SQLite only.",
+  "tables": {
+    "scans_v2": {
+      "columns": {
+        "scan_id": "TEXT PRIMARY KEY",
+        "trade_date": "TEXT NOT NULL",
+        "created_at": "TEXT"
+      },
+      "rows": [
+        {
+          "scan_id": "v2_20260911_5",
+          "trade_date": "2026-09-11",
+          "created_at": "2026-09-11T15:30:00"
+        }
+      ]
+    },
+    "dragons_v2": {
+      "columns": {
+        "trade_date": "TEXT NOT NULL",
+        "code": "TEXT NOT NULL",
+        "payload": "TEXT"
+      },
+      "primary_key": ["trade_date", "code"],
+      "rows": [
+        {
+          "trade_date": "2026-09-11",
+          "code": "600172",
+          "payload": "{\"ok\":true}"
+        }
+      ]
+    }
+  }
+}

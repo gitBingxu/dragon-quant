@@ -13,12 +13,13 @@
   report = logger.report_context("600519")  # 聚合该股全部日志
 """
 
-import time
 import json
 import threading
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
+
+from dragon_quant.runtime import clock
 
 
 @dataclass
@@ -37,14 +38,14 @@ class ScanLogger:
     def __init__(self):
         self._entries: list[LogEntry] = []
         self._lock = threading.Lock()
-        self._start_ts = time.time()
+        self._start_ts = clock.now().timestamp()
 
     # ─── 写入 ───
 
     def _log(self, category: str, level: str, message: str,
              code: str = "", **data):
         entry = LogEntry(
-            timestamp=time.time(),
+            timestamp=clock.now().timestamp(),
             category=category,
             level=level,
             message=message,
@@ -164,7 +165,7 @@ class ScanLogger:
                 scorers["by_dim"][dim] += 1
 
         return {
-            "elapsed_s": round(time.time() - self._start_ts, 1),
+            "elapsed_s": round(clock.now().timestamp() - self._start_ts, 1),
             "total_entries": len(self._entries),
             "phases": phases,
             "scorers": scorers,

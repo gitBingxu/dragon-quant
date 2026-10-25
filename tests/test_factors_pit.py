@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dragon_quant.factors import engine
 from dragon_quant.factors import finance as fin
@@ -444,6 +444,161 @@ class TestEngineFinWiring(TempDbBase):
         meta = json.loads(row[0])
         self.assertEqual(meta["period"], "2026-06-30")
         self.assertEqual(meta["pit_basis"], "statutory_backfilled")
+
+
+class TestFinanceServicesInjection(TempDbBase):
+    """M2C：财务链路可选 Services 注入；显式 ``tdx=`` 优先于 bundle。"""
+
+    class FakeBackfillTdx:
+        def __init__(self):
+            self.calls = 0
+
+        def get_financial_files(self, host=None):
+            return [{"filename": "tdxfin/gpcw20260630.zip", "md5": "m1",
+                     "size": 10}]
+
+        def get_financial_records(self, filename, host=None):
+            self.calls += 1
+            return [{"code": "600001", "market": 1, "report_date": 20260630,
+                     "fields": [1.0] * 20}]
+
+    class FakeSnapshotTdx:
+        def __init__(self):
+            self.codes = []
+
+        def get_finance_info(self, code):
+            self.codes.append(code)
+            return {"meigujing_zichan": 5.5, "jing_zichan": 5.5e8,
+                    "zhuying_shouru": 3e8, "jing_lirun": 3e7}
+
+    @staticmethod
+    def _services(tdx):
+        from types import SimpleNamespace
+        return SimpleNamespace(providers=SimpleNamespace(tdx=tdx))
+
+    def test_sync_backfill_uses_injected_bundle_tdx(self):
+        fake = self.FakeBackfillTdx()
+        with patch("dragon_quant.providers.tdx.TdxProvider",
+                   side_effect=AssertionError("default provider constructed")):
+            payload = fin.sync_backfill(services=self._services(fake),
+                                        db_path=self._db_path,
+                                        now="2026-11-01T10:00:00")
+
+        self.assertEqual(payload["downloaded"], 1)
+        self.assertEqual(fake.calls, 1)
+
+    def test_explicit_tdx_argument_wins_over_injected_bundle(self):
+        explicit = self.FakeBackfillTdx()
+        bundled = self.FakeBackfillTdx()
+
+        payload = fin.sync_backfill(tdx=explicit,
+                                    services=self._services(bundled),
+                                    db_path=self._db_path,
+                                    now="2026-11-01T10:00:00")
+
+        self.assertEqual(payload["downloaded"], 1)
+        self.assertEqual(explicit.calls, 1)
+        self.assertEqual(bundled.calls, 0)
+
+    def test_sync_snapshots_uses_injected_bundle_tdx(self):
+        fake = self.FakeSnapshotTdx()
+        with patch("dragon_quant.providers.tdx.TdxProvider",
+                   side_effect=AssertionError("default provider constructed")):
+            payload = fin.sync_snapshots(fin._today(), ["600001"],
+                                         services=self._services(fake),
+                                         db_path=self._db_path)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["ok"], 1)
+        self.assertEqual(fake.codes, ["600001"])
+
+    def test_calibrate_field_map_uses_injected_bundle_tdx(self):
+        class FakeCalibrateTdx:
+            def __init__(self):
+                self.calls = 0
+
+            def get_financial_files(self, host=None):
+                self.calls += 1
+                return []
+
+        fake = FakeCalibrateTdx()
+        with patch("dragon_quant.providers.tdx.TdxProvider",
+                   side_effect=AssertionError("default provider constructed")):
+            with self.assertRaises(ValueError):
+                fin.calibrate_field_map(services=self._services(fake),
+                                        db_path=self._db_path)
+
+        self.assertEqual(fake.calls, 1)
+
+    def test_load_trade_calendar_uses_injected_bundle_tdx(self):
+        fake = MagicMock(name="bundle.tdx")
+        with patch("dragon_quant.utils.trading.tdx_trade_dates",
+                   return_value=["2026-10-19"]) as dates, \
+             patch("dragon_quant.providers.tdx.TdxProvider",
+                   side_effect=AssertionError("default provider constructed")):
+            loaded, error = fin.load_trade_calendar(
+                days=5, services=self._services(fake))
+
+        self.assertEqual(loaded, ["2026-10-19"])
+        self.assertIsNone(error)
+        self.assertIs(dates.call_args.args[0], fake)
+
+    def test_load_fin_source_forwards_services_to_snapshot_sync(self):
+        fake = self.FakeSnapshotTdx()
+        services = self._services(fake)
+        with patch.object(fin.fin_store, "has_observed_snapshots",
+                          return_value=False), \
+             patch.object(fin, "_today", return_value="2026-10-19"), \
+             patch.object(fin, "sync_snapshots") as sync:
+            payload = fin.load_fin_source("2026-10-19", ["600001"],
+                                          services=services,
+                                          db_path=self._db_path)
+
+        sync.assert_called_once_with("2026-10-19", ("600001",),
+                                     db_path=self._db_path, services=services)
+        self.assertIn(payload["status"], ("no_report_yet", "field_map_unverified"))
+
+    def test_load_fin_source_same_day_auto_sync_never_builds_a_default_tdx(self):
+        fake = self.FakeSnapshotTdx()
+        with patch.object(fin, "_today", return_value="2026-10-19"), \
+             patch("dragon_quant.providers.tdx.TdxProvider",
+                   side_effect=AssertionError("default provider constructed")):
+            payload = fin.load_fin_source("2026-10-19", ["600001"],
+                                          services=self._services(fake),
+                                          db_path=self._db_path)
+
+        self.assertEqual(fake.codes, ["600001"])
+        self.assertIn(payload["status"], ("no_report_yet", "field_map_unverified"))
+
+
+class TestEngineFinServicesForwarding(TempDbBase):
+    """M3B: services reach the finance source through engine build paths."""
+
+    SCAN = {
+        "status": "ok",
+        "rows_by_code": {"600001": {"composite_score": 50.0}},
+        "codes": ("600001",),
+    }
+
+    def test_load_fin_source_forwards_services_to_finance(self):
+        services = object()
+        with patch.object(engine, "_load_scan_source", return_value=self.SCAN), \
+             patch("dragon_quant.factors.finance.load_fin_source",
+                   return_value={"status": "no_report_yet"}) as loader:
+            engine._load_fin_source("2026-09-01", {}, services=services,
+                                    db_path=self._db_path)
+
+        self.assertIs(loader.call_args.kwargs["services"], services)
+
+    def test_build_date_forwards_services_to_the_fin_source(self):
+        services = object()
+        with patch.object(engine, "_load_scan_source", return_value=self.SCAN), \
+             patch("dragon_quant.factors.finance.load_fin_source",
+                   return_value={"status": "no_report_yet"}) as loader:
+            engine.build_date("2026-09-01", names=["fin_bps"],
+                              db_path=self._db_path, services=services)
+
+        self.assertIs(loader.call_args.kwargs["services"], services)
 
 
 if __name__ == "__main__":

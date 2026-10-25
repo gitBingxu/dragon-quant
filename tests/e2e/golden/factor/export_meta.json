@@ -1,0 +1,59 @@
+{
+  "build_ids": [
+    1,
+    2
+  ],
+  "clean": {
+    "limits": [
+      0.05,
+      0.95
+    ],
+    "max_stale": 0,
+    "missing": "nan",
+    "normalize": "none",
+    "winsorize": "none"
+  },
+  "codes": [
+    "600001",
+    "600002",
+    "600003",
+    "600004",
+    "600005",
+    "600006"
+  ],
+  "columns": [
+    "five_dim_composite",
+    "five_dim_liquidity"
+  ],
+  "coverage_by_date": {
+    "2026-09-10": {
+      "five_dim_composite": 1.0,
+      "five_dim_liquidity": 0.833333
+    },
+    "2026-09-11": {
+      "five_dim_composite": 1.0,
+      "five_dim_liquidity": 0.833333
+    }
+  },
+  "dates": [
+    "2026-09-10",
+    "2026-09-11"
+  ],
+  "dropped_codes": [],
+  "dropped_rows": 0,
+  "generated_at": "2026-09-11T15:30:00",
+  "missing_rate_by_factor": {
+    "five_dim_composite": 0.0,
+    "five_dim_liquidity": 0.166667
+  },
+  "missing_versions": [],
+  "normalize_skipped": null,
+  "normalize_skipped_dates": [],
+  "pipeline_version": "factor-matrix/1",
+  "resolved_versions": {
+    "five_dim_composite": "<VERSION>",
+    "five_dim_liquidity": "<VERSION>"
+  },
+  "winsorize_skipped": null,
+  "winsorize_skipped_dates": []
+}

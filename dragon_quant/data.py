@@ -65,24 +65,47 @@ def _get_providers() -> dict:
     return _providers
 
 
+def _providers_from_services(services) -> Optional[dict]:
+    """Optional M2 assembly seam: return the injected provider mapping or None.
+
+    ``None`` means "no injection" so the historical lazy ``create_providers()``
+    path (and its patch target) stays in force.  A feature may pass a
+    ``Services`` whose ``providers`` is also ``None`` (read-only assembly); that
+    is treated the same as omitting the argument.
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return bundle.as_dict()
+
+
+def _resolve_providers(services) -> dict:
+    injected = _providers_from_services(services)
+    return _get_providers() if injected is None else injected
+
+
 # ═══ 板块相关 ═══
 
-def get_sector_ranking(asc: bool = False) -> list[SectorPerformance]:
+def get_sector_ranking(asc: bool = False, services=None) -> list[SectorPerformance]:
     """获取行业板块涨跌幅排行榜（同花顺）
 
     Args:
         asc: False=涨幅榜, True=跌幅榜
+        services: 可选 M2 装配注入；有 providers 时使用其 ``ths``。
     Returns:
         list[SectorPerformance] 按涨跌幅排序的板块列表
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     ths = providers["ths"]
     return ths.get_sector_ranking(asc=asc)
 
 
 def get_sector_components(sector_code: str, page: int = 1,
                           all_pages: bool = False,
-                          page_size: int = 50) -> list[StockInfo]:
+                          page_size: int = 50,
+                          services=None) -> list[StockInfo]:
     """获取行业板块成分股列表（同花顺，按涨跌幅降序）
 
     Args:
@@ -90,10 +113,11 @@ def get_sector_components(sector_code: str, page: int = 1,
         page: 页码（默认第一页）
         all_pages: 是否自动拉取全量分页
         page_size: 每页大小
+        services: 可选 M2 装配注入；有 providers 时使用其 ``ths``。
     Returns:
         list[StockInfo] 成分股列表
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     ths = providers["ths"]
     return ths.get_sector_components(
         sector_code,
@@ -103,43 +127,47 @@ def get_sector_components(sector_code: str, page: int = 1,
     )
 
 
-def get_sector_5min_kline(sector_code: str, bars: int = 100) -> list[KBar]:
+def get_sector_5min_kline(sector_code: str, bars: int = 100, services=None) -> list[KBar]:
     """获取行业板块 5 分钟 K 线（同花顺，1 分钟分时聚合）
 
     Args:
         sector_code: 同花顺行业板块 6 位代码，如 "881167"
         bars: K 线根数（默认 100）
+        services: 可选 M2 装配注入；有 providers 时使用其 ``ths``。
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     ths = providers["ths"]
     return ths.get_sector_5min_kline(sector_code, bars=bars)
 
 
 # ═══ 个股相关 ═══
 
-def get_kline(code: str, source: str = "xueqiu", days: int = 20) -> list[KBar]:
+def get_kline(code: str, source: str = "xueqiu", days: int = 20,
+              services=None) -> list[KBar]:
     """获取个股日 K 线
 
     Args:
         code: 股票代码，如 "600172"
         source: 数据源，xueqiu=雪球, tencent=腾讯
         days: 天数
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     Returns:
         list[KBar] 日K线数据
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     p = providers.get(source, providers["xueqiu"])
     return p.get_kline(code, days=days)
 
 
-def get_minute_kline(code: str, source: str = "xueqiu") -> list[KBar]:
+def get_minute_kline(code: str, source: str = "xueqiu", services=None) -> list[KBar]:
     """获取个股 1分钟K线（分时数据）
 
     Args:
         code: 股票代码
         source: 数据源，xueqiu 或 tencent
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     p = providers.get(source, providers["xueqiu"])
     if source == "tencent":
         return p.get_5min_kline(code)
@@ -147,30 +175,33 @@ def get_minute_kline(code: str, source: str = "xueqiu") -> list[KBar]:
     return p.get_minute_kline(code) if hasattr(p, 'get_minute_kline') else p.get_5min_kline(code)
 
 
-def get_quote(code: str, source: str = "tencent") -> Optional[Quote]:
+def get_quote(code: str, source: str = "tencent", services=None) -> Optional[Quote]:
     """获取个股实时行情
 
     Args:
         code: 股票代码
         source: 数据源，tencent=腾讯（推荐）, xueqiu=雪球
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     Returns:
         Quote 或 None（获取失败时）
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     p = providers.get(source, providers["tencent"])
     return p.get_quote(code)
 
 
-def batch_get_quotes(codes: list[str], source: str = "tencent") -> list[Quote]:
+def batch_get_quotes(codes: list[str], source: str = "tencent",
+                     services=None) -> list[Quote]:
     """批量获取实时行情
 
     Args:
         codes: 股票代码列表
         source: 数据源
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     Returns:
         list[Quote]
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     p = providers.get(source, providers["tencent"])
     if hasattr(p, 'batch_get_quotes'):
         return p.batch_get_quotes(codes)
@@ -178,15 +209,16 @@ def batch_get_quotes(codes: list[str], source: str = "tencent") -> list[Quote]:
     return [p.get_quote(c) for c in codes]
 
 
-def get_auction(code: str) -> list[dict]:
+def get_auction(code: str, services=None) -> list[dict]:
     """获取个股当日集合竞价盘口（TDX，仅当日 9:25 后可用，无历史回看）。
 
     Args:
         code: 股票代码，如 "600172"
+        services: 可选 M2 装配注入；有 providers 时使用其 ``tdx``。
     Returns:
         list[dict]，每项含 time/price/matched/unmatched；失败或非交易时段返回空列表。
     """
-    providers = _get_providers()
+    providers = _resolve_providers(services)
     tdx = providers["tdx"]
     return tdx.get_auction(code)
 

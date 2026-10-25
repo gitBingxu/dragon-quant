@@ -16,10 +16,7 @@ class TestAuctionPool(unittest.TestCase):
     def _run(self, *, pool="prep", days=None, snapshot=None,
              snapshot_error=None, calendar=None, calendar_error=None,
              dragons=None, legacy_dates=None, as_json=True, get_dragons=None):
-        # 先导入 cli：cli_commands 在模块底部反向引用 cli（既有循环规避设计），
-        # 直接先导入 cli_commands 会在独立运行该测试文件时触发循环导入。
-        from dragon_quant import cli  # noqa: F401
-        from dragon_quant import cli_commands
+        from dragon_quant import commands
 
         dragons = dragons or []
         legacy_dates = legacy_dates if legacy_dates is not None else (
@@ -31,11 +28,11 @@ class TestAuctionPool(unittest.TestCase):
         calls = {"auction": [], "quotes": 0, "snapshot_reads": 0}
         saved = []
 
-        def fake_auction(code):
+        def fake_auction(code, services=None):
             calls["auction"].append(code)
             return list(ITEMS)
 
-        def fake_batch(codes, source="tdx"):
+        def fake_batch(codes, source="tdx", services=None):
             calls["quotes"] += 1
             return []
 
@@ -51,8 +48,8 @@ class TestAuctionPool(unittest.TestCase):
             return list(calendar)
 
         with ExitStack() as stack:
-            stack.enter_context(patch.object(
-                cli_commands, "_resolve_trade_date", return_value=DAY))
+            stack.enter_context(patch(
+                "dragon_quant.commands.auction._resolve_trade_date", return_value=DAY))
             stack.enter_context(patch(
                 "dragon_quant.utils.trading.tdx_trade_dates",
                 side_effect=fake_calendar))
@@ -90,8 +87,8 @@ class TestAuctionPool(unittest.TestCase):
             stack.enter_context(redirect_stdout(buf))
             stack.enter_context(redirect_stderr(err))
             try:
-                cli_commands._cmd_auction(
-                    SimpleNamespace(pool=pool, days=days, json=as_json))
+                commands.dispatch(
+                    "auction", SimpleNamespace(pool=pool, days=days, json=as_json))
             except SystemExit as exc:
                 exit_code = exc.code
         raw = buf.getvalue()

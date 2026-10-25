@@ -9,6 +9,8 @@
   - manifest   分区 manifest 构建 / 解析 / 重建
   - state      state.json（schema 2）原子读写 + 进程锁
   - service    push / pull / status / verify（分区编排 + 行级合并）
+  - cli_service  CLI 应用服务：backend/sources/paths 装配 + 动作分派 + 日期/错误协调
+                 （命令层只消费它，不直接构造后端；M6）
 """
 
 from dragon_quant.assets_sync.errors import (

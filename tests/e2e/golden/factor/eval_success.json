@@ -1,0 +1,78 @@
+{
+  "build_ids": [
+    1,
+    2,
+    3
+  ],
+  "coverage": {
+    "mean": 1.0,
+    "min": 1.0,
+    "missing_rate": 0.0
+  },
+  "days": 2,
+  "degraded": [],
+  "effective_independent_days": 2,
+  "factor": "five_dim_composite",
+  "frequency": "1d",
+  "group_count": 2,
+  "groups": [
+    {
+      "group": 1,
+      "hit_rate": 1.0,
+      "mean_return": 2.4999999999999982,
+      "n": 6
+    },
+    {
+      "group": 2,
+      "hit_rate": 1.0,
+      "mean_return": 4.5000000000000036,
+      "n": 6
+    }
+  ],
+  "horizon": 1,
+  "ic": {
+    "autocorr1": null,
+    "ci95": [
+      0.5228141417748733,
+      1.0771858582251268
+    ],
+    "icir": 2.82842712474619,
+    "kendall_tau_b": null,
+    "mean": 0.8,
+    "n_days": 2,
+    "nw_t_stat": 5.65685424949238,
+    "positive_ratio": 1.0,
+    "std": 0.28284271247461906,
+    "t_stat": 4.0
+  },
+  "label_rule": "next_open_to_next_open",
+  "long_short": {
+    "mean": 2.0000000000000053,
+    "pool_mean_return": 3.5000000000000013,
+    "tradable": false
+  },
+  "nw_lag": 0,
+  "observations": 12,
+  "ok": true,
+  "pit_basis_mix": {
+    "observed": 12,
+    "revised": 0,
+    "statutory_backfilled": 0
+  },
+  "pit_policy": "strict",
+  "reason": null,
+  "resolved_version": "<VERSION>",
+  "retracted_count": 0,
+  "status": "evaluated",
+  "trial_count": 1,
+  "turnover": {
+    "basis": "consecutive_included_days",
+    "definition": "group_membership_change",
+    "mean": 0.0
+  },
+  "universe": "limit_up_candidates",
+  "warnings": [
+    "label_missing: 6 条样本因停牌/数据不足无前向收益",
+    "单日截面中位数 6 只，5% 双侧显著约需 |IC| 0.88"
+  ]
+}

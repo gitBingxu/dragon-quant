@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from dragon_quant import commands
 from dragon_quant.review_account.models import StrategyConfig
 
 
@@ -481,6 +482,136 @@ class TestRunPrepIntegration(unittest.TestCase):
         # run_prep → resolve_window_dates → PrepContext 的窗口透传不能断链
         self.assertEqual(captured["window"], ["2026-10-15", "2026-10-16"])
         self.assertEqual(captured["window_days"], 5)
+
+
+class TestPrepServicesInjection(unittest.TestCase):
+    """M2C：可选 Services 注入四个 provider；未传保持既有构造与 patch 目标。"""
+
+    day = "2026-10-19"
+
+    def _now(self):
+        return _sh_now(self.day)
+
+    def _services(self):
+        from types import SimpleNamespace
+        bundle = SimpleNamespace(tdx=MagicMock(name="bundle.tdx"),
+                                 ths=MagicMock(name="bundle.ths"),
+                                 tencent=MagicMock(name="bundle.tencent"),
+                                 xueqiu=MagicMock(name="bundle.xueqiu"))
+        return SimpleNamespace(providers=bundle), bundle
+
+    def _collect_with(self, services):
+        from dragon_quant.review_account import prep
+
+        captured = {}
+
+        def probe(ctx):
+            captured["ctx"] = ctx
+            return {"total": 0}
+
+        with patch.object(prep, "TdxProvider") as tdx_cls, \
+             patch.object(prep, "THSProvider") as ths_cls, \
+             patch.object(prep, "TencentProvider") as tencent_cls, \
+             patch.object(prep, "XueqiuProvider") as xueqiu_cls, \
+             patch.dict(prep.ASSET_COLLECTORS, clear=True):
+            prep.ASSET_COLLECTORS.update({
+                "probe": prep.CollectorSpec(probe, same_day_only=False),
+            })
+            prep._collect_all(self.day, window_trade_dates=[self.day],
+                              asset_types=["probe"], now=self._now(),
+                              services=services)
+        return captured["ctx"], {
+            "tdx": tdx_cls, "ths": ths_cls,
+            "tencent": tencent_cls, "xueqiu": xueqiu_cls,
+        }
+
+    def test_injected_bundle_provides_all_four_providers(self):
+        services, bundle = self._services()
+        ctx, classes = self._collect_with(services)
+
+        self.assertIs(ctx.tdx, bundle.tdx)
+        self.assertIs(ctx.ths, bundle.ths)
+        self.assertIs(ctx.tencent, bundle.tencent)
+        self.assertIs(ctx.xueqiu, bundle.xueqiu)
+        for cls in classes.values():
+            cls.assert_not_called()
+
+    def test_omitted_services_keep_constructor_patch_targets(self):
+        ctx, classes = self._collect_with(None)
+
+        for name, cls in classes.items():
+            with self.subTest(provider=name):
+                self.assertIs(getattr(ctx, name), cls.return_value)
+                cls.assert_called_once_with()
+
+    def test_services_without_bundle_falls_back_to_constructors(self):
+        from types import SimpleNamespace
+        ctx, classes = self._collect_with(SimpleNamespace(providers=None))
+
+        for name, cls in classes.items():
+            with self.subTest(provider=name):
+                self.assertIs(getattr(ctx, name), cls.return_value)
+
+    def test_run_prep_routes_bundle_tdx_to_calendar_and_collection(self):
+        from dragon_quant.review_account import prep
+        services, bundle = self._services()
+        seen = {}
+
+        def fake_validate(trade_date, tdx, now=None):
+            seen["calendar_tdx"] = tdx
+            return ["2026-10-16", self.day]
+
+        def fake_collect(trade_date, tdx, calendar, stored, plan, today, now,
+                         services=None):
+            seen["collect_tdx"] = tdx
+            seen["collect_services"] = services
+            return _assets(trade_date)
+
+        with patch.object(prep, "_validate_trade_date", side_effect=fake_validate), \
+             patch.object(prep, "plan_prep",
+                          return_value=prep.PrepPlan(["dragons"], {})), \
+             patch.object(prep, "_run_collection", side_effect=fake_collect), \
+             patch.object(prep, "TdxProvider") as tdx_cls, \
+             patch("dragon_quant.storage.assets_db.get_prep_assets",
+                   return_value=_assets(self.day)), \
+             patch("dragon_quant.storage.assets_db.save_prep_snapshot"):
+            prep.run_prep(self.day, now=self._now(), services=services)
+
+        tdx_cls.assert_not_called()
+        self.assertIs(seen["calendar_tdx"], bundle.tdx)
+        self.assertIs(seen["collect_tdx"], bundle.tdx)
+        self.assertIs(seen["collect_services"], services)
+
+    def test_macro_collection_uses_injected_tdx(self):
+        from dragon_quant.review_account import prep
+        services, bundle = self._services()
+        ctx = prep.PrepContext(trade_date=self.day, today=self.day,
+                               tdx=bundle.tdx, ths=bundle.ths,
+                               tencent=bundle.tencent, xueqiu=bundle.xueqiu,
+                               window_trade_dates=[self.day])
+
+        with patch.object(prep, "collect_macro", return_value={}) as collect, \
+             patch.object(prep, "YahooMacroSource"):
+            prep._collect_macro(ctx)
+
+        self.assertIs(collect.call_args.args[0]["tdx"], bundle.tdx)
+
+    def test_recompute_constructs_no_providers_even_with_services(self):
+        from dragon_quant.review_account import prep
+        services, bundle = self._services()
+
+        with patch("dragon_quant.review_account.prep.assets_db.get_prep_assets",
+                   return_value=_assets("2026-10-16")), \
+             patch("dragon_quant.review_account.prep.assets_db.save_prep_snapshot"), \
+             patch.object(prep, "TdxProvider") as tdx_cls, \
+             patch.object(prep, "THSProvider") as ths_cls:
+            prep.run_prep("2026-10-16", recompute=True, services=services)
+
+        tdx_cls.assert_not_called()
+        ths_cls.assert_not_called()
+        for name in ("tdx", "ths", "tencent", "xueqiu"):
+            with self.subTest(provider=name):
+                self.assertEqual(getattr(bundle, name).method_calls, [])
 
 
 class TestMalformedAssetsTypeCoercion(unittest.TestCase):
@@ -1706,11 +1837,10 @@ class TestCmdPrepOutput(unittest.TestCase):
     def test_default_prints_four_lines_and_empty_candidate_list(self):
         import io
         from contextlib import redirect_stdout
-        from dragon_quant import cli
         buf = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", return_value=self._result()), \
              redirect_stdout(buf):
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         lines = buf.getvalue().strip().splitlines()
         self.assertEqual(len(lines), 6)
         self.assertIn("是否建议买入：是", lines[0])
@@ -1720,7 +1850,6 @@ class TestCmdPrepOutput(unittest.TestCase):
     def test_default_prints_candidate_list_after_blank_line(self):
         import io
         from contextlib import redirect_stdout
-        from dragon_quant import cli
         result = self._result()
         result["candidates"] = [
             {"code": "600001", "name": "强票", "composite_score": 82,
@@ -1733,7 +1862,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         buf = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", return_value=result), \
              redirect_stdout(buf):
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         lines = buf.getvalue().strip().splitlines()
         self.assertEqual(lines[4], "")
         self.assertEqual(lines[5], "✅ 强票-强烈建议")
@@ -1744,11 +1873,10 @@ class TestCmdPrepOutput(unittest.TestCase):
         import io
         import json
         from contextlib import redirect_stdout
-        from dragon_quant import cli
         buf = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", return_value=self._result()), \
              redirect_stdout(buf):
-            cli._cmd_prep(self._args(json=True))
+            commands.dispatch("prep", self._args(json=True))
         payload = json.loads(buf.getvalue())
         self.assertEqual(payload["version"], "0.5")
         self.assertIn("candidates", payload)
@@ -1756,13 +1884,12 @@ class TestCmdPrepOutput(unittest.TestCase):
     def test_format_failure_still_exits_zero(self):
         import io
         from contextlib import redirect_stderr
-        from dragon_quant import cli
         err = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", return_value=self._result()), \
              patch("dragon_quant.review_account.advice.format_advice_lines",
                    side_effect=RuntimeError("format boom")), \
              redirect_stderr(err):
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         self.assertIn("摘要生成失败", err.getvalue())
 
     def test_prep_help_lists_json_not_verbose(self):
@@ -1792,14 +1919,13 @@ class TestCmdPrepOutput(unittest.TestCase):
     def test_default_error_prints_human_to_stderr(self):
         import io
         from contextlib import redirect_stderr, redirect_stdout
-        from dragon_quant import cli
         from dragon_quant.review_account.prep import PrepError
         out, err = io.StringIO(), io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep",
                    side_effect=PrepError("boom")), \
              redirect_stdout(out), redirect_stderr(err), \
              self.assertRaises(SystemExit) as cm:
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         self.assertEqual(cm.exception.code, 1)
         self.assertEqual(out.getvalue(), "")
         self.assertIn("❌ 复盘失败：boom", err.getvalue())
@@ -1808,14 +1934,13 @@ class TestCmdPrepOutput(unittest.TestCase):
         import io
         import json
         from contextlib import redirect_stderr, redirect_stdout
-        from dragon_quant import cli
         from dragon_quant.review_account.prep import PrepError
         out, err = io.StringIO(), io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep",
                    side_effect=PrepError("boom")), \
              redirect_stdout(out), redirect_stderr(err), \
              self.assertRaises(SystemExit) as cm:
-            cli._cmd_prep(self._args(json=True))
+            commands.dispatch("prep", self._args(json=True))
         self.assertEqual(cm.exception.code, 1)
         payload = json.loads(out.getvalue())
         self.assertEqual(list(payload), ["error"])
@@ -1843,7 +1968,6 @@ class TestCmdPrepOutput(unittest.TestCase):
     def test_plan_hint_goes_to_stderr(self):
         import io
         from contextlib import redirect_stdout, redirect_stderr
-        from dragon_quant import cli
         from dragon_quant.review_account.prep import PrepPlan
 
         def _fake_run(trade_date, recompute=False, **kwargs):
@@ -1854,7 +1978,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", side_effect=_fake_run), \
              redirect_stdout(out), redirect_stderr(err):
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         self.assertIn("增量补采 1 项资产：market_breadth", err.getvalue())
         self.assertIn("修复 1 项历史状态标记：fg_boards", err.getvalue())
         self.assertIn("是否建议买入：是", out.getvalue().splitlines()[0])
@@ -1862,7 +1986,6 @@ class TestCmdPrepOutput(unittest.TestCase):
     def test_plan_hint_zero_collection(self):
         import io
         from contextlib import redirect_stdout, redirect_stderr
-        from dragon_quant import cli
         from dragon_quant.review_account.prep import PrepPlan
 
         def _fake_run(trade_date, recompute=False, **kwargs):
@@ -1872,14 +1995,13 @@ class TestCmdPrepOutput(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", side_effect=_fake_run), \
              redirect_stdout(out), redirect_stderr(err):
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         self.assertIn("资产已就绪（无需采集）", err.getvalue())
         self.assertEqual(len(out.getvalue().strip().splitlines()), 6)
 
     def test_plan_hint_repairs_only_full_sentence(self):
         import io
         from contextlib import redirect_stdout, redirect_stderr
-        from dragon_quant import cli
         from dragon_quant.review_account.prep import PrepPlan
 
         def _fake_run(trade_date, recompute=False, **kwargs):
@@ -1889,7 +2011,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", side_effect=_fake_run), \
              redirect_stdout(out), redirect_stderr(err):
-            cli._cmd_prep(self._args())
+            commands.dispatch("prep", self._args())
         self.assertIn("资产已就绪，修复 1 项历史状态标记：market_breadth",
                       err.getvalue())
 
@@ -1949,14 +2071,20 @@ class TestPrepPlanHint(unittest.TestCase):
         import io
         from contextlib import redirect_stderr
         from types import SimpleNamespace
-        import dragon_quant.cli  # 先加载 cli，规避循环导入
-        from dragon_quant.cli_commands import _prep_plan_hint
+        from zoneinfo import ZoneInfo
+        from dragon_quant.commands.prep import _prep_plan_hint
+        from dragon_quant.runtime import clock
         plan = SimpleNamespace(collect=[], repairs={})
         buf = io.StringIO()
-        with patch("dragon_quant.cli_commands.datetime") as mock_dt, \
-             redirect_stderr(buf):
-            mock_dt.now.return_value = fake_now
-            _prep_plan_hint(plan, trade_date, auto_date)
+        moment = fake_now
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+        previous = clock.set_clock(clock.FixedClock(moment))
+        try:
+            with redirect_stderr(buf):
+                _prep_plan_hint(plan, trade_date, auto_date)
+        finally:
+            clock.set_clock(previous)
         return buf.getvalue().strip()
 
     def test_auto_date_weekday_shows_remedy_hint(self):

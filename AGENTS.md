@@ -30,10 +30,13 @@ cd ~/repo/dragon-quant
 # 查看 Linux 风格帮助提示
 python -m dragon_quant -h
 python -m dragon_quant scan -h
+# 不带子命令只打印帮助（exit 0），不会执行扫描
+python -m dragon_quant
 
 # 批量扫描（五维「识别真龙」评分器）
-python -m dragon_quant
 python -m dragon_quant scan --top 25 --candidates 5 --workers 2
+# 读取历史扫描记录（不触网）
+python -m dragon_quant scan --date 20260519 --top 5
 
 # 强制执行（跳过交易时段拦截 + DB 缓存）
 python -m dragon_quant scan --force
@@ -43,10 +46,21 @@ python -m dragon_quant blacklist list
 python -m dragon_quant blacklist add "次新股"
 python -m dragon_quant blacklist remove "次新股"
 
+# 原子数据查询 / Cookie
+python -m dragon_quant data sector
+python -m dragon_quant data cookie-status
+python -m dragon_quant data cookie-fetch
+python -m dragon_quant data cookie-set --cookie "xq_a_token=...; xq_is_login=1; u=..."
+
+# 日志查询
+python -m dragon_quant logs list
+python -m dragon_quant logs tail -n 20
+
 # 持久化数据管理
 python -m dragon_quant storage status        # 查看存储状态
 python -m dragon_quant storage size          # 磁盘占用
-python -m dragon_quant storage clear --all   # 清理全部
+python -m dragon_quant storage clear --all   # 清理 cache+results+logs（不清理 .db）
+python -m dragon_quant storage clear --cache --results --logs --days 7
 
 # 回测 / 查看 UI（默认读取 dragons_v2）
 python -m dragon_quant review --date 20260519
@@ -126,9 +140,17 @@ Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
 
 ```
 dragon_quant/
-├── __init__.py / __main__.py    # 入口
-├── cli.py                       # argparse CLI 门面（解析树 + main() + 共享 helper；scan_v2 为隐藏兼容别名）
-├── cli_commands.py              # 各子命令 `_cmd_*` 处理函数（经转发包装引用 cli 的 patch 目标）
+├── __init__.py / __main__.py    # 入口（PEP 562 惰性导出 scan / run_review；__main__ 为薄壳）
+├── cli.py                       # argparse CLI 门面（解析树 + main()；分发走 commands.dispatch；scan_v2 为隐藏兼容别名）
+├── app.py                       # Composition Root（RuntimeConfig / Services / build_services / ensure_storage；不 import cli/commands）
+├── commands/                    # 每个顶层命令一个 handler 模块（`handle(args, services)`）
+│   ├── __init__.py              # lazy `COMMANDS` 注册表 + `dispatch(name, args)` 唯一分发入口
+│   ├── _shared.py               # CLI 纯 helper（策略 JSON / 日期 / 序列化）单一实现
+│   ├── scan.py / logs.py / data.py / blacklist.py / review.py / review_account.py
+│   └── dragons.py / prep.py / auction.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py
+├── runtime/                     # 运行时基础设施（非 feature，无业务规则）
+│   ├── clock.py                 # Clock 协议 + SystemClock / FixedClock + 进程级唯一时钟缝
+│   └── providers.py             # ProviderBundle + build_provider_bundle()
 ├── orchestrator.py              # 编排主流程 (Phase A→F)，固定五维评分
 ├── data.py                      # 原子数据查询 API
 ├── rate_limit.py                # 分组并发调度器
@@ -140,7 +162,8 @@ dragon_quant/
 │   ├── xueqiu.py                # 雪球（回退）— 个股日K/分时，需 Cookie
 │   ├── tencent.py               # 腾讯（回退）— 零认证，批量行情 + 收盘盘口(bid1)；宏观 quote 方法保留（当前规格未路由）
 │   ├── macro.py                 # 宏观扰动门面 — MACRO_SPECS/collect_macro + TDX 扩展行情主链路 + Yahoo 回退（仅美债/黄金）
-│   └── cookie.py                # Cookie 管理 + CLI
+│   ├── cookie.py                # Cookie 库（读写/获取/状态）
+│   └── cookie_cli.py            # Cookie 独立入口 argparse（python -m dragon_quant.providers.cookie；可注入 fetch）
 │
 ├── scorers/                  # 五维「识别真龙」评分器
 │   ├── base.py                  # DragonVerdict + 1分K对齐/归一化涨幅/排名分位工具
@@ -153,6 +176,7 @@ dragon_quant/
 │   └── aggregator.py            # 门槛+加权聚合 → DragonVerdict
 │
 ├── factors/                  # 因子层（P0-P2：只读迁移 + 长表 + 评估 + 决策接入；默认零影响）
+│   ├── __init__.py              # 13 个批准出口（PEP 562）+ 25 个 lazy 旧名兼容（不进 __all__）
 │   ├── types.py                 # FactorSpec / FactorContext / FactorFrame / FactorValue
 │   ├── registry.py              # FACTOR_SPECS + 校验 + tokenize 内容哈希版本
 │   ├── engine.py                # build 模板方法 + resolve_available_at 三套 PIT + canonical_scan
@@ -166,11 +190,17 @@ dragon_quant/
 │       ├── prep.py              # prep 系 7 个因子（复盘快照只读迁移，默认关）
 │       └── auction.py           # auction 系 8 个因子（竞价快照只读迁移，默认关）
 │
-├── auction/                     # 集合竞价强度评分器（纯函数、无 I/O；四维加权 + 否决闸门）
+├── auction/                     # 集合竞价（纯函数评分 + 在线采集/离线重算编排）
+│   ├── service.py               # 公共用例 facade：run_auction / run_auction_recompute
+│   ├── collect.py               # 在线采集编排（候选池/日历/行情/盘口/资产 payload）
+│   ├── recompute.py             # 已存资产离线重算（零 provider、零网络）
+│   ├── scoring.py               # 采集与重算共享的评分/摘要唯一实现
+│   ├── dates.py                 # 日期归一与交易日解析（纯函数）
 │   ├── registry.py              # 权重/阈值/窗口常量（集中调参）
 │   ├── strength.py              # evaluate / rank_auctions
 │   ├── serialize.py             # Quote/AuctionVerdict → JSON 原生 dict（NaN/inf 清洗）
-│   └── types.py                 # AuctionVerdict
+│   ├── report.py                # 人读摘要
+│   └── types.py                 # AuctionVerdict / AuctionOutcome
 │
 ├── vpa/                         # 量价分析（独立模块，插件式因子 FACTORS）
 │   ├── engine.py / types.py / report.py
@@ -180,17 +210,23 @@ dragon_quant/
 ├── logging/                     # 结构化日志 + 自然语言报告
 │   ├── logger.py                # ScanLogger
 │   └── reporter.py              # ReportBuilder（五维报告）
-├── storage/                     # 统一持久化
-│   ├── paths.py / manager.py
-│   ├── db.py                    # SQLite 门面 + 基础设施（_connect/_ensure_schema/_tables/init_db）
+├── storage/                     # 统一持久化（惰性初始化，导入无副作用）
+│   ├── paths.py / manager.py    # 平台路径 + ensure_data_dirs() / 存储清理门面
+│   ├── db.py                    # dragon.db 门面（_connect 首次带锁建 schema；init_db 幂等 API）
 │   ├── _base.py                 # 转发包装，令 `db._connect` 的 patch 传递到领域模块
 │   ├── blacklist.py / scans.py / dragons.py / logs.py
 │   ├── assets_db.py             # 数据资产独立库 assets.db（prep/auction 原始资产 + 算法快照）
+│   ├── dragons_mirror.py / finance.py / factors.py   # 镜像对账 / 财务账本 / 因子读 API
 │   └── review_account.py / signals.py
 ├── utils/trading.py            # 交易日历 + 涨停判断 + 买入日定位
 ├── review.py                    # 龙头回测验证
-├── review_account/              # 共享策略/事件引擎/成交/数据/评估/盘后复盘（strategy/engine/execution/data/market/prep/evaluation）
-│   ├── prep.py / advice.py      # 两段式复盘 + 4 行市场摘要/逐只清单
+├── review_account/              # 共享策略/事件引擎/成交/数据/评估/盘后复盘
+│   ├── prep/                    # 盘后复盘包（公共 import 路径 review_account.prep 不变）
+│   │   ├── service.py           # 日期/时点门禁 + 增量计划 + 采集→计算编排
+│   │   ├── collectors.py        # 8 个 collector + 分类/健康判定 + collection_report 合并
+│   │   ├── compute.py           # 情绪/主线/候选池/宏观纯计算（只读 assets）
+│   │   └── rebuild.py           # dragons 五日窗口资产 + --recompute 本地重建
+│   ├── advice.py                # 4 行市场摘要 / 逐只清单
 │   └── verdicts.py              # 逐只参与判定规则链（facts → strong/light/ignore/unrated）
 ├── live_trade/                  # 实盘辅助交易（buy/sell；复用 review_account 策略，纯信号记账）
 │   ├── signal_engine.py         # SignalEngine：无账户/资金/仓位限制，buy-all + 峰值跟踪 + 影子风控
@@ -198,13 +234,47 @@ dragon_quant/
 │   ├── trader.py                # LiveTrader.buy/sell（回放当日事件流 → 信号入库）
 │   └── service.py               # run_buy/run_sell（策略装配 + 中文输出）
 ├── assets_sync/                 # 数据资产云端同步（原始资产备份/恢复）
-│   ├── codec.py / models.py     # 规范化 JSON / gzip / 哈希 / manifest
+│   ├── cli_service.py           # CLI 应用服务：backend/sources/paths 装配 + 动作分派 + 退出码
+│   ├── service.py               # push/pull/status/verify 编排 + 行级合并
+│   ├── sources.py / tables.py   # 资产源 Adapter / TableSpec 注册表
+│   ├── manifest.py / state.py   # 分区 manifest / state.json 原子读写 + 进程锁
+│   ├── codec.py / models.py     # 规范化 JSON / gzip / 哈希 / 值对象
 │   ├── credentials.py           # profile + 凭据（环境变量 → 0600 文件）
 │   ├── doctor.py                # 门槛 A：连通性与元数据回环
+│   ├── errors.py                # 异常层级与退出码映射
 │   └── backends/                # S3Backend（R2/B2，SigV4）+ LocalDirBackend（测试）
-├── web_ui/                      # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer）
 └── models/types.py             # dataclass 数据模型
+
+# 同级仓库包（不是 dragon_quant 的子包）
+web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer；web_ui.start_server）
 ```
+
+> **命令导航（M11B 起）**：`cli.py` 只做 argparse 解析，随后调用 `commands.dispatch(name, args)`；
+> 每个顶层命令的实现在 `commands/<name>.py` 的 `handle(args, services)`（buy/sell 共用
+> `commands/buy_sell.py` 的 `handle_buy`/`handle_sell`）。测试与脚本应直接走
+> `commands.dispatch` 或命令模块的公共 helper，不存在第二个转发层。真实导航链是
+> `cli → commands → feature 门面 → feature 用例 → 实现`；`app.py`（Composition Root）只是
+> commands 按需调用的装配支路，不在链上多一跳。
+
+> **入口事实（实测）**：`python -m dragon_quant`（不带子命令）与 `-h` 一样**打印帮助并 exit 0**，
+> 不会执行扫描；实时扫描必须显式 `scan`。`scan --date YYYYMMDD` 只读取历史扫描记录，不触网。
+> 旧的「无参数即 scan」说法与当前 parser 不符，不得据此调用。
+
+> **模块公共入口**：`orchestrator.scan`；`review.run_review/review_dragon`；
+> `review_account.run_review_account` + `review_account.prep.run_prep`；
+> `live_trade.run_buy/run_sell`；`auction.run_auction/run_auction_recompute`；
+> `factors` 13 个批准出口（`build/list_factors/query/status/export_matrix/evaluate_factor/
+> fin_sync/fin_calibrate/fin_status/parse_only/FactorModel/annotate_pool/CleanConfig`）；
+> `assets_sync.cli_service.run`；`vpa.analyze`；`storage` 以子模块名（`db/assets_db/
+> dragons_mirror/finance/manager/paths/blacklist/signals/scans/dragons/logs/review_account`）
+> 为文档化公共契约，`storage/__init__.py` 不做急切重导出；`web_ui.start_server`。
+
+> **刻意保留的兼容例外**（不随 CLI 兼容层清理移除）：
+> - `factors/__init__.py` 的 25 个 lazy 旧名：一轮迁移兼容，经 lazy 映射按需解析，**不 eager 绑定**；
+> - `storage/_base.py` 转发包装：保留 `db._connect` 运行期 patch 语义（测试与既有脚本依赖）；
+> - `review_account/prep` 的 `legacy()` 与活动导出：子模块在调用期经它反查 patch 目标；
+> - `live_trade/trader.datetime` 模块级导入：测试按模块属性 patch 交易时钟；
+> - `COMMANDS["scan"]` 的 provider 例外（`providers=None`）：保持 `api_stats` 与 M1 golden 口径。
 
 ---
 
@@ -293,7 +363,7 @@ dragon_quant/
 | `dragons`（assets.db） | dragons_v2 全量镜像 | 列 schema 与 `dragons_v2` **完全一致**（含 `id`/`source`）；`UNIQUE(trade_date, code)` + 3 索引；权威仍是 dragon.db，存储门面**锁外 best-effort 双写**（失败只警告、可 `assets backfill-dragons` 自愈），供 prep / review-account / buy / sell / auction 的候选池读取；`volatile=True` 纳入 `assets_sync`（`dragons:mirror`，date 分区，第 15 表） |
 | **`factor_*`（assets.db）** | 因子层（P0） | `factor_values` 长表主键 `(trade_date, code, factor_name, factor_version)`，缺失=无行（绝不写 0/中性分）；`factor_registry` 元数据历史快照（`ON CONFLICT DO NOTHING`，重插旧版本不得刷新 `created_at`）；`factor_build_runs` 逐日审计；`factor_sector_snapshots` 主板块快照（`UNIQUE(trade_date, code, category)`，`category` 可能是 `gn`/`dq`，只有 `hy` 是真实行业）；`factor_model_snapshots` 供 P2 使用。M6 起纳入 `assets_sync`（`factor` domain source，行级合并；派生数据可重算但一并备份） |
 | `prep_assets`（assets.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务按键 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`fund_flow`/`cninfo_announcements`/`macro_global`/`collection_report`；`collection_report` 按条合并，语义为「该日期资产当前最佳状态」（未执行的键沿用存量，失败补采不覆盖健康状态）；每日落库=时间换历史 |
-| `prep_snapshots`（assets.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `macro` 宏观扰动 + `candidates` 候选池（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；当前 `version=0.5`；加字段=加 JSON key，无需改表 |
+| `prep_snapshots`（assets.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `macro` 宏观扰动 + `candidates` 候选池（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；当前 `version=0.6`；加字段=加 JSON key，无需改表 |
 | `auction_assets`（assets.db） | 集合竞价原始资产 | `auction` 命令产出；`items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`quote_json`（可空）存 `Quote` 行情快照（昨收/跌停价/流通市值等，旧行为 NULL），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
 | `auction_snapshots`（assets.db） | 集合竞价强度计算结果 | `auction` 采集/`auction --recompute DATE` 写入；单列 `analysis_json` 存 `AuctionVerdict` 序列化结果（`version`/`code`/`is_weak`/`strength`/`direction`/`level`/`dims`/`reject_reason`/`unverified`/`rank`），`UNIQUE(trade_date, code, source)`、`source` 默认 `v2`；同日重跑整日原子替换，空结果不删旧快照。读接口 `assets_db.list_auction_snapshots` / `get_auction_snapshot`（逐行 JSON 损坏隔离）供候选池 A 维度消费 |
 
@@ -359,6 +429,8 @@ python -m dragon_quant review-account --ui-only --source v2
 
 ### Web UI 前端构建
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
+
+**服务器入口（B2）**：`web_ui.start_server(port=8765, open_browser=True, default_source="v2", default_page="review", *, block=True) -> HTTPServer`（`web_ui.server.start_server` 的包级重导出）是唯一公共入口。`python -m web_ui.server`、`review --ui*`、`review-account --ui*` 保持既有阻塞行为（默认 `block=True`）；`--port 0` 由操作系统分配端口，日志与浏览器 URL 取 `server.server_address` 的真实端口（永不为 0），浏览器仅在明确开启且真实 URL 已知后打开。测试/嵌入传 `block=False` 立即拿到已绑定的 `HTTPServer`，自行 `serve_forever` / `shutdown` / `server_close`；启动失败、键盘中断与 serve 循环异常都会关闭 server 并释放端口。
 
 ### 实盘辅助交易（buy / sell）
 ```bash
@@ -522,6 +594,7 @@ python -m dragon_quant factor fin status
 - **未实现（P3）**：替换五维评分、行业中性化/风险平价、ML 模型、财务原始资产云端同步。
 
 ### 必须遵守的约束
+- **存储惰性初始化（B1）**：`import dragon_quant` / `import dragon_quant.storage.paths` / `-h` / `-v` **不得创建**任何数据目录、`dragon.db` / `assets.db`、WAL/SHM、缓存、报告或 Cookie 文件；包根 `scan` / `run_review` 为 PEP 562 惰性导出。首次真实存储访问（`storage.db._connect`、`assets_db._connect(create=True)`、`app.ensure_storage`、扫描报告写入、`DataCache` 落盘）才按 `DQ_DATA_DIR` 幂等建目录与 schema；`db._connect` 首次连接带锁建 schema（失败不置 ready，可重试），`init_db()` 保持公开幂等 API。
 - **运行时依赖**：`playwright`（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）为必选；`tmdx`（通达信 TDX 首选数据链路）为**默认依赖**（`pip install dragon-quant` 自动安装；缺失时每次 CLI 命令除 -h/--help/-v/--version 在 stderr 提示补装）。新增第三方依赖不受限，但须满足：许可证与 MIT 兼容、包仍活跃维护、引入时同步更新本段与 README 的依赖说明。注意 `tmdx` 自身已硬依赖 pandas/numpy（传递安装在 venv 中，项目代码不直接 import）。项目要求 Python≥3.10。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
@@ -638,6 +711,25 @@ main 把需求拆解为用户故事、可测试验收标准、约束、明确非
 ### Cookie 失效处理
 板块数据用同花顺（无需 Cookie）。个股依赖雪球 Cookie（有效期几天到数周），返回空/403 先查雪球 Cookie 状态。
 
+### 测试与 E2E 门禁
+```bash
+# M0 harness 自检（不跑业务用例）
+.venv/bin/python tests/e2e/harness/runner.py --self-check
+.venv/bin/python -m pytest tests/e2e/test_harness_safety.py tests/e2e/test_architecture_rules.py -q
+
+# 全量离线 E2E（真实 CLI 子进程 + golden）
+.venv/bin/python -m pytest tests/e2e -q
+
+# 单元 / 集成测试（排除 e2e 与需要真实网络的 smoke）
+.venv/bin/python -m pytest tests -q --ignore=tests/e2e --ignore=tests/smoke
+
+# Node 安装器测试（隔离 HOME/TMPDIR/npm cache，不访问 registry）
+npm test
+```
+- **安全边界**：`tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
+- **覆盖映射**：`tests/e2e/coverage-map.json` 固定 51 个 parser 节点 / 15 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。
+- **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
+
 ### Git 规范
 - 仓库：`gitBingxu/dragon-quant`；main 合入需 CODEOWNERS 审批。
 - Commit 风格：中文 + emoji 前缀（见 git log）。
@@ -649,6 +741,7 @@ main 把需求拆解为用户故事、可测试验收标准、约束、明确非
 ## 当前状态
 
 ### ✅ 已完成
+- **整仓结构重构 M0-M12**：`cli_commands.py` 删除，命令拆入 `commands/`（lazy `COMMANDS` + `dispatch`）；新增 `app.py` Composition Root、`runtime/{clock,providers}.py`、`auction/{service,collect,recompute,scoring,dates}.py`、`review_account/prep/` 包、`assets_sync/cli_service.py`、`providers/cookie_cli.py`；`factors` 包根收窄为 13 个批准出口（lazy 旧名兼容一轮）；`storage` 惰性初始化、Web `start_server` 可 `block=False`/`port=0`；离线 E2E harness（51 节点）/ 单测 / npm 门禁全绿
 - 五维「识别真龙」评分器 `scorers/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
 - 集合竞价强度评分器 `auction/`（方向/供需/量价/末段抢筹四维加权 + 否决闸门，纯函数）；`auction` 采集与 `auction --recompute DATE` 已接线，结果写 `assets.db/auction_snapshots`（原始资产含 `items_json` + `quote_json`，快照 = 原始资产纯函数）
 - 数据资产独立库 `assets.db`（`prep_assets`/`auction_assets` 原始资产 + `prep_snapshots`/`auction_snapshots` 结果），与 dragon.db 物理隔离

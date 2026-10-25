@@ -1,0 +1,117 @@
+{
+  "run": {
+    "source": "v2",
+    "strategy_name": "dragon_pullback_daily",
+    "date_from": "2026-09-04",
+    "date_to": "2026-09-08",
+    "initial_cash": 100000.0,
+    "final_equity": 99495.199,
+    "total_return": -0.5048009999999881,
+    "max_drawdown": -0.5048009999999881,
+    "trade_count": 2,
+    "win_rate": 0.0
+  },
+  "snapshots": [
+    {
+      "trade_date": "2026-09-04",
+      "cash": 100000.0,
+      "market_value": 0.0,
+      "total_equity": 100000.0,
+      "daily_return": 0.0,
+      "cumulative_return": 0.0,
+      "drawdown": 0.0,
+      "position_code": "",
+      "position_name": "",
+      "position_qty": 0,
+      "position_cost": null,
+      "position_market_price": null,
+      "position_unrealized_return": null,
+      "position": []
+    },
+    {
+      "trade_date": "2026-09-07",
+      "cash": 772.2406000000046,
+      "market_value": 99000.0,
+      "total_equity": 99772.2406,
+      "daily_return": -0.22775939999999384,
+      "cumulative_return": -0.22775939999999384,
+      "drawdown": -0.22775939999999384,
+      "position_code": "600001",
+      "position_name": "样本",
+      "position_qty": 9900,
+      "position_cost": 10.02,
+      "position_market_price": 10.0,
+      "position_unrealized_return": -0.22953193882154777,
+      "position": [
+        {"code": "600001", "qty": 9900, "entry_date": "2026-09-07", "entry_price": 10.02, "took_profit_half": false}
+      ]
+    },
+    {
+      "trade_date": "2026-09-08",
+      "cash": 99495.19900000001,
+      "market_value": 0.0,
+      "total_equity": 99495.19900000001,
+      "daily_return": -0.2776740287017243,
+      "cumulative_return": -0.5048009999999881,
+      "drawdown": -0.5048009999999881,
+      "position_code": "",
+      "position_name": "",
+      "position_qty": 0,
+      "position_cost": null,
+      "position_market_price": null,
+      "position_unrealized_return": null,
+      "position": []
+    }
+  ],
+  "trades": [
+    {
+      "trade_date": "2026-09-07", "code": "600001", "name": "样本", "side": "BUY",
+      "price": 10.02, "qty": 9900, "amount": 99198.0, "fee": 29.759399999999996,
+      "realized_pnl": -29.759399999999996, "cash_after": 772.2406000000046,
+      "position_after": 9900, "reason_code": "buy_open_ma5_pullback",
+      "reason_text": "开盘贴近上日MA5，回踩承接"
+    },
+    {
+      "trade_date": "2026-09-08", "code": "600001", "name": "样本", "side": "SELL",
+      "price": 9.98, "qty": 9900, "amount": 98802.0, "fee": 79.0416,
+      "realized_pnl": -504.8009999999922, "cash_after": 99495.19900000001,
+      "position_after": 0, "reason_code": "first_day_stop_loss",
+      "reason_text": "已完成K线触及-3.5%止损，等待可执行报价"
+    }
+  ],
+  "positions": [
+    {
+      "code": "600001", "name": "样本", "entry_date": "2026-09-07",
+      "entry_price": 10.02, "qty": 9900,
+      "entry_reason_code": "buy_open_ma5_pullback", "exit_date": "2026-09-08",
+      "exit_price": 9.98, "exit_reason_code": "first_day_stop_loss",
+      "hold_days": 1, "status": "closed",
+      "realized_return": -0.5087296166439411,
+      "post_exit_max_return": 2.2044088176352594,
+      "post_exit_max_drawdown": -1.8036072144288546,
+      "post_exit_window_days": 3
+    }
+  ],
+  "events": [
+    {
+      "event_date": "2026-09-04", "event_type": "IDLE", "code": "",
+      "title": "空仓", "reason_code": "no_execution", "cash": 100000.0,
+      "total_equity": 100000.0, "ranking_mode": "legacy",
+      "pool_source": "legacy", "fallback_reason": "no_snapshot"
+    },
+    {
+      "event_date": "2026-09-07", "event_type": "BUY", "code": "600001",
+      "title": "BUY 样本", "reason_code": "buy_open_ma5_pullback",
+      "cash": 772.2406000000046, "total_equity": 99772.2406,
+      "ranking_mode": "legacy", "pool_source": "legacy",
+      "fallback_reason": "no_snapshot"
+    },
+    {
+      "event_date": "2026-09-08", "event_type": "SELL", "code": "600001",
+      "title": "SELL 样本", "reason_code": "first_day_stop_loss",
+      "cash": 99495.19900000001, "total_equity": 99495.19900000001,
+      "ranking_mode": "legacy", "pool_source": "legacy",
+      "fallback_reason": "no_snapshot"
+    }
+  ]
+}

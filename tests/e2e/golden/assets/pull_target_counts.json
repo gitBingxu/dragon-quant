@@ -1,0 +1,17 @@
+{
+  "prep_assets": 2,
+  "auction_assets": 1,
+  "prep_snapshots": 1,
+  "auction_snapshots": 2,
+  "dragons": 1,
+  "factor_values": 2,
+  "factor_build_runs": 1,
+  "factor_sector_snapshots": 1,
+  "factor_registry": 1,
+  "factor_model_snapshots": 1,
+  "fin_observed_snapshots": 1,
+  "fin_report_files": 1,
+  "fin_report_records": 2,
+  "fin_field_calibrations": 1,
+  "fin_xdxr_records": 1
+}

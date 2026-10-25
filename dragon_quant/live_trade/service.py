@@ -3,6 +3,7 @@
 from typing import Optional
 
 from dragon_quant.live_trade.trader import LiveTrader
+from dragon_quant.review_account.data import MarketData
 from dragon_quant.review_account.models import StrategyConfig
 from dragon_quant.review_account.priority import RANKING_MODE_LABELS
 from dragon_quant.review_account.strategy import BUY_CHECK_STATUS_LABELS
@@ -15,11 +16,38 @@ def _make_config(source: str, strategy_params: Optional[dict]) -> StrategyConfig
     return cfg
 
 
+def _market_data_from_services(services) -> Optional[MarketData]:
+    """可选 M2 装配注入：用 bundle 的雪球 provider 构造 MarketData；无注入返回 None。
+
+    None 让 ``LiveTrader`` 保持既有 ``MarketData()`` 默认构造（旧调用与
+    ``LiveTrader(..., data=...)`` 低层注入面不变）。
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return MarketData(provider=bundle.xueqiu)
+
+
+def _make_trader(cfg: StrategyConfig, source: str, services) -> LiveTrader:
+    data = _market_data_from_services(services)
+    if data is None:
+        return LiveTrader(cfg, source=source)
+    return LiveTrader(cfg, source=source, data=data)
+
+
 def run_buy(trade_date: str, source: str = "v2", verbose: bool = True,
             as_of: Optional[str] = None, strategy_params: Optional[dict] = None,
-            force: bool = False) -> dict:
+            force: bool = False, services=None) -> dict:
+    """执行买入信号回放。
+
+    ``services`` 为可选 M2 装配注入口：传入且其 ``providers`` 非空时，行情/
+    分时使用 ``services.providers.xueqiu``；不传保持既有构造路径。策略、成交、
+    信号与输出不变。
+    """
     cfg = _make_config(source, strategy_params)
-    result = LiveTrader(cfg, source=source).buy(trade_date, as_of, force=force)
+    result = _make_trader(cfg, source, services).buy(trade_date, as_of, force=force)
     if verbose:
         _print_buy(trade_date, result)
     return result
@@ -27,9 +55,10 @@ def run_buy(trade_date: str, source: str = "v2", verbose: bool = True,
 
 def run_sell(trade_date: str, source: str = "v2", verbose: bool = True,
              as_of: Optional[str] = None, strategy_params: Optional[dict] = None,
-             force: bool = False) -> dict:
+             force: bool = False, services=None) -> dict:
+    """执行卖出信号回放（``services`` 语义同 :func:`run_buy`）。"""
     cfg = _make_config(source, strategy_params)
-    result = LiveTrader(cfg, source=source).sell(trade_date, as_of, force=force)
+    result = _make_trader(cfg, source, services).sell(trade_date, as_of, force=force)
     if verbose:
         _print_sell(trade_date, result)
     return result

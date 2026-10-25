@@ -1,4 +1,7 @@
 # auction 候选池改为 prep 推荐 + buy/review-account 的 P/A 优先级排序 — 技术方案
+> **当前状态（2026-10-25 整仓结构重构 M0–M12）**：本文中的 `dragon_quant/cli_commands.py` / `dragon_quant/review_account/prep.py` 等实现位置已迁移：命令入口在 `dragon_quant/commands/<command>.py`（经 `commands.dispatch`），prep 在 `dragon_quant/review_account/prep/` 包（service/collectors/compute/rebuild），auction 编排在 `dragon_quant/auction/service.py`，assets CLI 装配在 `dragon_quant/assets_sync/cli_service.py`。历史设计正文保留原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+
+
 
 日期：2026-10-21 · 分支：feat/reviewa-account-op · 状态：v4（main 已放行；用户三项裁决已回写，进入阶段 3）
 v2 修订：吸收 solution-reviewer 首轮 findings（0 CRITICAL / 5 MAJOR / 12 MINOR），逐条处理见 §16.1。

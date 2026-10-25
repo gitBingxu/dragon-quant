@@ -1,0 +1,12 @@
+{
+  "dates": ["2026-10-20", "2026-10-21"],
+  "rows_source": 3,
+  "inserted": 2,
+  "updated": 0,
+  "unchanged": 1,
+  "missing_rows": 2,
+  "orphan_rows": 1,
+  "pruned": 0,
+  "failed": [],
+  "warnings": []
+}

@@ -1,0 +1,24 @@
+{
+  "checks": [
+    {
+      "rule": "buy_open_ma5_pullback", "label": "开盘回踩MA5",
+      "window": "09:30 开盘", "status": "passed", "selected": true,
+      "reason": "开盘贴近上日MA5，回踩承接"
+    },
+    {
+      "rule": "buy_open_turn_strong", "label": "弱转强",
+      "window": "09:35 首根5分钟K", "status": "pending", "selected": false,
+      "reason": "待09:35首根5分钟K确认；已知：开盘10.00 未突破上日高点10.20"
+    },
+    {
+      "rule": "buy_divergence_first_break", "label": "分歧买龙",
+      "window": "10:00 前6根5分钟K", "status": "pending", "selected": false,
+      "reason": "承接窗口需6根5分钟K，当前0根；已知：连续一字板0 < 2板（非分歧形态）"
+    },
+    {
+      "rule": "buy_dragon_comeback", "label": "龙回头",
+      "window": "09:30 开盘（日K形态）", "status": "failed", "selected": false,
+      "reason": "未找到符合条件的第一波（近15日内需≥2涨停且区间涨幅≥30%）"
+    }
+  ]
+}

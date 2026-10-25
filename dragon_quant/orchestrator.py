@@ -16,7 +16,6 @@ Orchestrator — 编排层主流程
 
 import json
 import sys
-import time
 import functools
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -29,6 +28,7 @@ from dragon_quant.providers.tdx import is_available as _tdx_available
 from dragon_quant.providers.ths import drain_fetch_failures
 from dragon_quant.logging.logger import ScanLogger
 from dragon_quant.logging.reporter import ReportBuilder
+from dragon_quant.runtime import clock
 from dragon_quant.storage.paths import RESULTS_DIR
 from dragon_quant._version import __version__
 from dragon_quant.scorers import registry as R, rank_verdicts
@@ -364,13 +364,41 @@ def _print_cached_output(output_data: dict, top_n: int):
 
 
 
-def _get_trade_date() -> Optional[str]:
+def _providers_from_services(services):
+    """从可选 Services 取出注入的 provider 映射；未注入时返回 None。
+
+    None 表示沿用既有 ``create_providers()`` 构造路径（旧调用与旧 patch 目标不变）。
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return dict(bundle.as_dict())
+
+
+def _attach_provider_logger(providers, logger):
+    """把扫描 logger 挂到注入的 provider 上，与 create_providers(logger=) 行为对齐。"""
+    if logger is None:
+        return providers
+    for provider in providers.values():
+        set_logger = getattr(provider, "set_logger", None)
+        if callable(set_logger):
+            set_logger(logger)
+    return providers
+
+
+def _get_trade_date(providers: Optional[dict] = None) -> Optional[str]:
     """确定最近交易日（A股）。TDX 优先（无 Cookie），雪球兜底。
 
     先分时K线（能精确反映当日是否有交易），失败回退日K线（latest bar 即最近交易日）。
     返回 "YYYY-MM-DD" 或 None。
+
+    ``providers`` 供 M2A services 注入；为 None 时沿用 ``create_providers()``
+    （保留既有 monkeypatch 目标）。
     """
-    providers = create_providers()
+    if providers is None:
+        providers = create_providers()
     bj_tz = timezone(timedelta(hours=8))
 
     def _last_bar_date(bars) -> Optional[str]:
@@ -414,8 +442,13 @@ def _get_trade_date() -> Optional[str]:
 
 def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
          verbose: bool = True, force: bool = False,
-         scorers: str = "v2", refresh_provider_cache: bool = False) -> dict:
+         scorers: str = "v2", refresh_provider_cache: bool = False,
+         services=None) -> dict:
     """龙头战法完整扫描 — Programmtic API
+
+    ``services`` 为可选的 M2A 装配注入口：传入且其 ``providers`` 非空时，Phase A–F
+    与交易日判定统一使用该 bundle；不传（或 bundle 为空）时完全沿用既有
+    ``create_providers()`` / monkeypatch 路径。算法、缓存、输出与持久化不变。
 
     返回结构化 dict:
       {
@@ -443,8 +476,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
       }
     """
     bj_tz = timezone(timedelta(hours=8))
-    now = datetime.now(bj_tz)
+    now = clock.now(bj_tz)
     source = "v2"
+    injected_providers = _providers_from_services(services)
 
     # 1. 交易时间段拦截 (工作日的 9:00 - 15:00)
     is_trading_day = now.weekday() < 5
@@ -471,7 +505,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             cached_scan = db.get_latest_scan_by_date(scan_date_fmt, top_n, source=source)
             # Step 2: 当天无记录 → 确定最近交易日（TDX 优先，雪球兜底），查历史记录
             if not cached_scan:
-                trade_date = _get_trade_date()
+                trade_date = _get_trade_date(providers=injected_providers)
                 if trade_date and trade_date != scan_date_fmt:
                     cached_scan = db.get_latest_scan_by_date(trade_date, top_n, source=source)
                     if cached_scan:
@@ -493,11 +527,14 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             if verbose:
                 print(f"  ⚠️ 检查缓存失败，将执行完整扫描: {e}", file=sys.stderr)
 
-    t_start = time.time()
+    t_start = clock.monotonic()
 
     logger = ScanLogger()
 
-    providers = create_providers(logger=logger)
+    if injected_providers is None:
+        providers = create_providers(logger=logger)
+    else:
+        providers = _attach_provider_logger(injected_providers, logger)
     tdx = providers["tdx"]
     ths = providers["ths"]
     xq = providers["xueqiu"]
@@ -512,7 +549,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     #   trade_date 优先用 TDX 确定的最近交易日（雪球兜底），失败回退自然日。
     #   volatile：--force 闯入交易时段时，provider 缓存只用内存不落盘，
     #             防止盘中波动数据冻结进当日交易日目录污染收盘后复用。
-    trade_date = _get_trade_date() or now.strftime("%Y-%m-%d")
+    trade_date = _get_trade_date(providers=injected_providers) or now.strftime("%Y-%m-%d")
     volatile = is_trading_day and 9 <= now.hour < 15
     _cf = functools.partial(_cached_fetch, limiter, cache,
                             trade_date=trade_date,
@@ -877,11 +914,11 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     # ────────────────────────────────────────────
     # Phase F: 输出与持久化
     # ────────────────────────────────────────────
-    elapsed = time.time() - t_start
+    elapsed = clock.monotonic() - t_start
     logger.phase("F", "扫描完成", elapsed_s=round(elapsed, 1))
 
     output = {
-        "timestamp": time.strftime("%Y%m%d_%H%M%S"),
+        "timestamp": clock.stamp(),
         "source": source,
         "elapsed_s": round(elapsed, 1),
         "params": {"top_n": top_n, "candidates_n": candidates_n, "workers": workers, "scorers": source},
@@ -975,8 +1012,9 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
                 print(f"  ⚠️ 日志持久化失败: {e}", file=sys.stderr)
             output["log_count"] = len(logger.to_dicts())
 
-        # 报告文本
+        # 报告文本（B1：导入期不再建目录，写入点自行确保父目录）
         report_path = RESULTS_DIR / f"scan_report_{source}_{timestamp}.txt"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(reporter.build_summary_report(display_list))
             f.write("\n\n")
@@ -1007,7 +1045,7 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             
             # 构建交易日历（5 日去重用）
             from dragon_quant.utils.trading import build_trade_calendar, trade_days_between
-            cal_start = (datetime.now(bj_tz) - timedelta(days=30)).strftime("%Y-%m-%d")
+            cal_start = (clock.now(bj_tz) - timedelta(days=30)).strftime("%Y-%m-%d")
             cal_end = now.strftime("%Y-%m-%d")
             calendar = build_trade_calendar(cal_start, cal_end)
 

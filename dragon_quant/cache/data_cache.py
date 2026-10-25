@@ -13,19 +13,20 @@ import json
 import os
 import sys
 import threading
-import time
 import uuid
 from dataclasses import fields, MISSING
 from pathlib import Path
 from typing import Any, Optional
 
 from dragon_quant.models.types import KBar, StockInfo, Quote, SectorPerformance
+from dragon_quant.runtime import clock
 
 
 def _today_end() -> int:
-    """当日 23:59:59 的时间戳（秒）"""
-    t = time.localtime()
-    return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 23, 59, 59, 0, 0, 0)))
+    """当日 23:59:59 的时间戳（秒），按 runtime clock 的本地日界。"""
+    moment = clock.now()
+    return int(moment.replace(hour=23, minute=59, second=59,
+                              microsecond=0).timestamp())
 
 
 # ─── 按交易日磁盘缓存：key 前缀 → dataclass 类型注册表 ───
@@ -121,7 +122,7 @@ class CacheEntry:
 
     @property
     def expired(self) -> bool:
-        return time.time() > self.ttl
+        return clock.now().timestamp() > self.ttl
 
 
 class DataCache:
@@ -180,7 +181,7 @@ class DataCache:
 
     def snapshot(self) -> dict[str, Any]:
         """导出全部未过期数据快照（用于共享缓存）"""
-        now = time.time()
+        now = clock.now().timestamp()
         result = {}
         with self._lock:
             for k, v in self._mem.items():
@@ -205,7 +206,7 @@ class DataCache:
         try:
             safe = _to_json_safe(data)
             with open(self._cache_dir / f"{key}.json", "w", encoding="utf-8") as f:
-                json.dump({"data": safe, "ts": time.time()}, f, ensure_ascii=False)
+                json.dump({"data": safe, "ts": clock.now().timestamp()}, f, ensure_ascii=False)
         except Exception as e:
             print(f"  ⚠️ 缓存持久化失败 {key}: {e}", file=sys.stderr)
 
@@ -219,12 +220,13 @@ class DataCache:
         try:
             with open(p, encoding="utf-8") as f:
                 blob = json.load(f)
-            age = time.time() - blob.get("ts", 0)
+            now = clock.now().timestamp()
+            age = now - blob.get("ts", 0)
             if age > max_age:
                 p.unlink()
                 return None
             data = blob["data"]
-            self.set(key, data, ttl=int(time.time()) + max_age - int(age))
+            self.set(key, data, ttl=int(now) + max_age - int(age))
             return data
         except Exception:
             return None
@@ -259,7 +261,7 @@ class DataCache:
             safe = _to_json_safe(data)
             tmp = p.with_name(f"{p.stem}.{uuid.uuid4().hex}.tmp")
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"data": safe, "ts": time.time()}, f, ensure_ascii=False)
+                json.dump({"data": safe, "ts": clock.now().timestamp()}, f, ensure_ascii=False)
             os.replace(tmp, p)
         except Exception as e:
             print(f"  ⚠️ 交易日缓存写入失败 {key}: {e}", file=sys.stderr)

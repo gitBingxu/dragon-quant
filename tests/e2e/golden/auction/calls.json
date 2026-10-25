@@ -1,0 +1,22 @@
+[
+  [
+    "tdx",
+    "get_kline"
+  ],
+  [
+    "tdx",
+    "batch_get_quotes"
+  ],
+  [
+    "tdx",
+    "get_auction"
+  ],
+  [
+    "tdx",
+    "get_auction"
+  ],
+  [
+    "tdx",
+    "get_auction"
+  ]
+]

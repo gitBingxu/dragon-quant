@@ -166,7 +166,7 @@ class TestAssetsCliTargetDir(unittest.TestCase):
 
 class TestPeriodFilterHint(unittest.TestCase):
     def test_hint_when_period_partitions_excluded(self):
-        from dragon_quant.cli_commands import _period_filter_hint
+        from dragon_quant.commands.assets import _period_filter_hint
         hint = _period_filter_hint({"period_excluded": [
             {"partition": "fin-2025-12-31", "sort_date": "2025-12-31"},
             {"partition": "finraw-2025-12-31", "sort_date": "2025-12-31"},
@@ -178,7 +178,7 @@ class TestPeriodFilterHint(unittest.TestCase):
         self.assertIsNone(_period_filter_hint({}))
 
     def test_pull_summary_distinguishes_pending_from_zero_conflict(self):
-        from dragon_quant.cli_commands import _assets_human_summary
+        from dragon_quant.commands.assets import _assets_human_summary
         text = _assets_human_summary("assets pull", {"summary": {
             "restored": 0, "skipped": 0, "conflicts": [],
             "manifest_source": "remote", "merge_pending": 2}})

@@ -19,14 +19,14 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 from zoneinfo import ZoneInfo
 
-from dragon_quant.factors import stats as fstats
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.registry import get_spec
+from . import stats as fstats
+from . import storage as fstore
+from .registry import get_spec
+from dragon_quant.runtime import clock
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 PIPELINE_VERSION = "factor-matrix/1"
@@ -71,12 +71,12 @@ def validate_clean(clean: CleanConfig) -> None:
 
 
 def _normalize_date(raw: str) -> str:
-    from dragon_quant.factors.service import normalize_date
+    from .service import normalize_date
     return normalize_date(raw)
 
 
 def _now() -> str:
-    return datetime.now(SHANGHAI).strftime("%Y-%m-%dT%H:%M:%S")
+    return clock.now(SHANGHAI).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _clamp(value: float, low: float, high: float) -> float:

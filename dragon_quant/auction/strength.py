@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from dragon_quant.models.types import Quote, ScoreResult
-from dragon_quant.auction import registry as R
+from . import registry as R
 from dragon_quant.auction.types import AuctionVerdict
 
 

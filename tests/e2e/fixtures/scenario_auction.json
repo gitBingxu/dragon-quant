@@ -1,0 +1,734 @@
+{
+  "case": "auction",
+  "now": "2026-09-11T09:30:00+08:00",
+  "trade_date": "2026-09-11",
+  "note": "M1D1 auction scenario; reviewed items live in seed_builders.py.",
+  "providers": {
+    "tdx": {
+      "get_kline": {
+        "by_code": {
+          "SH000001": [
+            {
+              "timestamp": 1785740400000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1785826800000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1785913200000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1785999600000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786086000000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786345200000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786431600000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786518000000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786604400000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786690800000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1786950000000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787036400000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787122800000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787209200000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787295600000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787554800000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787641200000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787727600000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787814000000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1787900400000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788159600000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788246000000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788332400000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788418800000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788505200000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788764400000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788850800000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1788937200000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1789023600000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            },
+            {
+              "timestamp": 1789110000000,
+              "volume": 0.0,
+              "open": 3000.0,
+              "high": 3010.0,
+              "low": 2990.0,
+              "close": 3000.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 0.0
+            }
+          ]
+        }
+      },
+      "batch_get_quotes": [
+        {
+          "code": "600001",
+          "name": "龙头A",
+          "price": 10.5,
+          "prev_close": 10.0,
+          "open_px": 10.0,
+          "high": 10.5,
+          "low": 10.0,
+          "pct": 5.0,
+          "chg": 0.5,
+          "turnover_rate": 8.0,
+          "amplitude": 5.0,
+          "volume": 1000000.0,
+          "amount": 100000000.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 10.5,
+          "bid1_price": 0.0,
+          "bid1_volume": 0.0,
+          "ask1_volume": 0.0,
+          "timestamp": 1789110000000,
+          "main_net_amount": 12345600.0
+        },
+        {
+          "code": "600002",
+          "name": "跟风B",
+          "price": 9.78,
+          "prev_close": 10.0,
+          "open_px": 10.0,
+          "high": 10.0,
+          "low": 9.78,
+          "pct": -2.2,
+          "chg": -0.22,
+          "turnover_rate": 5.0,
+          "amplitude": 5.0,
+          "volume": 1000000.0,
+          "amount": 80000000.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 9.78,
+          "bid1_price": 0.0,
+          "bid1_volume": 0.0,
+          "ask1_volume": 0.0,
+          "timestamp": 1789110000000,
+          "main_net_amount": -5000000.0
+        },
+        {
+          "code": "600003",
+          "name": "补涨C",
+          "price": 9.0,
+          "prev_close": 10.0,
+          "open_px": 10.0,
+          "high": 10.0,
+          "low": 9.0,
+          "pct": -10.0,
+          "chg": -1.0,
+          "turnover_rate": 6.0,
+          "amplitude": 5.0,
+          "volume": 1000000.0,
+          "amount": 50000000.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 9.0,
+          "bid1_price": 0.0,
+          "bid1_volume": 0.0,
+          "ask1_volume": 0.0,
+          "timestamp": 1789110000000,
+          "main_net_amount": 2000000.0
+        }
+      ],
+      "get_auction": {
+        "by_code": {
+          "600001": [
+            {
+              "time": "09:15:00",
+              "price": 10.4,
+              "matched": 0,
+              "unmatched": 100
+            },
+            {
+              "time": "09:18:00",
+              "price": 10.45,
+              "matched": 5000,
+              "unmatched": 200
+            },
+            {
+              "time": "09:20:00",
+              "price": 10.5,
+              "matched": 12000,
+              "unmatched": 150
+            },
+            {
+              "time": "09:21:00",
+              "price": 10.52,
+              "matched": 16000,
+              "unmatched": 300
+            },
+            {
+              "time": "09:22:00",
+              "price": 10.55,
+              "matched": 21000,
+              "unmatched": 250
+            },
+            {
+              "time": "09:23:00",
+              "price": 10.58,
+              "matched": 26000,
+              "unmatched": 200
+            },
+            {
+              "time": "09:24:00",
+              "price": 10.62,
+              "matched": 32000,
+              "unmatched": 300
+            },
+            {
+              "time": "09:24:30",
+              "price": 10.66,
+              "matched": 38000,
+              "unmatched": 250
+            },
+            {
+              "time": "09:24:45",
+              "price": 10.68,
+              "matched": 43000,
+              "unmatched": 200
+            },
+            {
+              "time": "09:25:00",
+              "price": 10.7,
+              "matched": 50000,
+              "unmatched": 150
+            }
+          ],
+          "600002": [
+            {
+              "time": "09:15:00",
+              "price": 10.0,
+              "matched": 0,
+              "unmatched": -100
+            },
+            {
+              "time": "09:18:00",
+              "price": 9.95,
+              "matched": 2000,
+              "unmatched": -200
+            },
+            {
+              "time": "09:20:00",
+              "price": 9.9,
+              "matched": 5000,
+              "unmatched": -150
+            },
+            {
+              "time": "09:21:00",
+              "price": 9.88,
+              "matched": 7000,
+              "unmatched": -300
+            },
+            {
+              "time": "09:22:00",
+              "price": 9.86,
+              "matched": 9000,
+              "unmatched": -250
+            },
+            {
+              "time": "09:23:00",
+              "price": 9.84,
+              "matched": 11000,
+              "unmatched": -200
+            },
+            {
+              "time": "09:24:00",
+              "price": 9.82,
+              "matched": 13000,
+              "unmatched": -300
+            },
+            {
+              "time": "09:24:30",
+              "price": 9.8,
+              "matched": 15000,
+              "unmatched": -250
+            },
+            {
+              "time": "09:24:45",
+              "price": 9.79,
+              "matched": 16500,
+              "unmatched": -200
+            },
+            {
+              "time": "09:25:00",
+              "price": 9.78,
+              "matched": 18000,
+              "unmatched": -150
+            }
+          ],
+          "600003": [
+            {
+              "time": "09:15:00",
+              "price": 10.0,
+              "matched": 0,
+              "unmatched": -100
+            },
+            {
+              "time": "09:18:00",
+              "price": 9.8,
+              "matched": 500,
+              "unmatched": -200
+            },
+            {
+              "time": "09:20:00",
+              "price": 9.5,
+              "matched": 1000,
+              "unmatched": -300
+            },
+            {
+              "time": "09:21:00",
+              "price": 9.2,
+              "matched": 1500,
+              "unmatched": -400
+            },
+            {
+              "time": "09:22:00",
+              "price": 9.1,
+              "matched": 2000,
+              "unmatched": -500
+            },
+            {
+              "time": "09:23:00",
+              "price": 9.05,
+              "matched": 2500,
+              "unmatched": -600
+            },
+            {
+              "time": "09:24:00",
+              "price": 9.02,
+              "matched": 3000,
+              "unmatched": -700
+            },
+            {
+              "time": "09:24:30",
+              "price": 9.01,
+              "matched": 3500,
+              "unmatched": -800
+            },
+            {
+              "time": "09:24:45",
+              "price": 9.0,
+              "matched": 4000,
+              "unmatched": -900
+            },
+            {
+              "time": "09:25:00",
+              "price": 9.0,
+              "matched": 4500,
+              "unmatched": -1000
+            }
+          ]
+        }
+      }
+    },
+    "tencent": {
+      "batch_get_quotes": [
+        {
+          "code": "600001",
+          "name": "龙头A",
+          "price": 10.5,
+          "prev_close": 10.0,
+          "open_px": 10.0,
+          "high": 10.5,
+          "low": 10.0,
+          "pct": 5.0,
+          "chg": 0.5,
+          "turnover_rate": 8.0,
+          "amplitude": 5.0,
+          "volume": 1000000.0,
+          "amount": 100000000.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 10.5,
+          "bid1_price": 0.0,
+          "bid1_volume": 0.0,
+          "ask1_volume": 0.0,
+          "timestamp": 1789110000000,
+          "main_net_amount": 12345600.0
+        },
+        {
+          "code": "600002",
+          "name": "跟风B",
+          "price": 9.78,
+          "prev_close": 10.0,
+          "open_px": 10.0,
+          "high": 10.0,
+          "low": 9.78,
+          "pct": -2.2,
+          "chg": -0.22,
+          "turnover_rate": 5.0,
+          "amplitude": 5.0,
+          "volume": 1000000.0,
+          "amount": 80000000.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 9.78,
+          "bid1_price": 0.0,
+          "bid1_volume": 0.0,
+          "ask1_volume": 0.0,
+          "timestamp": 1789110000000,
+          "main_net_amount": -5000000.0
+        },
+        {
+          "code": "600003",
+          "name": "补涨C",
+          "price": 9.0,
+          "prev_close": 10.0,
+          "open_px": 10.0,
+          "high": 10.0,
+          "low": 9.0,
+          "pct": -10.0,
+          "chg": -1.0,
+          "turnover_rate": 6.0,
+          "amplitude": 5.0,
+          "volume": 1000000.0,
+          "amount": 50000000.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 9.0,
+          "bid1_price": 0.0,
+          "bid1_volume": 0.0,
+          "ask1_volume": 0.0,
+          "timestamp": 1789110000000,
+          "main_net_amount": 2000000.0
+        }
+      ]
+    }
+  }
+}

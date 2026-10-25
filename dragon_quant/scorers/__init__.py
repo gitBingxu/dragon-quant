@@ -4,7 +4,7 @@
 依据《评分器Refactor.md》。
 """
 
-from dragon_quant.scorers import registry as R
+from . import registry as R
 from dragon_quant.scorers.aggregator import evaluate, rank_verdicts
 from dragon_quant.scorers.base import DragonVerdict
 

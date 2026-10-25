@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import KBar, Quote, ScoreResult, StockInfo
-from dragon_quant.scorers import registry as R
+from . import registry as R
 from dragon_quant.sectors import components_key
 from dragon_quant.scorers.base import at_limit, clip, desc_rank_score
 

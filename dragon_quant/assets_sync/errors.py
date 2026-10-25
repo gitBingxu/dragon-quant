@@ -1,4 +1,4 @@
-"""数据资产同步错误类型（CLI 退出码映射见 cli_commands._cmd_assets）。"""
+"""数据资产同步错误类型（CLI 退出码映射见 commands/assets.py）。"""
 
 
 class AssetsSyncError(Exception):

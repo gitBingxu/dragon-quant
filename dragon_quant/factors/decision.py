@@ -20,7 +20,7 @@ import math
 from dataclasses import dataclass
 from typing import Mapping, Optional, Protocol, Sequence, runtime_checkable
 
-from dragon_quant.factors import storage as fstore
+from . import storage as fstore
 
 CROSS_SECTION = "pool_mixed_vintage_by_candidate_date"
 DEFAULT_MODEL_NAME = "equal_rank_v1"
@@ -305,7 +305,7 @@ def default_snapshot(*, names: Optional[Sequence[str]] = None,
     重复计数。生产/研究快照应通过 ``storage.save_model_snapshot`` 显式写入，
     本函数只提供可复现的起点。
     """
-    from dragon_quant.factors.registry import compute_version_info, resolve_specs
+    from .registry import compute_version_info, resolve_specs
 
     excluded = set(exclude or ())
     specs = resolve_specs(list(names) if names else None,

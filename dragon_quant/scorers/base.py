@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from dragon_quant.scorers import registry as R
+from . import registry as R
 
 from dragon_quant.models.types import KBar, ScoreResult  # noqa: F401  (re-export)
 

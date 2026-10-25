@@ -424,6 +424,108 @@ class TestRunReview(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["code"], "600172")
 
+    def test_run_review_window_uses_the_runtime_clock(self):
+        """M9A: the 5~20 trading-day window is anchored on ``runtime.clock``."""
+        from datetime import timedelta, timezone
+
+        from dragon_quant.runtime import clock as runtime_clock
+
+        self.addCleanup(runtime_clock.reset_clock)
+        runtime_clock.set_clock(runtime_clock.FixedClock(
+            datetime(2026, 5, 30, 15, 30,
+                     tzinfo=timezone(timedelta(hours=8)))))
+
+        with patch("dragon_quant.review.db.get_pending_dragons",
+                   return_value=[{"code": "600172", "name": "黄河旋风",
+                                  "trade_date": "2026-05-19"}]), \
+             patch("dragon_quant.review.db.update_dragon_review"), \
+             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.build_trade_calendar",
+                   return_value=set()) as calendar:
+            mock_provider_cls.return_value.get_kline.return_value = []
+            run_review(verbose=False)
+
+        calendar.assert_called_once_with("2026-04-30", "2026-05-30")
+
+
+
+class TestRunReviewServicesInjection(unittest.TestCase):
+    """M2A: run_review consumes a supplied provider bundle without constructing XueqiuProvider."""
+
+    def setUp(self):
+        self._calendar = {"2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22"}
+
+    def _klines(self):
+        return [
+            _mk_kbar("2026-05-18", 10.0, 11.0, 11.0, 10.0, 10.0),
+            _mk_kbar("2026-05-19", 11.0, 12.1, 12.1, 11.0, 10.0),
+            _mk_kbar("2026-05-20", 12.5, 13.0, 13.5, 11.5, 7.5),
+            _mk_kbar("2026-05-21", 13.0, 14.0, 14.5, 12.5, 7.7),
+        ]
+
+    def _services(self, xueqiu):
+        from unittest.mock import MagicMock
+
+        from dragon_quant.app import build_services
+        from dragon_quant.runtime.providers import ProviderBundle
+
+        bundle = ProviderBundle(
+            tdx=MagicMock(name="tdx"), ths=MagicMock(name="ths"),
+            xueqiu=xueqiu, tencent=MagicMock(name="tencent"),
+        )
+        return build_services(providers=bundle)
+
+    def test_supplied_bundle_provider_is_used_for_kline_loading(self):
+        xueqiu = MagicMock()
+        xueqiu.get_kline.return_value = self._klines()
+
+        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
+                patch("dragon_quant.review.db.update_dragon_review") as mock_update, \
+                patch("dragon_quant.review.XueqiuProvider") as provider_cls, \
+                patch("dragon_quant.review.build_trade_calendar",
+                      return_value=self._calendar):
+            mock_pending.return_value = [{
+                "code": "000001", "name": "平安银行", "trade_date": "2026-05-19",
+            }]
+            results = run_review(trade_date="2026-05-19", verbose=False,
+                                 services=self._services(xueqiu))
+
+        provider_cls.assert_not_called()
+        xueqiu.get_kline.assert_called_once_with(
+            "000001", days=20, fq_type="normal")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "completed")
+        mock_update.assert_called_once()
+
+    def test_explicit_provider_wins_over_services(self):
+        explicit = MagicMock()
+        explicit.get_kline.return_value = self._klines()
+        bundled = MagicMock()
+
+        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
+                patch("dragon_quant.review.db.update_dragon_review"), \
+                patch("dragon_quant.review.build_trade_calendar",
+                      return_value=self._calendar):
+            mock_pending.return_value = [{
+                "code": "000001", "name": "平安银行", "trade_date": "2026-05-19",
+            }]
+            run_review(trade_date="2026-05-19", verbose=False,
+                       provider=explicit, services=self._services(bundled))
+
+        explicit.get_kline.assert_called_once()
+        bundled.get_kline.assert_not_called()
+
+    def test_no_pending_records_do_not_touch_supplied_providers(self):
+        xueqiu = MagicMock()
+        with patch("dragon_quant.review.db.get_pending_dragons",
+                   return_value=[]), \
+                patch("dragon_quant.review.XueqiuProvider") as provider_cls:
+            results = run_review(verbose=False, services=self._services(xueqiu))
+
+        self.assertEqual(results, [])
+        provider_cls.assert_not_called()
+        xueqiu.get_kline.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

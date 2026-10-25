@@ -319,6 +319,93 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestScanServicesInjection(TestScanScoringIntegration):
+    """M2A: a supplied ProviderBundle drives Phase A–F; omission keeps the factory."""
+
+    def _bundle(self):
+        from dragon_quant.runtime.providers import ProviderBundle
+
+        return ProviderBundle(tdx=self.tdx, ths=self.ths,
+                              xueqiu=self.xq, tencent=self.tx)
+
+    def _services(self, clock=None):
+        from dragon_quant.app import build_services
+
+        return build_services(providers=self._bundle(), clock=clock)
+
+    def test_supplied_bundle_drives_all_phases_and_skips_factory(self):
+        output = orch.scan(top_n=1, verbose=False, force=True,
+                           services=self._services())
+
+        # Phase A: TDX primary + THS fallback ranking
+        self.tdx.get_sector_ranking.assert_called()
+        self.ths.get_sector_ranking.assert_called()
+        # Phase B: sector components + daily klines
+        self.ths.get_sector_components.assert_called()
+        self.xq.get_kline.assert_called()
+        # Phase D: sector history/1min + minute klines + batch quotes
+        self.ths.get_sector_5min_kline_history.assert_called()
+        self.ths.get_sector_1min_kline.assert_called()
+        self.xq.get_minute_kline.assert_called()
+        self.tx.batch_get_quotes.assert_called()
+        # Phase F: persistence unchanged (diagnostic ranking keeps both codes)
+        self.assertEqual(self.rows("dragons_v2"), [("600002", 1, 1)])
+        self.assertEqual({r["code"] for r in output["ranking"]},
+                         {"600001", "600002"})
+        orch.create_providers.assert_not_called()
+
+    def test_omitted_services_keep_the_existing_factory_path(self):
+        orch.scan(top_n=1, verbose=False, force=True)
+        orch.create_providers.assert_called_once()
+
+    def test_services_without_providers_fall_back_to_factory(self):
+        from dragon_quant.app import build_services
+
+        orch.scan(top_n=1, verbose=False, force=True, services=build_services())
+        orch.create_providers.assert_called_once()
+
+    def test_services_clock_remains_passive_while_the_runtime_seam_owns_time(self):
+        from datetime import datetime
+
+        from dragon_quant.runtime.clock import FixedClock
+
+        output = orch.scan(
+            top_n=1, verbose=False, force=True,
+            services=self._services(clock=FixedClock(datetime(2020, 1, 1, 9, 30))),
+        )
+
+        # ``services.clock`` stays assembly metadata; the module seam is the
+        # single production time source (M9A).
+        self.assertFalse(output["timestamp"].startswith("20200101"))
+        self.assertTrue(
+            output["timestamp"].startswith(datetime.now().strftime("%Y%m%d")))
+
+    def _install_fixed_clock(self, moment):
+        from dragon_quant.runtime import clock as runtime_clock
+
+        self.addCleanup(runtime_clock.reset_clock)
+        runtime_clock.set_clock(runtime_clock.FixedClock(moment))
+
+    def test_runtime_clock_drives_gate_timestamp_and_scan_id(self):
+        from datetime import datetime, timedelta, timezone
+
+        bj_tz = timezone(timedelta(hours=8))
+
+        self._install_fixed_clock(datetime(2026, 9, 11, 10, 0, tzinfo=bj_tz))
+        blocked = orch.scan(top_n=1, verbose=False)
+        self.assertEqual(blocked["error"], "未收盘")
+        self.assertFalse(Path(self.db_path).exists())
+
+        self._install_fixed_clock(datetime(2026, 9, 11, 15, 30, tzinfo=bj_tz))
+        output = orch.scan(top_n=1, verbose=False, force=True)
+
+        self.assertEqual(output["timestamp"], "20260911_153000")
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT id, scan_date FROM scans_v2").fetchone()
+        self.assertEqual(row, ("v2_20260911_1", "2026-09-11"))
+
+
+
 class TestApiFailureAttribution(unittest.TestCase):
 
     def test_fallback_rescue_is_per_dimension(self):
@@ -381,6 +468,15 @@ class TestGetTradeDate(unittest.TestCase):
         xq = Mock()
         xq.get_minute_kline.return_value = [self._bar("2026-10-20")]
         self.assertEqual(self._run(None, xq), "2026-10-20")
+
+    def test_supplied_providers_bypass_create_providers(self):
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = [self._bar("2026-10-24")]
+        providers = {"tdx": tdx, "ths": None, "xueqiu": None, "tencent": None}
+        with patch.object(orch, "create_providers") as factory:
+            result = orch._get_trade_date(providers=providers)
+        self.assertEqual(result, "2026-10-24")
+        factory.assert_not_called()
 
     def test_xueqiu_fallback_when_tdx_fails(self):
         tdx = Mock()

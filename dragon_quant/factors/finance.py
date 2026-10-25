@@ -24,6 +24,7 @@ from typing import Iterable, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from dragon_quant.factors.engine import format_ts, parse_local, phase_ts
+from dragon_quant.runtime import clock
 from dragon_quant.storage import finance as fin_store
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -191,35 +192,56 @@ def _match_period(code: str, values: dict, *, db_path=None) -> Optional[str]:
 # ─── 同步：日度观测 ─────────────────────────────────────────────────────────
 
 
-def _default_tdx():
+def _provider_from_services(services):
+    """可选 M2 装配注入：取出 ``bundle.tdx``；无注入返回 None。
+
+    None 表示沿用既有 ``TdxProvider()`` 构造路径，显式 ``tdx=`` 参数与
+    现有 patch 目标保持不变。
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return getattr(bundle, "tdx", None)
+
+
+def _default_tdx(services=None):
+    provider = _provider_from_services(services)
+    if provider is not None:
+        return provider
     from dragon_quant.providers.tdx import TdxProvider
     return TdxProvider()
 
 
 def _today() -> str:
-    return datetime.now(SHANGHAI).date().isoformat()
+    return clock.now(SHANGHAI).date().isoformat()
 
 
-def load_trade_calendar(days: int = 180) -> tuple[list[str], Optional[str]]:
+def load_trade_calendar(days: int = 180, *,
+                        services=None) -> tuple[list[str], Optional[str]]:
     """真实交易日历（TDX 上证指数日K，经 ``utils/trading.tdx_trade_dates``）。
 
     只供 stale 逾期判定使用；失败返回 ``([], "stale_calendar_missing: ...")``，
     **不阻断 build**（调用方把警告写入报告，stale 判定退化为工作日近似）。
+    ``services`` 为可选 M2 装配注入：其 ``providers.tdx`` 非空时用它取日历。
     """
     try:
-        from dragon_quant.providers.tdx import TdxProvider
         from dragon_quant.utils.trading import tdx_trade_dates
-        return list(tdx_trade_dates(TdxProvider(), days=days)), None
+        return list(tdx_trade_dates(_default_tdx(services), days=days)), None
     except Exception as exc:
         return [], f"stale_calendar_missing: {type(exc).__name__}: {exc}"
 
 
 def sync_snapshots(trade_date: str, codes: Iterable[str], *, tdx=None,
-                   db_path=None, now: Optional[str] = None) -> dict:
+                   db_path=None, now: Optional[str] = None,
+                   services=None) -> dict:
     """日度观测：逐 code ``get_finance_info`` → UPSERT ``fin_observed_snapshots``。
 
     ``same_day_only``：``trade_date != today`` 直接拒绝（未观测到的日子永久缺失，
     不能用当前最新财务回填历史——那是前视）。
+    ``services`` 为可选 M2 装配注入：其 ``providers.tdx`` 非空时使用它；显式
+    ``tdx=`` 优先于 bundle。
     """
     codes = sorted({str(c) for c in (codes or []) if c})
     if not codes:
@@ -227,8 +249,8 @@ def sync_snapshots(trade_date: str, codes: Iterable[str], *, tdx=None,
     if trade_date != _today():
         raise ValueError(
             f"财务观测仅当日可采（same_day_only）：trade_date={trade_date} 不是今天 {_today()}")
-    tdx = tdx or _default_tdx()
-    captured_at = now or format_ts(datetime.now(SHANGHAI))
+    tdx = tdx or _default_tdx(services)
+    captured_at = now or format_ts(clock.now(SHANGHAI))
     rows: list[dict] = []
     errors: list[dict] = []
     updated_dates: dict[str, int] = {}
@@ -289,14 +311,16 @@ def sync_backfill(*, periods: Optional[Sequence[str]] = None,
                   from_period: Optional[str] = None,
                   to_period: Optional[str] = None, tdx=None, force: bool = False,
                   host: Optional[str] = None, db_path=None,
-                  now: Optional[str] = None) -> dict:
+                  now: Optional[str] = None, services=None) -> dict:
     """按报告期回填 gpcw 账本。
 
     幂等：同 ``(period, md5)`` 且状态 ok → 零下载（``force=True`` 强制重下）。
     md5 变化 = **追加新 vintage**（不覆盖旧行）；值未变的 code 不产生新行。
+    ``services`` 为可选 M2 装配注入：其 ``providers.tdx`` 非空时使用它；显式
+    ``tdx=`` 优先于 bundle。
     """
-    tdx = tdx or _default_tdx()
-    now_iso = now or format_ts(datetime.now(SHANGHAI))
+    tdx = tdx or _default_tdx(services)
+    now_iso = now or format_ts(clock.now(SHANGHAI))
     files = tdx.get_financial_files(host=host)
     parsed = [(period, entry) for entry in files
               if (period := _period_from_filename(entry.get("filename") or ""))]
@@ -554,12 +578,14 @@ def _solve_calibration(samples: list[tuple[list[float], dict]]) -> dict:
 
 def calibrate_field_map(*, sample: int = 20, tdx=None, db_path=None,
                         host: Optional[str] = None,
-                        period: Optional[str] = None) -> dict:
+                        period: Optional[str] = None, services=None) -> dict:
     """用 ``get_finance_info`` 的命名值反推 gpcw 字段索引与单位并落表。
 
     未拿到独立证据 → ``status="unverified"``（财务因子 fail-closed 禁用）。
+    ``services`` 为可选 M2 装配注入：其 ``providers.tdx`` 非空时使用它；显式
+    ``tdx=`` 优先于 bundle。
     """
-    tdx = tdx or _default_tdx()
+    tdx = tdx or _default_tdx(services)
     files = tdx.get_financial_files(host=host)
     candidates = [(p, item) for item in files
                   if (p := _period_from_filename(item.get("filename") or ""))]
@@ -704,7 +730,8 @@ def _period_codes(period: str, *, db_path=None) -> list[str]:
 
 
 def load_fin_source(trade_date: str, codes: Iterable[str], *, calendar: Iterable[str] = (),
-                    pool_profile: Optional[dict] = None, db_path=None) -> dict:
+                    pool_profile: Optional[dict] = None, db_path=None,
+                    services=None) -> dict:
     """``source_rows`` 组装：as-of 展开 + cohort + 观测回退 + 逾期/校准门禁。
 
     返回结构（``builtin/financial.py`` 的输入契约）::
@@ -736,7 +763,8 @@ def load_fin_source(trade_date: str, codes: Iterable[str], *, calendar: Iterable
     if trade_date == _today() and codes and not fin_store.has_observed_snapshots(
             trade_date, db_path=db_path):
         try:
-            sync_snapshots(trade_date, codes, db_path=db_path)
+            sync_snapshots(trade_date, codes, db_path=db_path,
+                           services=services)
         except Exception as exc:
             degraded.append(f"snapshot_sync_failed: {type(exc).__name__}: {exc}")
 
@@ -978,7 +1006,7 @@ def status(*, db_path=None) -> dict:
         **store,
         "latest_period": latest_period,
         "next_deadline": next_deadline,
-        "overdue": (parse_local(next_deadline) < datetime.now(SHANGHAI)
+        "overdue": (parse_local(next_deadline) < clock.now(SHANGHAI)
                     if next_deadline else None),
         "calibrations": calibrated,
         "verified_layouts": [c["layout_key"] for c in calibrated

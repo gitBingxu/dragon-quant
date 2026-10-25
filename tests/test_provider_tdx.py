@@ -210,8 +210,9 @@ class TestCliWarnIntegration(unittest.TestCase):
 
     def test_warn_called_for_command(self):
         import dragon_quant.cli as cli
+        from dragon_quant.commands import blacklist as blacklist_command
         with patch.object(cli, "warn_if_unavailable") as mock_warn, \
-             patch.object(cli, "_cmd_blacklist", return_value=None), \
+             patch.object(blacklist_command, "handle", return_value=None), \
              patch("sys.argv", ["dragon-quant", "blacklist", "list"]):
             cli.main()
         mock_warn.assert_called_once()

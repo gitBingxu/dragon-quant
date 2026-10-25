@@ -3,7 +3,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from dragon_quant._version import __version__
 from dragon_quant import cli
@@ -47,7 +47,7 @@ class TestCliHelp(unittest.TestCase):
     def test_scan_help_does_not_run_scan(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "scan", "-h"]), \
-             patch("dragon_quant.cli.orchestrate_scan") as mock_scan:
+             patch("dragon_quant.orchestrator.scan") as mock_scan:
             with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
                 cli.main()
 
@@ -117,9 +117,15 @@ class TestCliSourceArgs(unittest.TestCase):
              patch("dragon_quant.review.run_review") as mock_run:
             cli.main()
 
-        mock_run.assert_called_once_with(
-            trade_date="2026-05-19", top_n=None, force=False, verbose=True, source="v2"
+        mock_run.assert_called_once()
+        kwargs = mock_run.call_args.kwargs
+        self.assertEqual(
+            {key: kwargs[key] for key in ("trade_date", "top_n", "force", "verbose", "source")},
+            {"trade_date": "2026-05-19", "top_n": None, "force": False,
+             "verbose": True, "source": "v2"},
         )
+        # M3A: the command layer hands the M2 Services bundle to the feature.
+        self.assertIsNotNone(kwargs["services"].providers)
 
     def test_review_ui_only_source_passes_to_server(self):
         with patch("sys.argv", ["dragon-quant", "review", "--ui-only", "--source", "v2", "--no-browser"]), \
@@ -142,7 +148,10 @@ class TestCliSourceArgs(unittest.TestCase):
             source="v2",
             strategy_name="dragon_pullback_daily",
             verbose=True,
+            services=ANY,
         )
+        # M3B: the command layer hands the M2 Services bundle to the feature.
+        self.assertIsNotNone(mock_run.call_args.kwargs["services"].providers)
 
     def test_review_account_ui_only_uses_account_page(self):
         with patch("sys.argv", [
@@ -182,7 +191,7 @@ class TestCliSourceArgs(unittest.TestCase):
 
     def test_review_account_passes_shared_config(self):
         with patch("sys.argv", ["dragon-quant", "review-account", "--from", "20260907", "--to", "20260911", "--config", "params.json"]), \
-             patch("dragon_quant.cli._strategy_params", return_value={"max_position_pct": 25}), \
+             patch("dragon_quant.commands._shared.load_strategy_params", return_value={"max_position_pct": 25}), \
              patch("dragon_quant.review_account.run_review_account") as run:
             cli.main()
         self.assertEqual(run.call_args.kwargs["strategy_params"], {"max_position_pct": 25})
@@ -369,7 +378,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
              quote_serialize_side_effect=None, as_json=True):
         from contextlib import ExitStack
         from types import SimpleNamespace
-        from dragon_quant import cli_commands
+        from dragon_quant import commands
         from dragon_quant.storage import db, assets_db
 
         if auction_items is None:
@@ -413,7 +422,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
             stack.enter_context(patch.object(dragons_mirror, "stale_dates",
                                              return_value={}))
             stack.enter_context(
-                patch.object(cli_commands, "_resolve_trade_date",
+                patch("dragon_quant.commands.auction._resolve_trade_date",
                              return_value="2026-10-20"))
             stack.enter_context(
                 patch("dragon_quant.data.get_auction", return_value=auction_items))
@@ -446,8 +455,8 @@ class TestCmdAuctionStorage(unittest.TestCase):
             try:
                 # 固定 legacy 池：用例只验证采集/落库契约，不依赖本地 assets.db 的
                 # prep 快照状态（prep 池行为由 tests/test_auction_pool.py 覆盖）。
-                cli_commands._cmd_auction(
-                    SimpleNamespace(days=3, pool="legacy", json=as_json))
+                commands.dispatch(
+                    "auction", SimpleNamespace(days=3, pool="legacy", json=as_json))
             except SystemExit as exc:
                 exit_code = exc.code
         raw = buf.getvalue()
@@ -724,7 +733,7 @@ class TestCmdAuctionRecompute(unittest.TestCase):
     def _run(self, raw_date, assets, replace_side_effect=None,
              today="2026-10-20", as_json=True, list_side_effect=None):
         from types import SimpleNamespace
-        from dragon_quant import cli_commands
+        from dragon_quant import commands
         from dragon_quant.storage import assets_db
 
         if replace_side_effect is None:
@@ -736,13 +745,13 @@ class TestCmdAuctionRecompute(unittest.TestCase):
         with patch.object(assets_db, "list_auction_assets", **list_kwargs), \
              patch.object(assets_db, "replace_auction_snapshots",
                           side_effect=replace_side_effect) as replace, \
-             patch.object(cli_commands, "_resolve_trade_date", return_value=today), \
+             patch("dragon_quant.commands.auction._resolve_trade_date", return_value=today), \
              patch("dragon_quant.data.get_auction") as get_auction, \
              patch("dragon_quant.data.batch_get_quotes") as batch, \
              redirect_stdout(buf), redirect_stderr(err):
             try:
-                cli_commands._cmd_auction(
-                    SimpleNamespace(days=3, recompute=raw_date, json=as_json))
+                commands.dispatch(
+                    "auction", SimpleNamespace(days=3, recompute=raw_date, json=as_json))
             except SystemExit as exc:
                 exit_code = exc.code
         raw = buf.getvalue()

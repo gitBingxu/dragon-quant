@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from dragon_quant.providers.xueqiu import XueqiuProvider
+from dragon_quant.runtime import clock
 from dragon_quant.storage import db
 from dragon_quant.utils.trading import (
     build_trade_calendar,
@@ -164,7 +165,9 @@ def run_review(trade_date: Optional[str] = None,
                top_n: Optional[int] = None,
                force: bool = False,
                verbose: bool = True,
-               source: str = "v2") -> list[dict]:
+               source: str = "v2",
+               provider: Optional[XueqiuProvider] = None,
+               services=None) -> list[dict]:
     """批量执行龙头回测。
 
     默认行为（trade_date 未指定时）：
@@ -177,6 +180,9 @@ def run_review(trade_date: Optional[str] = None,
         force: True=无视 review_status 全部重算
         verbose: 打印进度
         source: 回测数据来源体系，默认 v2；v1 仅用于历史记录查询。
+        provider: 显式 K 线 provider（优先级最高，兼容旧调用）。
+        services: 可选 M2A 装配注入；仅当 ``provider`` 未给出且其 ``providers``
+            非空时使用 ``services.providers.xueqiu``，否则保持 ``XueqiuProvider()``。
     """
     if force:
         entries = db.get_pending_dragons(trade_date=trade_date, top_n=top_n,
@@ -187,8 +193,8 @@ def run_review(trade_date: Optional[str] = None,
 
     # 未指定日期时，自动筛选 5~20 交易日内入选的票
     if not trade_date and entries:
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        lookback_start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        today_str = clock.now().strftime("%Y-%m-%d")
+        lookback_start = (clock.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         calendar = build_trade_calendar(lookback_start, today_str)
         trading_days = sorted(calendar, reverse=True)  # 从近到远
 
@@ -219,7 +225,12 @@ def run_review(trade_date: Optional[str] = None,
     if verbose:
         print(f"🐉 龙头回测 [{source}] — 共 {len(entries)} 条待处理\n")
 
-    provider = XueqiuProvider()
+    if provider is None and services is not None:
+        bundle = getattr(services, "providers", None)
+        if bundle is not None:
+            provider = bundle.xueqiu
+    if provider is None:
+        provider = XueqiuProvider()
     results = []
 
     for i, e in enumerate(entries):

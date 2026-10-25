@@ -509,18 +509,30 @@ def _build_benchmark_series(code: str, dates: list[str], initial_cash: float) ->
 
 
 def start_server(port: int = 8765, open_browser: bool = True,
-                 default_source: str = "v2", default_page: str = "review"):
+                 default_source: str = "v2", default_page: str = "review",
+                 *, block: bool = True) -> HTTPServer:
     """启动 HTTP 服务器。
 
     Args:
-        port: 监听端口
-        open_browser: 是否自动打开浏览器
+        port: 监听端口；``0`` 表示由 OS 分配，实际端口从
+            ``server.server_address`` 读取，日志/URL 永不为 0。
+        open_browser: 是否自动打开浏览器（只在真实 URL 确定后打开）。
+        default_source: 默认 dragons 数据源（``v1``/``v2``）。
+        default_page: 默认面板（``review``/``account``）。
+        block: ``True``（默认）阻塞运行 ``serve_forever``，保持既有 CLI
+            行为；``False`` 立即返回已绑定的 server，由调用方自行
+            ``serve_forever`` / ``shutdown`` / ``server_close``。
+
+    Returns:
+        已绑定的 ``HTTPServer`` 实例。无论阻塞模式以何种方式结束（键盘
+        中断或 serve 循环异常），server 都会被关闭并释放端口。
     """
     default_source = default_source if default_source in {"v1", "v2"} else "v2"
     server = HTTPServer(("127.0.0.1", port), ReviewHandler)
     server.default_source = default_source
+    actual_port = server.server_address[1]
     path = "/account" if default_page == "account" else "/"
-    url = f"http://localhost:{port}{path}?source={default_source}"
+    url = f"http://localhost:{actual_port}{path}?source={default_source}"
 
     print(f"🐉 Review Web UI 已启动 → {url}")
     print("   按 Ctrl+C 停止服务")
@@ -531,11 +543,16 @@ def start_server(port: int = 8765, open_browser: bool = True,
         except Exception:
             pass
 
+    if not block:
+        return server
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n👋 服务器已停止")
+    finally:
         server.server_close()
+    return server
 
 
 if __name__ == "__main__":

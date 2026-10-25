@@ -144,9 +144,8 @@ class TestScorePipelineOrder(unittest.TestCase):
     def test_rank_is_serialized_after_ranking(self):
         """evaluate → rank_auctions → payload：rank 不得因顺序错误丢失。"""
         from unittest.mock import patch
-        from dragon_quant import cli  # noqa: F401  — 先导入以解开 cli_commands 循环引用
-        from dragon_quant import cli_commands
         from dragon_quant.auction import registry as R
+        from dragon_quant.auction.service import _score_auction_assets
 
         items = [
             {"time": "09:20:00", "price": 10.0, "matched": 100, "unmatched": 100},
@@ -158,7 +157,7 @@ class TestScorePipelineOrder(unittest.TestCase):
             {"code": "600002", "items": items, "quote": _quote(code="600002")},
         ]
         with patch.object(R, "SEMANTICS_VERIFIED", True):
-            payloads, failures, _ = cli_commands._score_auction_assets(assets)
+            payloads, failures, _ = _score_auction_assets(assets)
         self.assertEqual(failures, [])
         self.assertEqual({p["rank"] for p in payloads.values()}, {1, 2})
 

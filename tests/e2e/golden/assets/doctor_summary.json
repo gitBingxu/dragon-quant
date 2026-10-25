@@ -1,0 +1,12 @@
+{
+  "profile": "e2e",
+  "endpoint": "https://e2e.invalid",
+  "bucket": "e2e-bucket",
+  "samples": 3,
+  "operations": 13,
+  "success_rate": 1.0,
+  "metadata_roundtrip": true,
+  "listed": 3,
+  "errors": [],
+  "cleanup_errors": []
+}

@@ -10,6 +10,8 @@
 from datetime import datetime
 from typing import Optional
 
+from dragon_quant.runtime import clock
+
 
 def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
     """用平安银行日K提取 [from_date, to_date] 内的交易日集合。
@@ -29,7 +31,7 @@ def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
     klines = provider.get_kline("000001", days=days)
 
     dates: set[str] = set()
-    now = datetime.now()
+    now = clock.now()
     today = now.strftime("%Y-%m-%d")
     market_closed = (now.hour, now.minute) >= (15, 5)
     for k in klines:

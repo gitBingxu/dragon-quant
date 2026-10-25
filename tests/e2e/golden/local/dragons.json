@@ -1,0 +1,210 @@
+{
+  "default": {
+    "trade_date": "2026-09-11",
+    "source": "v2",
+    "count": 2,
+    "dragons": [
+      {
+        "code": "600003",
+        "name": "丙公司",
+        "scan_id": "v2_20260911_5",
+        "rank": 1,
+        "composite_score": 90.0,
+        "board_count": 3,
+        "open_px": 11.0,
+        "close_px": 11.5,
+        "high_px": 11.8,
+        "low_px": 10.9,
+        "pct": 6.0,
+        "turnover_rate": 3.0,
+        "amount": 10000000.0,
+        "market_cap": 1000000000.0,
+        "concepts": [
+          "测试",
+          "概念1"
+        ],
+        "report_text": "报告600003",
+        "buy_date": null,
+        "buy_price": null,
+        "max_return_5d": null,
+        "max_drawdown_5d": null,
+        "max_return_hold_days": null,
+        "review_status": "pending",
+        "version": "0.7.2",
+        "is_true_dragon": true,
+        "source": "v2"
+      },
+      {
+        "code": "600004",
+        "name": "丁公司",
+        "scan_id": "v2_20260911_5",
+        "rank": 2,
+        "composite_score": 70.0,
+        "board_count": 4,
+        "open_px": 12.0,
+        "close_px": 12.5,
+        "high_px": 12.8,
+        "low_px": 11.9,
+        "pct": 7.0,
+        "turnover_rate": 3.0,
+        "amount": 10000000.0,
+        "market_cap": 1000000000.0,
+        "concepts": [
+          "测试",
+          "概念2"
+        ],
+        "report_text": "报告600004",
+        "buy_date": null,
+        "buy_price": null,
+        "max_return_5d": null,
+        "max_drawdown_5d": null,
+        "max_return_hold_days": null,
+        "review_status": "pending",
+        "version": "0.7.2",
+        "is_true_dragon": false,
+        "source": "v2"
+      }
+    ]
+  },
+  "date_0910": {
+    "trade_date": "2026-09-10",
+    "source": "v2",
+    "count": 2,
+    "dragons": [
+      {
+        "code": "600001",
+        "name": "甲公司",
+        "scan_id": "v2_20260910_5",
+        "rank": 1,
+        "composite_score": 80.0,
+        "board_count": 3,
+        "open_px": 11.0,
+        "close_px": 11.5,
+        "high_px": 11.8,
+        "low_px": 10.9,
+        "pct": 6.0,
+        "turnover_rate": 3.0,
+        "amount": 10000000.0,
+        "market_cap": 1000000000.0,
+        "concepts": [
+          "测试",
+          "概念1"
+        ],
+        "report_text": "报告600001",
+        "buy_date": null,
+        "buy_price": null,
+        "max_return_5d": null,
+        "max_drawdown_5d": null,
+        "max_return_hold_days": null,
+        "review_status": "pending",
+        "version": "0.7.2",
+        "is_true_dragon": true,
+        "source": "v2"
+      },
+      {
+        "code": "600002",
+        "name": "乙公司",
+        "scan_id": "v2_20260910_5",
+        "rank": 2,
+        "composite_score": 60.0,
+        "board_count": 4,
+        "open_px": 12.0,
+        "close_px": 12.5,
+        "high_px": 12.8,
+        "low_px": 11.9,
+        "pct": 7.0,
+        "turnover_rate": 3.0,
+        "amount": 10000000.0,
+        "market_cap": 1000000000.0,
+        "concepts": [
+          "测试",
+          "概念2"
+        ],
+        "report_text": "报告600002",
+        "buy_date": null,
+        "buy_price": null,
+        "max_return_5d": null,
+        "max_drawdown_5d": null,
+        "max_return_hold_days": null,
+        "review_status": "pending",
+        "version": "0.7.2",
+        "is_true_dragon": false,
+        "source": "v2"
+      }
+    ]
+  },
+  "true_only_0910": {
+    "trade_date": "2026-09-10",
+    "source": "v2",
+    "count": 1,
+    "dragons": [
+      {
+        "code": "600001",
+        "name": "甲公司",
+        "scan_id": "v2_20260910_5",
+        "rank": 1,
+        "composite_score": 80.0,
+        "board_count": 3,
+        "open_px": 11.0,
+        "close_px": 11.5,
+        "high_px": 11.8,
+        "low_px": 10.9,
+        "pct": 6.0,
+        "turnover_rate": 3.0,
+        "amount": 10000000.0,
+        "market_cap": 1000000000.0,
+        "concepts": [
+          "测试",
+          "概念1"
+        ],
+        "report_text": "报告600001",
+        "buy_date": null,
+        "buy_price": null,
+        "max_return_5d": null,
+        "max_drawdown_5d": null,
+        "max_return_hold_days": null,
+        "review_status": "pending",
+        "version": "0.7.2",
+        "is_true_dragon": true,
+        "source": "v2"
+      }
+    ]
+  },
+  "true_only_latest": {
+    "trade_date": "2026-09-11",
+    "source": "v2",
+    "count": 1,
+    "dragons": [
+      {
+        "code": "600003",
+        "name": "丙公司",
+        "scan_id": "v2_20260911_5",
+        "rank": 1,
+        "composite_score": 90.0,
+        "board_count": 3,
+        "open_px": 11.0,
+        "close_px": 11.5,
+        "high_px": 11.8,
+        "low_px": 10.9,
+        "pct": 6.0,
+        "turnover_rate": 3.0,
+        "amount": 10000000.0,
+        "market_cap": 1000000000.0,
+        "concepts": [
+          "测试",
+          "概念1"
+        ],
+        "report_text": "报告600003",
+        "buy_date": null,
+        "buy_price": null,
+        "max_return_5d": null,
+        "max_drawdown_5d": null,
+        "max_return_hold_days": null,
+        "review_status": "pending",
+        "version": "0.7.2",
+        "is_true_dragon": true,
+        "source": "v2"
+      }
+    ]
+  }
+}

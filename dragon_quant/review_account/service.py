@@ -9,6 +9,20 @@ from dragon_quant.review_account.simulator import AccountSimulator, annotate_pos
 from dragon_quant.storage import db
 
 
+def _xueqiu_from_services(services):
+    """可选 M2 装配注入：取出 bundle 的雪球 provider；无注入返回 None。
+
+    None 表示沿用 ``AccountSimulator`` → ``MarketData`` 的既有默认构造，
+    旧调用与 ``MarketData(provider=...)`` / provider patch 行为不变。
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return bundle.xueqiu
+
+
 def run_review_account(date_from: str,
                        date_to: str,
                        *,
@@ -17,13 +31,19 @@ def run_review_account(date_from: str,
                        strategy_name: str = "dragon_pullback_daily",
                        verbose: bool = True,
                        display_name: Optional[str] = None,
-                       strategy_params: Optional[dict] = None) -> dict:
-    """运行账户级交易模拟并持久化结果。"""
+                       strategy_params: Optional[dict] = None,
+                       services=None) -> dict:
+    """运行账户级交易模拟并持久化结果。
+
+    ``services`` 为可选 M2 装配注入口：传入且其 ``providers`` 非空时，K 线
+    加载使用 ``services.providers.xueqiu``；不传时保持原有 ``XueqiuProvider()``
+    构造路径。策略、成交、候选池、信号与输出不变。
+    """
     if strategy_params is not None and not isinstance(strategy_params, dict):
         raise ValueError("strategy_params 必须是 JSON 对象")
     cfg = StrategyConfig.from_dict({**(strategy_params or {}), "source": source,
                                     "strategy_name": strategy_name, "initial_cash": initial_cash})
-    sim = AccountSimulator(cfg)
+    sim = AccountSimulator(cfg, provider=_xueqiu_from_services(services))
     result = sim.run(date_from, date_to)
     # 事后评估：清仓后窗口指标。放在 run() 之外，回测核心保持纯 as-of；失败逐条降级。
     annotate_post_exit(result["positions"], sim.data)

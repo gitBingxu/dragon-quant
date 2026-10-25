@@ -1,0 +1,1267 @@
+{
+  "schema": 1,
+  "description": "M1F2 machine-checkable coverage map: every parser node (51), hidden alias, invocation fact, and independent entry maps to real tests under tests/e2e.",
+  "parser_snapshot": {
+    "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
+    "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
+    "node_count": 51,
+    "top_level_count": 15,
+    "nodes": [
+      {
+        "command": "scan",
+        "flags": [
+          "-h",
+          "--help",
+          "--top",
+          "--candidates",
+          "--workers",
+          "--force",
+          "--no-cache",
+          "--date"
+        ]
+      },
+      {
+        "command": "logs",
+        "flags": [
+          "-h",
+          "--help",
+          "--source"
+        ]
+      },
+      {
+        "command": "logs tail",
+        "flags": [
+          "-h",
+          "--help",
+          "-n",
+          "--lines"
+        ]
+      },
+      {
+        "command": "logs query",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--category",
+          "--level",
+          "--code",
+          "--tail"
+        ]
+      },
+      {
+        "command": "logs clear",
+        "flags": [
+          "-h",
+          "--help",
+          "--days"
+        ]
+      },
+      {
+        "command": "logs list",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "logs summary",
+        "flags": [
+          "-h",
+          "--help",
+          "--date"
+        ]
+      },
+      {
+        "command": "data",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "data sector",
+        "flags": [
+          "-h",
+          "--help",
+          "--asc"
+        ]
+      },
+      {
+        "command": "data components",
+        "flags": [
+          "-h",
+          "--help",
+          "--sector"
+        ]
+      },
+      {
+        "command": "data kline",
+        "flags": [
+          "-h",
+          "--help",
+          "--code",
+          "--source",
+          "--days"
+        ]
+      },
+      {
+        "command": "data minute",
+        "flags": [
+          "-h",
+          "--help",
+          "--code",
+          "--source"
+        ]
+      },
+      {
+        "command": "data quote",
+        "flags": [
+          "-h",
+          "--help",
+          "--code",
+          "--source"
+        ]
+      },
+      {
+        "command": "data batch-quote",
+        "flags": [
+          "-h",
+          "--help",
+          "--codes",
+          "--source"
+        ]
+      },
+      {
+        "command": "data cookie-status",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "data cookie-fetch",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "data cookie-set",
+        "flags": [
+          "-h",
+          "--help",
+          "--cookie",
+          "-c"
+        ]
+      },
+      {
+        "command": "blacklist",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "blacklist list",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "blacklist add",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "blacklist remove",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "review",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--top",
+          "--force",
+          "--source",
+          "--ui",
+          "--ui-only",
+          "--port",
+          "--no-browser"
+        ]
+      },
+      {
+        "command": "review-account",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--capital",
+          "--strategy",
+          "--source",
+          "--ui",
+          "--ui-only",
+          "--port",
+          "--no-browser",
+          "--config"
+        ]
+      },
+      {
+        "command": "dragons",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--true-only"
+        ]
+      },
+      {
+        "command": "prep",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--recompute",
+          "--force",
+          "--json"
+        ]
+      },
+      {
+        "command": "auction",
+        "flags": [
+          "-h",
+          "--help",
+          "--pool",
+          "--days",
+          "--recompute",
+          "--json"
+        ]
+      },
+      {
+        "command": "assets",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "assets doctor",
+        "flags": [
+          "-h",
+          "--help",
+          "--profile",
+          "--timeout",
+          "--samples"
+        ]
+      },
+      {
+        "command": "assets push",
+        "flags": [
+          "-h",
+          "--help",
+          "--profile",
+          "--timeout",
+          "--from",
+          "--to",
+          "--all",
+          "--dry-run",
+          "--allow-shrink"
+        ]
+      },
+      {
+        "command": "assets pull",
+        "flags": [
+          "-h",
+          "--help",
+          "--profile",
+          "--timeout",
+          "--from",
+          "--to",
+          "--apply",
+          "--force",
+          "--pick",
+          "--target-dir"
+        ]
+      },
+      {
+        "command": "assets status",
+        "flags": [
+          "-h",
+          "--help",
+          "--profile",
+          "--timeout",
+          "--all",
+          "--orphans"
+        ]
+      },
+      {
+        "command": "assets verify",
+        "flags": [
+          "-h",
+          "--help",
+          "--profile",
+          "--timeout",
+          "--from",
+          "--to",
+          "--samples",
+          "--deep",
+          "--md5"
+        ]
+      },
+      {
+        "command": "assets backfill-dragons",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--dry-run",
+          "--prune",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "factor build",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--from",
+          "--to",
+          "--only",
+          "--all",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor list",
+        "flags": [
+          "-h",
+          "--help",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor query",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--from",
+          "--to",
+          "--name",
+          "--code",
+          "--version",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor status",
+        "flags": [
+          "-h",
+          "--help",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor export",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--name",
+          "--code",
+          "--version",
+          "--format",
+          "--out",
+          "--clean",
+          "--missing",
+          "--winsorize",
+          "--normalize",
+          "--limits",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor eval",
+        "flags": [
+          "-h",
+          "--help",
+          "--name",
+          "--from",
+          "--to",
+          "--horizon",
+          "--groups",
+          "--version",
+          "--min-days",
+          "--min-cross-section",
+          "--pit-policy",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor fin",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "factor fin sync",
+        "flags": [
+          "-h",
+          "--help",
+          "--snapshot",
+          "--backfill",
+          "--date",
+          "--from-period",
+          "--to-period",
+          "--force",
+          "--host",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor fin calibrate",
+        "flags": [
+          "-h",
+          "--help",
+          "--sample",
+          "--period",
+          "--host",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor fin status",
+        "flags": [
+          "-h",
+          "--help",
+          "--json"
+        ]
+      },
+      {
+        "command": "buy",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--source",
+          "--json",
+          "--at",
+          "--config",
+          "--force"
+        ]
+      },
+      {
+        "command": "sell",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
+          "--source",
+          "--at",
+          "--config",
+          "--force"
+        ]
+      },
+      {
+        "command": "vpa",
+        "flags": [
+          "-h",
+          "--help",
+          "--code",
+          "--source",
+          "--days",
+          "--no-save"
+        ]
+      },
+      {
+        "command": "storage",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "storage status",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "storage size",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "storage clear",
+        "flags": [
+          "-h",
+          "--help",
+          "--all",
+          "--cache",
+          "--results",
+          "--logs",
+          "--days"
+        ]
+      }
+    ]
+  },
+  "coverage": {
+    "nodes": {
+      "scan": {
+        "tests": [
+          "tests/e2e/test_scan.py::test_s1_success_matches_reviewed_golden",
+          "tests/e2e/test_scan.py::test_g4_scan_without_options_uses_default_parameters",
+          "tests/e2e/test_scan.py::test_s2_second_run_serves_database_cache_without_writes",
+          "tests/e2e/test_scan.py::test_s3_intraday_without_force_is_intercepted",
+          "tests/e2e/test_scan.py::test_s4_intraday_force_runs_but_skips_provider_disk_cache",
+          "tests/e2e/test_scan.py::test_s5_history_prints_pinned_raw_output_key_order",
+          "tests/e2e/test_scan.py::test_s6_history_missing_date_returns_error_json",
+          "tests/e2e/test_scan.py::test_s7_history_bad_date_format_uses_stderr",
+          "tests/e2e/test_scan.py::test_s8_parameters_map_to_output_and_scan_id",
+          "tests/e2e/test_scan.py::test_s9_no_cache_refetches_and_keeps_ranking",
+          "tests/e2e/test_scan.py::test_s10_missing_dimension_degrades_without_changing_scores",
+          "tests/e2e/test_scan.py::test_s10b_tdx_ranking_failure_falls_back_to_ths",
+          "tests/e2e/test_scan.py::test_s11_runtime_clock_mode_drives_scan_time_semantics_and_golden",
+          "tests/e2e/test_scan.py::test_s12_runtime_clock_mode_intraday_gate_uses_the_runtime_clock"
+        ],
+        "notes": "S1-S10 + G4 默认参数；G5 隐藏别名见 hidden_aliases；S11-S12 固定 runtime.clock 唯一时钟 seam（M9C 后无全局冻结）。"
+      },
+      "logs": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_l7_logs_without_action_is_silent_and_writes_nothing",
+          "tests/e2e/test_logs_data_storage.py::test_l6_source_v1_reads_v1_only"
+        ],
+        "notes": "Group without action is silent exit 0; --source v1 reads only v1 tables."
+      },
+      "logs tail": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_l1_tail_empty_and_seeded_with_line_limit"
+        ],
+        "notes": ""
+      },
+      "logs query": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_l2_query_filters_by_date_category_level_code_and_tail"
+        ],
+        "notes": ""
+      },
+      "logs clear": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_l3_clear_removes_old_v2_rows_and_keeps_v1_and_kept_minus_one"
+        ],
+        "notes": "Retains -1 contract is pinned as an existing baseline fact."
+      },
+      "logs list": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_l4_list_empty_and_grouped_table"
+        ],
+        "notes": ""
+      },
+      "logs summary": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_l5_summary_empty_and_seeded_payload"
+        ],
+        "notes": ""
+      },
+      "data": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d10_data_without_action_is_silent"
+        ],
+        "notes": ""
+      },
+      "data sector": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d1_sector_ranking_desc_and_asc_order"
+        ],
+        "notes": ""
+      },
+      "data components": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d2_components_requires_sector_and_lists_rows"
+        ],
+        "notes": ""
+      },
+      "data kline": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d3_kline_sources_and_empty_result"
+        ],
+        "notes": ""
+      },
+      "data minute": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d4_minute_xueqiu_and_tencent_bars"
+        ],
+        "notes": ""
+      },
+      "data quote": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d5_quote_success_and_failure_message"
+        ],
+        "notes": ""
+      },
+      "data batch-quote": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d6_batch_quote_prints_every_code_in_one_call"
+        ],
+        "notes": "The CLI fake provider observes one logical call; the 200-code transport split is covered by the direct provider/orchestrator unit test tests/test_orchestrator_helpers.py::test_quotes_over_two_hundred_are_sorted_and_complete."
+      },
+      "data cookie-status": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d7_cookie_status_empty_and_present",
+          "tests/e2e/test_independent_entries.py::test_i1_status_reports_empty_and_present_cookie"
+        ],
+        "notes": ""
+      },
+      "data cookie-fetch": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d9_cookie_fetch_success_writes_temp_cookie_via_fake_playwright",
+          "tests/e2e/test_logs_data_storage.py::test_d9_cookie_fetch_empty_and_error_never_write",
+          "tests/e2e/test_independent_entries.py::test_i3_fetch_ok_uses_fake_playwright_without_network",
+          "tests/e2e/test_independent_entries.py::test_i3_fetch_empty_and_error_are_offline_and_write_nothing"
+        ],
+        "notes": ""
+      },
+      "data cookie-set": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_d8_cookie_set_writes_only_the_temporary_cookie_file",
+          "tests/e2e/test_independent_entries.py::test_i2_set_writes_cookie_only_when_value_is_given"
+        ],
+        "notes": ""
+      },
+      "blacklist": {
+        "tests": [
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_b3_blacklist_without_action_equals_list"
+        ],
+        "notes": ""
+      },
+      "blacklist list": {
+        "tests": [
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_b1_blacklist_list_empty_and_populated"
+        ],
+        "notes": ""
+      },
+      "blacklist add": {
+        "tests": [
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_b2_blacklist_add_remove_is_idempotent_and_tolerates_missing"
+        ],
+        "notes": ""
+      },
+      "blacklist remove": {
+        "tests": [
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_b2_blacklist_add_remove_is_idempotent_and_tolerates_missing"
+        ],
+        "notes": ""
+      },
+      "review": {
+        "tests": [
+          "tests/e2e/test_review.py::test_r1_three_states_persist_exactly_and_write_vpa",
+          "tests/e2e/test_review.py::test_r2_no_entry_keeps_null_contract",
+          "tests/e2e/test_review.py::test_r3_provider_error_isolates_one_stock",
+          "tests/e2e/test_review.py::test_r4_no_pending_dragons_writes_nothing",
+          "tests/e2e/test_review.py::test_r5_auto_window_skips_recent_and_stale_rows",
+          "tests/e2e/test_review.py::test_r6_date_filter_processes_only_that_day",
+          "tests/e2e/test_review.py::test_r7_force_recomputes_completed_row",
+          "tests/e2e/test_review.py::test_r8_source_v1_updates_v1_only",
+          "tests/e2e/test_web_api.py::test_r9_review_ui_only_serves_root",
+          "tests/e2e/test_web_api.py::test_r10_review_ui_runs_backtest_then_serves",
+          "tests/e2e/test_web_api.py::test_r11_single_row_write_failure_warns_and_continues",
+          "tests/e2e/test_review.py::test_r12_runtime_clock_mode_drives_the_auto_window"
+        ],
+        "notes": "R1-R8 CLI; R9-R11 Web/UI and write-back failure covered together; R12 pins the runtime.clock-driven 5~20 window."
+      },
+      "review-account": {
+        "tests": [
+          "tests/e2e/test_review_account.py::test_ra1_golden_equity_tables_and_post_exit",
+          "tests/e2e/test_review_account.py::test_ra2_config_legal_changes_position_sizing",
+          "tests/e2e/test_review_account.py::test_ra3_config_invalid_exit_1_without_persistence",
+          "tests/e2e/test_review_account.py::test_ra4_missing_dates_exit_0_no_write",
+          "tests/e2e/test_review_account.py::test_ra5_missing_daily_exit_1_without_partial_rows",
+          "tests/e2e/test_review_account.py::test_ra6_suspended_day_is_reported_not_silent",
+          "tests/e2e/test_review_account.py::test_ra6_daily_fallback_day_keeps_golden_equity",
+          "tests/e2e/test_review_account.py::test_ra8_legacy_ranking_and_fallback_are_visible",
+          "tests/e2e/test_review_account.py::test_ra8_prep_snapshot_pool_uses_prep_only_then_mixed",
+          "tests/e2e/test_review_account.py::test_ra9_runtime_clock_mode_excludes_intraday_today",
+          "tests/e2e/test_web_api.py::test_ra7_review_account_ui_runs_backtest_then_serves_account",
+          "tests/e2e/test_web_api.py::test_ra7_review_account_ui_only_needs_no_backtest"
+        ],
+        "notes": "RA1-RA9; RA9 pins the runtime-clock include_today boundary; RA7 UI lifecycle is shared with the Web entry."
+      },
+      "dragons": {
+        "tests": [
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_dr1_default_exports_latest_trade_date_payload",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_dr2_date_formats_and_true_only_filter",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_dr3_no_data_exits_one_with_error_json"
+        ],
+        "notes": ""
+      },
+      "prep": {
+        "tests": [
+          "tests/e2e/test_prep.py::test_p1_success_human_output_and_persisted_rows_match_reviewed_golden",
+          "tests/e2e/test_prep.py::test_p2_json_key_order_and_snapshot_equality",
+          "tests/e2e/test_prep.py::test_p2b_default_date_uses_latest_mirror_day_and_prints_hint",
+          "tests/e2e/test_prep.py::test_p3_second_run_collects_nothing_and_reuses_assets",
+          "tests/e2e/test_prep.py::test_p4_missing_asset_is_the_only_one_recollected",
+          "tests/e2e/test_prep.py::test_p4b_failed_recollection_does_not_touch_other_assets",
+          "tests/e2e/test_prep.py::test_p5_recompute_is_offline_and_rebuilds_only_the_dragons_asset",
+          "tests/e2e/test_prep.py::test_p6_force_recollects_every_collectable_asset",
+          "tests/e2e/test_prep.py::test_p6b_force_on_a_historical_day_still_skips_same_day_only_assets",
+          "tests/e2e/test_prep.py::test_p7_daily_gate_rejects_intraday_run",
+          "tests/e2e/test_prep.py::test_p8_non_trading_day_is_distinct_from_calendar_failure",
+          "tests/e2e/test_prep.py::test_p9_future_date_is_rejected_in_both_output_modes",
+          "tests/e2e/test_prep.py::test_p10_historical_day_never_collects_same_day_only_assets",
+          "tests/e2e/test_prep.py::test_p11a_default_date_with_empty_mirror_refuses_to_guess",
+          "tests/e2e/test_prep.py::test_p11b_explicit_date_with_missing_target_day_fails_the_collector",
+          "tests/e2e/test_prep.py::test_p11c_historical_mirror_gap_degrades_but_keeps_other_days",
+          "tests/e2e/test_prep.py::test_p12a_short_calendar_marks_window_short",
+          "tests/e2e/test_prep.py::test_p12b_empty_window_is_empty_not_an_error",
+          "tests/e2e/test_prep.py::test_p12c_unreadable_mirror_raises_inside_the_collector",
+          "tests/e2e/test_prep.py::test_p13a_missing_instrument_degrades_without_a_yahoo_attempt",
+          "tests/e2e/test_prep.py::test_p13b_previous_session_index_marks_mixed_session",
+          "tests/e2e/test_prep.py::test_p14_single_factor_failure_is_isolated_and_snapshot_still_written",
+          "tests/e2e/test_prep.py::test_p15_runtime_clock_mode_drives_the_1640_gate",
+          "tests/e2e/test_prep.py::test_p16_runtime_clock_mode_full_prep_matches_reviewed_golden",
+          "tests/e2e/test_prep.py::test_c18_fake_macro_response_covers_every_macro_spec"
+        ],
+        "notes": "P1-P16 + C18 macro fallback protection; P15-P16 pin the runtime.clock prep gate and full golden."
+      },
+      "auction": {
+        "tests": [
+          "tests/e2e/test_auction.py::test_a1_collect_success_matches_reviewed_golden",
+          "tests/e2e/test_auction.py::test_a2_json_key_order_and_payload_contract",
+          "tests/e2e/test_auction.py::test_a3_missing_prep_snapshot_falls_back_to_legacy_mirror",
+          "tests/e2e/test_auction.py::test_a4_empty_pool_never_touches_quotes_or_auction_endpoints",
+          "tests/e2e/test_auction.py::test_a5_total_collection_failure_exits_nonzero_and_writes_nothing",
+          "tests/e2e/test_auction.py::test_a6_assets_written_with_snapshot_write_failure_still_exits_zero",
+          "tests/e2e/test_auction.py::test_a7_recompute_is_offline_and_reproduces_the_snapshots",
+          "tests/e2e/test_auction.py::test_a8_recompute_rejects_a_future_date",
+          "tests/e2e/test_auction.py::test_a9_recompute_without_assets_fails_without_provider_calls",
+          "tests/e2e/test_auction.py::test_a10_days_is_ignored_when_the_prep_pool_succeeds",
+          "tests/e2e/test_auction.py::test_a11_tdx_quote_miss_falls_back_to_tencent_and_marks_missing",
+          "tests/e2e/test_auction.py::test_a11b_total_quote_failure_still_scores_with_quote_missing",
+          "tests/e2e/test_auction.py::test_a12a_corrupt_asset_row_is_isolated_during_recompute",
+          "tests/e2e/test_auction.py::test_a12b_all_corrupt_assets_fail_without_touching_snapshots",
+          "tests/e2e/test_auction.py::test_a12c_snapshot_reads_isolate_corrupt_rows",
+          "tests/e2e/test_auction.py::test_a13_runtime_clock_mode_recompute_future_gate_uses_the_runtime_clock",
+          "tests/e2e/test_auction.py::test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam"
+        ],
+        "notes": "A13 pins the runtime.clock recompute date gate."
+      },
+      "assets": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as18_group_without_action_emits_json_error_exit_2"
+        ],
+        "notes": ""
+      },
+      "assets doctor": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as1_doctor_ok_uses_local_backend_and_leaves_no_objects",
+          "tests/e2e/test_assets.py::test_as2_doctor_backend_failure_reports_failed_and_exits_1"
+        ],
+        "notes": ""
+      },
+      "assets push": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as3_push_full_layout_state_schema2_and_idempotence",
+          "tests/e2e/test_assets.py::test_as4_push_dry_run_never_writes_remote_or_state",
+          "tests/e2e/test_assets.py::test_as5_push_shrink_requires_allow_flag_and_preserves_remote",
+          "tests/e2e/test_assets.py::test_as16_lock_busy_second_process_exits_1_without_remote_calls"
+        ],
+        "notes": "AS16 shared lock covered in cross_cutting.assets_sync_lock."
+      },
+      "assets pull": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as6_pull_dry_run_plans_downloads_and_writes_nothing",
+          "tests/e2e/test_assets.py::test_as7_pull_apply_target_dir_row_merge_conflict_force_and_null_fill",
+          "tests/e2e/test_assets.py::test_as7b_pull_reports_deferred_raw_when_metadata_row_is_missing",
+          "tests/e2e/test_assets.py::test_as16_lock_busy_second_process_exits_1_without_remote_calls"
+        ],
+        "notes": "AS16 shared lock covered in cross_cutting.assets_sync_lock."
+      },
+      "assets status": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as8_status_full_coverage_clean_then_drift",
+          "tests/e2e/test_assets.py::test_as8b_status_reports_mismatched_and_exits_1",
+          "tests/e2e/test_assets.py::test_as9_status_orphans_is_null_when_manifest_is_missing",
+          "tests/e2e/test_assets.py::test_as17_missing_credentials_exit_2_without_network"
+        ],
+        "notes": "AS17 missing credentials fails closed with exit 2 and zero network calls."
+      },
+      "assets verify": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as10_verify_manifest_self_consistency_and_tamper",
+          "tests/e2e/test_assets.py::test_as11_verify_deep_downloads_blobs_and_detects_corruption",
+          "tests/e2e/test_assets.py::test_as12_verify_argument_errors_exit_2_without_credentials"
+        ],
+        "notes": ""
+      },
+      "assets backfill-dragons": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as13_backfill_dry_run_reports_diff_without_row_writes",
+          "tests/e2e/test_assets.py::test_as14_backfill_run_fills_mirror_and_is_idempotent",
+          "tests/e2e/test_assets.py::test_as15_backfill_prune_deletes_only_mirror_orphans"
+        ],
+        "notes": ""
+      },
+      "factor": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f16_group_without_action_exits_2"
+        ],
+        "notes": ""
+      },
+      "factor build": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f2_build_single_day_pit_rows_audit_and_reviewed_golden",
+          "tests/e2e/test_factor.py::test_f3_build_range_expands_only_scan_days",
+          "tests/e2e/test_factor.py::test_f4_only_builds_named_factors_and_default_off_stays_off",
+          "tests/e2e/test_factor.py::test_f5_all_builds_every_registered_factor_and_stays_offline",
+          "tests/e2e/test_factor.py::test_f13b_fin_factor_build_applies_modal_cohort_and_pit_phase",
+          "tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"
+        ],
+        "notes": ""
+      },
+      "factor list": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f1_list_json_and_human_match_registry"
+        ],
+        "notes": ""
+      },
+      "factor query": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f6_query_day_series_and_version_resolution",
+          "tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"
+        ],
+        "notes": ""
+      },
+      "factor status": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f7_status_counts_and_human_output"
+        ],
+        "notes": ""
+      },
+      "factor export": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f8_export_csv_with_sidecar_and_missing_rate",
+          "tests/e2e/test_factor.py::test_f8b_export_clean_mad_zero_and_missing_drop",
+          "tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"
+        ],
+        "notes": ""
+      },
+      "factor eval": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f9_eval_metrics_match_reviewed_numeric_golden",
+          "tests/e2e/test_factor.py::test_f10_eval_insufficient_data_is_a_valid_conclusion",
+          "tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"
+        ],
+        "notes": ""
+      },
+      "factor fin": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f16_group_without_action_exits_2"
+        ],
+        "notes": ""
+      },
+      "factor fin sync": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f11_fin_snapshot_is_same_day_only_and_persists_rows",
+          "tests/e2e/test_factor.py::test_f12_fin_backfill_is_idempotent_and_appends_vintages",
+          "tests/e2e/test_factor.py::test_f12b_fin_backfill_cli_runs_on_the_single_runtime_clock_seam",
+          "tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"
+        ],
+        "notes": ""
+      },
+      "factor fin calibrate": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f13_fin_calibrate_verified_and_unverified_exit_codes",
+          "tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"
+        ],
+        "notes": ""
+      },
+      "factor fin status": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_f14_fin_status_counts_after_backfill_and_vintage"
+        ],
+        "notes": ""
+      },
+      "buy": {
+        "tests": [
+          "tests/e2e/test_buy_sell.py::test_bu1_buy_success_sentiment_checks_and_signal_row",
+          "tests/e2e/test_buy_sell.py::test_bu2_second_buy_run_is_idempotent",
+          "tests/e2e/test_buy_sell.py::test_bu3_no_candidate_exit_0",
+          "tests/e2e/test_buy_sell.py::test_bu4_historical_without_at_exit_1",
+          "tests/e2e/test_buy_sell.py::test_bu5_before_0930_rejected_even_with_force",
+          "tests/e2e/test_buy_sell.py::test_bu6_midday_force_replays_and_marks_signal",
+          "tests/e2e/test_buy_sell.py::test_bu6_closed_force_json_reports_forced",
+          "tests/e2e/test_buy_sell.py::test_bu7_1500_1506_grace_needs_no_force",
+          "tests/e2e/test_buy_sell.py::test_bu8_at_wins_over_force",
+          "tests/e2e/test_buy_sell.py::test_bu9_json_keys_and_four_checks",
+          "tests/e2e/test_buy_sell.py::test_bu10_sentiment_ban_rejects_before_pattern_rules",
+          "tests/e2e/test_buy_sell.py::test_bu11_suspended_candidate_is_reported",
+          "tests/e2e/test_buy_sell.py::test_bu_data_quality_daily_fallback_is_observable",
+          "tests/e2e/test_buy_sell.py::test_bu12_runtime_clock_mode_midday_gate_uses_the_runtime_clock"
+        ],
+        "notes": ""
+      },
+      "sell": {
+        "tests": [
+          "tests/e2e/test_buy_sell.py::test_se1_sell_closes_signal_with_reason_and_hold_days",
+          "tests/e2e/test_buy_sell.py::test_se2_half_then_full_close",
+          "tests/e2e/test_buy_sell.py::test_se3_no_position_exit_0",
+          "tests/e2e/test_buy_sell.py::test_se4_time_gates_match_buy",
+          "tests/e2e/test_buy_sell.py::test_se5_suspended_position_is_frozen",
+          "tests/e2e/test_buy_sell.py::test_se6_sell_has_no_json_option",
+          "tests/e2e/test_buy_sell.py::test_se7_runtime_clock_mode_midday_gate_matches_buy"
+        ],
+        "notes": ""
+      },
+      "vpa": {
+        "tests": [
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_v1_vpa_success_renders_report_and_persists_row",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_v1b_vpa_cli_save_date_comes_from_the_runtime_clock",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_v2_no_save_renders_but_does_not_write",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_v3_fallback_reports_keep_exit_zero_and_write_nothing",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_v4_missing_code_is_an_argparse_error"
+        ],
+        "notes": ""
+      },
+      "storage": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_st5_storage_without_action_is_silent"
+        ],
+        "notes": ""
+      },
+      "storage status": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_st1_status_fresh_layout_and_missing_databases"
+        ],
+        "notes": ""
+      },
+      "storage size": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_st2_size_sums_each_temporary_directory"
+        ],
+        "notes": ""
+      },
+      "storage clear": {
+        "tests": [
+          "tests/e2e/test_logs_data_storage.py::test_st3_clear_cache_only_removes_cache_files",
+          "tests/e2e/test_logs_data_storage.py::test_st3_clear_results_respects_days_against_frozen_clock",
+          "tests/e2e/test_logs_data_storage.py::test_st3_clear_logs_removes_files_and_both_log_tables",
+          "tests/e2e/test_logs_data_storage.py::test_st4_clear_all_empties_directories_and_protects_databases"
+        ],
+        "notes": ""
+      }
+    },
+    "hidden_aliases": {
+      "scan_v2": {
+        "tests": [
+          "tests/e2e/test_scan.py::test_g5_hidden_scan_v2_alias_equals_scan_history"
+        ],
+        "notes": "Hidden compatibility alias; must stay out of help (G1)."
+      }
+    },
+    "invocation_facts": {
+      "no_argument_actual_help": {
+        "tests": [
+          "tests/e2e/test_scan.py::test_g4_no_argument_invocation_prints_help_without_side_effects"
+        ],
+        "notes": "Spec §4 G4 says 'no args == scan', but the pinned real behavior is help: add_subparsers(dest='command') overwrites the scan default. This is a baseline fact, not a production fix (M1 must not change behavior)."
+      },
+      "global_help_version_and_errors": {
+        "tests": [
+          "tests/e2e/test_cli_global.py::test_g1_help_lists_every_top_level_command_and_hides_scan_v2",
+          "tests/e2e/test_cli_global.py::test_g2_version_matches_package_version",
+          "tests/e2e/test_cli_global.py::test_g3_unknown_command_exits_two_with_usage",
+          "tests/e2e/test_cli_global.py::test_g6_invalid_source_choice_exits_two",
+          "tests/e2e/test_cli_global.py::test_g8_group_without_action_behavior_is_pinned"
+        ],
+        "notes": ""
+      },
+      "import_time_side_effects": {
+        "tests": [
+          "tests/e2e/test_cli_global.py::test_g7_help_has_no_provider_calls_and_keeps_real_data_untouched",
+          "tests/e2e/test_harness_safety.py::test_c11_help_does_not_touch_real_data",
+          "tests/e2e/test_scan.py::test_g4_no_argument_invocation_prints_help_without_side_effects"
+        ],
+        "notes": "Help/no-arg paths must not call providers or touch the real data directory; the import-time schema-only dragon.db is pinned until M8."
+      },
+      "group_without_action": {
+        "tests": [
+          "tests/e2e/test_cli_global.py::test_g8_group_without_action_behavior_is_pinned",
+          "tests/e2e/test_logs_data_storage.py::test_l7_logs_without_action_is_silent_and_writes_nothing",
+          "tests/e2e/test_logs_data_storage.py::test_d10_data_without_action_is_silent",
+          "tests/e2e/test_logs_data_storage.py::test_st5_storage_without_action_is_silent",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_b3_blacklist_without_action_equals_list",
+          "tests/e2e/test_assets.py::test_as18_group_without_action_emits_json_error_exit_2",
+          "tests/e2e/test_factor.py::test_f16_group_without_action_exits_2"
+        ],
+        "notes": "logs/data/storage are silent exit 0; blacklist defaults to list; assets/factor/factor fin emit an error and exit 2."
+      },
+      "fixture_integrity": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_scenario_fixture_matches_reviewed_builder"
+        ],
+        "notes": "Synthetic fixtures are pinned to reviewed builders instead of regenerated blindly."
+      }
+    },
+    "independent_entries": {
+      "cookie": {
+        "tests": [
+          "tests/e2e/test_independent_entries.py::test_i1_status_reports_empty_and_present_cookie",
+          "tests/e2e/test_independent_entries.py::test_i2_set_writes_cookie_only_when_value_is_given",
+          "tests/e2e/test_independent_entries.py::test_i3_fetch_ok_uses_fake_playwright_without_network",
+          "tests/e2e/test_independent_entries.py::test_i3_fetch_empty_and_error_are_offline_and_write_nothing",
+          "tests/e2e/test_independent_entries.py::test_i4_unknown_action_exits_two"
+        ],
+        "notes": "I1-I4 run the real dragon_quant.providers.cookie entry point; only playwright/network seams are faked."
+      },
+      "web": {
+        "tests": [
+          "tests/e2e/test_web_api.py::test_w1_w3_w4_w7_review_ui_routes_and_404",
+          "tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
+          "tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
+          "tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series"
+        ],
+        "notes": "W1-W8 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly)."
+      },
+      "npm": {
+        "tests": [
+          "tests/e2e/test_independent_entries.py::test_n1_version_and_help_are_offline",
+          "tests/e2e/test_independent_entries.py::test_n2_unknown_command_exits_two",
+          "tests/e2e/test_independent_entries.py::test_n3_install_dry_run_writes_nothing",
+          "tests/e2e/test_independent_entries.py::test_n4_install_doctor_uninstall_lifecycle",
+          "tests/e2e/test_independent_entries.py::test_n5_modified_install_rejected_then_force_backs_up",
+          "tests/e2e/test_independent_entries.py::test_n6_missing_and_too_low_cli",
+          "tests/e2e/test_independent_entries.py::test_n7_low_node_version_exits_two"
+        ],
+        "notes": "N1-N7 drive the real node installer binary with isolated HOME/TMPDIR/npm cache and an unreachable npm registry."
+      }
+    },
+    "cross_cutting": {
+      "r9_r11_review_ui": {
+        "tests": [
+          "tests/e2e/test_web_api.py::test_r9_review_ui_only_serves_root",
+          "tests/e2e/test_web_api.py::test_r10_review_ui_runs_backtest_then_serves",
+          "tests/e2e/test_web_api.py::test_r11_single_row_write_failure_warns_and_continues"
+        ],
+        "notes": "R9 --ui-only, R10 --ui after backtest, R11 single-row write-back failure (SQLite trigger) warns and continues with exit 0."
+      },
+      "ra7_review_account_ui": {
+        "tests": [
+          "tests/e2e/test_web_api.py::test_ra7_review_account_ui_runs_backtest_then_serves_account",
+          "tests/e2e/test_web_api.py::test_ra7_review_account_ui_only_needs_no_backtest"
+        ],
+        "notes": "RA7 --ui and --ui-only serve /account; both reuse the Web server harness."
+      },
+      "npm_packaging_lifecycle": {
+        "tests": [
+          "tests/e2e/test_independent_entries.py::test_n1_version_and_help_are_offline",
+          "tests/e2e/test_independent_entries.py::test_n2_unknown_command_exits_two",
+          "tests/e2e/test_independent_entries.py::test_n3_install_dry_run_writes_nothing",
+          "tests/e2e/test_independent_entries.py::test_n4_install_doctor_uninstall_lifecycle",
+          "tests/e2e/test_independent_entries.py::test_n5_modified_install_rejected_then_force_backs_up",
+          "tests/e2e/test_independent_entries.py::test_n6_missing_and_too_low_cli",
+          "tests/e2e/test_independent_entries.py::test_n7_low_node_version_exits_two"
+        ],
+        "notes": "N packaging is one lifecycle: N3 dry-run -> N4 install/doctor/uninstall -> N5 modified install rejection then --force backup -> N6 CLI missing/too low -> N7 Node too low. N4 and N5 intentionally share the same package fixture and are mapped together."
+      },
+      "assets_sync_lock": {
+        "tests": [
+          "tests/e2e/test_assets.py::test_as16_lock_busy_second_process_exits_1_without_remote_calls"
+        ],
+        "notes": "AS16 covers push and pull together: both acquire the same <DQ_DATA_DIR>/assets_sync.lock through the shared service entry, so one busy-lock case proves the common lock and verifies zero backend calls / no state write."
+      },
+      "macro_c18": {
+        "tests": [
+          "tests/e2e/test_prep.py::test_c18_fake_macro_response_covers_every_macro_spec"
+        ],
+        "notes": "C18: complete macro success never attempts Yahoo/HTTP; missing instruments degrade deterministically (P13a/P13b)."
+      },
+      "provider_contracts": {
+        "tests": [
+          "tests/e2e/test_provider_contract.py::test_fake_base_covers_every_stockprovider_method_with_same_signature",
+          "tests/e2e/test_provider_contract.py::test_fake_concrete_override_surface_matches_production",
+          "tests/e2e/test_provider_contract.py::test_fake_module_helpers_match_production_module_helpers",
+          "tests/e2e/test_provider_contract.py::test_pinned_not_implemented_table_matches_production_ast",
+          "tests/e2e/test_provider_contract.py::test_scenario_fixture_is_pinned_to_the_frozen_clock",
+          "tests/e2e/test_provider_contract.py::test_runtime_surface_matches_pinned_contract",
+          "tests/e2e/test_provider_contract.py::test_unconfigured_scenario_fails_closed_without_real_transport",
+          "tests/e2e/test_provider_contract.py::test_configured_scenario_returns_real_model_instances",
+          "tests/e2e/test_provider_contract.py::test_fake_assets_backend_round_trip_and_call_log",
+          "tests/e2e/test_provider_contract.py::test_fake_assets_backend_error_mode_never_touches_network"
+        ],
+        "notes": "Fake provider/backend surface is pinned to production signatures and an AST commitment of NotImplementedError methods; unknown scenarios fail closed."
+      },
+      "architecture_rules": {
+        "tests": [
+          "tests/e2e/test_architecture_rules.py::test_c12_harness_never_imports_application_or_pytest",
+          "tests/e2e/test_architecture_rules.py::test_injection_module_level_imports_are_stdlib_only",
+          "tests/e2e/test_architecture_rules.py::test_harness_is_stdlib_only_against_known_third_party",
+          "tests/e2e/test_architecture_rules.py::test_datetime_isinstance_sites_are_audited",
+          "tests/e2e/test_architecture_rules.py::test_scan_and_review_current_time_flows_through_the_runtime_clock",
+          "tests/e2e/test_architecture_rules.py::test_m9b_current_time_flows_through_the_runtime_clock",
+          "tests/e2e/test_architecture_rules.py::test_m9b2_factors_cache_logging_storage_use_the_runtime_clock",
+          "tests/e2e/test_architecture_rules.py::test_fake_clock_is_runtime_only_and_keeps_app_imports_local",
+          "tests/e2e/test_architecture_rules.py::test_injection_never_replaces_datetime_or_time",
+          "tests/e2e/test_architecture_rules.py::test_every_current_time_call_is_classified",
+          "tests/e2e/test_architecture_rules.py::test_runner_is_runnable_as_a_script",
+          "tests/e2e/test_architecture_rules.py::test_app_composition_root_does_not_import_cli_or_commands",
+          "tests/e2e/test_architecture_rules.py::test_feature_modules_do_not_import_the_composition_root",
+          "tests/e2e/test_architecture_rules.py::test_provider_bundle_has_a_single_definition",
+          "tests/e2e/test_architecture_rules.py::test_app_does_not_construct_feature_objects",
+          "tests/e2e/test_architecture_rules.py::test_command_modules_do_not_import_cli_statically",
+          "tests/e2e/test_architecture_rules.py::test_cli_loads_migrated_handlers_lazily",
+          "tests/e2e/test_architecture_rules.py::test_command_modules_never_construct_providers",
+          "tests/e2e/test_architecture_rules.py::test_legacy_command_shim_is_deleted",
+          "tests/e2e/test_architecture_rules.py::test_auction_command_stays_thin_and_the_facade_has_no_orchestration",
+          "tests/e2e/test_architecture_rules.py::test_auction_service_modules_do_not_import_command_or_composition_root",
+          "tests/e2e/test_architecture_rules.py::test_auction_collect_resolves_missing_services_through_the_runtime_factory",
+          "tests/e2e/test_architecture_rules.py::test_auction_recompute_constructs_no_providers",
+          "tests/e2e/test_architecture_rules.py::test_auction_modules_are_split_by_responsibility",
+          "tests/e2e/test_architecture_rules.py::test_auction_collect_and_recompute_share_one_scoring_implementation",
+          "tests/e2e/test_architecture_rules.py::test_auction_feature_modules_have_no_layering_cycles",
+          "tests/e2e/test_architecture_rules.py::test_prep_package_replaces_the_module_atomically",
+          "tests/e2e/test_architecture_rules.py::test_prep_facade_exports_every_legacy_patch_target",
+          "tests/e2e/test_architecture_rules.py::test_prep_submodules_resolve_legacy_targets_at_runtime",
+          "tests/e2e/test_architecture_rules.py::test_prep_compute_and_rebuild_own_distinct_responsibilities",
+          "tests/e2e/test_architecture_rules.py::test_prep_recompute_stays_offline_and_modules_have_no_layering_cycle",
+          "tests/e2e/test_architecture_rules.py::test_prep_collectors_own_collection_with_a_single_definition_site",
+          "tests/e2e/test_architecture_rules.py::test_prep_collectors_do_not_import_service_or_package_root",
+          "tests/e2e/test_architecture_rules.py::test_m6_assets_command_is_a_thin_adapter",
+          "tests/e2e/test_architecture_rules.py::test_m6_assets_cli_service_owns_assembly_below_the_command_layer",
+          "tests/e2e/test_architecture_rules.py::test_m6_backend_injection_is_a_run_level_seam",
+          "tests/e2e/test_architecture_rules.py::test_m7_factors_facade_exports_exactly_thirteen_names",
+          "tests/e2e/test_architecture_rules.py::test_m7_factors_submodules_never_import_the_package_root",
+          "tests/e2e/test_architecture_rules.py::test_m7_factor_package_has_no_module_level_import_cycles",
+          "tests/e2e/test_architecture_rules.py::test_m7_scorers_and_auction_package_roots_have_no_module_level_cycles",
+          "tests/e2e/test_architecture_rules.py::test_m7_command_uses_only_the_factor_facade",
+          "tests/e2e/test_architecture_rules.py::test_m10b_cookie_cli_owns_the_single_entry_implementation",
+          "tests/e2e/test_architecture_rules.py::test_m10b_cookie_module_main_delegates_to_cookie_cli"
+        ],
+        "notes": "Harness/injection stay stdlib-only and never import dragon_quant or pytest; datetime isinstance canary is audited before factor work. M2A adds app dependency-direction pins: app never imports cli/commands, no dragon_quant module imports app, and ProviderBundle has a single definition site. M2C adds the final assembly pin: app.py constructs no MarketData/simulator/LiveTrader/assets-backend feature objects. M3A adds the command-layer pins: commands/* reach cli only through a runtime sys.modules lookup, and cli.py imports the lazy registry package (never a handler module). M3B adds the provider-assembly pin: command modules consume a Services bundle and never call create_providers/build_provider_bundle or construct provider classes. M3C separated the CLI from its handlers; M11B then retires the compatibility shim outright: the forwarder module is deleted, no production module references it, and commands.dispatch plus the command modules are the only handler entry points. M4 adds the auction service pin: orchestration is split into auction/collect.py, recompute.py, scoring.py and dates.py, auction/service.py is a facade without orchestration, commands/auction.py stays a ≤120-line adapter, every service module never imports commands/cli/app, collect falls back to the runtime provider factory, recompute stays offline, collect/recompute share one scoring implementation, and the new modules have no backwards layering cycle. M5A adds the prep package pin: review_account/prep is one package (no prep.py twin), the facade keeps every legacy patch target, submodules resolve those targets at call time through the facade, compute is pure, rebuild owns the dragons window, recompute stays offline, and the module graph is compute → rebuild → service without backwards edges. M5B adds the final prep boundary pin: collectors.py owns the eight collectors, registry, classification/health and collection_report merging with exactly one definition site each; service.py keeps only date gates, incremental planning and collection→compute orchestration; collectors never import the service or the package root, and the module graph becomes compute → rebuild → collectors → service. M6 adds the assets CLI-service pin: commands/assets.py only maps arguments/renders output (no backend, sources, paths or sync calls), assets_sync/cli_service.py owns backend/source/path assembly and action dispatch without importing commands/cli/app and without re-implementing push/pull/status/verify, run() accepts an injected backend covering every remote action, the default backend is S3Backend from loaded credentials, and backfill-dragons stays local. M7 adds the factors facade pin: the package root exports exactly the approved 13 names and is import-lazy (legacy names resolve through one lazy map for one migration cycle), no factor submodule imports the package root at any level, the factors/scorers/auction module-level import graphs are acyclic (function-local lazy imports are excluded by design), and commands/factor.py enters factors only through the public facade plus the documented factors.service submodule (package-root export_matrix/evaluate_factor keep their pre-M7 matrix/evaluation identities; CLI wrappers live in service). M10B adds the cookie entry pin: providers/cookie_cli.py is the only CLI orchestration site (argparse + status/set/fetch dispatch with a keyword-only fetch injection), providers/cookie.py keeps the library functions and its __main__ is a thin delegate with no second parser or dispatch branch, and cookie_cli never imports app/cli/commands."
+      },
+      "harness_helpers": {
+        "tests": [
+          "tests/e2e/test_harness_helpers.py::test_canonical_dumps_is_deterministic_and_rejects_nan",
+          "tests/e2e/test_harness_helpers.py::test_canonical_float_tolerance_and_structural_equality",
+          "tests/e2e/test_harness_helpers.py::test_canonical_normalizes_sandbox_paths",
+          "tests/e2e/test_harness_helpers.py::test_canonical_hash_helpers",
+          "tests/e2e/test_harness_helpers.py::test_seed_creates_only_the_target_temporary_database",
+          "tests/e2e/test_harness_helpers.py::test_seed_refuses_overwrite_and_unsafe_identifiers",
+          "tests/e2e/test_harness_helpers.py::test_seed_db_stays_inside_the_sandbox",
+          "tests/e2e/test_harness_helpers.py::test_assertlib_process_assertions",
+          "tests/e2e/test_harness_helpers.py::test_assertlib_json_key_order",
+          "tests/e2e/test_harness_helpers.py::test_assertlib_file_and_database_helpers",
+          "tests/e2e/test_harness_helpers.py::test_assertlib_missing_database_is_an_error"
+        ],
+        "notes": ""
+      },
+      "harness_safety": {
+        "tests": [
+          "tests/e2e/test_harness_safety.py::test_c1_missing_data_dir_rejected",
+          "tests/e2e/test_harness_safety.py::test_c2_real_default_data_dir_rejected",
+          "tests/e2e/test_harness_safety.py::test_c3_relative_and_symlink_escape_rejected",
+          "tests/e2e/test_harness_safety.py::test_c3_case_insensitive_real_path_variant_rejected",
+          "tests/e2e/test_harness_safety.py::test_c4_output_outside_root_rejected_before_launch",
+          "tests/e2e/test_harness_safety.py::test_c16_inherited_real_data_exception_rejected",
+          "tests/e2e/test_harness_safety.py::test_environment_is_whitelisted",
+          "tests/e2e/test_harness_safety.py::test_c10_sentinel_detects_metadata_change",
+          "tests/e2e/test_harness_safety.py::test_c10_sentinel_detects_new_real_directory",
+          "tests/e2e/test_harness_safety.py::test_c5_external_socket_blocked",
+          "tests/e2e/test_harness_safety.py::test_c6_dns_resolution_blocked",
+          "tests/e2e/test_harness_safety.py::test_c13_localhost_only_when_explicitly_enabled",
+          "tests/e2e/test_harness_safety.py::test_preflight_proves_every_required_seam",
+          "tests/e2e/test_harness_safety.py::test_subprocess_guard_blocks_every_launch_api",
+          "tests/e2e/test_harness_safety.py::test_preflight_gate_rejects_tampered_proof",
+          "tests/e2e/test_harness_safety.py::test_fake_assets_backend_is_active",
+          "tests/e2e/test_harness_safety.py::test_c7_fake_providers_are_active",
+          "tests/e2e/test_harness_safety.py::test_c8_datetime_and_time_are_not_globally_replaced",
+          "tests/e2e/test_harness_safety.py::test_runtime_clock_is_frozen_and_isinstance_semantics_stay_intact",
+          "tests/e2e/test_harness_safety.py::test_legacy_clock_mode_is_rejected_before_any_child_launch",
+          "tests/e2e/test_harness_safety.py::test_legacy_clock_mode_is_rejected_inside_the_injection",
+          "tests/e2e/test_harness_safety.py::test_c17_default_trade_date_flows_through_the_runtime_clock",
+          "tests/e2e/test_harness_safety.py::test_c9_disabled_injection_prevents_business_launch",
+          "tests/e2e/test_harness_safety.py::test_c15_marker_mismatch_prevents_business_launch",
+          "tests/e2e/test_harness_safety.py::test_c11_help_does_not_touch_real_data",
+          "tests/e2e/test_harness_safety.py::test_c14_storage_clear_only_touches_sandbox",
+          "tests/e2e/test_harness_safety.py::test_c19_cookie_fetch_ok_writes_sandbox_cookie",
+          "tests/e2e/test_harness_safety.py::test_c19_cookie_fetch_empty_and_error_are_offline",
+          "tests/e2e/test_harness_safety.py::test_timeout_kills_child_process_group",
+          "tests/e2e/test_harness_safety.py::test_cleanup_is_idempotent_and_keep_is_explicit",
+          "tests/e2e/test_harness_safety.py::test_standalone_self_check_exits_zero",
+          "tests/e2e/test_harness_safety.py::test_minimal_fixture_is_pinned"
+        ],
+        "notes": ""
+      },
+      "runtime_clock_modules": {
+        "tests": [
+          "tests/e2e/test_factor.py::test_m9b2_runtime_clock_mode_drives_build_export_and_captured_at",
+          "tests/e2e/test_logs_data_storage.py::test_m9b2_runtime_clock_mode_drives_logs_clear_cutoff",
+          "tests/e2e/test_logs_data_storage.py::test_m9b2_runtime_clock_mode_drives_storage_clear_days",
+          "tests/e2e/test_logs_data_storage.py::test_m9b2_runtime_clock_mode_drives_cache_ttl_and_persisted_age",
+          "tests/e2e/test_scan.py::test_s11_runtime_clock_mode_drives_scan_time_semantics_and_golden",
+          "tests/e2e/test_scan.py::test_s12_runtime_clock_mode_intraday_gate_uses_the_runtime_clock",
+          "tests/e2e/test_review.py::test_r12_runtime_clock_mode_drives_the_auto_window",
+          "tests/e2e/test_review_account.py::test_ra9_runtime_clock_mode_excludes_intraday_today",
+          "tests/e2e/test_prep.py::test_p15_runtime_clock_mode_drives_the_1640_gate",
+          "tests/e2e/test_prep.py::test_p16_runtime_clock_mode_full_prep_matches_reviewed_golden",
+          "tests/e2e/test_auction.py::test_a13_runtime_clock_mode_recompute_future_gate_uses_the_runtime_clock",
+          "tests/e2e/test_auction.py::test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam",
+          "tests/e2e/test_buy_sell.py::test_bu12_runtime_clock_mode_midday_gate_uses_the_runtime_clock",
+          "tests/e2e/test_buy_sell.py::test_se7_runtime_clock_mode_midday_gate_matches_buy",
+          "tests/e2e/test_blacklist_dragons_vpa.py::test_v1b_vpa_cli_save_date_comes_from_the_runtime_clock",
+          "tests/e2e/test_factor.py::test_f12b_fin_backfill_cli_runs_on_the_single_runtime_clock_seam",
+          "tests/e2e/test_harness_safety.py::test_c8_datetime_and_time_are_not_globally_replaced",
+          "tests/e2e/test_harness_safety.py::test_runtime_clock_is_frozen_and_isinstance_semantics_stay_intact",
+          "tests/e2e/test_harness_safety.py::test_legacy_clock_mode_is_rejected_before_any_child_launch",
+          "tests/e2e/test_harness_safety.py::test_legacy_clock_mode_is_rejected_inside_the_injection",
+          "tests/e2e/test_harness_safety.py::test_c17_default_trade_date_flows_through_the_runtime_clock",
+          "tests/e2e/test_architecture_rules.py::test_every_current_time_call_is_classified"
+        ],
+        "notes": "M9C: runtime.clock 是唯一时钟 seam；datetime/time 从不被全局替换（isinstance 正常），旧 M9A/M9B（含 BU12/SE7/RA9/P15/P16/A13）runtime 用例合并登记于此。"
+      },
+      "coverage_audit": {
+        "tests": [
+          "tests/e2e/test_coverage_map.py::test_parser_snapshot_has_51_nodes_and_15_top_level_commands",
+          "tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
+          "tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
+          "tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",
+          "tests/e2e/test_coverage_map.py::test_only_declared_conditional_skips_remain",
+          "tests/e2e/test_coverage_map.py::test_coverage_map_has_no_unknown_or_duplicate_nodes",
+          "tests/e2e/test_coverage_map.py::test_lock_packaging_and_ui_cross_cutting_notes_are_explicit"
+        ],
+        "notes": "The audit module itself is mapped here so no tests/e2e test function is silently unmapped; it reads only stdlib JSON/AST and never launches a business process."
+      }
+    }
+  },
+  "conditional_skips": [
+    {
+      "file": "tests/e2e/test_harness_safety.py",
+      "function": "test_c3_case_insensitive_real_path_variant_rejected",
+      "reason": "Only skips on a case-sensitive filesystem where an uppercase path variant is a different file, so the case-insensitive bypass cannot be constructed. On the default macOS APFS volume this branch executes and the test passes (248 passed, 0 skipped)."
+    }
+  ],
+  "known_gaps": []
+}

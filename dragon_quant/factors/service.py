@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from dragon_quant.factors import engine, storage as fstore
-from dragon_quant.factors.registry import (
+from . import engine, storage as fstore
+from .registry import (
     FACTOR_SPECS,
     compute_version_info,
     resolve_specs,
     spec_names,
 )
+from dragon_quant.runtime import clock
 from dragon_quant.storage import db as _db
 
 
@@ -64,7 +65,7 @@ def _resolve_dates(date: Optional[str], date_from: Optional[str],
 
 def build(date: Optional[str] = None, date_from: Optional[str] = None,
           date_to: Optional[str] = None, only=None, *, all_factors: bool = False,
-          db_path=None) -> dict:
+          db_path=None, services=None) -> dict:
     """单日 / 区间 build。
 
     区间按「区间内有扫描记录的交易日」逐日展开（无扫描的日期无法产出因子，
@@ -78,6 +79,8 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
     ``finance.load_trade_calendar`` 取 TDX 指数日K；无数据时 fin 因子必然
     fail-closed（``missing_source``），加载日历纯属多余网络请求。
     已有财务数据时仍读日历，失败只记 ``stale_calendar_missing`` 警告，不阻断 build。
+    ``services`` 为可选 M2 装配注入口：交易日历与财务当日快照补采都使用注入的
+    bundle（不另起默认 ``TdxProvider``）；不传时保持既有构造路径。
     """
     names = parse_only(only)
     if all_factors:
@@ -93,20 +96,20 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
 
         if fin_store.has_any_fin_data(db_path=db_path):
             from datetime import datetime
-            from zoneinfo import ZoneInfo
 
-            from dragon_quant.factors import finance
+            from . import finance
             # 日历必须覆盖到最早构建日（+ 缓冲），否则 stale 逾期日数被截断。
-            today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+            today = clock.now(engine.SHANGHAI).date()
             earliest = dates[0] if dates else today.isoformat()
             span = (today - datetime.strptime(earliest, "%Y-%m-%d").date()).days
-            loaded, error = finance.load_trade_calendar(days=max(180, span + 60))
+            loaded, error = finance.load_trade_calendar(
+                days=max(180, span + 60), services=services)
             calendar = tuple(loaded)
             if error:
                 warnings.append(error)
     reports = [
         engine.build_date(trade_date, names=names, db_path=db_path,
-                          calendar=calendar)
+                          calendar=calendar, services=services)
         for trade_date in dates
     ]
     if mode == "range" and not dates:
@@ -211,9 +214,7 @@ def status(*, db_path=None) -> dict:
 
 
 def _today() -> str:
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    return clock.now(engine.SHANGHAI).date().isoformat()
 
 
 def _candidate_codes(trade_date: str) -> list[str]:
@@ -230,11 +231,12 @@ def _candidate_codes(trade_date: str) -> list[str]:
 def fin_sync(*, snapshot: bool = False, backfill: bool = False,
              date: Optional[str] = None, from_period: Optional[str] = None,
              to_period: Optional[str] = None, force: bool = False,
-             host: Optional[str] = None, db_path=None) -> dict:
+             host: Optional[str] = None, db_path=None,
+             services=None) -> dict:
     """``factor fin sync``：日度观测（当日）或按报告期回填（可历史）。"""
     if snapshot == backfill:
         raise ValueError("fin sync 需要且只能指定 --snapshot 或 --backfill")
-    from dragon_quant.factors import finance
+    from . import finance
 
     if snapshot:
         trade_date = normalize_date(date) if date else _today()
@@ -242,7 +244,8 @@ def fin_sync(*, snapshot: bool = False, backfill: bool = False,
             raise ValueError(
                 f"财务观测仅当日可采（same_day_only）：{trade_date} != 今天 {_today()}")
         codes = _candidate_codes(trade_date)
-        payload = finance.sync_snapshots(trade_date, codes, db_path=db_path)
+        payload = finance.sync_snapshots(trade_date, codes, db_path=db_path,
+                                         services=services)
         return {"ok": payload.get("status") != "error", "mode": "snapshot",
                 **payload}
 
@@ -252,25 +255,26 @@ def fin_sync(*, snapshot: bool = False, backfill: bool = False,
         periods=None,
         from_period=normalize_date(from_period) if from_period else None,
         to_period=normalize_date(to_period) if to_period else None,
-        force=force, host=host, db_path=db_path)
+        force=force, host=host, db_path=db_path, services=services)
     ok = not payload.get("failed") or payload.get("inserted", 0) > 0
     return {"ok": ok, "mode": "backfill", **payload}
 
 
 def fin_calibrate(*, sample: int = 20, period: Optional[str] = None,
-                  host: Optional[str] = None, db_path=None) -> dict:
-    from dragon_quant.factors import finance
+                  host: Optional[str] = None, db_path=None,
+                  services=None) -> dict:
+    from . import finance
 
     if int(sample) < 1:
         raise ValueError("--sample 必须 ≥ 1")
     payload = finance.calibrate_field_map(
         sample=int(sample), period=normalize_date(period) if period else None,
-        host=host, db_path=db_path)
+        host=host, db_path=db_path, services=services)
     return {"ok": payload.get("status") == "verified", "mode": "calibrate", **payload}
 
 
 def fin_status(*, db_path=None) -> dict:
-    from dragon_quant.factors import finance
+    from . import finance
     return finance.status(db_path=db_path)
 
 
@@ -281,7 +285,7 @@ def export_matrix(date_from: str, date_to: str, *, names, version=None,
                   codes=None, clean=None, fmt: str = "csv",
                   out_path=None, db_path=None) -> dict:
     """``factor export``：长表 → ``date × code`` 矩阵 + sidecar。"""
-    from dragon_quant.factors.matrix import export_matrix as _export
+    from .matrix import export_matrix as _export
     return _export(
         date_from, date_to, names=names, version=version, codes=codes,
         clean=clean, fmt=fmt, out_path=out_path, db_path=db_path)
@@ -292,7 +296,7 @@ def evaluate_factor(name: str, date_from: str, date_to: str, *, data,
                     min_days: int = 20, min_cross_section: int = 10,
                     pit_policy: str = "strict", db_path=None) -> dict:
     """``factor eval``：RankIC / ICIR / NW-t / 分组 / 覆盖率 / PIT 口径。"""
-    from dragon_quant.factors.evaluation import evaluate_factor as _evaluate
+    from .evaluation import evaluate_factor as _evaluate
     payload = _evaluate(
         name, date_from, date_to, horizon=horizon, groups=groups,
         version=version, data=data, min_days=min_days,

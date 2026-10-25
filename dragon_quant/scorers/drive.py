@@ -7,7 +7,7 @@ from typing import Optional
 
 from dragon_quant.cache.data_cache import DataCache
 from dragon_quant.models.types import Candidate, KBar, ScoreResult, StockInfo
-from dragon_quant.scorers import registry as R
+from . import registry as R
 from dragon_quant.sectors import components_key, sector_1min_key
 from dragon_quant.scorers.base import (
     CHINA_TZ, at_limit, clip, common_minute_axis, continuous_ranges, gain_curve,

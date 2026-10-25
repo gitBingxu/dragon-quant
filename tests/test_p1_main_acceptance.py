@@ -88,8 +88,7 @@ class TestMainAcceptance(TempDbBase):
 
     def test_assets_status_marks_factor_and_fin_synced(self):
         # M6 breaking 变更：factor_* / fin_* 已纳入同步，not_synced 恒为 {}。
-        from dragon_quant import cli  # noqa: F401 — 先走正常入口，规避 cli↔cli_commands 循环
-        from dragon_quant.cli_commands import _assets_human_summary
+        from dragon_quant.commands.assets import _assets_human_summary
         text = _assets_human_summary("assets status", {"summary": {}})
         self.assertIn("已纳入同步", text)
         self.assertNotIn("not_synced", text)

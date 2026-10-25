@@ -3,8 +3,8 @@
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from dragon_quant.factors.engine import (
@@ -104,16 +104,25 @@ class TestResolveAvailableAt(unittest.TestCase):
 
 
 class TestTimezone(unittest.TestCase):
+    """时区告警读 runtime clock 的 UTC 偏移，而不是进程真实 ``time.localtime``。"""
+
+    def _warn_at(self, moment):
+        from dragon_quant.runtime import clock
+
+        previous = clock.set_clock(clock.FixedClock(moment))
+        try:
+            return timezone_warning()
+        finally:
+            clock.set_clock(previous)
+
     def test_timezone_warning_when_not_plus_8(self):
-        fake = SimpleNamespace(tm_gmtoff=0)
-        with patch("dragon_quant.factors.engine.time.localtime", return_value=fake):
-            warning = timezone_warning()
+        warning = self._warn_at(datetime(2026, 5, 19, 2, 0, tzinfo=timezone.utc))
         self.assertIn("timezone_warning", warning)
 
     def test_no_warning_on_plus_8(self):
-        fake = SimpleNamespace(tm_gmtoff=8 * 3600)
-        with patch("dragon_quant.factors.engine.time.localtime", return_value=fake):
-            self.assertIsNone(timezone_warning())
+        moment = datetime(2026, 5, 19, 10, 0,
+                          tzinfo=timezone(timedelta(hours=8)))
+        self.assertIsNone(self._warn_at(moment))
 
 
 class TestCanonicalScan(unittest.TestCase):

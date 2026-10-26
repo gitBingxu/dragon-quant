@@ -27,10 +27,20 @@ export interface Dragon {
   max_return_hold_days: number | null;
   review_status: string | null;
   version: string;
+  // 严格口径（入选后首个交易日按开盘价买入）；v1 为 null。
+  strict_buy_date: string | null;
+  strict_buy_price: number | null;
+  strict_max_return_5d: number | null;
+  strict_max_drawdown_5d: number | null;
+  strict_max_return_hold_days: number | null;
+  strict_review_status: string | null;
+  strict_review_reason: string | null;
+  strict_reviewed: boolean;
 }
 
 export interface Summary {
   source: "v1" | "v2";
+  // 旧键：宽松口径兼容。
   total: number;
   completed: number;
   pending: number;
@@ -39,6 +49,18 @@ export interface Summary {
   best_stock_code: string | null;
   best_stock_name: string | null;
   best_return: number | null;
+  // 双口径 / 重算进度。
+  avg_return_strict: number | null;
+  win_rate_loose: number | null;
+  win_rate_strict: number | null;
+  win_rate_loose_n: number;
+  win_rate_strict_n: number;
+  cannot_evaluate: number;
+  pending_recompute: number;
+  failed_recompute: number;
+  best_stock_code_strict: string | null;
+  best_stock_name_strict: string | null;
+  best_return_strict: number | null;
 }
 
 export interface DragonFilters {

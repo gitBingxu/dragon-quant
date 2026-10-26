@@ -238,11 +238,18 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
     rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
     rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
+    rev_p.add_argument("--recompute-all", dest="recompute_all", action="store_true",
+                       help="全量重算所有状态（v2，最老优先；默认跳过已有严格结果）")
+    rev_p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                       help="配合 --recompute-all：只统计，不写库、不拉个股 K 线")
+    rev_p.add_argument("--limit", type=int, default=None,
+                       help="配合 --recompute-all：只处理最老 N 条（canary）")
     rev_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                        help="回测数据来源体系：v2=dragons_v2 (默认 v2；v1 仅用于历史记录查询)")
     rev_p.add_argument("--ui", action="store_true", help="回测后启动 Web UI")
     rev_p.add_argument("--ui-only", action="store_true", help="仅启动 Web UI（不执行回测）")
-    rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
+    rev_p.add_argument("--port", type=int, default=None,
+                       help="Web UI 端口 (默认 8765；被占用时自动改用随机端口)")
     rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     # review-account 子命令

@@ -20,6 +20,7 @@ from typing import Optional
 
 from dragon_quant.infra.storage import dragons_rows
 from dragon_quant.infra.storage._base import _connect, _ensure_schema, _lock, _normalize_source, _tables
+from dragon_quant.scan.storage import review_strict
 
 
 def _mirror_write(label: str, source: str, action) -> None:
@@ -468,6 +469,62 @@ def update_dragon_review(trade_date: str, code: str,
         _mirror_write("update_dragon_review", source, _mirror)
 
 
+def save_dual_review(trade_date: str, code: str, *,
+                     loose: dict,
+                     strict: Optional[dict] = None,
+                     source: str = "v2"):
+    """在同一 ``dragon.db`` 事务内写宽松（dragons_*）+ 严格（侧表）结果。
+
+    ``strict=None`` 表示本次不写严格结果（传输失败 / 历史不足等），已有严格行
+    保持不变。任何写入失败整体回滚，避免只写一半。镜像仍在锁外 best-effort。
+    """
+    source = _normalize_source(source)
+    fields = {
+        "buy_date": loose.get("buy_date"),
+        "buy_price": loose.get("buy_price"),
+        "max_return_5d": loose.get("max_return_5d"),
+        "max_drawdown_5d": loose.get("max_drawdown_5d"),
+        "max_return_hold_days": loose.get("max_return_hold_days"),
+        "review_status": loose.get("status", "completed"),
+    }
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            t = _tables(source)
+            dragons_rows.update_review(conn, t["dragons"], trade_date, code, **fields)
+            if strict is not None:
+                review_strict.upsert(
+                    conn,
+                    trade_date=trade_date,
+                    code=code,
+                    source=source,
+                    buy_date=strict.get("buy_date"),
+                    buy_price=strict.get("buy_price"),
+                    max_return_5d=strict.get("max_return_5d"),
+                    max_drawdown_5d=strict.get("max_drawdown_5d"),
+                    max_return_hold_days=strict.get("max_return_hold_days"),
+                    review_status=strict["review_status"],
+                    reason=strict.get("reason"),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    if source == "v2":
+        def _mirror(mirror):
+            rowcount = mirror.update_dragon_review(trade_date, code, **fields)
+            if rowcount == 0:
+                print(f"[mirror] mirror_missing_row: assets.db.dragons 缺行 "
+                      f"{trade_date}/{code}（review 字段未镜像，可用 "
+                      "assets backfill-dragons 修复）", file=sys.stderr)
+
+        _mirror_write("save_dual_review", source, _mirror)
+
+
 def _parse_version(v: str, parts: Optional[int] = None) -> Optional[tuple]:
     """解析版本号字符串为整数元组，无法解析返回 None。
 
@@ -528,14 +585,19 @@ def query_dragons(filters: Optional[dict] = None,
                   source: str = "v2") -> list[dict]:
     """灵活查询 dragons 表（供 Web UI /api/dragons 使用）。
 
+    v2 额外 LEFT JOIN ``dragon_review_strict``：收益 / 回撤 / 状态筛选与排序
+    **固定使用严格口径**；v1 没有严格口径，继续使用 ``dragons_v1`` 旧字段。
+    旧的宽松字段原样保留，新增 ``strict_*`` 字段与 ``strict_reviewed``。
+
     Args:
         filters 支持的 key:
             code_like, name_like: LIKE 模糊匹配
             date_from, date_to: trade_date 范围
             score_min, score_max: composite_score 范围
-            return_min, return_max: max_return_5d 范围
-            status: list[str] 过滤 review_status
-        sort_by: 排序字段
+            return_min, return_max: v2=严格收益 / v1=宽松收益
+            drawdown_min, drawdown_max: v2=严格回撤 / v1=宽松回撤
+            status: list[str] 过滤派生状态
+        sort_by: 排序字段（v2 的严格键见 ``_SORT_MAP``）
         sort_dir: asc / desc
     """
     if filters is None:
@@ -547,14 +609,7 @@ def query_dragons(filters: Optional[dict] = None,
         source = _normalize_source(source)
         t = _tables(source)
 
-        sql = (
-            "SELECT trade_date, code, name, scan_id, rank, composite_score, "
-            "board_count, open_px, close_px, high_px, low_px, pct, "
-            "turnover_rate, amount, market_cap, concepts_json, report_text, "
-            "buy_date, buy_price, max_return_5d, max_drawdown_5d, "
-            "max_return_hold_days, review_status, version, is_true_dragon "
-            f"FROM {t['dragons']}"
-        )
+        base = _query_base_sql(t["dragons"], source)
         params: list = []
         conditions: list[str] = []
 
@@ -576,57 +631,68 @@ def query_dragons(filters: Optional[dict] = None,
         if "score_max" in filters:
             conditions.append("composite_score <= ?")
             params.append(filters["score_max"])
+
+        return_col = "strict_max_return_5d" if source == "v2" else "max_return_5d"
+        drawdown_col = "strict_max_drawdown_5d" if source == "v2" else "max_drawdown_5d"
         if "return_min" in filters:
-            conditions.append("COALESCE(max_return_5d, -9999) >= ?")
+            conditions.append(f"COALESCE({return_col}, -9999) >= ?")
             params.append(filters["return_min"])
         if "return_max" in filters:
-            conditions.append("COALESCE(max_return_5d, 9999) <= ?")
+            conditions.append(f"COALESCE({return_col}, 9999) <= ?")
             params.append(filters["return_max"])
         if "drawdown_min" in filters:
-            conditions.append("COALESCE(max_drawdown_5d, -9999) >= ?")
+            conditions.append(f"COALESCE({drawdown_col}, -9999) >= ?")
             params.append(filters["drawdown_min"])
         if "drawdown_max" in filters:
-            conditions.append("COALESCE(max_drawdown_5d, 9999) <= ?")
+            conditions.append(f"COALESCE({drawdown_col}, 9999) <= ?")
             params.append(filters["drawdown_max"])
         if filters.get("status"):
             placeholders = ",".join("?" * len(filters["status"]))
-            conditions.append(f"review_status IN ({placeholders})")
+            conditions.append(f"derived_status IN ({placeholders})")
             params.extend(filters["status"])
 
+        sql = f"SELECT * FROM ({base}) q"
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
 
-        # 排序字段白名单
-        ALLOWED = {
-            "trade_date", "code", "name", "rank", "composite_score",
-            "board_count", "pct", "buy_date", "buy_price",
-            "max_return_5d", "max_drawdown_5d", "max_return_hold_days",
-            "review_status", "source",
-        }
-        order_col = sort_by if sort_by in ALLOWED and sort_by != "source" else "composite_score"
+        order_col = _SORT_MAP[source].get(sort_by, "composite_score")
         order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
         sql += f" ORDER BY {order_col} {order_dir} NULLS LAST"
 
         rows = conn.execute(sql, params).fetchall()
-        result = [
-            {
-                "trade_date": r[0], "code": r[1], "name": r[2],
-                "scan_id": r[3], "rank": r[4], "composite_score": r[5],
-                "board_count": r[6], "open_px": r[7], "close_px": r[8],
-                "high_px": r[9], "low_px": r[10], "pct": r[11],
-                "turnover_rate": r[12], "amount": r[13], "market_cap": r[14],
-                "concepts": json.loads(r[15]) if r[15] else [],
-                "report_text": r[16] or "",
-                "buy_date": r[17], "buy_price": r[18],
-                "max_return_5d": r[19], "max_drawdown_5d": r[20],
-                "max_return_hold_days": r[21],
-                "review_status": r[22],
-                "version": r[23] or "",
-                "is_true_dragon": bool(r[24]) if r[24] is not None else None,
+        result = []
+        for raw in rows:
+            r = dict(zip(_RESULT_COLUMNS, raw))
+            concepts_raw = r["concepts_json"]
+            result.append({
+                "trade_date": r["trade_date"], "code": r["code"],
+                "name": r["name"], "scan_id": r["scan_id"], "rank": r["rank"],
+                "composite_score": r["composite_score"],
+                "board_count": r["board_count"],
+                "open_px": r["open_px"], "close_px": r["close_px"],
+                "high_px": r["high_px"], "low_px": r["low_px"], "pct": r["pct"],
+                "turnover_rate": r["turnover_rate"], "amount": r["amount"],
+                "market_cap": r["market_cap"],
+                "concepts": json.loads(concepts_raw) if concepts_raw else [],
+                "report_text": r["report_text"] or "",
+                "buy_date": r["buy_date"], "buy_price": r["buy_price"],
+                "max_return_5d": r["max_return_5d"],
+                "max_drawdown_5d": r["max_drawdown_5d"],
+                "max_return_hold_days": r["max_return_hold_days"],
+                "review_status": r["review_status"],
+                "version": r["version"] or "",
+                "is_true_dragon": (bool(r["is_true_dragon"])
+                                   if r["is_true_dragon"] is not None else None),
                 "source": source,
-            }
-            for r in rows
-        ]
+                "strict_buy_date": r["strict_buy_date"],
+                "strict_buy_price": r["strict_buy_price"],
+                "strict_max_return_5d": r["strict_max_return_5d"],
+                "strict_max_drawdown_5d": r["strict_max_drawdown_5d"],
+                "strict_max_return_hold_days": r["strict_max_return_hold_days"],
+                "strict_review_status": r["strict_review_status"],
+                "strict_review_reason": r["strict_review_reason"],
+                "strict_reviewed": r["strict_review_status"] is not None,
+            })
 
         # 版本号范围过滤（语义化比较，需在 Python 端处理）
         vmin = filters.get("version_min")
@@ -641,47 +707,146 @@ def query_dragons(filters: Optional[dict] = None,
         conn.close()
 
 
+_BASE_COLUMNS: tuple[str, ...] = (
+    "trade_date", "code", "name", "scan_id", "rank", "composite_score",
+    "board_count", "open_px", "close_px", "high_px", "low_px", "pct",
+    "turnover_rate", "amount", "market_cap", "concepts_json", "report_text",
+    "buy_date", "buy_price", "max_return_5d", "max_drawdown_5d",
+    "max_return_hold_days", "review_status", "version", "is_true_dragon",
+)
+
+_STRICT_COLUMNS: tuple[str, ...] = (
+    "strict_buy_date", "strict_buy_price", "strict_max_return_5d",
+    "strict_max_drawdown_5d", "strict_max_return_hold_days",
+    "strict_review_status", "strict_review_reason", "derived_status",
+)
+
+_RESULT_COLUMNS: tuple[str, ...] = _BASE_COLUMNS + _STRICT_COLUMNS
+
+_SORT_MAP: dict[str, dict[str, str]] = {
+    "v2": {
+        "trade_date": "trade_date", "code": "code", "name": "name",
+        "rank": "rank", "composite_score": "composite_score",
+        "board_count": "board_count", "pct": "pct",
+        "buy_date": "strict_buy_date",
+        "buy_price": "strict_buy_price",
+        "max_return_5d": "strict_max_return_5d",
+        "max_drawdown_5d": "strict_max_drawdown_5d",
+        "max_return_hold_days": "strict_max_return_hold_days",
+        "review_status": "derived_status",
+        "strict_buy_date": "strict_buy_date",
+        "strict_buy_price": "strict_buy_price",
+        "strict_max_return_5d": "strict_max_return_5d",
+        "strict_max_drawdown_5d": "strict_max_drawdown_5d",
+        "strict_max_return_hold_days": "strict_max_return_hold_days",
+        "strict_review_status": "derived_status",
+    },
+    "v1": {
+        "trade_date": "trade_date", "code": "code", "name": "name",
+        "rank": "rank", "composite_score": "composite_score",
+        "board_count": "board_count", "pct": "pct",
+        "buy_date": "buy_date", "buy_price": "buy_price",
+        "max_return_5d": "max_return_5d",
+        "max_drawdown_5d": "max_drawdown_5d",
+        "max_return_hold_days": "max_return_hold_days",
+        "review_status": "derived_status",
+        # 前端统一用严格列 key；v1 映射回旧字段（无严格口径）。
+        "strict_buy_date": "buy_date",
+        "strict_buy_price": "buy_price",
+        "strict_max_return_5d": "max_return_5d",
+        "strict_max_drawdown_5d": "max_drawdown_5d",
+        "strict_max_return_hold_days": "max_return_hold_days",
+        "strict_review_status": "derived_status",
+    },
+}
+
+
+def _query_base_sql(table: str, source: str) -> str:
+    """构造统一结果集的子查询（v2 JOIN 严格侧表 / v1 全部 NULL）。"""
+    if source == "v2":
+        strict_cols = (
+            "s.buy_date AS strict_buy_date, "
+            "s.buy_price AS strict_buy_price, "
+            "s.max_return_5d AS strict_max_return_5d, "
+            "s.max_drawdown_5d AS strict_max_drawdown_5d, "
+            "s.max_return_hold_days AS strict_max_return_hold_days, "
+            "s.review_status AS strict_review_status, "
+            "s.reason AS strict_review_reason, "
+            "CASE "
+            "WHEN s.review_status IS NOT NULL THEN s.review_status "
+            "WHEN d.review_status = 'pending' THEN 'pending' "
+            "WHEN d.review_status = 'error' THEN 'error' "
+            "ELSE 'pending_recompute' END AS derived_status "
+        )
+        join = (
+            " FROM {table} d LEFT JOIN dragon_review_strict s "
+            "ON s.trade_date = d.trade_date AND s.code = d.code AND s.source = 'v2'"
+        ).format(table=table)
+    else:
+        strict_cols = (
+            "NULL AS strict_buy_date, NULL AS strict_buy_price, "
+            "NULL AS strict_max_return_5d, NULL AS strict_max_drawdown_5d, "
+            "NULL AS strict_max_return_hold_days, NULL AS strict_review_status, "
+            "NULL AS strict_review_reason, "
+            "d.review_status AS derived_status "
+        )
+        join = f" FROM {table} d"
+
+    cols = ", ".join(f"d.{name}" for name in _BASE_COLUMNS)
+    return f"SELECT {cols}, {strict_cols}{join}"
+
+
 def get_review_summary(source: str = "v2") -> dict:
-    """返回 dragons 表中的汇总统计（供 Web UI /api/summary 使用）。"""
+    """返回 dragons 表的汇总统计（供 Web UI /api/summary 使用）。
+
+    旧键（``avg_return`` / ``win_rate`` / ``best_*``）保持**宽松口径**兼容；
+    新增键提供严格口径与重算进度。胜利条件两种口径一致：
+    ``max_return_5d > 0 且 max_drawdown_5d > -5``（严格大于，0 / -5 都不算赢）。
+
+    宽松胜率分母 = 宽松 completed **且存在严格行且严格非 cannot_evaluate**
+    （保证两种口径在同一批样本上可比）；严格分母 = 严格 completed。
+    v1 没有严格表，新增口径键返回 ``None`` / ``0``。
+    """
     conn = _connect()
     try:
         _ensure_schema(conn)
         source = _normalize_source(source)
         t = _tables(source)
-        total = conn.execute(f"SELECT COUNT(*) FROM {t['dragons']}").fetchone()[0]
+        dragons = t["dragons"]
 
-        completed = conn.execute(
-            f"SELECT COUNT(*) FROM {t['dragons']} WHERE review_status = 'completed'"
-        ).fetchone()[0]
+        def _count(sql: str, params: tuple = ()) -> int:
+            return conn.execute(sql, params).fetchone()[0]
 
-        pending = conn.execute(
-            f"SELECT COUNT(*) FROM {t['dragons']} WHERE review_status = 'pending'"
-        ).fetchone()[0]
+        total = _count(f"SELECT COUNT(*) FROM {dragons}")
+        completed = _count(
+            f"SELECT COUNT(*) FROM {dragons} WHERE review_status = 'completed'")
+        pending = _count(
+            f"SELECT COUNT(*) FROM {dragons} WHERE review_status = 'pending'")
 
         avg_row = conn.execute(
-            f"SELECT AVG(max_return_5d) FROM {t['dragons']} "
-            f"WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
+            f"SELECT AVG(max_return_5d) FROM {dragons} "
+            "WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
         ).fetchone()
 
-        win_row = conn.execute(
-            f"SELECT COUNT(*) FROM {t['dragons']} "
+        win_count = _count(
+            f"SELECT COUNT(*) FROM {dragons} "
             "WHERE review_status = 'completed' "
             "AND max_return_5d > 0 "
             "AND max_drawdown_5d > -5.0"
-        ).fetchone()
+        )
 
         best = conn.execute(
-            f"SELECT code, name, max_return_5d FROM {t['dragons']} "
+            f"SELECT code, name, max_return_5d FROM {dragons} "
             "WHERE review_status = 'completed' AND max_return_5d IS NOT NULL "
             "ORDER BY max_return_5d DESC LIMIT 1"
         ).fetchone()
 
         avg_return = round(avg_row[0], 2) if avg_row and avg_row[0] is not None else None
-        win_count = win_row[0] if win_row else 0
         completed_count = completed if completed else 0
-        win_rate = round(win_count / completed_count * 100, 1) if completed_count > 0 else None
+        win_rate = (round(win_count / completed_count * 100, 1)
+                    if completed_count > 0 else None)
 
-        return {
+        summary = {
             "total": total,
             "completed": completed,
             "pending": pending,
@@ -692,6 +857,107 @@ def get_review_summary(source: str = "v2") -> dict:
             "best_return": round(best[2], 2) if best and best[2] is not None else None,
             "source": source,
         }
+
+        if source == "v2":
+            summary.update(_strict_summary(conn, dragons))
+        else:
+            summary.update({
+                "avg_return_strict": None,
+                "win_rate_loose": None,
+                "win_rate_strict": None,
+                "win_rate_loose_n": 0,
+                "win_rate_strict_n": 0,
+                "cannot_evaluate": 0,
+                "pending_recompute": 0,
+                "failed_recompute": 0,
+                "best_stock_code_strict": None,
+                "best_stock_name_strict": None,
+                "best_return_strict": None,
+            })
+        return summary
     finally:
         conn.close()
+
+
+def _strict_summary(conn, dragons: str) -> dict:
+    """严格侧表汇总（仅 v2）。"""
+    def _count(sql: str) -> int:
+        return conn.execute(sql).fetchone()[0]
+
+    strict_completed = _count(
+        "SELECT COUNT(*) FROM dragon_review_strict "
+        "WHERE source = 'v2' AND review_status = 'completed'")
+    cannot_evaluate = _count(
+        "SELECT COUNT(*) FROM dragon_review_strict "
+        "WHERE source = 'v2' AND review_status = 'cannot_evaluate'")
+
+    avg_row = conn.execute(
+        "SELECT AVG(max_return_5d) FROM dragon_review_strict "
+        "WHERE source = 'v2' AND review_status = 'completed' "
+        "AND max_return_5d IS NOT NULL"
+    ).fetchone()
+    avg_return_strict = (round(avg_row[0], 2)
+                         if avg_row and avg_row[0] is not None else None)
+
+    strict_wins = _count(
+        "SELECT COUNT(*) FROM dragon_review_strict "
+        "WHERE source = 'v2' AND review_status = 'completed' "
+        "AND max_return_5d > 0 AND max_drawdown_5d > -5.0"
+    )
+
+    # 宽松胜率只在「两种口径都有有效结果」的样本上统计。
+    loose_den = _count(
+        f"SELECT COUNT(*) FROM {dragons} d "
+        "JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
+        "AND s.code = d.code AND s.source = 'v2' "
+        "WHERE d.review_status = 'completed' "
+        "AND s.review_status != 'cannot_evaluate'"
+    )
+    loose_wins = _count(
+        f"SELECT COUNT(*) FROM {dragons} d "
+        "JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
+        "AND s.code = d.code AND s.source = 'v2' "
+        "WHERE d.review_status = 'completed' "
+        "AND s.review_status != 'cannot_evaluate' "
+        "AND d.max_return_5d > 0 AND d.max_drawdown_5d > -5.0"
+    )
+
+    pending_recompute = _count(
+        f"SELECT COUNT(*) FROM {dragons} d "
+        "LEFT JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
+        "AND s.code = d.code AND s.source = 'v2' "
+        "WHERE s.trade_date IS NULL "
+        "AND d.review_status IN ('completed', 'no_entry')"
+    )
+    failed_recompute = _count(
+        f"SELECT COUNT(*) FROM {dragons} d "
+        "LEFT JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
+        "AND s.code = d.code AND s.source = 'v2' "
+        "WHERE s.trade_date IS NULL AND d.review_status = 'error'"
+    )
+
+    best = conn.execute(
+        "SELECT d.code, d.name, s.max_return_5d FROM dragon_review_strict s "
+        f"JOIN {dragons} d ON d.trade_date = s.trade_date AND d.code = s.code "
+        "WHERE s.source = 'v2' AND s.review_status = 'completed' "
+        "AND s.max_return_5d IS NOT NULL "
+        "ORDER BY s.max_return_5d DESC LIMIT 1"
+    ).fetchone()
+
+    return {
+        "avg_return_strict": avg_return_strict,
+        "win_rate_loose": (round(loose_wins / loose_den * 100, 1)
+                           if loose_den > 0 else None),
+        "win_rate_strict": (round(strict_wins / strict_completed * 100, 1)
+                            if strict_completed > 0 else None),
+        "win_rate_loose_n": loose_den,
+        "win_rate_strict_n": strict_completed,
+        "cannot_evaluate": cannot_evaluate,
+        "pending_recompute": pending_recompute,
+        "failed_recompute": failed_recompute,
+        "best_stock_code_strict": best[0] if best else None,
+        "best_stock_name_strict": best[1] if best else None,
+        "best_return_strict": (round(best[2], 2)
+                               if best and best[2] is not None else None),
+    }
 

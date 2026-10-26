@@ -44,8 +44,8 @@ class LazyCommand:
 
 
 def _review_providers(args: Any) -> bool:
-    """``--ui-only`` only serves the saved results; it never reads market data."""
-    return not getattr(args, "ui_only", False)
+    """``--ui-only`` only serves the saved results; ``--dry-run`` never reads K 线."""
+    return not getattr(args, "ui_only", False) and not getattr(args, "dry_run", False)
 
 
 #: ``data`` actions that read market data (everything else stays fully offline).

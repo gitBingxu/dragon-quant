@@ -121,7 +121,7 @@ class TestNoImportSideEffects:
             "import dragon_quant.infra.storage as infra_storage",
             "import dragon_quant.scan.storage as scan_storage",
             "assert infra_storage.__all__ == []",
-            "assert scan_storage.__all__ == ['main', 'scans', 'dragons', 'logs', 'blacklist', 'results']",
+            "assert scan_storage.__all__ == ['main', 'scans', 'dragons', 'review_strict', 'logs', 'blacklist', 'results']",
             "for package in ('dragon_quant.infra.storage', 'dragon_quant.scan.storage'):",
             "    loaded = [name for name in sys.modules",
             "              if name.startswith(package + '.')]",

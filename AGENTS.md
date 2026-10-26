@@ -156,7 +156,7 @@ dragon_quant/
 │   │   ├── __init__.py
 │   │   └── main.py
 │   ├── storage/                 # 扫描持久化仓储 + Phase F 收口
-│   │   ├── __init__.py / main.py / scans.py / dragons.py / logs.py
+│   │   ├── __init__.py / main.py / scans.py / dragons.py / review_strict.py / logs.py
 │   │   └── blacklist.py / results.py
 │   ├── cache/                   # ScanCache（通用 DataCache 在 infra.storage）
 │   │   ├── __init__.py
@@ -324,6 +324,7 @@ web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine /
 | `scans_v2` | 每轮扫描元信息 | 含 `raw_output` 完整结果 JSON；`scan` 固定读写 v2 |
 | `scan_stocks_v2` | 每轮全部评分结果 | scan_id 关联；填充 `dim_liquidity` / `is_true_dragon` / `reject_reason` |
 | `dragons_v2` | 入选龙头（最终物化）| `UNIQUE(trade_date, code)`；`version`=包版本号；review 字段写回此表 |
+| `dragon_review_strict` | 严格口径 review 结果（侧表）| `UNIQUE(trade_date, code, source)`；`review_status` ∈ `completed`/`cannot_evaluate`，`reason` 记录 partial / 无法区分原因；**无行 = 尚未重算**，不写 0/中性值；`dragons_*` 宽松字段语义不变 |
 | `scan_logs_v2` | 结构化日志 | `logs` 默认查询 v2 |
 | `*_v1` | 历史旧表 | 不再由主流程写入，仅显式 `--source v1` 查询 |
 | `vpa_analysis` | 量价分析 | 独立表，不复用 dragons |
@@ -371,13 +372,21 @@ web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine /
 
 ### 龙头回测
 ```bash
-python -m dragon_quant review                        # 自动筛 5~20 交易日内 pending 票全回测
+python -m dragon_quant review                        # 所有距当日 >=5 交易日的 pending 票（无 20 日上限）
 python -m dragon_quant review --date 20260519 --top 5
 python -m dragon_quant review --date 20260519
+python -m dragon_quant review --recompute-all --dry-run   # 全量重算预检（上界统计；不写库/不拉个股K）
+python -m dragon_quant review --recompute-all --limit 20  # 最老 20 条 canary
+python -m dragon_quant review --recompute-all             # 全量双口径回填（默认跳过已有严格行）
 python -m dragon_quant review --ui                    # 回测后启动 Web UI，默认展示 v2
 python -m dragon_quant review --ui-only               # 仅看结果
 ```
-回测逻辑：默认从 `dragons_v2` 读 pending → 找入选后第一个非一字板日（`high != low`）最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回 `dragons_v2`。`--source v1` 仅用于历史旧表。
+**双口径**（共享收益/回撤窗口与公式；胜利条件均为 `max_return_5d > 0 且 max_drawdown_5d > -5`，0 / -5 都不算赢）：
+
+- **宽松口径**（历史行为，写 `dragons_*` 现有 review 字段）：入选后首个 `high != low` 日按**最低价**买入。
+- **严格口径**（写侧表 `dragon_review_strict`，`UNIQUE(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位 → `cannot_evaluate`（原因固定「停牌或数据缺失无法区分」）；传输失败不写/不覆盖严格结果；严格窗口为空 `cannot_evaluate`，部分窗口沿用公式并标 `partial_window`；宽松旧 0/0 契约不变。
+
+`review` 默认只处理 pending、取消 20 交易日上限（不足 5 交易日等待），显式 `--date` 绕过成熟度；`--force` 重算所有成熟状态并覆盖严格。按 code 聚合拉 K（每 code 一次，深度覆盖最老记录）、日历一次；拉取后校验 `min(k.date) <= trade_date`，否则报「历史数据不足」而不是拿最近窗口冒充。`--recompute-all` 仅 v2、最老优先、默认跳过已有严格行（`--force` 覆盖）、跳过 VPA；`--dry-run` / `--limit` 只能与其组合（非法组合 exit 2）；dry-run 是未过滤成熟度的上界，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。`--source v1` 保持旧 5~20 窗口与旧口径，不写严格结果。Web UI 表格 / 收益 / 回撤 / 状态筛选固定严格口径，v1 明确标注旧口径。
 
 ### 账户级模拟交易
 ```bash
@@ -406,6 +415,8 @@ python -m dragon_quant review-account --ui-only --source v2
 源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库随包分发）。运行期仅靠 Python stdlib 托管，**不需要 Node**；改前端时才需 `npm run build`。
 
 **服务器入口（B2）**：`web_ui.start_server(port=8765, open_browser=True, default_source="v2", default_page="review", *, block=True) -> HTTPServer`（`web_ui.server.start_server` 的包级重导出）是唯一公共入口。`python -m web_ui.server`、`review --ui*`、`review-account --ui*` 保持既有阻塞行为（默认 `block=True`）；`--port 0` 由操作系统分配端口，日志与浏览器 URL 取 `server.server_address` 的真实端口（永不为 0），浏览器仅在明确开启且真实 URL 已知后打开。测试/嵌入传 `block=False` 立即拿到已绑定的 `HTTPServer`，自行 `serve_forever` / `shutdown` / `server_close`；启动失败、键盘中断与 serve 循环异常都会关闭 server 并释放端口。
+
+**端口冲突（仅 `review` CLI）**：`review` 的 `--port` 默认值为 `None` 哨兵，`commands/review._start_ui` 解析为 `8765`；未显式给 `--port` 时遇 `EADDRINUSE`（兼容 Windows `winerror=10048`）在 stderr 警告一次并仅重试一次 `port=0`，不另写 URL 逻辑。显式 `--port N` 被占用时不换端口，stderr 输出可操作错误并 `SystemExit(1)`（无 traceback）；非端口占用错误（如 `EACCES`）原样抛出。`web_ui.server.start_server` 的公共签名与「占用时抛 `OSError`」契约不变；`review-account` 端口行为/默认值完全不变。E2E 用测试自持 ephemeral blocker 验证显式冲突，不依赖共享 8765。
 
 ### 实盘辅助交易（buy / sell）
 ```bash

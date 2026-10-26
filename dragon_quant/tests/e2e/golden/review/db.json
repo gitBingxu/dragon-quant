@@ -90,5 +90,29 @@
       "max_drawdown_5d": null,
       "max_return_hold_days": null
     }
+  ],
+  "strict": [
+    {
+      "trade_date": "2026-08-17",
+      "code": "600001",
+      "buy_date": "2026-08-18",
+      "buy_price": 10.1,
+      "max_return_5d": 6.93,
+      "max_drawdown_5d": -4.95,
+      "max_return_hold_days": 3,
+      "review_status": "completed",
+      "reason": null
+    },
+    {
+      "trade_date": "2026-08-21",
+      "code": "600002",
+      "buy_date": "2026-08-24",
+      "buy_price": 11.0,
+      "max_return_5d": 0.0,
+      "max_drawdown_5d": 0.0,
+      "max_return_hold_days": 2,
+      "review_status": "completed",
+      "reason": null
+    }
   ]
 }

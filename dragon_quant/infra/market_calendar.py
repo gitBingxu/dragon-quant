@@ -13,21 +13,26 @@ from typing import Optional
 from dragon_quant.infra import clock
 
 
-def build_trade_calendar(from_date: str, to_date: str) -> set[str]:
+def build_trade_calendar(from_date: str, to_date: str, *,
+                         days: Optional[int] = None) -> set[str]:
     """用平安银行日K提取 [from_date, to_date] 内的交易日集合。
 
     平安银行（000001）是全市场最不容易停牌的标的之一，
     其日K线天然覆盖所有交易日，不会遗漏。
+
+    ``days`` 是向后兼容的可选参数：调用方需要覆盖更长历史（如 review 全量
+    重算）时显式给出拉取根数；缺省保持历史公式，scan / prep 等既有调用不变。
     """
     from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 
     provider = XueqiuProvider()
-    try:
-        start = datetime.strptime(from_date, "%Y-%m-%d")
-        end = datetime.strptime(to_date, "%Y-%m-%d")
-        days = max((end - start).days + 30, 90)
-    except ValueError:
-        days = 90
+    if days is None:
+        try:
+            start = datetime.strptime(from_date, "%Y-%m-%d")
+            end = datetime.strptime(to_date, "%Y-%m-%d")
+            days = max((end - start).days + 30, 90)
+        except ValueError:
+            days = 90
     klines = provider.get_kline("000001", days=days)
 
     dates: set[str] = set()

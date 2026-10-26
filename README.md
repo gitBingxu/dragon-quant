@@ -566,7 +566,7 @@ dragon_quant/
 │   ├── provider/                # 数据源适配
 │   │   ├── __init__.py / main.py / base.py / bundle.py / data.py / rate_limit.py
 │   │   ├── tdx.py / ths.py / xueqiu.py / tencent.py / macro.py
-│   │   └── cookie.py / cookie_cli.py
+│   │   └── cookie.py
 │   ├── storage/                 # dragon.db 唯一连接 + 通用设施
 │   │   ├── __init__.py / main.py / paths.py / identifiers.py / connection.py / schema.py
 │   │   └── _base.py / dragons_rows.py / cache.py / manager.py
@@ -586,9 +586,6 @@ dragon_quant/
 │           ├── doctor.py / errors.py
 │           └── backends/
 │               ├── __init__.py / base.py / local.py / s3.py / signer.py
-└── providers/                   # 唯一保留的旧路径例外
-    ├── __init__.py              # 空包骨架
-    └── cookie.py                # 仅 `python -m dragon_quant.providers.cookie` 入口委托
 
 # 同级仓库包（不是 dragon_quant 的子包）
 web_ui/                          # 回测 Web UI（Vite+React+TS / stdlib HTTPServer；web_ui.start_server）

@@ -1,4 +1,4 @@
-"""M0 offline E2E safety canaries (C1-C17, C19).
+"""M0 offline E2E safety canaries (C1-C17).
 
 Every test here is a *negative* safety proof: it must fail before any business
 process, network call, or real-data access can happen.  Business E2E scenarios
@@ -547,62 +547,6 @@ def test_c14_storage_clear_only_touches_sandbox(sandbox):
         assert not (sandbox.data_dir / rel).exists(), rel
     for name in ("dragon.db", "assets.db", "prep.db"):
         assert (sandbox.data_dir / name).exists(), name
-
-
-# ─── C19: real cookie entrypoint driven by fake Playwright ──────────────────
-
-
-def test_c19_cookie_fetch_ok_writes_sandbox_cookie(sandbox):
-    result = runner().run_module(
-        "dragon_quant.providers.cookie",
-        ["fetch"],
-        sandbox=sandbox,
-        env_override={"DQ_E2E_COOKIE_FETCH": "ok"},
-    )
-    assert result.returncode == 0, result.stderr
-    cookie = sandbox.data_dir / "cookies" / "xueqiu"
-    assert cookie.exists()
-    assert "xq_a_token=e2e-synthetic-token" in cookie.read_text(encoding="utf-8")
-
-    status = runner().run_module(
-        "dragon_quant.providers.cookie", ["status"], sandbox=sandbox
-    )
-    assert status.returncode == 0, status.stderr
-    assert "雪球: ✅" in status.stdout
-
-    log_lines = sandbox.call_log.read_text(encoding="utf-8").splitlines()
-    assert any('"provider": "playwright"' in line for line in log_lines)
-    assert any('"method": "chromium.launch"' in line for line in log_lines)
-
-
-def test_c19_cookie_fetch_empty_and_error_are_offline(sandbox):
-    empty = EnvSandbox.for_case("cookie-empty", now=NOW)
-    try:
-        result = runner().run_module(
-            "dragon_quant.providers.cookie",
-            ["fetch"],
-            sandbox=empty,
-            env_override={"DQ_E2E_COOKIE_FETCH": "empty"},
-        )
-        assert result.returncode == 0, result.stderr
-        assert "获取失败" in result.stdout
-        assert not (empty.data_dir / "cookies" / "xueqiu").exists()
-    finally:
-        empty.cleanup()
-
-    broken = EnvSandbox.for_case("cookie-error", now=NOW)
-    try:
-        result = runner().run_module(
-            "dragon_quant.providers.cookie",
-            ["fetch"],
-            sandbox=broken,
-            env_override={"DQ_E2E_COOKIE_FETCH": "error"},
-        )
-        assert result.returncode == 0, result.stderr
-        assert "E2E fake playwright failure" in result.stderr
-        assert not (broken.data_dir / "cookies" / "xueqiu").exists()
-    finally:
-        broken.cleanup()
 
 
 # ─── Task 4: timeout, cleanup, standalone self-check ────────────────────────

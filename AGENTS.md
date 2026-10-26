@@ -124,10 +124,10 @@ python -m dragon_quant factor eval --name five_dim_composite --from 20260501 --t
 python -c "from dragon_quant.infra.provider.cookie import get_xq; print(f'雪球: {bool(get_xq())}')"
 
 # 手动设置雪球 Cookie（推荐）
-python -m dragon_quant.providers.cookie set --cookie "xq_a_token=...; xq_is_login=1; u=..." --source xq
+python -m dragon_quant data cookie-set --cookie "xq_a_token=...; xq_is_login=1; u=..."
 
 # 自动获取（需要 playwright；首次运行自动下载 chromium 内核约 150MB，走国内镜像）
-python -m dragon_quant.providers.cookie fetch --source xq
+python -m dragon_quant data cookie-fetch
 ```
 
 Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
@@ -194,7 +194,7 @@ dragon_quant/
 │   ├── provider/                # 数据源适配
 │   │   ├── __init__.py / main.py / base.py / bundle.py / data.py / rate_limit.py
 │   │   ├── tdx.py / ths.py / xueqiu.py / tencent.py / macro.py
-│   │   └── cookie.py / cookie_cli.py
+│   │   └── cookie.py
 │   ├── storage/                 # dragon.db 唯一连接 + 通用设施
 │   │   ├── __init__.py / main.py / paths.py / identifiers.py / connection.py / schema.py
 │   │   └── _base.py / dragons_rows.py / cache.py / manager.py
@@ -214,9 +214,6 @@ dragon_quant/
 │           ├── doctor.py / errors.py
 │           └── backends/
 │               ├── __init__.py / base.py / local.py / s3.py / signer.py
-└── providers/                   # 唯一保留的旧路径例外
-    ├── __init__.py              # 空包骨架
-    └── cookie.py                # 仅 `python -m dragon_quant.providers.cookie` 入口委托
 
 # 同级仓库包（不是 dragon_quant 的子包）
 web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer；web_ui.start_server）
@@ -718,7 +715,7 @@ npm test
 ## 当前状态
 
 ### ✅ 已完成
-- **整仓结构重构 M0-M12**：`cli_commands.py` 删除，命令拆入 `commands/`（lazy `COMMANDS` + `dispatch`）；新增 `app.py` Composition Root、`infra/clock.py` + `infra/provider/bundle.py`、`review_account/auction/`、`review_account/prep/` 包、`infra/assets/sync/cli_service.py`、`infra/provider/cookie_cli.py`；`infra/factor` 包根收窄为 13 个批准出口（lazy 旧名兼容一轮）；`infra/storage` 惰性初始化、Web `start_server` 可 `block=False`/`port=0`；离线 E2E harness（51 节点）/ 单测 / npm 门禁全绿
+- **整仓结构重构 M0-M12**：`cli_commands.py` 删除，命令拆入 `commands/`（lazy `COMMANDS` + `dispatch`）；新增 `app.py` Composition Root、`infra/clock.py` + `infra/provider/bundle.py`、`review_account/auction/`、`review_account/prep/` 包、`infra/assets/sync/cli_service.py`；`infra/factor` 包根收窄为 13 个批准出口（lazy 旧名兼容一轮）；`infra/storage` 惰性初始化、Web `start_server` 可 `block=False`/`port=0`；离线 E2E harness（51 节点）/ 单测 / npm 门禁全绿
 - 五维「识别真龙」评分器 `scan/scores/`（带动/领涨/抗跌/流动/资金承接 + 门槛加权聚合），由 `scan` 命令触发
 - 集合竞价强度评分器 `review_account/auction/`（方向/供需/量价/末段抢筹四维加权 + 否决闸门，纯函数）；`auction` 采集与 `auction --recompute DATE` 已接线，结果写 `assets.db/auction_snapshots`（原始资产含 `items_json` + `quote_json`，快照 = 原始资产纯函数）
 - 数据资产独立库 `assets.db`（`prep_assets`/`auction_assets` 原始资产 + `prep_snapshots`/`auction_snapshots` 结果），与 dragon.db 物理隔离

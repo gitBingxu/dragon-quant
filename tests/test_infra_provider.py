@@ -3,7 +3,8 @@
 The provider implementations, the data facade, the rate limiter and the single
 ``ProviderBundle`` live under ``infra/provider``.  Legacy paths only keep
 migration shims; the canonical cookie library must not own a ``__main__``
-guard (the independent entry stays ``python -m dragon_quant.providers.cookie``).
+guard (Cookie CLI is the formal ``data cookie-status|cookie-set|cookie-fetch``
+command, not an independent module entry).
 """
 
 from __future__ import annotations
@@ -69,10 +70,3 @@ def test_data_and_rate_limit_are_moved():
     assert callable(get_kline)
     assert callable(batch_get_quotes)
     assert RateLimiter.__module__ == "dragon_quant.infra.provider.rate_limit"
-
-
-def test_canonical_cookie_cli_owns_the_entry_orchestration():
-    from dragon_quant.infra.provider import cookie, cookie_cli
-
-    assert cookie_cli.main.__module__ == "dragon_quant.infra.provider.cookie_cli"
-    assert cookie_cli.main.__kwdefaults__["fetch"] is cookie.fetch_xq

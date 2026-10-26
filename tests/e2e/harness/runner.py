@@ -693,9 +693,8 @@ def self_check() -> int:
         else:
             print("OK runtime clock active")
 
-        cookie = run_module(
-            "dragon_quant.providers.cookie",
-            ["fetch"],
+        cookie = run_cli(
+            ["data", "cookie-fetch"],
             sandbox=sandbox,
             env_override={"DQ_E2E_COOKIE_FETCH": "ok"},
         )

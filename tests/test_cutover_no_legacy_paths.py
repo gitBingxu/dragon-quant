@@ -1,18 +1,17 @@
 """Task 16 cutover gate: the legacy import paths are gone for good.
 
-The final tree keeps exactly one old-path exception:
-``dragon_quant/providers/{__init__.py,cookie.py}`` where ``cookie.py`` is only the
-``python -m`` entry delegating to :mod:`dragon_quant.infra.provider.cookie_cli`.
-
-Everything else (the migration shims and ``infra/compat.py``) must not exist, must
-not be imported by production code, and must fail to import in a **fresh process**
-(so that a stale ``sys.modules`` entry from an earlier test cannot fake success).
+There is no old-path exception left: the historical ``dragon_quant/providers``
+package and the ``infra/provider/cookie_cli.py`` adapter are both removed (the
+Cookie CLI is the formal ``data cookie-status|cookie-set|cookie-fetch``
+command).  Everything else (the migration shims and ``infra/compat.py``) must
+not exist, must not be imported by production code, and must fail to import in
+a **fresh process** (so that a stale ``sys.modules`` entry from an earlier test
+cannot fake success).
 """
 
 from __future__ import annotations
 
 import ast
-import importlib.util
 import os
 import subprocess
 import sys
@@ -27,6 +26,7 @@ FORBIDDEN_PATHS = [
     "assets_sync", "live_trade", "models", "runtime", "utils",
     "review_account/strategy.py", "review_account/execution.py",
     "review_account/priority.py", "review_account/risk.py", "infra/compat.py",
+    "providers", "infra/provider/cookie_cli.py",
 ]
 
 # Module prefixes that may no longer be imported anywhere in production.
@@ -50,13 +50,8 @@ FORBIDDEN_PREFIXES = (
     "dragon_quant.review_account.priority",
     "dragon_quant.review_account.risk",
     "dragon_quant.infra.compat",
-    "dragon_quant.providers.base",
-    "dragon_quant.providers.tdx",
-    "dragon_quant.providers.ths",
-    "dragon_quant.providers.xueqiu",
-    "dragon_quant.providers.tencent",
-    "dragon_quant.providers.macro",
-    "dragon_quant.providers.cookie_cli",
+    "dragon_quant.providers",
+    "dragon_quant.infra.provider.cookie_cli",
 )
 
 
@@ -166,11 +161,6 @@ def test_legacy_paths_are_gone():
     assert remaining == [], f"legacy paths still exist: {remaining}"
 
 
-def test_providers_keeps_only_the_documented_entry():
-    files = sorted(path.name for path in (PACKAGE / "providers").glob("*.py"))
-    assert files == ["__init__.py", "cookie.py"], files
-
-
 # ─── production imports ────────────────────────────────────────────────────
 
 
@@ -234,8 +224,9 @@ names = (
     "dragon_quant.review_account.execution",
     "dragon_quant.review_account.priority",
     "dragon_quant.review_account.risk",
-    "dragon_quant.providers.tdx",
-    "dragon_quant.providers.cookie_cli",
+    "dragon_quant.providers",
+    "dragon_quant.providers.cookie",
+    "dragon_quant.infra.provider.cookie_cli",
 )
 for name in names:
     try:
@@ -243,19 +234,8 @@ for name in names:
     except ModuleNotFoundError:
         continue
     raise AssertionError(f"{name} still importable")
-import importlib.util
-assert importlib.util.find_spec("dragon_quant.providers.cookie") is not None
 print("ok")
 """
     result = _run_isolated(code, tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
-
-
-def test_providers_cookie_is_entry_only():
-    spec = importlib.util.find_spec("dragon_quant.providers.cookie")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    for name in ("get_xq", "set_xq", "fetch_xq", "main", "build_parser"):
-        assert not hasattr(module, name), f"providers.cookie must not expose {name}"

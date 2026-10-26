@@ -137,7 +137,7 @@ def test_datetime_isinstance_sites_are_audited():
     change ``factors/evaluation.py`` semantics.
     """
 
-    expected = {"dragon_quant/factors/evaluation.py"}
+    expected = {"dragon_quant/infra/factor/evaluation.py"}
     repo_root = E2E_ROOT.parents[1]
     found: dict[str, list[int]] = {}
     for path in sorted((repo_root / "dragon_quant").rglob("*.py")):
@@ -148,7 +148,7 @@ def test_datetime_isinstance_sites_are_audited():
         "isinstance(..., datetime) 站点变化，必须重新审查时钟语义: "
         f"{ {name: lines for name, lines in found.items()} }"
     )
-    assert found["dragon_quant/factors/evaluation.py"] == [65]
+    assert found["dragon_quant/infra/factor/evaluation.py"] == [65]
 
 
 def _module_imports(path: Path) -> set[str]:
@@ -212,14 +212,14 @@ def test_scan_and_review_current_time_flows_through_the_runtime_clock():
     """M9A: scan/review must not read current time from datetime/time directly."""
     repo_root = E2E_ROOT.parents[1]
     expectations = {
-        "dragon_quant/orchestrator.py": {"clock.now", "clock.monotonic",
-                                         "clock.stamp"},
-        "dragon_quant/review.py": {"clock.now"},
+        "dragon_quant/scan/orchestrator/main.py": {"clock.now", "clock.monotonic",
+                                                   "clock.stamp"},
+        "dragon_quant/review/main.py": {"clock.now"},
     }
     for relative, required in expectations.items():
         with_test = repo_root / relative
         names = _imported_names(with_test)
-        assert "dragon_quant.runtime.clock" in names, (
+        assert "dragon_quant.infra.clock" in names, (
             f"{relative} must import the runtime clock seam")
         chains = _call_chains(with_test)
         missing = sorted(required - chains)
@@ -237,14 +237,14 @@ def test_m9b_current_time_flows_through_the_runtime_clock():
         "dragon_quant/review_account/prep/service.py": {"clock.now"},
         "dragon_quant/review_account/prep/collectors.py": {"clock.now"},
         "dragon_quant/review_account/prep/rebuild.py": {"clock.now"},
-        "dragon_quant/live_trade/trader.py": {"clock.now"},
-        "dragon_quant/auction/dates.py": {"clock.now"},
-        "dragon_quant/utils/trading.py": {"clock.now"},
+        "dragon_quant/review_account/live_trade/trader.py": {"clock.now"},
+        "dragon_quant/review_account/auction/dates.py": {"clock.now"},
+        "dragon_quant/infra/market_calendar.py": {"clock.now"},
     }
     for relative, required in expectations.items():
         path = repo_root / relative
         names = _imported_names(path)
-        assert "dragon_quant.runtime.clock" in names, (
+        assert "dragon_quant.infra.clock" in names, (
             f"{relative} must import the runtime clock seam")
         missing = sorted(required - _call_chains(path))
         assert not missing, f"{relative} misses clock calls: {missing}"
@@ -266,19 +266,19 @@ def test_m9b2_factors_cache_logging_storage_use_the_runtime_clock():
     """M9B2: factors/cache/logging/storage wall-time call sites use the clock seam."""
     repo_root = E2E_ROOT.parents[1]
     expectations = {
-        "dragon_quant/factors/engine.py": {"clock.now", "clock.monotonic"},
-        "dragon_quant/factors/matrix.py": {"clock.now"},
-        "dragon_quant/factors/service.py": {"clock.now"},
-        "dragon_quant/factors/finance.py": {"clock.now"},
-        "dragon_quant/cache/data_cache.py": {"clock.now"},
-        "dragon_quant/logging/logger.py": {"clock.now"},
-        "dragon_quant/logging/query.py": {"clock.now"},
-        "dragon_quant/storage/manager.py": {"clock.now"},
+        "dragon_quant/infra/factor/engine.py": {"clock.now", "clock.monotonic"},
+        "dragon_quant/infra/factor/matrix.py": {"clock.now"},
+        "dragon_quant/infra/factor/service.py": {"clock.now"},
+        "dragon_quant/infra/factor/finance.py": {"clock.now"},
+        "dragon_quant/infra/storage/cache.py": {"clock.now"},
+        "dragon_quant/scan/logger/events.py": {"clock.now"},
+        "dragon_quant/scan/logger/query.py": {"clock.now"},
+        "dragon_quant/infra/storage/manager.py": {"clock.now"},
     }
     for relative, required in expectations.items():
         path = repo_root / relative
         names = _imported_names(path)
-        assert "dragon_quant.runtime.clock" in names, (
+        assert "dragon_quant.infra.clock" in names, (
             f"{relative} must import the runtime clock seam")
         missing = sorted(required - _call_chains(path))
         assert not missing, f"{relative} misses clock calls: {missing}"
@@ -287,9 +287,9 @@ def test_m9b2_factors_cache_logging_storage_use_the_runtime_clock():
             f"{relative} still reads current time directly: {offenders}")
 
     # Parsing-only modules must not acquire current time at all.
-    parsing = repo_root / "dragon_quant/factors/evaluation.py"
+    parsing = repo_root / "dragon_quant/infra/factor/evaluation.py"
     assert not _current_time_calls(parsing), (
-        f"factors/evaluation.py must not read current time: "
+        f"infra/factor/evaluation.py must not read current time: "
         f"{_current_time_calls(parsing)}")
 
 
@@ -345,38 +345,38 @@ def test_injection_never_replaces_datetime_or_time():
 #: M9C 审计清单：除 runtime.clock 适配器外，生产代码里仍有直接当前时间调用的
 #: 文件 → 调用计数。任何新增/删除都必须在此显式登记，否则视为未受控时间。
 _CURRENT_TIME_INVENTORY = {
-    "dragon_quant/assets_sync/backends/s3.py": {"datetime.now": 1},
-    "dragon_quant/assets_sync/backends/signer.py": {"datetime.now": 1},
-    "dragon_quant/providers/tdx.py": {
+    "dragon_quant/infra/assets/sync/backends/s3.py": {"datetime.now": 1},
+    "dragon_quant/infra/assets/sync/backends/signer.py": {"datetime.now": 1},
+    "dragon_quant/infra/provider/tdx.py": {
         "time.time": 49, "time.mktime": 1,
         "time.strftime": 1, "time.localtime": 1},
-    "dragon_quant/providers/tencent.py": {"time.time": 3, "time.mktime": 1},
-    "dragon_quant/providers/ths.py": {
+    "dragon_quant/infra/provider/tencent.py": {"time.time": 3, "time.mktime": 1},
+    "dragon_quant/infra/provider/ths.py": {
         "time.time": 14, "time.mktime": 3,
         "time.strftime": 1, "time.localtime": 1},
-    "dragon_quant/providers/xueqiu.py": {"time.time": 5},
-    "dragon_quant/runtime/clock.py": {"datetime.now": 1},
+    "dragon_quant/infra/provider/xueqiu.py": {"time.time": 5},
+    "dragon_quant/infra/clock.py": {"datetime.now": 1},
 }
 
 #: 每个保留调用的分类与理由（空理由视为未解释，测试会失败）。
 _CURRENT_TIME_EXCEPTIONS = {
-    "dragon_quant/runtime/clock.py":
+    "dragon_quant/infra/clock.py":
         "SystemClock 适配器本体：唯一允许产生真实当前时间的位置。",
-    "dragon_quant/providers/tdx.py":
+    "dragon_quant/infra/provider/tdx.py":
         "E2E 用 fake provider 整体替换，模块体不执行；time.time 仅作耗时测量，"
         "time.mktime/strftime/localtime 只解析给定 K 线时间戳。",
-    "dragon_quant/providers/tencent.py":
+    "dragon_quant/infra/provider/tencent.py":
         "E2E 用 fake provider 整体替换，模块体不执行；time.time 仅耗时测量，"
         "time.mktime 只解析给定时间字符串。",
-    "dragon_quant/providers/ths.py":
+    "dragon_quant/infra/provider/ths.py":
         "E2E 用 fake provider 整体替换，模块体不执行；time.time 仅耗时测量，"
         "mktime/strftime/localtime 只解析给定时间戳。",
-    "dragon_quant/providers/xueqiu.py":
+    "dragon_quant/infra/provider/xueqiu.py":
         "E2E 用 fake provider 整体替换，模块体不执行；time.time 仅耗时测量与"
         "请求防缓存参数，不写持久化墙钟字段。",
-    "dragon_quant/assets_sync/backends/signer.py":
+    "dragon_quant/infra/assets/sync/backends/signer.py":
         "SigV4 签名时间戳，只在真实 S3 传输路径执行；E2E 使用 fake backend。",
-    "dragon_quant/assets_sync/backends/s3.py":
+    "dragon_quant/infra/assets/sync/backends/s3.py":
         "服务端时钟偏差校验，只在真实 S3 传输路径执行；E2E 使用 fake backend。",
 }
 
@@ -408,8 +408,8 @@ def test_every_current_time_call_is_classified():
         "dragon_quant/commands/_shared.py",
         "dragon_quant/commands/vpa.py",
         "dragon_quant/commands/prep.py",
-        "dragon_quant/assets_sync/state.py",
-        "dragon_quant/assets_sync/cli_service.py",
+        "dragon_quant/infra/assets/sync/state.py",
+        "dragon_quant/infra/assets/sync/cli_service.py",
     ):
         assert not _current_time_calls(repo_root / migrated), (
             f"{migrated} must read current time through runtime.clock only")
@@ -427,8 +427,8 @@ def test_app_composition_root_does_not_import_cli_or_commands():
     assert not offenders, f"app.py must stay off the command layer: {offenders}"
 
 
-_FEATURE_FILES = ("orchestrator.py", "review.py", "data.py")
-_FEATURE_DIRS = ("review_account", "live_trade", "auction", "factors", "assets_sync", "vpa")
+_FEATURE_FILES = ("review/main.py", "infra/provider/data.py", "infra/provider/cookie.py")
+_FEATURE_DIRS = ("scan", "review_account", "vpa", "infra/factor", "infra/assets")
 
 
 def test_feature_modules_do_not_import_the_composition_root():
@@ -438,8 +438,10 @@ def test_feature_modules_do_not_import_the_composition_root():
     feature_paths = [package / name for name in _FEATURE_FILES]
     for directory in _FEATURE_DIRS:
         feature_paths.extend(sorted((package / directory).rglob("*.py")))
-    assert (package / "orchestrator.py").exists()
-    assert (package / "review.py").exists()
+    assert (package / "scan" / "orchestrator" / "main.py").exists()
+    assert not (package / "orchestrator.py").exists()  # Task 16 cutover
+    assert (package / "review" / "main.py").exists()
+    assert not (package / "review.py").exists()
 
     offenders: dict[str, list[str]] = {}
     for path in feature_paths:
@@ -455,7 +457,7 @@ def test_feature_modules_do_not_import_the_composition_root():
 
 
 def test_provider_bundle_has_a_single_definition():
-    """M2A: runtime/providers.py is the only ProviderBundle definition site."""
+    """M2A: infra/provider/bundle.py is the only ProviderBundle definition site."""
     repo_root = E2E_ROOT.parents[1]
     sites: list[str] = []
     for path in sorted((repo_root / "dragon_quant").rglob("*.py")):
@@ -463,7 +465,7 @@ def test_provider_bundle_has_a_single_definition():
         if any(isinstance(node, ast.ClassDef) and node.name == "ProviderBundle"
                for node in tree.body):
             sites.append(path.relative_to(repo_root).as_posix())
-    assert sites == ["dragon_quant/runtime/providers.py"], sites
+    assert sites == ["dragon_quant/infra/provider/bundle.py"], sites
 
 
 # Feature objects that only their own factories may construct (M2 composition root).
@@ -628,15 +630,19 @@ _AUCTION_RECOMPUTE_CALLS = frozenset({
 _AUCTION_SCORING_CALLS = frozenset({"evaluate", "rank_auctions", "verdict_to_payload"})
 _AUCTION_ORCHESTRATION_CALLS = _AUCTION_COLLECT_CALLS | _AUCTION_SCORING_CALLS
 _PROVIDER_FACTORY_CALLS = frozenset({"build_provider_bundle", "create_providers"})
-_AUCTION_MODULES = ("service", "collect", "recompute", "scoring", "dates", "types")
+_AUCTION_MODULES = ("main", "collect", "recompute", "scoring", "dates", "types")
 
 
 def _repo_root() -> Path:
     return E2E_ROOT.parents[1]
 
 
+def _auction_dir() -> Path:
+    return _repo_root() / "dragon_quant" / "review_account" / "auction"
+
+
 def _auction_module(name: str) -> Path:
-    return _repo_root() / "dragon_quant" / "auction" / f"{name}.py"
+    return _auction_dir() / f"{name}.py"
 
 
 def _function_node(path: Path, name: str) -> ast.FunctionDef:
@@ -671,30 +677,31 @@ def _calls_in(node: ast.AST) -> set[str]:
 def _auction_imports(path: Path) -> set[str]:
     return {
         name for name in _module_imports(path)
-        if name == "dragon_quant.auction" or name.startswith("dragon_quant.auction.")
+        if name == "dragon_quant.review_account.auction"
+        or name.startswith("dragon_quant.review_account.auction.")
     }
 
 
 def test_auction_command_stays_thin_and_the_facade_has_no_orchestration():
-    """M4: the command renders; ``service.py`` is a facade over split modules."""
+    """M4: the command renders; ``main.py`` is a facade over split modules."""
     command = _repo_root() / "dragon_quant" / "commands" / "auction.py"
-    service = _auction_module("service")
+    facade = _auction_module("main")
 
     lines = command.read_text(encoding="utf-8").splitlines()
     assert len(lines) <= 120, f"commands/auction.py 必须是薄 adapter，当前 {len(lines)} 行"
 
     command_calls = _called_names(command)
     assert {"run_auction", "run_auction_recompute"} <= command_calls, (
-        "command must invoke the public auction service facade")
+        "command must invoke the public auction main facade")
     offenders = sorted(command_calls & _AUCTION_ORCHESTRATION_CALLS)
     assert not offenders, f"command still orchestrates auction work: {offenders}"
 
-    service_calls = _called_names(service)
-    offenders = sorted(service_calls & _AUCTION_ORCHESTRATION_CALLS)
-    assert not offenders, f"service facade still contains orchestration: {offenders}"
-    defined = _top_level_functions(service)
+    facade_calls = _called_names(facade)
+    offenders = sorted(facade_calls & _AUCTION_ORCHESTRATION_CALLS)
+    assert not offenders, f"main facade still contains orchestration: {offenders}"
+    defined = _top_level_functions(facade)
     offenders = sorted(defined & {"run_auction", "run_auction_recompute"})
-    assert not offenders, f"service facade must re-export, not implement: {offenders}"
+    assert not offenders, f"main facade must re-export, not implement: {offenders}"
 
 
 def test_auction_service_modules_do_not_import_command_or_composition_root():
@@ -753,39 +760,39 @@ def test_auction_modules_are_split_by_responsibility():
 def test_auction_collect_and_recompute_share_one_scoring_implementation():
     """M4: scoring has a single implementation consumed by both use cases."""
     definitions = [
-        path.name for path in sorted((_repo_root() / "dragon_quant" / "auction").glob("*.py"))
+        path.name for path in sorted(_auction_dir().glob("*.py"))
         if "_score_auction_assets" in _top_level_functions(path)
     ]
     assert definitions == ["scoring.py"], definitions
 
     for name in ("collect", "recompute"):
         imports = _module_imports(_auction_module(name))
-        assert "dragon_quant.auction.scoring" in imports, (
+        assert "dragon_quant.review_account.auction.scoring" in imports, (
             f"auction/{name}.py must consume the shared scoring module")
 
 
 def test_auction_feature_modules_have_no_layering_cycles():
-    """M4: service -> use cases -> scoring/dates/types; never backwards."""
+    """M4: main -> use cases -> scoring/dates/types; never backwards."""
     imports = {name: _auction_imports(_auction_module(name))
                for name in _AUCTION_MODULES}
 
     for name in ("collect", "recompute", "scoring", "dates", "types"):
-        assert "dragon_quant.auction.service" not in imports[name], (
+        assert "dragon_quant.review_account.auction.main" not in imports[name], (
             f"auction/{name}.py must not import the facade back")
 
-    assert "dragon_quant.auction.recompute" not in imports["collect"]
-    assert "dragon_quant.auction.collect" not in imports["recompute"]
+    assert "dragon_quant.review_account.auction.recompute" not in imports["collect"]
+    assert "dragon_quant.review_account.auction.collect" not in imports["recompute"]
     for leaf in ("scoring", "dates", "types"):
         upward = imports[leaf] & {
-            "dragon_quant.auction.collect",
-            "dragon_quant.auction.recompute",
-            "dragon_quant.auction.service",
+            "dragon_quant.review_account.auction.collect",
+            "dragon_quant.review_account.auction.recompute",
+            "dragon_quant.review_account.auction.main",
         }
         assert not upward, f"auction/{leaf}.py imports an upper layer: {sorted(upward)}"
 
-    assert {"dragon_quant.auction.collect",
-            "dragon_quant.auction.recompute"} <= imports["service"], (
-        "service.py must be the facade over both use cases")
+    assert {"dragon_quant.review_account.auction.collect",
+            "dragon_quant.review_account.auction.recompute"} <= imports["main"], (
+        "main.py must be the facade over both use cases")
 
 
 
@@ -793,7 +800,7 @@ def test_auction_feature_modules_have_no_layering_cycles():
 
 _PREP_DIR = _repo_root() / "dragon_quant" / "review_account" / "prep"
 _PREP_MODULE = _repo_root() / "dragon_quant" / "review_account" / "prep.py"
-_PREP_FILES = ("__init__", "service", "compute", "rebuild", "collectors")
+_PREP_FILES = ("__init__", "main", "service", "compute", "rebuild", "collectors")
 
 # Names the old module exported and that operators/tests still patch or import.
 _LEGACY_PATCH_TARGETS = frozenset({
@@ -821,8 +828,11 @@ def _relative_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     modules: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module:
-            modules.add(node.module)
+        if isinstance(node, ast.ImportFrom) and node.level == 1:
+            if node.module:
+                modules.add(node.module)
+            else:  # ``from . import main`` → main
+                modules.update(alias.name for alias in node.names)
     return modules
 
 
@@ -854,10 +864,12 @@ def test_prep_package_replaces_the_module_atomically():
 
 
 def test_prep_facade_exports_every_legacy_patch_target():
-    """M5A: the facade keeps owning the names old patch targets mutate."""
-    exported = _exported_names(_prep_file("__init__"))
+    """Task 12: the facade (prep/main.py) keeps the names old patch targets mutate."""
+    exported = _exported_names(_prep_file("main"))
     missing = sorted(_LEGACY_PATCH_TARGETS - exported)
-    assert not missing, f"prep 门面缺少兼容导出: {missing}"
+    assert not missing, f"prep/main 门面缺少兼容导出: {missing}"
+    # 包 __init__ 只是代理：不得再持有同名实值（否则 patch 转发后读取会拿到旧值）。
+    assert not (_LEGACY_PATCH_TARGETS & _exported_names(_prep_file("__init__")))
 
 
 def test_prep_submodules_resolve_legacy_targets_at_runtime():
@@ -899,8 +911,9 @@ def test_prep_compute_and_rebuild_own_distinct_responsibilities():
     assert not compute & {"run_prep", "_collect_all", "plan_prep",
                           "rebuild_dragons_for_recompute"}
     imports = _module_imports(_prep_file("compute"))
-    assert not imports & {"time", "dragon_quant.storage"}, (
-        f"compute.py 必须保持纯计算（无 I/O）: {sorted(imports & {'time', 'dragon_quant.storage'})}")
+    forbidden = {"time", "dragon_quant.infra.assets"}
+    assert not imports & forbidden, (
+        f"compute.py 必须保持纯计算（无 I/O）: {sorted(imports & forbidden)}")
 
     rebuild = _top_level_functions(_prep_file("rebuild"))
     assert {"rebuild_dragons_for_recompute", "build_dragons_payload",
@@ -938,7 +951,8 @@ def test_prep_recompute_stays_offline_and_modules_have_no_layering_cycle():
     assert graph["collectors"] == {"compute", "rebuild"}
     assert graph["rebuild"] == {"compute"}
     assert graph["compute"] == set()
-    assert graph["__init__"] == {"compute", "rebuild", "collectors", "service"}
+    assert graph["main"] == {"compute", "rebuild", "collectors", "service"}
+    assert graph["__init__"] == {"main"}
 
     assert "service" not in graph["collectors"], "collectors 不得反向依赖 service"
     assert not graph["rebuild"] & {"collectors", "service"}
@@ -1012,7 +1026,8 @@ def test_prep_collectors_do_not_import_service_or_package_root():
 # ─── M6: assets CLI service extraction ─────────────────────────────────────
 
 _ASSETS_COMMAND = _repo_root() / "dragon_quant" / "commands" / "assets.py"
-_ASSETS_CLI_SERVICE = _repo_root() / "dragon_quant" / "assets_sync" / "cli_service.py"
+_ASSETS_CLI_SERVICE = (
+    _repo_root() / "dragon_quant" / "infra" / "assets" / "sync" / "cli_service.py")
 
 # Backend/source/path assembly and sync orchestration belong to cli_service.
 _ASSETS_ORCHESTRATION_CALLS = frozenset({
@@ -1039,16 +1054,16 @@ def test_m6_assets_command_is_a_thin_adapter():
     assert "run" in calls, "the command must call the cli_service entry point"
 
     imported = _imported_names(_ASSETS_COMMAND)
-    assert "dragon_quant.assets_sync.cli_service" in imported, (
-        "the command must consume the public cli_service")
+    assert "dragon_quant.infra.assets.main" in imported, (
+        "the command must consume the public assets entry point (infra.assets.main)")
     assembly_imports = sorted(
         name for name in imported
         if name.startswith((
-            "dragon_quant.assets_sync.backends",
-            "dragon_quant.assets_sync.credentials",
-            "dragon_quant.assets_sync.doctor",
-            "dragon_quant.assets_sync.sources",
-            "dragon_quant.assets_sync.state",
+            "dragon_quant.infra.assets.sync.backends",
+            "dragon_quant.infra.assets.sync.credentials",
+            "dragon_quant.infra.assets.sync.doctor",
+            "dragon_quant.infra.assets.sync.sources",
+            "dragon_quant.infra.assets.sync.state",
         ))
     )
     assert not assembly_imports, (
@@ -1067,7 +1082,7 @@ def test_m6_assets_cli_service_owns_assembly_below_the_command_layer():
     offenders = sorted(
         name for name in imported
         if name in forbidden or any(name.startswith(f"{root}.") for root in forbidden))
-    assert not offenders, f"assets_sync/cli_service.py imports an upper layer: {offenders}"
+    assert not offenders, f"infra/assets/sync/cli_service.py imports an upper layer: {offenders}"
 
     defined = _top_level_functions(_ASSETS_CLI_SERVICE)
     assert {"run", "parse_asset_date", "_build_backend"} <= defined
@@ -1077,13 +1092,13 @@ def test_m6_assets_cli_service_owns_assembly_below_the_command_layer():
     assert not offenders, f"cli_service must not re-implement sync work: {offenders}"
 
     for module in (
-        "dragon_quant.assets_sync.backends.s3",
-        "dragon_quant.assets_sync.credentials",
-        "dragon_quant.assets_sync.doctor",
-        "dragon_quant.assets_sync.service",
-        "dragon_quant.assets_sync.sources",
-        "dragon_quant.assets_sync.state",
-        "dragon_quant.storage.dragons_mirror",
+        "dragon_quant.infra.assets.sync.backends.s3",
+        "dragon_quant.infra.assets.sync.credentials",
+        "dragon_quant.infra.assets.sync.doctor",
+        "dragon_quant.infra.assets.sync.service",
+        "dragon_quant.infra.assets.sync.sources",
+        "dragon_quant.infra.assets.sync.state",
+        "dragon_quant.infra.assets.dragons_mirror",
     ):
         assert module in imported, f"cli_service must consume {module}"
 
@@ -1111,8 +1126,8 @@ def test_m6_backend_injection_is_a_run_level_seam():
 
 # ─── M7: factors public facade narrowing and dependency decycling ──────────
 
-_FACTOR_PACKAGE = "dragon_quant.factors"
-_FACTOR_INIT = _repo_root() / "dragon_quant" / "factors" / "__init__.py"
+_FACTOR_PACKAGE = "dragon_quant.infra.factor"
+_FACTOR_INIT = _repo_root() / "dragon_quant" / "infra" / "factor" / "main.py"
 
 # 用户批准的 13 个公共出口（顺序即 __all__ 顺序）。
 _M7_PUBLIC_EXPORTS = [
@@ -1131,8 +1146,8 @@ _M7_PUBLIC_EXPORTS = [
     "CleanConfig",
 ]
 
-# 命令层只允许 ``from dragon_quant.factors import CleanConfig, service``：
-# 门面取 CleanConfig，CLI 用例包装经文档化公共子模块 factors.service。
+# 命令层只允许 ``from dragon_quant.infra.factor import CleanConfig, service``：
+# 门面取 CleanConfig，CLI 用例包装经文档化公共子模块 infra.factor.service。
 _M7_COMMAND_ALLOWED_FACTOR_IMPORTS = frozenset({_FACTOR_PACKAGE})
 _M7_COMMAND_FACADE_NAMES = frozenset({"CleanConfig", "service"})
 
@@ -1261,7 +1276,7 @@ def test_m7_factors_facade_exports_exactly_thirteen_names():
 
 def test_m7_factors_submodules_never_import_the_package_root():
     """M7: submodules use direct sibling imports; no edge back to the root."""
-    package = _repo_root() / "dragon_quant" / "factors"
+    package = _repo_root() / "dragon_quant" / "infra" / "factor"
     offenders: dict[str, list[int]] = {}
     for path in sorted(package.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -1285,8 +1300,12 @@ def test_m7_factor_package_has_no_module_level_import_cycles():
 
 
 def test_m7_scorers_and_auction_package_roots_have_no_module_level_cycles():
-    """M7 final gate: the sibling packages with the same root-import pattern."""
-    for package in ("dragon_quant.scorers", "dragon_quant.auction"):
+    """M7 final gate: the sibling packages with the same root-import pattern.
+
+    Task 8 moved the five-dimension scorers into ``scan.scores``; this gate covers
+    the canonical packages only.
+    """
+    for package in ("dragon_quant.scan.scores", "dragon_quant.review_account.auction"):
         cycle = _package_cycle(package)
         assert cycle is None, f"{package} 包级 import 环: " + " → ".join(cycle or [])
 
@@ -1324,8 +1343,10 @@ def test_m7_command_uses_only_the_factor_facade():
 
 # ─── M10B: cookie library / independent CLI boundary ──────────────────────
 
-_COOKIE_LIBRARY = _repo_root() / "dragon_quant" / "providers" / "cookie.py"
-_COOKIE_CLI = _repo_root() / "dragon_quant" / "providers" / "cookie_cli.py"
+_PROVIDER_DIR = _repo_root() / "dragon_quant" / "infra" / "provider"
+_COOKIE_LIBRARY = _PROVIDER_DIR / "cookie.py"
+_COOKIE_CLI = _PROVIDER_DIR / "cookie_cli.py"
+_COOKIE_ENTRY = _repo_root() / "dragon_quant" / "providers" / "cookie.py"
 
 
 def test_m10b_cookie_cli_owns_the_single_entry_implementation():
@@ -1334,7 +1355,7 @@ def test_m10b_cookie_cli_owns_the_single_entry_implementation():
     ``cookie.py`` keeps the library (read/write/fetch); the independent entry's
     argparse and status/set/fetch dispatch live in exactly one module.
     """
-    assert _COOKIE_CLI.is_file(), "dragon_quant/providers/cookie_cli.py 必须存在"
+    assert _COOKIE_CLI.is_file(), "dragon_quant/infra/provider/cookie_cli.py 必须存在"
 
     defined = _top_level_functions(_COOKIE_CLI)
     assert {"main", "build_parser"} <= defined, (
@@ -1346,9 +1367,8 @@ def test_m10b_cookie_cli_owns_the_single_entry_implementation():
     positional = [arg.arg for arg in main_node.args.args]
     assert positional[:1] == ["argv"], f"main() 首个位置参数应为 argv: {positional}"
 
-    providers = _repo_root() / "dragon_quant" / "providers"
     sites = [
-        path.name for path in sorted(providers.glob("cookie*.py"))
+        path.name for path in sorted(_PROVIDER_DIR.glob("cookie*.py"))
         if "main" in _top_level_functions(path)
     ]
     assert sites == ["cookie_cli.py"], f"cookie CLI 编排实现必须唯一: {sites}"
@@ -1363,9 +1383,13 @@ def test_m10b_cookie_cli_owns_the_single_entry_implementation():
     assert not offenders, f"cookie_cli.py 不得依赖上层入口: {offenders}"
 
 
-def test_m10b_cookie_module_main_delegates_to_cookie_cli():
-    """M10B: the library module's ``__main__`` is a thin delegate."""
-    tree = ast.parse(_COOKIE_LIBRARY.read_text(encoding="utf-8"))
+def test_m10b_cookie_entry_delegates_to_cookie_cli():
+    """M10B: the canonical library has no entry; the legacy file only delegates."""
+    library_source = _COOKIE_LIBRARY.read_text(encoding="utf-8")
+    assert "__main__" not in library_source, (
+        "canonical cookie.py 不得持有独立入口")
+
+    tree = ast.parse(_COOKIE_ENTRY.read_text(encoding="utf-8"))
     guards = [
         node for node in tree.body
         if isinstance(node, ast.If)
@@ -1373,13 +1397,13 @@ def test_m10b_cookie_module_main_delegates_to_cookie_cli():
             isinstance(part, ast.Name) and part.id == "__name__"
             for part in ast.walk(node.test))
     ]
-    assert len(guards) == 1, "cookie.py 必须只有一个 __main__ 块"
+    assert len(guards) == 1, "providers/cookie.py 必须只有一个 __main__ 块"
 
     block = guards[0]
     calls = _calls_in(block)
-    assert "main" in calls, "cookie.py 的 __main__ 必须委托 cookie_cli.main"
+    assert "main" in calls, "providers/cookie.py 的 __main__ 必须委托 cookie_cli.main"
     assert not calls & {"ArgumentParser", "parse_args", "add_argument"}, (
-        "cookie.py 不得保留第二份 status/set/fetch 编排")
+        "providers/cookie.py 不得保留第二份 status/set/fetch 编排")
 
     delegated = {
         (node.module, alias.name)
@@ -1387,9 +1411,9 @@ def test_m10b_cookie_module_main_delegates_to_cookie_cli():
         if isinstance(node, ast.ImportFrom)
         for alias in node.names
     }
-    assert ("cookie_cli", "main") in delegated or (
-        "dragon_quant.providers.cookie_cli", "main") in delegated, delegated
+    assert ("dragon_quant.infra.provider.cookie_cli", "main") in delegated, delegated
 
     library = _top_level_functions(_COOKIE_LIBRARY)
     assert {"get_xq", "set_xq", "fetch_xq"} <= library, (
-        f"cookie.py 必须保留库函数: {sorted({'get_xq', 'set_xq', 'fetch_xq'} - library)}")
+        f"canonical cookie.py 必须保留库函数: "
+        f"{sorted({'get_xq', 'set_xq', 'fetch_xq'} - library)}")

@@ -1,4 +1,4 @@
-"""tests for dragon_quant.live_trade — 纯信号 buy/sell 命令（复用 review_account 策略与成交）。"""
+"""tests for review_account.live_trade — 纯信号 buy/sell 命令（复用 review_account 策略与成交）。"""
 import copy
 import datetime
 import io
@@ -9,21 +9,22 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from dragon_quant.models.types import KBar
-from dragon_quant.live_trade.service import _make_config, _print_buy, _print_sell, run_buy, run_sell
-from dragon_quant.live_trade.shadow import build_shadow_state, position_as_of
-from dragon_quant.live_trade.signal_engine import SignalEngine
-from dragon_quant.live_trade.trader import LiveTrader
+from dragon_quant.infra.models import KBar
+from dragon_quant.review_account.live_trade.service import _make_config, _print_buy, _print_sell, run_buy, run_sell
+from dragon_quant.review_account.live_trade.shadow import build_shadow_state, position_as_of
+from dragon_quant.review_account.live_trade.signal_engine import SignalEngine
+from dragon_quant.review_account.live_trade.trader import LiveTrader
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
-from dragon_quant.review_account.execution import (
+from dragon_quant.review_account.strategy.execution import (
     apply_sell_fill, break_even_price, buy_quantity, notional_quantity,
 )
 from dragon_quant.review_account.market import (
     SHANGHAI, at, bar_times, build_row, DataCoverageError, validate_bars,
 )
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
-from dragon_quant.storage import db
+from dragon_quant.infra.storage import connection
+from dragon_quant.review_account.live_trade import storage as signal_store
 from tests.test_review_account import CAND, DAY, FakeData, bars, history, position, row
 
 
@@ -282,7 +283,7 @@ class TestLiveTraderRun(unittest.TestCase):
                      second=0, **kw):
         """patch 掉 _run_buy/_run_sell，只看闸门判定与传给引擎的截断点。"""
         method = "_run_buy" if command == "buy" else "_run_sell"
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    self._fake_now(hour, minute, second)), \
                 patch.object(LiveTrader, method, return_value={}) as run:
             result = getattr(self._trader(), command)(day, force=force, **kw)
@@ -297,17 +298,17 @@ class TestLiveTraderRun(unittest.TestCase):
             self._trader().buy("2026-09-06", as_of="10:00")
 
     def test_before_open_rejected(self):
-        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(9, 0)), \
+        with patch("dragon_quant.review_account.live_trade.trader.datetime", self._fake_now(9, 0)), \
                 self.assertRaises(ValueError):
             self._trader().buy("2026-10-09")
 
     def test_noon_break_rejected(self):
-        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(12, 0)), \
+        with patch("dragon_quant.review_account.live_trade.trader.datetime", self._fake_now(12, 0)), \
                 self.assertRaises(ValueError):
             self._trader().buy("2026-10-09")
 
     def test_after_close_rejected(self):
-        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(15, 30)), \
+        with patch("dragon_quant.review_account.live_trade.trader.datetime", self._fake_now(15, 30)), \
                 self.assertRaises(ValueError):
             self._trader().buy("2026-10-09")
 
@@ -330,14 +331,14 @@ class TestLiveTraderRun(unittest.TestCase):
         self.assertEqual(cutoff, until)
 
     def test_force_before_open_still_rejected(self):
-        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(9, 0)), \
+        with patch("dragon_quant.review_account.live_trade.trader.datetime", self._fake_now(9, 0)), \
                 self.assertRaises(ValueError) as cm:
             self._trader().buy("2026-10-09", force=True)
         self.assertIn("尚未开盘", str(cm.exception))
 
     def test_force_before_first_bar_still_rejected(self):
         """09:30–09:35：属于交易时段但没有完整5分钟K，force 不放行。"""
-        with patch("dragon_quant.live_trade.trader.datetime", self._fake_now(9, 32)), \
+        with patch("dragon_quant.review_account.live_trade.trader.datetime", self._fake_now(9, 32)), \
                 self.assertRaises(ValueError) as cm:
             self._trader().buy("2026-10-09", force=True)
         self.assertIn("尚无完整5分钟K", str(cm.exception))
@@ -386,7 +387,7 @@ class TestServiceRun(unittest.TestCase):
 
     def test_run_buy_wires_trader_and_print(self):
         result = {"buys": [], "details": [], "reason_text": "候选池暂无触发买点的标的"}
-        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as Trader:
             Trader.return_value.buy.return_value = result
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -398,7 +399,7 @@ class TestServiceRun(unittest.TestCase):
 
     def test_run_sell_wires_trader_and_print(self):
         result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号"}
-        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as Trader:
             Trader.return_value.sell.return_value = result
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -411,7 +412,7 @@ class TestServiceRun(unittest.TestCase):
     def test_run_buy_force_passes_through_and_prints_hint(self):
         result = {"buys": [], "details": [], "reason_text": "候选池暂无触发买点的标的",
                   "forced": True}
-        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as Trader:
             Trader.return_value.buy.return_value = result
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -423,7 +424,7 @@ class TestServiceRun(unittest.TestCase):
     def test_run_sell_force_passes_through_and_prints_hint(self):
         result = {"sells": [], "held": [], "reason_text": "持仓暂无卖出信号",
                   "forced": True}
-        with patch("dragon_quant.live_trade.service.LiveTrader") as Trader:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as Trader:
             Trader.return_value.sell.return_value = result
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -462,40 +463,45 @@ class TestSignalStorage(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
         self._conn = sqlite3.connect(self._db_path)
-        with patch("dragon_quant.storage.db._connect",
+        with patch("dragon_quant.infra.storage.connection._connect",
                    side_effect=lambda: sqlite3.connect(self._db_path)):
-            db.init_db()
+            connection.init_db()
 
     def tearDown(self):
         self._conn.close()
         self._tmpdir.cleanup()
 
     def _connect(self):
-        return patch("dragon_quant.storage.db._connect",
+        return patch("dragon_quant.infra.storage.connection._connect",
                      side_effect=lambda: sqlite3.connect(self._db_path))
 
     def test_signal_roundtrip_idempotent_and_before_date(self):
         code = "600001"
         with self._connect():
-            i1, created1 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+            i1, created1 = signal_store.insert_signal(code, "样本", "2026-09-07", 10.0,
                                             "buy_open_ma5_pullback", "开盘承接", {"a": 1})
-            i2, created2 = db.insert_signal(code, "样本", "2026-09-07", 10.0,
+            i2, created2 = signal_store.insert_signal(code, "样本", "2026-09-07", 10.0,
                                             "buy_open_ma5_pullback", "开盘承接", {"a": 1})
             self.assertEqual(i1, i2)  # 幂等：同一 code 未平仓不重复记录
             self.assertTrue(created1)
             self.assertFalse(created2)
-            self.assertEqual([s["code"] for s in db.list_open_signals(source="v2")], [code])
+            self.assertEqual(
+                [s["code"] for s in signal_store.list_open_signals(source="v2")],
+                [code])
             # before_date：只取 entry_date < 目标日的持仓
-            self.assertEqual([s["code"] for s in db.list_open_signals(before_date="2026-09-08", source="v2")], [code])
-            self.assertEqual(db.list_open_signals(before_date="2026-09-07", source="v2"), [])
+            self.assertEqual(
+                [s["code"] for s in signal_store.list_open_signals(
+                    before_date="2026-09-08", source="v2")],
+                [code])
+            self.assertEqual(signal_store.list_open_signals(before_date="2026-09-07", source="v2"), [])
             # 峰值写回
-            self.assertTrue(db.update_signal_peaks(code, 8.5, 10.85))
-            row_sig = db.list_open_signals(source="v2")[0]
+            self.assertTrue(signal_store.update_signal_peaks(code, 8.5, 10.85))
+            row_sig = signal_store.list_open_signals(source="v2")[0]
             self.assertAlmostEqual(row_sig["highest_return"], 8.5)
             self.assertAlmostEqual(row_sig["highest_price"], 10.85)
             # 平仓后不再出现在未平仓列表
-            self.assertTrue(db.close_signal(code, "2026-09-08", 9.5, "hard_stop_loss", "止损", {}, 1))
-            self.assertEqual(db.list_open_signals(source="v2"), [])
+            self.assertTrue(signal_store.close_signal(code, "2026-09-08", 9.5, "hard_stop_loss", "止损", {}, 1))
+            self.assertEqual(signal_store.list_open_signals(source="v2"), [])
 
 
 def signal(**kw) -> dict:
@@ -845,10 +851,10 @@ class TestLiveTraderAlignment(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
         self._conn = sqlite3.connect(self._db_path)
-        self._patch = patch("dragon_quant.storage.db._connect",
+        self._patch = patch("dragon_quant.infra.storage.connection._connect",
                             side_effect=lambda: sqlite3.connect(self._db_path))
         self._patch.start()
-        db.init_db()
+        connection.init_db()
 
     def tearDown(self):
         self._patch.stop()
@@ -860,11 +866,11 @@ class TestLiveTraderAlignment(unittest.TestCase):
 
     def test_sell_coverage_includes_candidates(self):
         """候选分时缺失 → 整日 daily_fallback（与回测 codes = candidates ∪ positions 一致）。"""
-        db.insert_signal("600001", "持仓", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal("600001", "持仓", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
         cand = {"code": "600002", "name": "候选", "rank": 1, "composite_score": 80,
                 "is_true_dragon": True, "trade_date": "2026-09-04"}
-        with patch("dragon_quant.live_trade.trader.collect_candidates",
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates",
                    return_value=[cand]):
             result = self._trader(MissingCodeData("600002")).sell(DAY, "10:00")
         self.assertEqual(result["data_quality"], "daily_fallback")
@@ -872,49 +878,49 @@ class TestLiveTraderAlignment(unittest.TestCase):
         for s in result["sells"]:
             self.assertNotIn("forced", s["signal"])
         self.assertNotIn(
-            "forced", db.list_all_signals(source="v2")[0]["exit_signal"])
+            "forced", signal_store.list_all_signals(source="v2")[0]["exit_signal"])
 
     def test_buy_coverage_includes_positions(self):
         """持仓分时缺失 → buy 同样整日 daily_fallback（codes 含 as-of 持仓）。"""
-        db.insert_signal("600002", "持仓", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal("600002", "持仓", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
-        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                    return_value=([CAND], _pool_ctx())):
             result = self._trader(MissingCodeData("600002")).buy(DAY, "10:00")
         self.assertEqual(result["data_quality"], "daily_fallback")
 
     def test_buy_updates_existing_position_peaks(self):
-        db.insert_signal(CAND["code"], "持仓", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal(CAND["code"], "持仓", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
-        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                    return_value=([], _pool_ctx())):
             self._trader(RisingData()).buy(DAY, "10:00")
-        row_sig = db.list_open_signals(source="v2")[0]
+        row_sig = signal_store.list_open_signals(source="v2")[0]
         self.assertGreater(row_sig["highest_price"], 10.3)
         self.assertGreater(row_sig["highest_return"], 3.0)
 
     def test_buy_flags_unpersisted_when_row_already_open(self):
         """回放到当日早盘：未来（09-08）的 open 行不参与 as-of，但写库命中幂等 → 标注未落库。"""
-        db.insert_signal(CAND["code"], "未来", "2026-09-08", 10.0, "buy", "买", {},
+        signal_store.insert_signal(CAND["code"], "未来", "2026-09-08", 10.0, "buy", "买", {},
                          "v2", qty=1000)
-        db.update_signal_peaks(CAND["code"], 3.0, 9.9)  # 该未来行的既有峰值
-        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+        signal_store.update_signal_peaks(CAND["code"], 3.0, 9.9)  # 该未来行的既有峰值
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                    return_value=([CAND], _pool_ctx())):
             result = self._trader(FakeData()).buy(DAY, "10:00")
         self.assertEqual(len(result["buys"]), 1)
         self.assertFalse(result["buys"][0]["persisted"])
         # 未落库的买入不得把本次回放峰值写到那条无关 open 行上
-        row_sig = db.list_open_signals(source="v2")[0]
+        row_sig = signal_store.list_open_signals(source="v2")[0]
         self.assertAlmostEqual(row_sig["highest_price"], 9.9)
         self.assertAlmostEqual(row_sig["highest_return"], 3.0)
 
     def test_buy_records_qty_for_break_even_parity(self):
-        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                    return_value=([CAND], _pool_ctx())):
             result = self._trader(FakeData()).buy(DAY, "10:00")
         b = result["buys"][0]
         self.assertEqual(b["qty"], notional_quantity(StrategyConfig(), b["entry_price"]))
-        row_sig = db.list_open_signals(source="v2")[0]
+        row_sig = signal_store.list_open_signals(source="v2")[0]
         self.assertEqual(row_sig["qty"], b["qty"])
         self.assertNotIn("forced", row_sig["entry_signal"])  # 非强制运行不打标
 
@@ -931,9 +937,9 @@ class TestLiveTraderAlignment(unittest.TestCase):
             MarketEvent(at(DAY, "09:30"), "open", {"600001": open_row}, [CAND]),
             MarketEvent(at(DAY, "09:35"), "bar", {"600001": bar_row}, [CAND]),
         ]
-        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                    return_value=([CAND], _pool_ctx())), \
-                patch("dragon_quant.live_trade.trader.historical_events",
+                patch("dragon_quant.review_account.live_trade.trader.historical_events",
                       return_value=iter(events)):
             result = self._trader(FakeData()).buy(DAY, "10:00")
         unfilled = [d for d in result["details"]
@@ -945,11 +951,11 @@ class TestLiveTraderAlignment(unittest.TestCase):
 
     def test_first_day_half_routes_to_half_close_and_rebuilds(self):
         """首日减半（first_day_stop 开启）：partial 走 half_close_signal，影子状态重建 qty/took_profit_half。"""
-        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
         cfg = StrategyConfig(sell_rule_toggles={"first_day_stop": True})
         trader = LiveTrader(cfg, source="v2", data=_FirstDayDipData())
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[]):
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates", return_value=[]):
             result = trader.sell(DAY, "10:00")
         self.assertEqual(len(result["sells"]), 1)
         sell = result["sells"][0]
@@ -958,48 +964,48 @@ class TestLiveTraderAlignment(unittest.TestCase):
         self.assertEqual(sell["qty"], 500)
         self.assertEqual(result["held"][0]["qty"], 500)
         self.assertTrue(result["held"][0]["took_profit_half"])
-        row_sig = db.list_all_signals(source="v2")[0]
+        row_sig = signal_store.list_all_signals(source="v2")[0]
         self.assertEqual(row_sig["status"], "open")          # 剩余半仓继续跟踪
         self.assertTrue(row_sig["took_profit_half"])
         self.assertEqual(row_sig["half_exit_qty"], 500)
         self.assertEqual(row_sig["half_exit_reason_code"], "first_day_stop_half")
         # 同一信号不得再写第二条半仓腿（took_profit_half 幂等守卫）
-        self.assertFalse(db.half_close_signal("600001", DAY, 9.9, 100,
+        self.assertFalse(signal_store.half_close_signal("600001", DAY, 9.9, 100,
                                               "next_day_limit_up_half", "重复减半", {}))
-        self.assertEqual(db.list_all_signals(source="v2")[0]["half_exit_qty"], 500)
+        self.assertEqual(signal_store.list_all_signals(source="v2")[0]["half_exit_qty"], 500)
         rebuilt = position_as_of(row_sig, cfg, DAY, at(DAY, "15:00"))
         self.assertTrue(rebuilt.took_profit_half)
         self.assertEqual(rebuilt.qty, 500)
 
     def test_forced_buy_persists_forced_marker(self):
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    _mock_datetime(DAY, 15, 30)), \
-                patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+                patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                       return_value=([CAND], _pool_ctx())):
             result = self._trader(FakeData()).buy(DAY, force=True)
         self.assertTrue(result["forced"])
         self.assertTrue(result["buys"])
-        self.assertIs(db.list_open_signals(source="v2")[0]["entry_signal"]["forced"], True)
+        self.assertIs(signal_store.list_open_signals(source="v2")[0]["entry_signal"]["forced"], True)
 
     def test_forced_sell_persists_forced_marker(self):
-        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
         trader = self._trader(_CrashIntradayData())
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    _mock_datetime(DAY, 15, 30)), \
-                patch("dragon_quant.live_trade.trader.collect_candidates",
+                patch("dragon_quant.review_account.live_trade.trader.collect_candidates",
                       return_value=[]), \
-                patch("dragon_quant.live_trade.trader.db.close_signal",
-                      wraps=db.close_signal) as close:
+                patch("dragon_quant.review_account.live_trade.trader.signal_store.close_signal",
+                      wraps=signal_store.close_signal) as close:
             result = trader.sell(DAY, force=True)
         self.assertTrue(result["forced"])
         self.assertEqual(len(result["sells"]), 1)
         self.assertFalse(result["sells"][0]["partial"])
         self.assertIs(close.call_args.args[5]["forced"], True)
-        self.assertIs(db.list_all_signals(source="v2")[0]["exit_signal"]["forced"], True)
+        self.assertIs(signal_store.list_all_signals(source="v2")[0]["exit_signal"]["forced"], True)
 
     def test_forced_half_close_persists_forced_marker(self):
-        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
 
         class _HalfEngine:
@@ -1020,12 +1026,12 @@ class TestLiveTraderAlignment(unittest.TestCase):
                     "signal": {"kind": "half"}}]}
 
         trader = self._trader(FakeData())
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    _mock_datetime(DAY, 15, 30)), \
-                patch("dragon_quant.live_trade.trader.collect_candidates",
+                patch("dragon_quant.review_account.live_trade.trader.collect_candidates",
                       return_value=[]), \
-                patch("dragon_quant.live_trade.trader.SignalEngine", _HalfEngine), \
-                patch("dragon_quant.live_trade.trader.db.half_close_signal",
+                patch("dragon_quant.review_account.live_trade.trader.SignalEngine", _HalfEngine), \
+                patch("dragon_quant.review_account.live_trade.trader.signal_store.half_close_signal",
                       return_value=True) as half:
             result = trader.sell(DAY, force=True)
         self.assertTrue(result["forced"])
@@ -1033,12 +1039,12 @@ class TestLiveTraderAlignment(unittest.TestCase):
         self.assertIs(half.call_args.args[6]["forced"], True)
 
         # 非强制（10:00 盘中）同一半仓腿不得打标。
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    _mock_datetime(DAY, 10, 0)), \
-                patch("dragon_quant.live_trade.trader.collect_candidates",
+                patch("dragon_quant.review_account.live_trade.trader.collect_candidates",
                       return_value=[]), \
-                patch("dragon_quant.live_trade.trader.SignalEngine", _HalfEngine), \
-                patch("dragon_quant.live_trade.trader.db.half_close_signal",
+                patch("dragon_quant.review_account.live_trade.trader.SignalEngine", _HalfEngine), \
+                patch("dragon_quant.review_account.live_trade.trader.signal_store.half_close_signal",
                       return_value=True) as half_normal:
             result_normal = trader.sell(DAY)
         self.assertFalse(result_normal["forced"])
@@ -1046,13 +1052,13 @@ class TestLiveTraderAlignment(unittest.TestCase):
 
     def test_force_after_close_daily_fallback_does_not_fill_at_close(self):
         """强制盘后 + 日K兜底：收盘价成交腿（15:00:00.001）必须被截断，不伪造成交。"""
-        db.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
+        signal_store.insert_signal("600001", "样本", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
         trader = self._trader(_CrashCloseData(intraday_missing=[DAY]))
 
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    _mock_datetime(DAY, 15, 30)), \
-                patch("dragon_quant.live_trade.trader.collect_candidates",
+                patch("dragon_quant.review_account.live_trade.trader.collect_candidates",
                       return_value=[]):
             forced = trader.sell(DAY, force=True)
         self.assertTrue(forced["forced"])
@@ -1063,9 +1069,9 @@ class TestLiveTraderAlignment(unittest.TestCase):
         self.assertGreater(forced["held"][0]["highest_return"], 0)
 
         # 对照：同为日K兜底，盘中 15:05（未强制）会以收盘价成交 → 证明确有可触发的平仓腿。
-        with patch("dragon_quant.live_trade.trader.datetime",
+        with patch("dragon_quant.review_account.live_trade.trader.datetime",
                    _mock_datetime(DAY, 15, 5)), \
-                patch("dragon_quant.live_trade.trader.collect_candidates",
+                patch("dragon_quant.review_account.live_trade.trader.collect_candidates",
                       return_value=[]):
             control = trader.sell(DAY)
         self.assertFalse(control["forced"])
@@ -1092,7 +1098,7 @@ class TestSignalMigration(unittest.TestCase):
                      "VALUES ('600001', '2026-09-04', 10, 'open')")
         conn.commit()
         conn.close()
-        self._patch = patch("dragon_quant.storage.db._connect",
+        self._patch = patch("dragon_quant.infra.storage.connection._connect",
                             side_effect=lambda: sqlite3.connect(self._db_path))
         self._patch.start()
 
@@ -1101,14 +1107,14 @@ class TestSignalMigration(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def test_adds_columns_and_reads_legacy_rows(self):
-        db.init_db()
+        connection.init_db()
         conn = sqlite3.connect(self._db_path)
         cols = {r[1] for r in conn.execute("PRAGMA table_info(buy_sell_signals)")}
         conn.close()
         for name in ("qty", "half_exit_date", "half_exit_price", "half_exit_qty",
                      "half_exit_reason_code", "half_exit_reason_text", "half_exit_signal_json"):
             self.assertIn(name, cols)
-        rows = db.list_all_signals(source="v2")
+        rows = signal_store.list_all_signals(source="v2")
         self.assertEqual(len(rows), 1)
         self.assertIsNone(rows[0]["qty"])
         self.assertFalse(rows[0]["took_profit_half"])
@@ -1122,36 +1128,36 @@ class TestHalfSignalStorage(unittest.TestCase):
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
         self._conn = sqlite3.connect(self._db_path)
         with self._connect():
-            db.init_db()
+            connection.init_db()
 
     def tearDown(self):
         self._conn.close()
         self._tmpdir.cleanup()
 
     def _connect(self):
-        return patch("dragon_quant.storage.db._connect",
+        return patch("dragon_quant.infra.storage.connection._connect",
                      side_effect=lambda: sqlite3.connect(self._db_path))
 
     def test_insert_signal_positional_source_and_qty_keyword(self):
         """MAJOR #4 回归：位置传 source 仍兼容，qty 为 keyword-only。"""
         with self._connect():
-            sid, created = db.insert_signal("600003", "样本", "2026-09-07", 10.0,
+            sid, created = signal_store.insert_signal("600003", "样本", "2026-09-07", 10.0,
                                             "buy", "买", {}, "v2", qty=300)
             self.assertTrue(created)
-            s = db.list_open_signals(source="v2")[0]
+            s = signal_store.list_open_signals(source="v2")[0]
             self.assertEqual(s["id"], sid)
             self.assertEqual(s["source"], "v2")
             self.assertEqual(s["qty"], 300)
 
     def test_half_close_freezes_leg_and_keeps_open(self):
         with self._connect():
-            db.insert_signal("600001", "样本", "2026-09-07", 10.0, "buy", "买", {},
+            signal_store.insert_signal("600001", "样本", "2026-09-07", 10.0, "buy", "买", {},
                              "v2", qty=1000)
-            self.assertTrue(db.half_close_signal("600001", "2026-09-08", 10.5, 500,
+            self.assertTrue(signal_store.half_close_signal("600001", "2026-09-08", 10.5, 500,
                                                  "next_day_limit_up_half", "减半", {"x": 1}))
-            self.assertFalse(db.half_close_signal("600001", "2026-09-08", 10.5, 500,
+            self.assertFalse(signal_store.half_close_signal("600001", "2026-09-08", 10.5, 500,
                                                   "next_day_limit_up_half", "减半", {"x": 1}))
-            rows = db.list_open_signals(source="v2")
+            rows = signal_store.list_open_signals(source="v2")
             self.assertEqual(len(rows), 1)
             s = rows[0]
             self.assertEqual(s["status"], "open")
@@ -1162,9 +1168,9 @@ class TestHalfSignalStorage(unittest.TestCase):
             self.assertEqual(s["half_exit_reason_code"], "next_day_limit_up_half")
             self.assertEqual(s["half_exit_signal"], {"x": 1})
             # 剩余半仓继续跟踪，随后可被全清
-            self.assertTrue(db.close_signal("600001", "2026-09-09", 11.0,
+            self.assertTrue(signal_store.close_signal("600001", "2026-09-09", 11.0,
                                             "trailing_take_profit", "移动止盈", {}, 2))
-            self.assertEqual(db.list_open_signals(source="v2"), [])
+            self.assertEqual(signal_store.list_open_signals(source="v2"), [])
 
 
 if __name__ == "__main__":

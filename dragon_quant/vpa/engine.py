@@ -47,7 +47,7 @@ def analyze(code: str, source: str = "xueqiu", days: int = 60,
     Returns:
         VPAReport
     """
-    from dragon_quant.data import get_kline
+    from dragon_quant.infra.provider.data import get_kline
 
     run_ctx = dict(DEFAULT_CTX)
     if ctx:

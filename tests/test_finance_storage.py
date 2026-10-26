@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.storage import finance as store
+from dragon_quant.infra.factor import finance_store as store
 
 
 class FinanceStorageBase(unittest.TestCase):
@@ -14,7 +14,7 @@ class FinanceStorageBase(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
         self._patch = patch(
-            "dragon_quant.storage.assets_db._connect",
+            "dragon_quant.infra.assets.db._connect",
             side_effect=self._connect)
         self._patch.start()
 
@@ -59,7 +59,7 @@ class TestSchema(FinanceStorageBase):
         self.assertTrue(set(store.FIN_TABLES).issubset(tables))
 
     def test_required_columns_registered(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         for table in store.FIN_TABLES:
             self.assertIn(table, assets_db._REQUIRED_COLUMNS)
 

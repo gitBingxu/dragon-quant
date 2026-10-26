@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.storage import factors as store
+from dragon_quant.infra.factor import sql as store
 
 
 class FactorsStorageBase(unittest.TestCase):
@@ -14,7 +14,7 @@ class FactorsStorageBase(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
         self._patch = patch(
-            "dragon_quant.storage.assets_db._connect",
+            "dragon_quant.infra.assets.db._connect",
             side_effect=self._connect)
         self._patch.start()
 
@@ -59,7 +59,7 @@ class TestSchema(FactorsStorageBase):
         self.assertIn("idx_factor_build_runs_date", indexes)
 
     def test_required_columns_registered(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         for table in store.FACTOR_TABLES:
             self.assertIn(table, assets_db._REQUIRED_COLUMNS)
             self.assertIn(table, assets_db._WRITE_REQUIRED_COLUMNS)

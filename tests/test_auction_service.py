@@ -1,6 +1,6 @@
 """M4 auction feature service contract tests.
 
-These tests pin the extracted ``dragon_quant.auction.service`` seam only:
+These tests pin the extracted ``dragon_quant.review_account.auction.main`` seam only:
 
 * payload shape / key order for collect, empty-pool and recompute;
 * explicit ``services`` win, missing providers fall back to the runtime factory;
@@ -16,10 +16,10 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.auction.service import (
+from dragon_quant.review_account.auction.main import (
     AuctionOutcome, run_auction, run_auction_recompute,
 )
-from dragon_quant.models.types import Quote
+from dragon_quant.infra.models import Quote
 
 DAY = "2026-10-20"
 PREV = "2026-10-19"
@@ -69,7 +69,7 @@ def _snapshot(codes=(("600001", "甲"), ("600002", "乙"))):
 
 
 def _asset(code: str, *, name=None, items=None, quote="default"):
-    from dragon_quant.auction.serialize import quote_to_payload
+    from dragon_quant.review_account.auction.serialize import quote_to_payload
 
     return {
         "trade_date": DAY,
@@ -108,7 +108,7 @@ class _CollectHarness:
             def _factory():
                 calls["factory"] += 1
                 return SimpleNamespace(tdx=bundle_tdx)
-            self._patch("dragon_quant.runtime.providers.build_provider_bundle",
+            self._patch("dragon_quant.infra.provider.bundle.build_provider_bundle",
                         side_effect=_factory)
 
         def _calendar(tdx, days=120):
@@ -116,7 +116,7 @@ class _CollectHarness:
             if opt.get("calendar_error") is not None:
                 raise opt["calendar_error"]
             return list(calendar)
-        self._patch("dragon_quant.utils.trading.tdx_trade_dates",
+        self._patch("dragon_quant.infra.market_calendar.tdx_trade_dates",
                     side_effect=_calendar)
 
         def _prep_snapshot(date, source="v2"):
@@ -124,14 +124,14 @@ class _CollectHarness:
             if opt.get("snapshot_error") is not None:
                 raise opt["snapshot_error"]
             return snapshot
-        self._patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        self._patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                     side_effect=_prep_snapshot)
 
-        self._patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+        self._patch("dragon_quant.infra.assets.dragons_mirror.list_dragon_trade_dates",
                     return_value=legacy_dates)
-        self._patch("dragon_quant.storage.dragons_mirror.get_dragons",
+        self._patch("dragon_quant.infra.assets.dragons_mirror.get_dragons",
                     return_value=dragons)
-        self._patch("dragon_quant.storage.dragons_mirror.stale_dates",
+        self._patch("dragon_quant.infra.assets.dragons_mirror.stale_dates",
                     return_value={})
 
         def _auction(code, services=None):
@@ -139,7 +139,7 @@ class _CollectHarness:
             if opt.get("auction_error") is not None:
                 raise opt["auction_error"]
             return list(ITEMS) if opt.get("auction_items", ITEMS) else []
-        self._patch("dragon_quant.data.get_auction", side_effect=_auction)
+        self._patch("dragon_quant.infra.provider.data.get_auction", side_effect=_auction)
 
         quotes = opt.get("quotes")
         if quotes is None:
@@ -152,14 +152,14 @@ class _CollectHarness:
             if opt.get("batch_error") is not None:
                 raise opt["batch_error"]
             return list(quotes)
-        self._patch("dragon_quant.data.batch_get_quotes", side_effect=_batch)
+        self._patch("dragon_quant.infra.provider.data.batch_get_quotes", side_effect=_batch)
 
         def _save(trade_date, code, name, items, quote=None):
             calls["saved"].append(code)
             calls["saved_rows"].append({"code": code, "name": name})
             if opt.get("save_error") is not None:
                 raise opt["save_error"]
-        self._patch("dragon_quant.storage.assets_db.save_auction_asset",
+        self._patch("dragon_quant.infra.assets.db.save_auction_asset",
                     side_effect=_save)
 
         persisted = opt.get("persisted")
@@ -171,7 +171,7 @@ class _CollectHarness:
                 return list(persisted)
             return [_asset(row["code"], name=row["name"])
                     for row in calls["saved_rows"]]
-        self._patch("dragon_quant.storage.assets_db.list_auction_assets",
+        self._patch("dragon_quant.infra.assets.db.list_auction_assets",
                     side_effect=_list)
 
         def _replace(trade_date, payloads, source="v2"):
@@ -179,7 +179,7 @@ class _CollectHarness:
             if opt.get("replace_error") is not None:
                 raise opt["replace_error"]
             return len(payloads)
-        self._patch("dragon_quant.storage.assets_db.replace_auction_snapshots",
+        self._patch("dragon_quant.infra.assets.db.replace_auction_snapshots",
                     side_effect=_replace)
         return self
 
@@ -303,17 +303,17 @@ class TestRecomputeContract(unittest.TestCase):
         assets = [_asset("600001", name="甲"), _asset("600002", name="乙")]
         with ExitStack() as stack:
             factory = stack.enter_context(
-                patch("dragon_quant.runtime.providers.build_provider_bundle"))
+                patch("dragon_quant.infra.provider.bundle.build_provider_bundle"))
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.list_auction_assets",
+                "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=assets))
             replace = stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.replace_auction_snapshots",
+                "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 return_value=2))
             get_auction = stack.enter_context(patch(
-                "dragon_quant.data.get_auction"))
+                "dragon_quant.infra.provider.data.get_auction"))
             batch = stack.enter_context(patch(
-                "dragon_quant.data.batch_get_quotes"))
+                "dragon_quant.infra.provider.data.batch_get_quotes"))
 
             outcome = run_auction_recompute("20261020", services=None, today=DAY)
 
@@ -339,9 +339,9 @@ class TestRecomputeContract(unittest.TestCase):
             with self.subTest(expected=expected):
                 with ExitStack() as stack:
                     factory = stack.enter_context(
-                        patch("dragon_quant.runtime.providers.build_provider_bundle"))
+                        patch("dragon_quant.infra.provider.bundle.build_provider_bundle"))
                     stack.enter_context(patch(
-                        "dragon_quant.storage.assets_db.list_auction_assets",
+                        "dragon_quant.infra.assets.db.list_auction_assets",
                         return_value=options["assets"]))
                     outcome = run_auction_recompute(
                         options["raw"], services=None, today=options["today"])
@@ -355,10 +355,10 @@ class TestRecomputeContract(unittest.TestCase):
     def test_recompute_snapshot_write_failure_is_an_error(self):
         with ExitStack() as stack:
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.list_auction_assets",
+                "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=[_asset("600001")]))
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.replace_auction_snapshots",
+                "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 side_effect=RuntimeError("db locked")))
             outcome = run_auction_recompute("20261020", today=DAY)
 
@@ -371,21 +371,21 @@ class TestRecomputeContract(unittest.TestCase):
 class TestPublicFacade(unittest.TestCase):
 
     def test_format_report_forwards_to_the_report_implementation(self):
-        from dragon_quant.auction import format_report
+        from dragon_quant.review_account.auction.main import format_report
 
-        with patch("dragon_quant.auction.report.format_auction_report",
+        with patch("dragon_quant.review_account.auction.report.format_auction_report",
                    return_value=["line"]) as implementation:
             self.assertEqual(format_report([], trade_date=DAY), ["line"])
 
         implementation.assert_called_once_with([], trade_date=DAY)
 
     def test_package_exposes_the_public_use_case_facade(self):
-        import dragon_quant.auction as auction
+        import dragon_quant.review_account.auction as auction
 
         self.assertTrue(callable(auction.run_auction))
         self.assertTrue(callable(auction.run_auction_recompute))
         self.assertEqual(auction.AuctionOutcome.__module__,
-                         "dragon_quant.auction.types")
+                         "dragon_quant.review_account.auction.types")
 
 
 if __name__ == "__main__":

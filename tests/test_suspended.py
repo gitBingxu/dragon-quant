@@ -7,9 +7,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.live_trade.signal_engine import SignalEngine
-from dragon_quant.live_trade.trader import LiveTrader
-from dragon_quant.models.types import KBar
+from dragon_quant.review_account.live_trade.signal_engine import SignalEngine
+from dragon_quant.review_account.live_trade.trader import LiveTrader
+from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
 from dragon_quant.review_account.market import (
@@ -20,7 +20,8 @@ from dragon_quant.review_account.models import (
     StrategyConfig,
 )
 from dragon_quant.review_account.simulator import AccountSimulator
-from dragon_quant.storage import db
+from dragon_quant.review_account.live_trade import storage as db
+from dragon_quant.infra.storage.connection import init_db
 from tests.test_review_account import CAND, DAY, FakeData, row
 
 SUSP = "600002"
@@ -336,19 +337,19 @@ class TestLiveTraderSuspended(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
-        self._patch = patch("dragon_quant.storage.db._connect",
+        self._patch = patch("dragon_quant.infra.storage.connection._connect",
                             side_effect=lambda: sqlite3.connect(self._db_path))
         self._patch.start()
-        db.init_db()
+        init_db()
 
     def tearDown(self):
         self._patch.stop()
         self._tmpdir.cleanup()
 
     def test_buy_reports_suspended_and_degrades(self):
-        with patch("dragon_quant.live_trade.trader.collect_candidates_ex",
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates_ex",
                    return_value=([CAND, CAND_S], _ctx())), \
-                patch("dragon_quant.live_trade.trader.load_market_sentiment",
+                patch("dragon_quant.review_account.live_trade.trader.load_market_sentiment",
                       return_value=None):
             result = LiveTrader(StrategyConfig(), source="v2",
                                 data=SuspendedData(suspended={SUSP})).buy(DAY, "10:00")
@@ -360,7 +361,7 @@ class TestLiveTraderSuspended(unittest.TestCase):
     def test_sell_freezes_suspended_holding(self):
         db.insert_signal(SUSP, "停牌样本", "2026-09-04", 10.0, "buy", "买", {},
                          "v2", qty=1000)
-        with patch("dragon_quant.live_trade.trader.collect_candidates", return_value=[]):
+        with patch("dragon_quant.review_account.live_trade.trader.collect_candidates", return_value=[]):
             result = LiveTrader(StrategyConfig(), source="v2",
                                 data=SuspendedData(suspended={SUSP})).sell(DAY, "10:00")
         self.assertEqual(result["sells"], [])

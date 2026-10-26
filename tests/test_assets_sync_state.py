@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.assets_sync.errors import LockBusyError
-from dragon_quant.assets_sync.state import (
+from dragon_quant.infra.assets.sync.errors import LockBusyError
+from dragon_quant.infra.assets.sync.state import (
     LOCK_STALE_SECONDS,
     ProcessLock,
     default_paths,
@@ -96,7 +96,7 @@ class TestProcessLock(StateTestBase):
         path.mkdir()
         (path / "owner.json").write_text(json.dumps({
             "pid": 12345, "hostname": "host", "started_at": now_iso()}), encoding="utf-8")
-        with patch("dragon_quant.assets_sync.state._pid_alive", return_value=False):
+        with patch("dragon_quant.infra.assets.sync.state._pid_alive", return_value=False):
             lock = self._lock()
             lock.acquire()
             self.assertTrue((path / "owner.json").exists())
@@ -109,7 +109,7 @@ class TestProcessLock(StateTestBase):
         (path / "owner.json").write_text(json.dumps({
             "pid": os.getpid(), "hostname": "host", "started_at": old.isoformat()}),
             encoding="utf-8")
-        with patch("dragon_quant.assets_sync.state._pid_alive", return_value=True):
+        with patch("dragon_quant.infra.assets.sync.state._pid_alive", return_value=True):
             with self.assertRaises(LockBusyError):
                 self._lock().acquire()
 
@@ -131,8 +131,8 @@ class TestProcessLock(StateTestBase):
         (path / "owner.json").write_text(json.dumps({
             "pid": os.getpid(), "hostname": "host", "started_at": old.isoformat()}),
             encoding="utf-8")
-        with patch("dragon_quant.assets_sync.state.sys.platform", "win32"), \
-             patch("dragon_quant.assets_sync.state.os.kill",
+        with patch("dragon_quant.infra.assets.sync.state.sys.platform", "win32"), \
+             patch("dragon_quant.infra.assets.sync.state.os.kill",
                    side_effect=AssertionError("win32 不得调用 os.kill")):
             lock = self._lock()
             lock.acquire()

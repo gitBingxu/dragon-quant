@@ -116,6 +116,57 @@ def test_documented_fallback_window_is_five_days():
     assert "之前 **5** 个真实交易日的**全部真龙**并集" in agents
 
 
+def _documented_tree_paths() -> set[str]:
+    documented: set[str] = set()
+    for document in (AGENTS, README):
+        documented |= {str(path) for path in _tree_paths(document)}
+    return documented
+
+
+def _assert_canonical_are_documented(canonical: list[str]) -> None:
+    missing_files = [name for name in canonical if not (REPO_ROOT / name).exists()]
+    assert not missing_files, f"canonical files missing: {missing_files}"
+    documented = _documented_tree_paths()
+    missing_docs = [name for name in canonical if name not in documented]
+    assert not missing_docs, f"main tree misses canonical paths: {missing_docs}"
+
+
+def test_task12_canonical_entrypoints_are_documented():
+    """Task 12 canonical paths exist and are part of the documented main tree."""
+    _assert_canonical_are_documented([
+        "dragon_quant/review/__init__.py",
+        "dragon_quant/review/main.py",
+        "dragon_quant/review_account/main.py",
+        "dragon_quant/review_account/storage.py",
+        "dragon_quant/review_account/prep/main.py",
+        "dragon_quant/vpa/main.py",
+    ])
+
+
+def test_task13_canonical_entrypoints_are_documented():
+    """Task 13 canonical paths exist and are part of the documented main tree."""
+    _assert_canonical_are_documented([
+        "dragon_quant/review_account/auction/__init__.py",
+        "dragon_quant/review_account/auction/main.py",
+        "dragon_quant/review_account/auction/collect.py",
+        "dragon_quant/review_account/auction/recompute.py",
+        "dragon_quant/review_account/auction/scoring.py",
+        "dragon_quant/review_account/auction/dates.py",
+        "dragon_quant/review_account/auction/registry.py",
+        "dragon_quant/review_account/auction/strength.py",
+        "dragon_quant/review_account/auction/serialize.py",
+        "dragon_quant/review_account/auction/report.py",
+        "dragon_quant/review_account/auction/types.py",
+        "dragon_quant/review_account/live_trade/__init__.py",
+        "dragon_quant/review_account/live_trade/main.py",
+        "dragon_quant/review_account/live_trade/service.py",
+        "dragon_quant/review_account/live_trade/trader.py",
+        "dragon_quant/review_account/live_trade/signal_engine.py",
+        "dragon_quant/review_account/live_trade/shadow.py",
+        "dragon_quant/review_account/live_trade/storage.py",
+    ])
+
+
 def test_every_parser_node_has_a_readme_command():
     readme = _read(README)
     missing: list[str] = []
@@ -148,21 +199,45 @@ def test_current_navigation_has_no_removed_modules():
         assert "dragon_quant/review_account/prep.py" not in text
 
 
+def test_docs_describe_the_new_tree_first():
+    """Task 15: the first tree block is the final main tree, not the migration shim tree."""
+    for document in (AGENTS, README):
+        block = _tree_block(document)
+        for expected in ("commands/", "scan/", "review/", "review_account/", "vpa/", "infra/"):
+            assert expected in block, f"{document.name} main tree misses {expected}"
+        assert "scorers/" not in block, (
+            f"{document.name} main tree still lists the legacy scorers/ package")
+        # A top-level ``storage/`` line would be the old shim tree; infra/storage
+        # renders as ``├── storage/`` under an ``infra/`` parent and must stay.
+        assert "\n├── storage/" not in block, (
+            f"{document.name} main tree still lists the legacy top-level storage/ package")
+        assert "\n├── factors/" not in block, (
+            f"{document.name} main tree still lists the legacy top-level factors/ package")
+
+
 def test_new_architecture_packages_are_documented():
     documented = {str(path) for path in _tree_paths(AGENTS)}
     required = [
         "dragon_quant/app.py",
         "dragon_quant/commands",
-        "dragon_quant/runtime/clock.py",
-        "dragon_quant/runtime/providers.py",
-        "dragon_quant/auction/service.py",
-        "dragon_quant/auction/collect.py",
-        "dragon_quant/auction/recompute.py",
-        "dragon_quant/auction/scoring.py",
-        "dragon_quant/auction/dates.py",
-        "dragon_quant/review_account/prep",
-        "dragon_quant/assets_sync/cli_service.py",
-        "dragon_quant/providers/cookie_cli.py",
+        "dragon_quant/infra/clock.py",
+        "dragon_quant/infra/provider/bundle.py",
+        "dragon_quant/infra/storage/main.py",
+        "dragon_quant/infra/factor/main.py",
+        "dragon_quant/infra/assets/main.py",
+        "dragon_quant/scan/orchestrator/main.py",
+        "dragon_quant/scan/storage/main.py",
+        "dragon_quant/scan/logger/main.py",
+        "dragon_quant/scan/cache/main.py",
+        "dragon_quant/scan/scores/main.py",
+        "dragon_quant/review/main.py",
+        "dragon_quant/review_account/main.py",
+        "dragon_quant/review_account/prep/main.py",
+        "dragon_quant/review_account/auction/main.py",
+        "dragon_quant/review_account/live_trade/main.py",
+        "dragon_quant/review_account/strategy/main.py",
+        "dragon_quant/vpa/main.py",
+        "dragon_quant/providers/cookie.py",
     ]
     missing = [name for name in required if name not in documented]
     assert not missing, f"AGENTS.md architecture overview misses: {missing}"

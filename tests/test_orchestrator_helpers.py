@@ -9,16 +9,16 @@ import json
 import sqlite3
 import tempfile
 from pathlib import Path
-from contextlib import ExitStack, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from unittest.mock import Mock, patch
-from dragon_quant import orchestrator as orch
-from dragon_quant.cache.data_cache import DataCache
-from dragon_quant.models.types import SectorPerformance
-from dragon_quant.storage import db
+from dragon_quant.scan.orchestrator import main as orch
+from dragon_quant.scan.cache.main import ScanCache
+from dragon_quant.infra.models import SectorPerformance
+from dragon_quant.scan.storage import dragons as db
 from tests.test_scorers import _min_bars, _quote
 from tests.support import patch_storage_dbs
-from dragon_quant.models.types import StockInfo, KBar, Candidate
-from dragon_quant.orchestrator import (
+from dragon_quant.infra.models import StockInfo, KBar
+from dragon_quant.scan.orchestrator.main import (
     _is_valid_candidate,
     _compute_consecutive_boards,
     _compute_5day_return,
@@ -205,11 +205,16 @@ class TestScanScoringIntegration(unittest.TestCase):
         # orch.scan() 的 Phase F 会 save_dragons → 锁外 fan-out 双写 assets.db 镜像，
         # 必须两个连接点一起隔离，否则镜像写落到真实数据目录。
         self.stack.enter_context(patch_storage_dbs(self.db_path))
-        self.stack.enter_context(patch.object(orch, "RESULTS_DIR", Path(self.tmp.name)))
-        self.cache = DataCache(cache_dir="")
-        self.stack.enter_context(patch.object(orch, "DataCache", return_value=self.cache))
+        self.stack.enter_context(
+            patch("dragon_quant.infra.storage.paths.RESULTS_DIR",
+                  Path(self.tmp.name)))
+        self.cache = ScanCache(cache_dir="")
+        self.stack.enter_context(
+            patch.object(orch, "create_scan_cache", return_value=self.cache))
         self.stack.enter_context(patch.object(orch, "_get_trade_date", return_value="2026-09-11"))
-        self.stack.enter_context(patch("dragon_quant.utils.trading.build_trade_calendar", return_value={"2026-09-11"}))
+        self.stack.enter_context(
+            patch("dragon_quant.infra.market_calendar.build_trade_calendar",
+                  return_value={"2026-09-11"}))
         self.ths, self.xq, self.tx = Mock(), Mock(), Mock()
         # tdx 主链路：mock 返回空，让板块链锚点/个股链全部回退到老链路
         self.tdx = Mock()
@@ -222,13 +227,18 @@ class TestScanScoringIntegration(unittest.TestCase):
             lambda asc=False, category="hy", **kw: (
                 [SectorPerformance("881001", "S", 2, 2, 0.0, category, "ths")]
                 if category == "hy" else []))
-        self.ths.get_sector_components.return_value = [StockInfo("600001", "Rejected", pct=10), StockInfo("600002", "Passed", pct=10)]
+        self.ths.get_sector_components.return_value = [
+            StockInfo("600001", "Rejected", pct=10),
+            StockInfo("600002", "Passed", pct=10),
+        ]
         self.ths.get_sector_5min_kline_history.return_value = []
         self.ths.get_sector_1min_kline.return_value = _min_bars(100, [0, 1])
         self.xq.get_kline.return_value = _min_bars(10, [0, 1, 2, 3, 4, 10])
         self.xq.get_minute_kline.return_value = _min_bars(10, [0, 10])
         self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11) for c in codes]
-        self.stack.enter_context(patch.object(orch, "create_providers", return_value={"tdx": self.tdx, "ths": self.ths, "xueqiu": self.xq, "tencent": self.tx}))
+        self.stack.enter_context(patch.object(
+            orch, "create_providers",
+            return_value={"tdx": self.tdx, "ths": self.ths, "xueqiu": self.xq, "tencent": self.tx}))
         limiter = Mock()
         limiter.submit.side_effect = lambda provider, fn: fn()
         self.stack.enter_context(patch.object(orch, "RateLimiter", return_value=limiter))
@@ -301,9 +311,54 @@ class TestScanScoringIntegration(unittest.TestCase):
 
     def test_five_day_dedupe_preserves_original_rank(self):
         self.pass_codes = {"600001", "600002"}
-        with patch.object(db, "get_last_entry_with_rank", side_effect=lambda code, **kw: ("2000-01-01", 1) if code == "600001" else None), patch("dragon_quant.utils.trading.trade_days_between", return_value=1):
+        with patch.object(
+                db, "get_last_entry_with_rank",
+                side_effect=lambda code, **kw: ("2000-01-01", 1) if code == "600001" else None), \
+                patch("dragon_quant.infra.market_calendar.trade_days_between", return_value=1):
             orch.scan(top_n=2, verbose=False, force=True)
         self.assertEqual(self.rows("dragons_v2"), [("600002", 2, 1)])
+
+    def test_phase_f_calls_persist_once_and_backfills_output(self):
+        """Phase F 只调用一次 persist_scan_result，并用返回 counts/path 回填。"""
+        from dragon_quant.scan.storage.main import PersistResult
+
+        report_path = Path(self.tmp.name) / "r.txt"
+        with patch.object(
+                orch, "persist_scan_result",
+                return_value=PersistResult(
+                    log_count=7, report_path=report_path,
+                    saved_dragons=1, skipped_dragons=0, updated_dragons=0,
+                    errors=[])) as persist:
+            output = orch.scan(top_n=2, verbose=False, force=True)
+
+        self.assertEqual(persist.call_count, 1)
+        kwargs = persist.call_args.kwargs
+        timestamp = kwargs["timestamp"]
+        self.assertEqual(kwargs["scan_id"], f"v2_{timestamp[:8]}_2")
+        self.assertEqual(
+            kwargs["scan_date_fmt"],
+            f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}")
+        self.assertEqual([row["code"] for row in kwargs["dragon_rows"]], ["600002"])
+        self.assertEqual(kwargs["dragon_rows"][0]["scan_id"], kwargs["scan_id"])
+        self.assertIn(output["report_text"], kwargs["report_text"])
+        self.assertTrue(callable(kwargs["trade_calendar"]))
+        self.assertEqual(kwargs["trade_calendar"](), {"2026-09-11"})
+        self.assertEqual(kwargs["version"], orch.__version__)
+        self.assertEqual(output["log_count"], 7)
+        self.assertEqual(output["report_path"], str(report_path))
+
+    def test_phase_f_log_error_is_visible_before_report_failure(self):
+        """日志失败先于报告失败时，verbose 必须已打印日志错误（旧行为）。"""
+        stderr = io.StringIO()
+        with patch("dragon_quant.scan.storage.logs.save_scan_logs",
+                   side_effect=RuntimeError("log down")), \
+                patch("dragon_quant.scan.storage.main.write_scan_report",
+                      side_effect=OSError("disk full")), \
+                redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            with self.assertRaises(OSError):
+                orch.scan(top_n=2, verbose=True, force=True)
+
+        self.assertIn("日志持久化失败: log down", stderr.getvalue())
 
     def test_rebuild_does_not_promote_rejected_or_beyond_topn(self):
         self.pass_codes = {"600002", "600003"}
@@ -323,7 +378,7 @@ class TestScanServicesInjection(TestScanScoringIntegration):
     """M2A: a supplied ProviderBundle drives Phase A–F; omission keeps the factory."""
 
     def _bundle(self):
-        from dragon_quant.runtime.providers import ProviderBundle
+        from dragon_quant.infra.provider.bundle import ProviderBundle
 
         return ProviderBundle(tdx=self.tdx, ths=self.ths,
                               xueqiu=self.xq, tencent=self.tx)
@@ -367,7 +422,7 @@ class TestScanServicesInjection(TestScanScoringIntegration):
     def test_services_clock_remains_passive_while_the_runtime_seam_owns_time(self):
         from datetime import datetime
 
-        from dragon_quant.runtime.clock import FixedClock
+        from dragon_quant.infra.clock import FixedClock
 
         output = orch.scan(
             top_n=1, verbose=False, force=True,
@@ -381,7 +436,7 @@ class TestScanServicesInjection(TestScanScoringIntegration):
             output["timestamp"].startswith(datetime.now().strftime("%Y%m%d")))
 
     def _install_fixed_clock(self, moment):
-        from dragon_quant.runtime import clock as runtime_clock
+        from dragon_quant.infra import clock as runtime_clock
 
         self.addCleanup(runtime_clock.reset_clock)
         runtime_clock.set_clock(runtime_clock.FixedClock(moment))
@@ -409,7 +464,7 @@ class TestScanServicesInjection(TestScanScoringIntegration):
 class TestApiFailureAttribution(unittest.TestCase):
 
     def test_fallback_rescue_is_per_dimension(self):
-        from dragon_quant.logging.logger import ScanLogger
+        from dragon_quant.scan.logger.events import ScanLogger
         logger = ScanLogger()
         logger.api("tdx", "sector_ranking", ok=False, error="boom-1",
                    dimension="gn")

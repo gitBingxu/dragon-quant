@@ -799,7 +799,7 @@ def test_c18_fake_macro_response_covers_every_macro_spec():
     with sandbox("c18") as box:
         result = run_python(
             box,
-            "from dragon_quant.providers.macro import MACRO_KEYS\n"
+            "from dragon_quant.infra.provider.macro import MACRO_KEYS\n"
             "print(','.join(MACRO_KEYS))\n")
         assert_exit(result, 0)
         # Cross-check the reviewed fixture against the production spec source.

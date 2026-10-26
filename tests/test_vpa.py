@@ -3,10 +3,10 @@ tests for dragon_quant.vpa — 量价分析模块
 """
 import unittest
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 from dragon_quant.vpa.engine import analyze, _aggregate, DEFAULT_CTX
 from dragon_quant.vpa.factors import FACTORS
-from dragon_quant.vpa.factors import vol_amount, trend_verify, breakout, divergence
+from dragon_quant.vpa.factors import trend_verify, breakout, divergence
 from dragon_quant.vpa.types import (
     FactorResult, SIGNAL_BULLISH, SIGNAL_BEARISH, SIGNAL_NEUTRAL,
 )
@@ -111,7 +111,7 @@ class TestAnalyzeFallback(unittest.TestCase):
 
     def test_insufficient_data_fallback(self):
         # 通过 monkeypatch get_kline 返回过短数据
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
         orig = data.get_kline
         data.get_kline = lambda code, source="xueqiu", days=20: []
         try:
@@ -120,6 +120,20 @@ class TestAnalyzeFallback(unittest.TestCase):
             self.assertEqual(rep.signal, SIGNAL_NEUTRAL)
         finally:
             data.get_kline = orig
+
+
+class TestVpaMainFacade(unittest.TestCase):
+
+    def test_package_reexports_the_main_facade(self):
+        import dragon_quant.vpa as package
+        import dragon_quant.vpa.main as main
+        from dragon_quant.vpa.engine import analyze as impl_analyze
+        from dragon_quant.vpa.types import FactorResult, VPAReport
+
+        self.assertIs(main.analyze, impl_analyze)
+        self.assertIs(package.analyze, main.analyze)
+        self.assertIs(package.VPAReport, VPAReport)
+        self.assertIs(package.FactorResult, FactorResult)
 
 
 if __name__ == "__main__":

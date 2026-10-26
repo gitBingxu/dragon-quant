@@ -1,0 +1,827 @@
+{
+  "assets_schema": {
+    "auction_assets": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "name",
+        "items_json",
+        "quote_json",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_auction_assets_1"
+      ]
+    },
+    "auction_snapshots": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "source",
+        "analysis_json",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_auction_snapshots_1"
+      ]
+    },
+    "dragons": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "name",
+        "scan_id",
+        "rank",
+        "composite_score",
+        "board_count",
+        "open_px",
+        "close_px",
+        "high_px",
+        "low_px",
+        "pct",
+        "turnover_rate",
+        "amount",
+        "market_cap",
+        "concepts_json",
+        "report_text",
+        "is_true_dragon",
+        "version",
+        "created_at",
+        "buy_date",
+        "buy_price",
+        "max_return_5d",
+        "max_drawdown_5d",
+        "max_return_hold_days",
+        "review_status",
+        "source"
+      ],
+      "indexes": [
+        "idx_assets_dragons_code",
+        "idx_assets_dragons_date",
+        "idx_assets_dragons_review",
+        "sqlite_autoindex_dragons_1"
+      ]
+    },
+    "factor_build_runs": {
+      "columns": [
+        "id",
+        "trade_date",
+        "started_at",
+        "finished_at",
+        "report_json",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_factor_build_runs_date"
+      ]
+    },
+    "factor_model_snapshots": {
+      "columns": [
+        "model_name",
+        "model_version",
+        "params_json",
+        "factor_versions_json",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_factor_model_snapshots_1"
+      ]
+    },
+    "factor_registry": {
+      "columns": [
+        "factor_name",
+        "factor_version",
+        "label",
+        "frequency",
+        "source",
+        "depends_on_json",
+        "lookback",
+        "direction",
+        "unit",
+        "available_phase",
+        "pit_rule",
+        "scope_json",
+        "params_json",
+        "default_enabled",
+        "valid_from",
+        "deprecated_at",
+        "owner",
+        "description",
+        "spec_hash",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_factor_registry_1"
+      ]
+    },
+    "factor_sector_snapshots": {
+      "columns": [
+        "trade_date",
+        "code",
+        "industry_code",
+        "industry_name",
+        "category",
+        "source",
+        "scan_id",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_factor_sector_date",
+        "sqlite_autoindex_factor_sector_snapshots_1"
+      ]
+    },
+    "factor_values": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "factor_name",
+        "factor_version",
+        "value",
+        "available_at",
+        "source",
+        "source_scan_id",
+        "source_meta_json",
+        "computed_at"
+      ],
+      "indexes": [
+        "idx_factor_values_code_date",
+        "idx_factor_values_date_name",
+        "sqlite_autoindex_factor_values_1"
+      ]
+    },
+    "fin_field_calibrations": {
+      "columns": [
+        "layout_key",
+        "num_fields",
+        "mapping_json",
+        "confidence_json",
+        "status",
+        "sample_n",
+        "calibrated_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_fin_field_calibrations_1"
+      ]
+    },
+    "fin_observed_snapshots": {
+      "columns": [
+        "trade_date",
+        "code",
+        "updated_date",
+        "period",
+        "values_json",
+        "values_hash",
+        "captured_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_fin_observed_snapshots_1"
+      ]
+    },
+    "fin_report_files": {
+      "columns": [
+        "report_period",
+        "filename",
+        "md5",
+        "filesize",
+        "first_seen_at",
+        "status",
+        "records_count",
+        "raw_blob",
+        "error"
+      ],
+      "indexes": [
+        "sqlite_autoindex_fin_report_files_1"
+      ]
+    },
+    "fin_report_records": {
+      "columns": [
+        "report_period",
+        "code",
+        "file_md5",
+        "layout_key",
+        "values_json",
+        "available_at",
+        "pit_basis",
+        "first_seen_at",
+        "retracted_at"
+      ],
+      "indexes": [
+        "idx_fin_records_code_period",
+        "sqlite_autoindex_fin_report_records_1"
+      ]
+    },
+    "fin_xdxr_records": {
+      "columns": [
+        "code",
+        "ex_date",
+        "category",
+        "payload_json",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_fin_xdxr_records_1"
+      ]
+    },
+    "prep_assets": {
+      "columns": [
+        "id",
+        "trade_date",
+        "asset_type",
+        "payload_json",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_prep_assets_1"
+      ]
+    },
+    "prep_snapshots": {
+      "columns": [
+        "id",
+        "trade_date",
+        "source",
+        "result_json",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_prep_snapshots_1"
+      ]
+    }
+  },
+  "dragon_schema": {
+    "buy_sell_signals": {
+      "columns": [
+        "id",
+        "code",
+        "name",
+        "source",
+        "entry_date",
+        "entry_price",
+        "entry_reason_code",
+        "entry_reason_text",
+        "entry_signal_json",
+        "highest_return",
+        "highest_price",
+        "took_profit_half",
+        "status",
+        "exit_date",
+        "exit_price",
+        "exit_reason_code",
+        "exit_reason_text",
+        "exit_signal_json",
+        "hold_days",
+        "created_at",
+        "updated_at",
+        "qty",
+        "half_exit_date",
+        "half_exit_price",
+        "half_exit_qty",
+        "half_exit_reason_code",
+        "half_exit_reason_text",
+        "half_exit_signal_json"
+      ],
+      "indexes": [
+        "idx_buy_sell_open",
+        "idx_buy_sell_open_by_date"
+      ]
+    },
+    "dragons_v1": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "name",
+        "scan_id",
+        "rank",
+        "composite_score",
+        "board_count",
+        "open_px",
+        "close_px",
+        "high_px",
+        "low_px",
+        "pct",
+        "turnover_rate",
+        "amount",
+        "market_cap",
+        "concepts_json",
+        "report_text",
+        "is_true_dragon",
+        "version",
+        "created_at",
+        "buy_date",
+        "buy_price",
+        "max_return_5d",
+        "max_drawdown_5d",
+        "max_return_hold_days",
+        "review_status",
+        "source"
+      ],
+      "indexes": [
+        "idx_dragons_v1_code",
+        "idx_dragons_v1_date",
+        "idx_dragons_v1_review",
+        "sqlite_autoindex_dragons_v1_1"
+      ]
+    },
+    "dragons_v2": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "name",
+        "scan_id",
+        "rank",
+        "composite_score",
+        "board_count",
+        "open_px",
+        "close_px",
+        "high_px",
+        "low_px",
+        "pct",
+        "turnover_rate",
+        "amount",
+        "market_cap",
+        "concepts_json",
+        "report_text",
+        "is_true_dragon",
+        "version",
+        "created_at",
+        "buy_date",
+        "buy_price",
+        "max_return_5d",
+        "max_drawdown_5d",
+        "max_return_hold_days",
+        "review_status",
+        "source"
+      ],
+      "indexes": [
+        "idx_dragons_v2_code",
+        "idx_dragons_v2_date",
+        "idx_dragons_v2_review",
+        "sqlite_autoindex_dragons_v2_1"
+      ]
+    },
+    "review_account_events": {
+      "columns": [
+        "id",
+        "run_id",
+        "event_date",
+        "event_type",
+        "code",
+        "name",
+        "title",
+        "detail",
+        "reason_code",
+        "cash",
+        "total_equity",
+        "signal_json"
+      ],
+      "indexes": [
+        "idx_review_account_events_run"
+      ]
+    },
+    "review_account_positions": {
+      "columns": [
+        "id",
+        "run_id",
+        "code",
+        "name",
+        "entry_date",
+        "entry_price",
+        "qty",
+        "entry_reason_code",
+        "entry_signal_json",
+        "exit_date",
+        "exit_price",
+        "exit_reason_code",
+        "exit_signal_json",
+        "realized_return",
+        "hold_days",
+        "status",
+        "post_exit_max_return",
+        "post_exit_max_drawdown",
+        "post_exit_window_days"
+      ],
+      "indexes": [
+        "idx_review_account_positions_run"
+      ]
+    },
+    "review_account_runs": {
+      "columns": [
+        "id",
+        "source",
+        "display_name",
+        "strategy_name",
+        "strategy_params_json",
+        "date_from",
+        "date_to",
+        "initial_cash",
+        "final_equity",
+        "total_return",
+        "max_drawdown",
+        "trade_count",
+        "win_rate",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_review_account_runs_created"
+      ]
+    },
+    "review_account_snapshots": {
+      "columns": [
+        "id",
+        "run_id",
+        "trade_date",
+        "cash",
+        "market_value",
+        "total_equity",
+        "daily_return",
+        "cumulative_return",
+        "drawdown",
+        "position_code",
+        "position_name",
+        "position_qty",
+        "position_cost",
+        "position_market_price",
+        "position_unrealized_return",
+        "positions_json"
+      ],
+      "indexes": [
+        "idx_review_account_snapshots_run"
+      ]
+    },
+    "review_account_trades": {
+      "columns": [
+        "id",
+        "run_id",
+        "trade_date",
+        "code",
+        "name",
+        "side",
+        "price",
+        "qty",
+        "amount",
+        "fee",
+        "realized_pnl",
+        "cash_after",
+        "position_after",
+        "reason_code",
+        "reason_text",
+        "signal_json"
+      ],
+      "indexes": [
+        "idx_review_account_trades_run"
+      ]
+    },
+    "scan_logs_v1": {
+      "columns": [
+        "id",
+        "scan_id",
+        "ts",
+        "category",
+        "level",
+        "message",
+        "code",
+        "data_json",
+        "source"
+      ],
+      "indexes": [
+        "idx_scan_logs_v1_category",
+        "idx_scan_logs_v1_code",
+        "idx_scan_logs_v1_level",
+        "idx_scan_logs_v1_scan"
+      ]
+    },
+    "scan_logs_v2": {
+      "columns": [
+        "id",
+        "scan_id",
+        "ts",
+        "category",
+        "level",
+        "message",
+        "code",
+        "data_json",
+        "source"
+      ],
+      "indexes": [
+        "idx_scan_logs_v2_category",
+        "idx_scan_logs_v2_code",
+        "idx_scan_logs_v2_level",
+        "idx_scan_logs_v2_scan"
+      ]
+    },
+    "scan_stocks_v1": {
+      "columns": [
+        "id",
+        "scan_id",
+        "code",
+        "name",
+        "rank",
+        "composite_score",
+        "board_count",
+        "concepts_json",
+        "dim_drive",
+        "dim_anti_drop",
+        "dim_leadership",
+        "dim_absorption",
+        "dim_liquidity",
+        "is_true_dragon",
+        "reject_reason",
+        "report_text",
+        "open_px",
+        "close_px",
+        "high_px",
+        "low_px",
+        "pct",
+        "turnover_rate",
+        "amount",
+        "market_cap",
+        "source"
+      ],
+      "indexes": [
+        "idx_scan_stocks_v1_code",
+        "idx_scan_stocks_v1_scan",
+        "sqlite_autoindex_scan_stocks_v1_1"
+      ]
+    },
+    "scan_stocks_v2": {
+      "columns": [
+        "id",
+        "scan_id",
+        "code",
+        "name",
+        "rank",
+        "composite_score",
+        "board_count",
+        "concepts_json",
+        "dim_drive",
+        "dim_anti_drop",
+        "dim_leadership",
+        "dim_absorption",
+        "dim_liquidity",
+        "is_true_dragon",
+        "reject_reason",
+        "report_text",
+        "open_px",
+        "close_px",
+        "high_px",
+        "low_px",
+        "pct",
+        "turnover_rate",
+        "amount",
+        "market_cap",
+        "source"
+      ],
+      "indexes": [
+        "idx_scan_stocks_v2_code",
+        "idx_scan_stocks_v2_scan",
+        "sqlite_autoindex_scan_stocks_v2_1"
+      ]
+    },
+    "scans_v1": {
+      "columns": [
+        "id",
+        "scan_date",
+        "elapsed_s",
+        "top_n",
+        "candidates_n",
+        "workers",
+        "raw_output",
+        "source",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_scans_v1_1"
+      ]
+    },
+    "scans_v2": {
+      "columns": [
+        "id",
+        "scan_date",
+        "elapsed_s",
+        "top_n",
+        "candidates_n",
+        "workers",
+        "raw_output",
+        "source",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_scans_v2_1"
+      ]
+    },
+    "sector_blacklist": {
+      "columns": [
+        "name",
+        "created_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_sector_blacklist_1"
+      ]
+    },
+    "vpa_analysis": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "name",
+        "source",
+        "health_score",
+        "signal",
+        "summary",
+        "factors_json",
+        "version",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_vpa_code",
+        "idx_vpa_date",
+        "sqlite_autoindex_vpa_analysis_1"
+      ]
+    }
+  },
+  "factor_versions": {
+    "auction_dim_direction": [
+      "v6e5e1f6b6156",
+      "source"
+    ],
+    "auction_dim_supply": [
+      "ve915348c2d8a",
+      "source"
+    ],
+    "auction_dim_tail_grab": [
+      "vf425de75f773",
+      "source"
+    ],
+    "auction_dim_vol_price": [
+      "v0791015087c5",
+      "source"
+    ],
+    "auction_direction": [
+      "vf27a4c8bd111",
+      "source"
+    ],
+    "auction_is_weak": [
+      "vce29f9e06774",
+      "source"
+    ],
+    "auction_rank": [
+      "v25b67ded45ea",
+      "source"
+    ],
+    "auction_strength": [
+      "vb94ad38c4877",
+      "source"
+    ],
+    "fin_bps": [
+      "vfd440e037948",
+      "source"
+    ],
+    "fin_net_assets": [
+      "vabe67487ddc6",
+      "source"
+    ],
+    "fin_net_margin": [
+      "v139150b71eb2",
+      "source"
+    ],
+    "fin_net_profit_yoy": [
+      "vb86b8beb535e",
+      "source"
+    ],
+    "fin_revenue_yoy": [
+      "v075f78f1bb68",
+      "source"
+    ],
+    "fin_roe": [
+      "vd69d752f3d57",
+      "source"
+    ],
+    "five_dim_absorption": [
+      "vf0e29e461209",
+      "source"
+    ],
+    "five_dim_anti_drop": [
+      "v2c0a01592481",
+      "source"
+    ],
+    "five_dim_composite": [
+      "v3cdaa2a7e48f",
+      "source"
+    ],
+    "five_dim_drive": [
+      "v97d5b9d38551",
+      "source"
+    ],
+    "five_dim_is_true_dragon": [
+      "v60f4429f7c3f",
+      "source"
+    ],
+    "five_dim_leadership": [
+      "v81b6ded7ab40",
+      "source"
+    ],
+    "five_dim_liquidity": [
+      "vbf251c1547e8",
+      "source"
+    ],
+    "prep_composite": [
+      "vd6589a85b70f",
+      "source"
+    ],
+    "prep_high_days": [
+      "v83023cf94e9c",
+      "source"
+    ],
+    "prep_in_pool_today": [
+      "v5953c67eee97",
+      "source"
+    ],
+    "prep_limit_up_suc_rate": [
+      "vf57b0a8a795b",
+      "source"
+    ],
+    "prep_t_pct": [
+      "v4a4e93391d89",
+      "source"
+    ],
+    "prep_t_turnover": [
+      "vf1ba7ea7befe",
+      "source"
+    ],
+    "prep_verdict": [
+      "v9d521ce01b92",
+      "source"
+    ],
+    "vpa_breakout": [
+      "vef593955eb84",
+      "source"
+    ],
+    "vpa_divergence": [
+      "vce9e8127f63c",
+      "source"
+    ],
+    "vpa_health_score": [
+      "v866042a1595d",
+      "source"
+    ],
+    "vpa_trend_verify": [
+      "va1728dc06ebb",
+      "source"
+    ],
+    "vpa_vol_amount": [
+      "vfb61d8039b43",
+      "source"
+    ]
+  },
+  "golden_sha256": {
+    "assets/backfill_dry_run.json": "c8d5cdf346411c84b23ea0a2a730c3ad73fc1c5db712cae62d121e15f13138ac",
+    "assets/doctor_summary.json": "5cf15a653362b537572aa096c883ffba3ab498e27202fd0d5edd573e0eca02cd",
+    "assets/pull_apply.json": "b32ab19a092fafa9cfb83f9e9ce6d1916fd6fa93d532a153d1f7a7f628c7fb30",
+    "assets/pull_dry_run.json": "96e874f5bfffd4ffc22a1b40f54b661bfce3d12e297196c8bd56245dc94f227a",
+    "assets/pull_target_counts.json": "e366986b2340381d8c68dafafcbde9729af9cd5b7b4f02266627096db3980eb1",
+    "assets/push_summary.json": "fafe166edc347752869e90c7559c382a014713ed9d943395eb6c414c3e159fad",
+    "assets/state.json": "5b6d0b7715ca3a241e041a4037a717acabc04f7597b6e24b407ef60e2f618893",
+    "assets/status_clean.json": "1ec4c3bc0e992d98f185aca237c6744dcb995ebf45a4a81723496e6541e66037",
+    "auction/assets.json": "91962844bf44cdea5ad89a976500226e9e1eec2a0e54af91ffd7a6e827ad7629",
+    "auction/calls.json": "94ab53dde21d8e7c44a10bc383d8fc693dec6cfee6c941c935c001fceb1b0c09",
+    "auction/json_collect.json": "15bdaa0004f012ba113ea3426bc741ca95c41720b2ddf6918a399f624ac6131b",
+    "auction/snapshots.json": "d72ac1c2a9708da072c78ccd0fdc6b339ea52e47fa5fe5caacfb09debc4f90fa",
+    "auction/stdout_collect.txt": "ce09805775c6f1f4c1e7f1cf72323b752fa9e9e4595e94c3c2e58d3cb6cfbb97",
+    "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
+    "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",
+    "factor/export_matrix.csv": "46655b3c09b4aaf6fc0c6281a74d6694dca6d302968b79eb9d2682c104682a1c",
+    "factor/export_meta.json": "7e931a536c92a65d740586bbe5621420be6fa668da207ffd84b3e908a8958e40",
+    "factor/fin_backfill.json": "ea11f74a6bf57dad94ec47cb7bdd8427a5ab53b73b8d889fd9252afecf89ead7",
+    "factor/fin_calibration.json": "fef39d0ac4bffd69f18d16e72ad8296a3791b26e1c2413c7cf44cb63ab6863fa",
+    "factor/fin_status.json": "67fd9f313eb325e328093b95b5b9fd1408a2c665fa482435abc9303a18049097",
+    "live_trade/buy_checks.json": "efa3ffbd0239a9c44ada3990682b90ade7eee6973532f6ef120af4ff6fd67052",
+    "live_trade/half_closed.json": "fb766c91c2f145cf631a135eb73ca9934d001441246aa2eafd445cd6515e6a61",
+    "live_trade/half_open.json": "b75eba04bc5c05abbe4b2148d12b0cc927dd3bdd34e2b02a8cfc3661269690ce",
+    "live_trade/signal_closed.json": "c4cbb6774d6c1b33c1d55c19d6004c14b9f8f8bcf1793751a296d20fe9ffb283",
+    "live_trade/signal_open.json": "1a58a08ecd0b69bbe6b42a90a3d67b5df0adadef331c6968f423c520a6b62f65",
+    "local/data.json": "5f493284c3cbee2b4c79a636e6a7740abcb30f18f2e8d3a882d37b4f7fd4f64c",
+    "local/dragons.json": "1e9d0c5fee98d7265a994075da49140e583af9087242e60a5f95873bfeeeffb5",
+    "local/logs.json": "0a865278c1880c8083b4858e0888e5c5898e439b7e324dd0c223cc253d69de85",
+    "local/vpa.json": "4fa2979932c9e5ea88503ed1107998c94857b94e4fa54ab3a96a2f26ce44cbcf",
+    "prep/assets.json": "b0b12b3eb40d6b494dae6df894a13a13b8db69fffba5766a3cfc2dddd7073de8",
+    "prep/calls.json": "5e6da0f4086a213c7692709be96205a251c3401b9cc6109afa78563d58f4a0b7",
+    "prep/snapshot.json": "13ac9d9bc258bee9d6afc5e8d904711308d1cdb63ce79552333091dc0b0976e1",
+    "prep/stdout.txt": "504aeae0c30162cf61e55c0fb874b934898a4d8e14789e4da6b15e956af59dfd",
+    "review/db.json": "99c28053be37462c760d0a813b19548775093bc3a2ed462639618b1f6cbc5975",
+    "review/stdout_lines.json": "45ee833c44e755aab70900680a6e7054c9262a62e5d9fc675c6b168fbf6eabdb",
+    "review_account/config_legal.json": "d25147d78680fdc8762eff750334158eae6ca15922d55c13a2cfdcf9d9ca26e0",
+    "review_account/golden.json": "df0c2783763e64dc6485aebcb4882a67d5b5f0c8bbb9678e58ab2dc5ca5756d8",
+    "review_account/stdout.txt": "bc46cc2620d4a9d69806d593480f88361f16ceffc64028b2e85d0ba005d2de74",
+    "review_account/suspended.json": "4bf80ccfbf8599b8b37943d2da1893bc2d1f8b22090121eb18d17a50ef1d3e00",
+    "scan/db.json": "55c5c8c95465186eae4514c2fb9c388beacaa2631e6fe9af2055dd4b8f293487",
+    "scan/raw_output.json": "e49023eb4b76b17072dd733b685a85ac6cd17facfa52c035e3e71203b5520f19",
+    "scan/report.txt": "6ca32961ac9c3a54811e6bd739803aa5d101067bc62021a48f4fd7408a590f34",
+    "scan/stdout.txt": "6bea5fd273f934ebf29f0a0da1e9826fa255f924a92ce9e609ced79bbef05d5c",
+    "scan/stdout_cached.txt": "11f1830b7c804cdec71a4c76234abb21d058c7feb2c73b152fe729001159eb50"
+  }
+}

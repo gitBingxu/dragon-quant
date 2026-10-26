@@ -1,5 +1,5 @@
 """
-tests for dragon_quant.providers.ths 纯函数：
+tests for dragon_quant.infra.provider.ths 纯函数：
   _safe_float / _parse_jsonp / _parse_components_html /
   _parse_ranking_html / _aggregate_5min / THSProvider._get_inner_code
 """
@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from dragon_quant.providers.ths import (
+from dragon_quant.infra.provider.ths import (
     _safe_float, _parse_jsonp, _parse_components_html,
     _parse_region_ranking_html,
     _aggregate_5min, THSProvider, _INNER_CACHE,
@@ -145,14 +145,14 @@ class TestInnerCode(unittest.TestCase):
     def tearDown(self):
         _INNER_CACHE.clear()
 
-    @patch("dragon_quant.providers.ths._fetch")
+    @patch("dragon_quant.infra.provider.ths._fetch")
     def test_industry_code_uses_self_without_request(self, mock_fetch):
         p = THSProvider()
         self.assertEqual(p._get_inner_code("881140"), "881140")
         mock_fetch.assert_not_called()
         self.assertEqual(_INNER_CACHE["hy:881140"], "881140")
 
-    @patch("dragon_quant.providers.ths._fetch")
+    @patch("dragon_quant.infra.provider.ths._fetch")
     def test_extract_and_cache(self, mock_fetch):
         mock_fetch.return_value = "<input id='clid' value='885611'>"
         p = THSProvider()
@@ -161,7 +161,7 @@ class TestInnerCode(unittest.TestCase):
         self.assertEqual(p._get_inner_code("301558"), "885611")
         self.assertEqual(mock_fetch.call_count, 1)
 
-    @patch("dragon_quant.providers.ths._fetch", return_value="<html>no clid</html>")
+    @patch("dragon_quant.infra.provider.ths._fetch", return_value="<html>no clid</html>")
     def test_missing(self, _mock):
         self.assertEqual(THSProvider()._get_inner_code("999999"), "")
 
@@ -217,7 +217,7 @@ class TestCategoryRouting(unittest.TestCase):
         with self.assertRaises(ValueError):
             THSProvider().get_sector_components("1", category="xx")
 
-    @patch("dragon_quant.providers.ths._fetch", return_value="<input id='clid' value='885517'>")
+    @patch("dragon_quant.infra.provider.ths._fetch", return_value="<input id='clid' value='885517'>")
     def test_inner_code_keyed_by_category(self, _mock):
         _INNER_CACHE.clear()
         p = THSProvider()

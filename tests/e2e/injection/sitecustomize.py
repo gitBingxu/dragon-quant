@@ -113,7 +113,7 @@ class _FakeProviderFinder(importlib.abc.MetaPathFinder):
     E2E_FAKE_PROVIDER_FINDER = True
 
     def find_spec(self, fullname, path=None, target=None):  # type: ignore[no-untyped-def]
-        if not fullname.startswith("dragon_quant.providers."):
+        if not fullname.startswith("dragon_quant.infra.provider."):
             return None
         short = fullname.rsplit(".", 1)[-1]
         if short not in EXPECTED_PROVIDERS:
@@ -138,7 +138,7 @@ class _BackendLoader(importlib.abc.Loader):
 
 class _FakeBackendFinder(importlib.abc.MetaPathFinder):
     E2E_FAKE_BACKEND_FINDER = True
-    TARGET = "dragon_quant.assets_sync.backends.s3"
+    TARGET = "dragon_quant.infra.assets.sync.backends.s3"
 
     def find_spec(self, fullname, path=None, target=None):  # type: ignore[no-untyped-def]
         if fullname != self.TARGET:

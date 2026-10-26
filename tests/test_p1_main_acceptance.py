@@ -8,10 +8,10 @@
 
 import unittest
 
-from dragon_quant.factors import finance as fin
-from dragon_quant.factors.builtin import financial
-from dragon_quant.factors.types import FactorContext
-from dragon_quant.storage import finance as fin_store
+from dragon_quant.infra.factor import finance as fin
+from dragon_quant.infra.factor.builtin import financial
+from dragon_quant.infra.factor.types import FactorContext
+from dragon_quant.infra.factor import finance_store as fin_store
 from tests.test_factors_pit import TempDbBase
 
 

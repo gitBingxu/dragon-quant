@@ -5,7 +5,7 @@ from __future__ import annotations
 
 def handle(args, services):
     """龙头回测命令。"""
-    from dragon_quant.review import run_review
+    from dragon_quant.review.main import run_review
 
     date_str = None
     if args.date:

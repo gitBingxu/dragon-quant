@@ -1,9 +1,10 @@
 """M8 / B1：导入期零副作用 + 首次存储访问惰性初始化。
 
 覆盖：
-- ``import dragon_quant`` / ``import dragon_quant.storage.paths`` / ``storage.db``
+- ``import dragon_quant`` / ``import dragon_quant.infra.storage.paths`` / ``infra.storage.connection``
   与 ``-h`` / ``-v`` 不创建任何数据目录、数据库、WAL/SHM、缓存或报告；
-- 包根 ``scan`` / ``run_review`` 为 PEP 562 惰性导出，函数身份不变；
+- 包根 ``scan`` 为可调用包（2026-10-25 批准，函数身份不再保证）、``run_review``
+  为 PEP 562 惰性导出；两者导入期都不加载 orchestrator / review 等重模块；
 - ``ensure_data_dirs()`` 幂等；
 - 首次 ``db._connect()`` 建目录 + schema，失败不置 ready 且可重试，并发首连只建一次；
 - ``init_db()`` 幂等且兼容被 patch 的 ``_connect``；
@@ -80,7 +81,7 @@ class TestNoImportSideEffects:
         data_root = tmp_path / "data"
         result = _run_child(
             tmp_path, data_root=data_root,
-            code="import dragon_quant.storage.paths as p; print(p.DATA_DIR)")
+            code="import dragon_quant.infra.storage.paths as p; print(p.DATA_DIR)")
 
         assert result.returncode == 0, result.stderr
         assert Path(result.stdout.strip()) == data_root
@@ -90,24 +91,21 @@ class TestNoImportSideEffects:
         data_root = tmp_path / "data"
         result = _run_child(
             tmp_path, data_root=data_root,
-            code="import dragon_quant.storage.db  # noqa: F401")
+            code="import dragon_quant.infra.storage.connection  # noqa: F401")
 
         assert result.returncode == 0, result.stderr
         _assert_no_paths_created(data_root, tmp_path / "home")
 
-    def test_storage_package_boundary_is_documented_and_lazy(self, tmp_path: Path):
+    def test_infra_assets_package_import_is_lazy(self, tmp_path: Path):
+        """``import dragon_quant.infra.assets`` 零 eager 子模块、零目录副作用（B1）。"""
         data_root = tmp_path / "data"
-        expected = [
-            "db", "assets_db", "dragons_mirror", "finance", "manager", "paths",
-            "blacklist", "signals", "scans", "dragons", "logs", "review_account",
-        ]
         code = "\n".join([
             "import sys",
-            "import dragon_quant.storage as storage",
-            f"assert storage.__all__ == {expected!r}",
-            "assert storage.__doc__ and '子模块' in storage.__doc__",
-            "for name in storage.__all__:",
-            "    assert f'dragon_quant.storage.{name}' not in sys.modules, name",
+            "import dragon_quant.infra.assets as assets",
+            "loaded = sorted(name for name in sys.modules if name.startswith(",
+            "    'dragon_quant.infra.assets.'))",
+            "assert loaded == [], loaded",
+            "assert assets.__all__ == []",
             "print('ok')",
         ])
         result = _run_child(tmp_path, data_root=data_root, code=code)
@@ -116,21 +114,42 @@ class TestNoImportSideEffects:
         assert result.stdout.strip() == "ok"
         _assert_no_paths_created(data_root, tmp_path / "home")
 
-    def test_package_import_defers_heavy_modules_and_keeps_identity(
+    def test_storage_package_boundaries_are_documented_and_lazy(self, tmp_path: Path):
+        data_root = tmp_path / "data"
+        code = "\n".join([
+            "import sys",
+            "import dragon_quant.infra.storage as infra_storage",
+            "import dragon_quant.scan.storage as scan_storage",
+            "assert infra_storage.__all__ == []",
+            "assert scan_storage.__all__ == ['main', 'scans', 'dragons', 'logs', 'blacklist', 'results']",
+            "for package in ('dragon_quant.infra.storage', 'dragon_quant.scan.storage'):",
+            "    loaded = [name for name in sys.modules",
+            "              if name.startswith(package + '.')]",
+            "    assert loaded == [], (package, loaded)",
+            "print('ok')",
+        ])
+        result = _run_child(tmp_path, data_root=data_root, code=code)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ok"
+        _assert_no_paths_created(data_root, tmp_path / "home")
+
+    def test_package_import_defers_heavy_modules_and_resolves_scan_entry(
             self, tmp_path: Path):
         data_root = tmp_path / "data"
         code = "\n".join([
             "import sys",
             "import dragon_quant",
-            "assert 'dragon_quant.orchestrator' not in sys.modules",
+            "assert 'dragon_quant.scan.orchestrator.main' not in sys.modules",
             "assert 'dragon_quant.review' not in sys.modules",
-            "assert 'dragon_quant.storage.db' not in sys.modules",
+            "assert 'dragon_quant.infra.storage.connection' not in sys.modules",
             "from dragon_quant import scan, run_review",
-            "import dragon_quant.orchestrator as orchestrator",
+            "import dragon_quant.scan.orchestrator.main as orchestrator",
             "import dragon_quant.review as review",
-            "assert scan is orchestrator.scan",
+            "assert callable(scan)",
+            "assert scan is dragon_quant.scan",
+            "assert scan.scan is orchestrator.scan",
             "assert run_review is review.run_review",
-            "assert dragon_quant.scan is scan",
             "assert dragon_quant.run_review is run_review",
             "print('ok')",
         ])
@@ -153,7 +172,7 @@ class TestNoImportSideEffects:
 
 
 def _patch_paths_root(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
-    from dragon_quant.storage import paths
+    from dragon_quant.infra.storage import paths
 
     monkeypatch.setattr(paths, "DATA_DIR", root)
     monkeypatch.setattr(paths, "COOKIE_DIR", root / "cookies")
@@ -167,7 +186,7 @@ def _patch_paths_root(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
 
 class TestEnsureDataDirs:
     def test_ensure_data_dirs_is_idempotent(self, tmp_path, monkeypatch):
-        from dragon_quant.storage import paths
+        from dragon_quant.infra.storage import paths
 
         root = tmp_path / "dq"
         _patch_paths_root(monkeypatch, root)
@@ -186,7 +205,7 @@ class TestEnsureDataDirs:
 def fresh_db(tmp_path, monkeypatch):
     """把 dragon.db 指向一次性目录，并重置 schema ready 标志。"""
 
-    from dragon_quant.storage import db
+    from dragon_quant.infra.storage import connection as db
 
     root = tmp_path / "dq"
     _patch_paths_root(monkeypatch, root)
@@ -197,7 +216,7 @@ def fresh_db(tmp_path, monkeypatch):
 
 class TestFirstConnection:
     def test_first_connection_creates_dirs_and_schema(self, fresh_db):
-        from dragon_quant.storage import db
+        from dragon_quant.infra.storage import connection as db
 
         conn = db._connect()
         try:
@@ -218,7 +237,7 @@ class TestFirstConnection:
 
     def test_failed_schema_initialization_is_retryable(
             self, fresh_db, monkeypatch):
-        from dragon_quant.storage import db
+        from dragon_quant.infra.storage import connection as db
 
         real_ensure = db._ensure_schema
         calls = {"n": 0}
@@ -246,7 +265,7 @@ class TestFirstConnection:
 
     def test_concurrent_first_connections_initialize_schema_once(
             self, fresh_db, monkeypatch):
-        from dragon_quant.storage import db
+        from dragon_quant.infra.storage import connection as db
 
         real_ensure = db._ensure_schema
         lock = threading.Lock()
@@ -285,7 +304,7 @@ class TestFirstConnection:
         assert db._schema_ready is True
 
     def test_init_db_is_idempotent_with_patched_connect(self, tmp_path, monkeypatch):
-        from dragon_quant.storage import db
+        from dragon_quant.infra.storage import connection as db
 
         target = tmp_path / "patched.db"
         monkeypatch.setattr(db, "_connect", lambda: sqlite3.connect(str(target)))
@@ -312,7 +331,7 @@ class TestFirstConnection:
 class TestAssetsDbLaziness:
     def test_read_path_creates_nothing_and_write_path_creates(
             self, tmp_path, monkeypatch):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         root = tmp_path / "dq"
         _patch_paths_root(monkeypatch, root)
@@ -336,7 +355,7 @@ class TestAssetsDbLaziness:
 
 class TestWriteTimeInitialization:
     def test_data_cache_defers_directory_creation(self, tmp_path):
-        from dragon_quant.cache.data_cache import DataCache
+        from dragon_quant.infra.storage.cache import DataCache
 
         cache_dir = tmp_path / "cache"
         cache = DataCache(cache_dir=cache_dir)
@@ -350,7 +369,8 @@ class TestWriteTimeInitialization:
 
     def test_storage_manager_read_and_clear_do_not_create_database(
             self, tmp_path, monkeypatch):
-        from dragon_quant.storage import db, manager
+        from dragon_quant.infra.storage import connection as db
+        from dragon_quant.infra.storage import manager
 
         root = tmp_path / "dq"
         db_path = root / "dragon.db"

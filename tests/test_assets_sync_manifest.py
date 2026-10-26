@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dragon_quant.assets_sync import codec, manifest as manifest_mod
-from dragon_quant.assets_sync.backends.local import LocalDirBackend
-from dragon_quant.assets_sync.errors import AmbiguousError, IntegrityError
+from dragon_quant.infra.assets.sync import codec, manifest as manifest_mod
+from dragon_quant.infra.assets.sync.backends.local import LocalDirBackend
+from dragon_quant.infra.assets.sync.errors import AmbiguousError, IntegrityError
 
 
 class ManifestTestBase(unittest.TestCase):

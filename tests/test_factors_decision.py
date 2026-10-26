@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.decision import (
+from dragon_quant.infra.factor import storage as fstore
+from dragon_quant.infra.factor.decision import (
     DEGRADED_BELOW_MIN_COVERAGE, DEGRADED_DATE_FALLBACK,
     DEGRADED_FACTOR_READ_ERROR, DEGRADED_MODEL_MISSING,
     DEGRADED_MODEL_READ_ERROR,
@@ -18,7 +18,7 @@ from dragon_quant.factors.decision import (
     build_completion_rate, candidate_factor_date, default_snapshot,
     save_default_model_snapshot,
 )
-from dragon_quant.factors.types import FactorValue
+from dragon_quant.infra.factor.types import FactorValue
 
 DAY = "2026-10-20"
 CAND_DATE = "2026-10-19"
@@ -28,7 +28,7 @@ class TempDbBase(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
-        self._patch = patch("dragon_quant.storage.assets_db._connect",
+        self._patch = patch("dragon_quant.infra.assets.db._connect",
                             side_effect=self._connect)
         self._patch.start()
 

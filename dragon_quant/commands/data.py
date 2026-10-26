@@ -10,7 +10,7 @@ from dragon_quant.commands._shared import kbar_to_dict, to_dict
 
 def handle(args, services):
     """数据查询命令。"""
-    from dragon_quant.data import (
+    from dragon_quant.infra.provider.data import (
         get_sector_ranking, get_sector_components, get_kline, get_minute_kline,
         get_quote, batch_get_quotes,
     )
@@ -66,14 +66,14 @@ def handle(args, services):
                 print(json.dumps(to_dict(q), ensure_ascii=False))
 
     elif args.data_action == "cookie-status":
-        from dragon_quant.data import cookie_status
+        from dragon_quant.infra.provider.data import cookie_status
         print(json.dumps(cookie_status(), ensure_ascii=False, indent=2))
 
     elif args.data_action == "cookie-fetch":
-        from dragon_quant.data import fetch_cookies
+        from dragon_quant.infra.provider.data import fetch_cookies
         result = fetch_cookies()
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
     elif args.data_action == "cookie-set":
-        from dragon_quant.providers.cookie import set_xq
+        from dragon_quant.infra.provider.cookie import set_xq
         set_xq(args.cookie)

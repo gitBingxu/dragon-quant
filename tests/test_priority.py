@@ -1,20 +1,21 @@
 """P/A 优先级：三值语义、排序键、否决、决策记录、开关矩阵。"""
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.auction.registry import AUCTION_ITEMS_MISSING
-from dragon_quant.auction.strength import evaluate as evaluate_auction
+from dragon_quant.review_account.auction.registry import AUCTION_ITEMS_MISSING
+from dragon_quant.review_account.auction.strength import evaluate as evaluate_auction
 from dragon_quant.review_account.engine import TradingEngine, rank_key as engine_rank_key
 from dragon_quant.review_account.market import at
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
-from dragon_quant.review_account.priority import (
+from dragon_quant.review_account.strategy.priority import (
     RANKING_MODE_LABELS, auction_state, auction_veto_reason, key_components,
     prep_state, rank_key, ranking_mode, tri_order, would_veto,
 )
-from dragon_quant.review_account.strategy import BuyRejected, evaluate_buy, explain_buy_candidate
-from dragon_quant.live_trade.signal_engine import rank_key as signal_rank_key
+from dragon_quant.review_account.strategy.main import (
+    BuyRejected, evaluate_buy, explain_buy_candidate,
+)
+from dragon_quant.review_account.live_trade.signal_engine import rank_key as signal_rank_key
 
 DAY = "2026-10-20"
 PREV = "2026-10-19"
@@ -197,7 +198,7 @@ class TestSwitchMatrix(unittest.TestCase):
             loader_calls.append(day)
             return rows
 
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             pool, ctx = collect_candidates_ex(
                 [PREV, DAY], DAY, cfg, lambda *a, **k: [], auction_loader=loader)
@@ -266,7 +267,7 @@ class TestEngineDecisionOrder(unittest.TestCase):
     """AC5/AC7：同一 MarketEvent 喂两引擎，决策顺序一致；ranked_out/daily_buy_limit。"""
 
     def test_same_event_two_engines_same_order_and_ranked_out(self):
-        from dragon_quant.live_trade.signal_engine import SignalEngine
+        from dragon_quant.review_account.live_trade.signal_engine import SignalEngine
 
         cands = [_candidate(True, True, code="A", composite_score=80),
                  _candidate(False, True, code="B", composite_score=90)]
@@ -283,7 +284,7 @@ class TestEngineDecisionOrder(unittest.TestCase):
         self.assertIn("A=弱", ranked[0]["reason_text"])
 
     def test_ranking_off_uses_composite_not_a(self):
-        from dragon_quant.live_trade.signal_engine import SignalEngine
+        from dragon_quant.review_account.live_trade.signal_engine import SignalEngine
 
         cands = [_candidate(True, True, code="A", composite_score=80),
                  _candidate(False, True, code="B", composite_score=90)]

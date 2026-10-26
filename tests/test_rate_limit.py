@@ -1,10 +1,10 @@
 """
-tests for dragon_quant.rate_limit — 并发调度器
+tests for dragon_quant.infra.provider.rate_limit — 并发调度器
 """
 import time
 import threading
 import unittest
-from dragon_quant.rate_limit import RateLimiter
+from dragon_quant.infra.provider.rate_limit import RateLimiter
 
 
 class TestRateLimiter(unittest.TestCase):

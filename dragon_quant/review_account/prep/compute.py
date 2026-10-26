@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from dragon_quant.providers.macro import (
+from dragon_quant.infra.provider.macro import (
     CALIBER_PREVIOUS, CALIBER_SAME_DAY, MACRO_INDEX_KEYS, MACRO_KEYS,
     SPEC_BY_KEY,
 )

@@ -1,11 +1,11 @@
-"""Pin the E2E clock through the single ``runtime.clock`` seam (M9C).
+"""Pin the E2E clock through the single ``infra.clock`` seam (M9C).
 
 ``DQ_E2E_CLOCK_MODE`` is still read so a caller can be explicit, but ``runtime``
 is the **only** accepted value: the legacy ``datetime``/``time`` global
 replacement was removed once every production call site needed by E2E had a
 verified runtime-clock path.
 
-Installing a ``FixedClock`` into ``dragon_quant.runtime.clock`` leaves
+Installing a ``FixedClock`` into ``dragon_quant.infra.clock`` leaves
 ``datetime.datetime`` and ``time.time`` untouched, so ``isinstance(x, datetime)``
 and any stdlib/third-party use of the real clock keep their normal semantics.
 ``time.monotonic`` stays real; ``FixedClock.monotonic`` is a constant and is only
@@ -52,6 +52,6 @@ def install(now_iso: str) -> str:
 
 def _install_runtime_clock(moment: _datetime_module.datetime) -> None:
     """Pin the application clock seam; no global class replacement."""
-    from dragon_quant.runtime import clock as runtime_clock
+    from dragon_quant.infra import clock as runtime_clock
 
     runtime_clock.set_clock(runtime_clock.FixedClock(moment))

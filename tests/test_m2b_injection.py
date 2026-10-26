@@ -14,8 +14,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from dragon_quant.app import build_services
-from dragon_quant.models.types import KBar
-from dragon_quant.runtime.providers import ProviderBundle
+from dragon_quant.infra.models import KBar
+from dragon_quant.infra.provider.bundle import ProviderBundle
 
 ROOT = Path(__file__).resolve().parent.parent
 PROVIDER_NAMES = ("tdx", "ths", "xueqiu", "tencent")
@@ -45,13 +45,13 @@ class TestDataFacadeInjection(unittest.TestCase):
         self.services = services_with(self.bundle)
 
     def _call_without_default_factory(self, fn, *args, **kwargs):
-        with patch("dragon_quant.data.create_providers") as factory:
+        with patch("dragon_quant.infra.provider.data.create_providers") as factory:
             result = fn(*args, services=self.services, **kwargs)
         factory.assert_not_called()
         return result
 
     def test_sector_calls_use_bundle_ths(self):
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
 
         self._call_without_default_factory(data.get_sector_ranking, asc=True)
         self.bundle.ths.get_sector_ranking.assert_called_once_with(asc=True)
@@ -65,7 +65,7 @@ class TestDataFacadeInjection(unittest.TestCase):
         self.bundle.ths.get_sector_5min_kline.assert_called_once_with("881167", bars=20)
 
     def test_individual_stock_calls_use_bundle_by_source(self):
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
 
         self._call_without_default_factory(data.get_kline, "600001", days=30)
         self.bundle.xueqiu.get_kline.assert_called_once_with("600001", days=30)
@@ -83,16 +83,16 @@ class TestDataFacadeInjection(unittest.TestCase):
         self.bundle.tencent.batch_get_quotes.assert_called_once_with(["600001", "600002"])
 
     def test_auction_uses_bundle_tdx(self):
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
 
         self._call_without_default_factory(data.get_auction, "600001")
         self.bundle.tdx.get_auction.assert_called_once_with("600001")
 
     def test_omitted_services_keeps_lazy_default_factory(self):
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
 
         mapping = {name: MagicMock(name=name) for name in PROVIDER_NAMES}
-        with patch("dragon_quant.data.create_providers", return_value=mapping) as factory, \
+        with patch("dragon_quant.infra.provider.data.create_providers", return_value=mapping) as factory, \
                 patch.object(data, "_providers", None):
             data.get_kline("600001")
 
@@ -100,10 +100,10 @@ class TestDataFacadeInjection(unittest.TestCase):
         mapping["xueqiu"].get_kline.assert_called_once_with("600001", days=20)
 
     def test_services_without_providers_falls_back_to_default_factory(self):
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
 
         mapping = {name: MagicMock(name=name) for name in PROVIDER_NAMES}
-        with patch("dragon_quant.data.create_providers", return_value=mapping) as factory, \
+        with patch("dragon_quant.infra.provider.data.create_providers", return_value=mapping) as factory, \
                 patch.object(data, "_providers", None):
             data.get_quote("600001", services=build_services())
 
@@ -120,7 +120,7 @@ class TestVpaInjection(unittest.TestCase):
         bundle = fake_bundle()
         bundle.xueqiu.get_kline.return_value = vpa_bars()
 
-        with patch("dragon_quant.data.create_providers") as factory:
+        with patch("dragon_quant.infra.provider.data.create_providers") as factory:
             report = analyze("600001", days=30, services=services_with(bundle))
 
         factory.assert_not_called()
@@ -129,7 +129,7 @@ class TestVpaInjection(unittest.TestCase):
         self.assertTrue(report.factors)
 
     def test_omitted_services_keeps_patchable_get_kline_signature(self):
-        import dragon_quant.data as data
+        import dragon_quant.infra.provider.data as data
         from dragon_quant.vpa.engine import analyze
 
         original = data.get_kline
@@ -165,9 +165,9 @@ class TestReviewAccountInjection(unittest.TestCase):
 
         with patch.object(AccountSimulator, "run", fake_run), \
                 patch("dragon_quant.review_account.service.annotate_post_exit"), \
-                patch("dragon_quant.review_account.service.db.create_review_account_run",
+                patch("dragon_quant.review_account.service.account_store.create_review_account_run",
                       return_value=1), \
-                patch("dragon_quant.review_account.service.db.save_review_account_results"):
+                patch("dragon_quant.review_account.service.account_store.save_review_account_results"):
             run_review_account("2026-09-01", "2026-09-02", verbose=False, services=services)
         return captured["data"]
 
@@ -177,20 +177,33 @@ class TestReviewAccountInjection(unittest.TestCase):
         self.assertIs(data.provider, bundle.xueqiu)
 
     def test_omitted_services_keeps_default_provider(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 
         data = self._run()
         self.assertIsInstance(data.provider, XueqiuProvider)
+
+    def test_review_account_main_is_the_public_entry(self):
+        from dragon_quant.review_account import main, run_review_account
+        from dragon_quant.review_account.service import run_review_account as impl
+
+        self.assertIs(run_review_account, main.run_review_account)
+        self.assertIs(main.run_review_account, impl)
+
+    def test_review_account_service_names_its_storage_owner_explicitly(self):
+        from dragon_quant.review_account import service, storage
+
+        self.assertIs(service.account_store, storage)
+        self.assertFalse(hasattr(service, "db"))
 
 
 class TestLiveTradeInjection(unittest.TestCase):
     """run_buy / run_sell hand the bundle to LiveTrader as real MarketData."""
 
     def test_run_buy_uses_injected_provider(self):
-        from dragon_quant.live_trade.service import run_buy
+        from dragon_quant.review_account.live_trade.service import run_buy
 
         bundle = fake_bundle()
-        with patch("dragon_quant.live_trade.service.LiveTrader") as trader_cls:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as trader_cls:
             trader_cls.return_value.buy.return_value = {"buys": []}
             run_buy(DAY, as_of="10:00", verbose=False, services=services_with(bundle))
 
@@ -200,10 +213,10 @@ class TestLiveTradeInjection(unittest.TestCase):
         self.assertEqual(cfg.source, "v2")
 
     def test_run_sell_uses_injected_provider(self):
-        from dragon_quant.live_trade.service import run_sell
+        from dragon_quant.review_account.live_trade.service import run_sell
 
         bundle = fake_bundle()
-        with patch("dragon_quant.live_trade.service.LiveTrader") as trader_cls:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as trader_cls:
             trader_cls.return_value.sell.return_value = {"sells": []}
             run_sell(DAY, as_of="10:00", verbose=False, services=services_with(bundle))
 
@@ -211,9 +224,9 @@ class TestLiveTradeInjection(unittest.TestCase):
         self.assertIs(kwargs["data"].provider, bundle.xueqiu)
 
     def test_omitted_services_keeps_livetrader_default_construction(self):
-        from dragon_quant.live_trade.service import run_buy
+        from dragon_quant.review_account.live_trade.service import run_buy
 
-        with patch("dragon_quant.live_trade.service.LiveTrader") as trader_cls:
+        with patch("dragon_quant.review_account.live_trade.service.LiveTrader") as trader_cls:
             trader_cls.return_value.buy.return_value = {"buys": []}
             run_buy(DAY, as_of="10:00", verbose=False)
 
@@ -228,8 +241,8 @@ class TestFeatureImportDirection(unittest.TestCase):
     FILES = (
         ROOT / "dragon_quant" / "review_account" / "service.py",
         ROOT / "dragon_quant" / "review_account" / "data.py",
-        ROOT / "dragon_quant" / "live_trade" / "service.py",
-        ROOT / "dragon_quant" / "data.py",
+        ROOT / "dragon_quant" / "review_account" / "live_trade" / "service.py",
+        ROOT / "dragon_quant" / "infra" / "provider" / "data.py",
         ROOT / "dragon_quant" / "vpa" / "engine.py",
     )
 

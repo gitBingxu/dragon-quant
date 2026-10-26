@@ -1,10 +1,9 @@
 """
-tests for dragon_quant.models.types — 6 dataclass 实例化 + 序列化
+tests for dragon_quant.infra.models — 6 dataclass 实例化 + 序列化
 """
-import io
 import json
 import unittest
-from dragon_quant.models.types import KBar, StockInfo, Quote, SectorPerformance, Candidate, ScoreResult
+from dragon_quant.infra.models import KBar, StockInfo, Quote, SectorPerformance, Candidate, ScoreResult
 
 
 class TestKBar(unittest.TestCase):

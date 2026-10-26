@@ -1,23 +1,22 @@
-"""tests for dragon_quant.scorers — 五维识别真龙评分体系。
+"""tests for dragon_quant.scan.scores — 五维识别真龙评分体系。
 
 覆盖：base 工具、leadership 排名分位、liquidity 一字不罚、drive 脉冲-跟随、
 anti_drop 跳水段、absorption 中性回落、aggregator 门槛一票否决与不否决。
 """
-import time
 import unittest
 from datetime import datetime
 from unittest.mock import patch
 
-from dragon_quant.scorers.base import CHINA_TZ
-from dragon_quant.scorers import absorption, aggregator
+from dragon_quant.scan.scores.base import CHINA_TZ
+from dragon_quant.scan.scores import absorption, aggregator
 
-from dragon_quant.cache.data_cache import DataCache
-from dragon_quant.models.types import KBar, Quote, StockInfo, Candidate
-from dragon_quant.scorers import evaluate, rank_verdicts
-from dragon_quant.scorers import registry as R
-from dragon_quant.scorers.base import (
+from dragon_quant.infra.storage.cache import DataCache
+from dragon_quant.infra.models import KBar, Quote, StockInfo, Candidate
+from dragon_quant.scan.scores import evaluate, rank_verdicts
+from dragon_quant.scan.scores import registry as R
+from dragon_quant.scan.scores.base import (
     clip, desc_rank_score, common_minute_axis, gain_curve)
-from dragon_quant.scorers import leadership, liquidity, drive, anti_drop
+from dragon_quant.scan.scores import leadership, liquidity, drive, anti_drop
 
 
 def _min_bars(pre, pcts, start="2026-06-19 09:30"):
@@ -41,6 +40,18 @@ def _quote(code, pct, lu, bid1=0.0, vol=100000.0, tr=10.0):
                  market_cap=0, float_market_cap=0, volume_ratio=1, pe=0,
                  limit_up=lu, limit_down=0, avg_price=0,
                  bid1_price=lu, bid1_volume=bid1, ask1_volume=0)
+
+
+def test_scores_facade_and_sector_keys():
+    """Task 8: the canonical facade lives in scan.scores.main / scan.sectors."""
+    from dragon_quant.scan.scores.main import (
+        SCORERS, evaluate as evaluate_fn, rank_verdicts as rank_fn)
+    from dragon_quant.scan.sectors import sector_key
+
+    assert sector_key("tdx", "gn", "880683") == "tdx:gn:880683"
+    assert callable(evaluate_fn) and callable(rank_fn)
+    assert set(SCORERS) == {
+        "drive", "leadership", "anti_drop", "liquidity", "absorption"}
 
 
 class TestBaseUtils(unittest.TestCase):
@@ -145,7 +156,7 @@ class TestDrivePulse(unittest.TestCase):
 
     def test_pure_follower_zero(self):
         """纯跟风票（板块先拉、个股后跟，无主动带动）→ lead 子因子 0 分。"""
-        cache = DataCache(cache_dir="")
+        DataCache(cache_dir="")
         # 板块第1分钟就先拉起来，个股拖到第4分钟才跟 → 个股脉冲前板块已抢跑
         sector = _min_bars(100.0, [0, 0.4, 0.7, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
         stock = _min_bars(10.0, [0, 0, 0, 0, 4.0, 7.0, 10.0, 10.0, 10.0, 10.0])
@@ -388,7 +399,7 @@ class TestScoringRegressions(unittest.TestCase):
         self.assertEqual(result.dims["absorption"].score, 50)
 
     def test_low_or_failed_absorption_does_not_veto(self):
-        from dragon_quant.models.types import ScoreResult
+        from dragon_quant.infra.models import ScoreResult
         def passing(*args, **kwargs):
             return ScoreResult("test", 80, 0)
         def fail(*args, **kwargs):
@@ -400,7 +411,7 @@ class TestScoringRegressions(unittest.TestCase):
             self.assertTrue(result.is_true_dragon)
 
     def test_rank_clears_stale_rejected_rank(self):
-        from dragon_quant.scorers.base import DragonVerdict
+        from dragon_quant.scan.scores.base import DragonVerdict
         rejected = DragonVerdict("A", False, 99, rank=1)
         passed = DragonVerdict("B", True, 60)
         rank_verdicts([rejected, passed])
@@ -590,11 +601,11 @@ class TestNamespacedSectorKeys(unittest.TestCase):
     """评分器用 primary_sector_key 读取规范化缓存键，缺省回退裸 code。"""
 
     def setUp(self):
-        from dragon_quant.cache.data_cache import DataCache
+        from dragon_quant.infra.storage.cache import DataCache
         self.cache = DataCache(cache_dir="")
 
     def test_liquidity_reads_namespaced_components(self):
-        from dragon_quant.scorers import liquidity
+        from dragon_quant.scan.scores import liquidity
         self.cache.set("quotes:batch", [_quote("600001", 10, 11, bid1=50000),
                                         _quote("600002", 10, 11, bid1=50000)])
         self.cache.set("kline:1min:600001", _min_bars(10, [0] * 9 + [10]))
@@ -612,8 +623,8 @@ class TestBareCodeSectorKeys(unittest.TestCase):
     """不传 primary_sector_key 时，仍读取旧式裸 code 键（向后兼容）。"""
 
     def test_liquidity_reads_bare_code_key(self):
-        from dragon_quant.cache.data_cache import DataCache
-        from dragon_quant.scorers import liquidity
+        from dragon_quant.infra.storage.cache import DataCache
+        from dragon_quant.scan.scores import liquidity
         cache = DataCache(cache_dir="")
         cache.set("quotes:batch", [_quote("600001", 10, 11, bid1=50000),
                                    _quote("600002", 10, 11, bid1=50000)])

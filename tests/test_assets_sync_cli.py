@@ -7,8 +7,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 from dragon_quant import cli
-from dragon_quant.assets_sync.credentials import AssetsConfig
-from dragon_quant.assets_sync.errors import ConfigError, LockBusyError
+from dragon_quant.infra.assets.sync.credentials import AssetsConfig
+from dragon_quant.infra.assets.sync.errors import ConfigError, LockBusyError
 
 
 def _run(argv):
@@ -40,7 +40,7 @@ class TestAssetsCliHelp(unittest.TestCase):
 
 class TestAssetsCliValidation(unittest.TestCase):
     def test_invalid_date_exits_2_before_network(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=AssertionError("不应触网/读配置")):
             code, out, _ = _run(["assets", "push", "--from", "2026-13-01"])
         self.assertEqual(code, 2)
@@ -76,9 +76,9 @@ class TestAssetsCliValidation(unittest.TestCase):
 class TestAssetsCliExitCodes(unittest.TestCase):
     def _run_with_push(self, result, argv=None):
         argv = argv or ["assets", "push"]
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.service.push", return_value=result):
+             patch("dragon_quant.infra.assets.sync.service.push", return_value=result):
             return _run(argv)
 
     def test_success_exit_0(self):
@@ -106,16 +106,16 @@ class TestAssetsCliExitCodes(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_config_error_exit_2(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=ConfigError("缺少配置项: endpoint")):
             code, out, _ = _run(["assets", "status"])
         self.assertEqual(code, 2)
         self.assertIn("endpoint", json.loads(out)["failed"][0]["reason"])
 
     def test_lock_busy_exit_1(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.service.ProcessLock") as lock_cls:
+             patch("dragon_quant.infra.assets.sync.service.ProcessLock") as lock_cls:
             lock_cls.return_value.acquire.side_effect = LockBusyError("busy")
             code, out, _ = _run(["assets", "push"])
         self.assertEqual(code, 1)
@@ -147,10 +147,10 @@ class TestAssetsCliTargetDir(unittest.TestCase):
                 return {"ok": True, "fatal": False, "failed": [],
                         "summary": {"restored": 0}}
 
-            with patch("dragon_quant.assets_sync.credentials.load_config",
+            with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                        return_value=_config()), \
-                 patch("dragon_quant.storage.paths.DATA_DIR", main_data), \
-                 patch("dragon_quant.assets_sync.service.pull",
+                 patch("dragon_quant.infra.storage.paths.DATA_DIR", main_data), \
+                 patch("dragon_quant.infra.assets.sync.service.pull",
                        side_effect=fake_pull):
                 code, _, _ = _run([
                     "assets", "pull", "--from", "2026-10-21", "--to", "2026-10-21",

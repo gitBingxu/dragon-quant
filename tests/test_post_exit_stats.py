@@ -3,13 +3,13 @@
 import math
 import unittest
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.evaluation import TOTAL_ROW_CODE, entry_reason_stats
 from dragon_quant.review_account.indicators import is_tradable_daily_bar, post_exit_stats
 from dragon_quant.review_account.market import at
 from dragon_quant.review_account.models import BUY_SIGNAL_CODES, ClosedPosition
 from dragon_quant.review_account.simulator import annotate_post_exit
-from dragon_quant.review_account.strategy import BUY_CHECK_LABELS
+from dragon_quant.review_account.strategy.main import BUY_CHECK_LABELS
 
 EXIT = "2026-09-04"   # 周五
 DAYS = ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11"]

@@ -208,7 +208,7 @@ class TestSnapshotConsumption(unittest.TestCase):
              "verdict": "light"},
         ]}
         cfg = SimpleNamespace(source="v2", min_score=50)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
                                              "2026-10-20", cfg, lambda *a, **k: [])
@@ -233,7 +233,7 @@ class TestSnapshotConsumption(unittest.TestCase):
                   {"code": "X", "name": "X", "composite_score": 60,
                    "is_true_dragon": True}]
         cfg = SimpleNamespace(source="v2", min_score=50)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
                                              "2026-10-20", cfg,
@@ -257,7 +257,7 @@ class TestSnapshotConsumption(unittest.TestCase):
         ]}
         loader = MagicMock(return_value=[])
         cfg = SimpleNamespace(source="v2", min_score=50)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
                                              "2026-10-20", cfg, loader)
@@ -281,7 +281,7 @@ class TestSnapshotConsumption(unittest.TestCase):
         ]}
         cfg = SimpleNamespace(source="v2", min_score=50,
                               prep_verdict_filter_enabled=False)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             out, ctx = collect_candidates_ex(["2026-10-19", "2026-10-20"],
                                              "2026-10-20", cfg, lambda *a, **k: [])
@@ -301,7 +301,7 @@ class TestSnapshotConsumption(unittest.TestCase):
              "verdict": "strong"},
         ]}
         cfg = SimpleNamespace(source="v2", min_score=50)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             out, _ = collect_candidates_ex(["2026-10-19", "2026-10-20"],
                                            "2026-10-20", cfg, lambda *a, **k: [])

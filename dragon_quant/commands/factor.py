@@ -13,8 +13,8 @@ def handle(args, services):
         _cmd_factor_fin(args, services)
         return
     # 门面只提供 13 个公共名；CLI 的用例包装（日期归一/ok 退出码语义）在文档化
-    # 公共子模块 ``factors.service``。运行期导入保证 service.* 的 patch 目标仍生效。
-    from dragon_quant.factors import CleanConfig, service
+    # 公共子模块 ``infra.factor.service``。运行期导入保证 service.* 的 patch 目标仍生效。
+    from dragon_quant.infra.factor import CleanConfig, service
 
     as_json = getattr(args, "json", False)
     try:
@@ -66,7 +66,7 @@ def handle(args, services):
                 version=args.version, codes=service.parse_only(args.codes),
                 clean=clean, fmt=args.fmt, out_path=args.out_path)
         elif action == "eval":
-            from dragon_quant.review_account.data import MarketData
+            from dragon_quant.review_account.main import MarketData
             provider = getattr(getattr(services, "providers", None), "xueqiu", None)
             data = MarketData(provider=provider) if provider is not None else MarketData()
             payload = service.evaluate_factor(
@@ -96,8 +96,8 @@ def handle(args, services):
 
 def _cmd_factor_fin(args, services):
     """``factor fin``：sync（snapshot/backfill）/ calibrate / status。"""
-    # 同 handle：经文档化公共子模块 factors.service 调用 CLI 用例包装。
-    from dragon_quant.factors import service
+    # 同 handle：经文档化公共子模块 infra.factor.service 调用 CLI 用例包装。
+    from dragon_quant.infra.factor import service
 
     sub = getattr(args, "fin_action", None)
     as_json = getattr(args, "json", False)

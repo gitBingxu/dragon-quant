@@ -2,11 +2,11 @@
 import json
 import unittest
 
-from dragon_quant.live_trade.signal_engine import SignalEngine
+from dragon_quant.review_account.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.engine import TradingEngine
 from dragon_quant.review_account.market import at, build_daily_row, build_row
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig
-from dragon_quant.review_account.strategy import (
+from dragon_quant.review_account.strategy.main import (
     BUY_CHECK_DISPLAY_ORDER, BUY_SIGNAL_DIVERGENCE_BREAK, BUY_SIGNAL_DRAGON_COMEBACK,
     BUY_SIGNAL_MA5_PULLBACK, BUY_SIGNAL_OPEN_TURN_STRONG, evaluate_buy,
     explain_buy_candidate, explain_buy_checks,

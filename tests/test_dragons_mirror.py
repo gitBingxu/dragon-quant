@@ -13,7 +13,10 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from dragon_quant.storage import assets_db, db, dragons_mirror
+from dragon_quant.infra.assets import db as assets_db
+from dragon_quant.infra.assets import dragons_mirror
+from dragon_quant.scan.storage import dragons as db
+from dragon_quant.infra.storage.connection import init_db
 
 DAY = "2026-10-20"
 DAY2 = "2026-10-19"
@@ -26,9 +29,9 @@ class MirrorTestBase(unittest.TestCase):
         self.dragon_path = root / "dragon.db"
         self.assets_path = root / "assets.db"
         self._patches = [
-            patch("dragon_quant.storage.db._connect",
+            patch("dragon_quant.infra.storage.connection._connect",
                   side_effect=lambda *a, **k: sqlite3.connect(self.dragon_path)),
-            patch("dragon_quant.storage.assets_db._connect",
+            patch("dragon_quant.infra.assets.db._connect",
                   side_effect=self._assets_connect),
         ]
         for item in self._patches:
@@ -56,7 +59,7 @@ class MirrorTestBase(unittest.TestCase):
 
     def _seed_source_only(self, rows_by_date):
         """只写源库（镜像 fan-out 打桩为空），用于回填/对账测试。"""
-        with patch("dragon_quant.storage.dragons._mirror_write"):
+        with patch("dragon_quant.scan.storage.dragons._mirror_write"):
             for day, rows in rows_by_date.items():
                 db.save_dragons(day, rows, version="1.0")
 
@@ -85,7 +88,7 @@ class TestDualWrite(MirrorTestBase):
 
     def test_table_columns_match_dragons_v2(self):
         """AC3：镜像字段 probe 与 dragons_v2 的列名集合完全相等。"""
-        db.init_db()
+        init_db()
         db.save_dragons(DAY, self._sample_rows(), version="1.0")
         src = sqlite3.connect(self.dragon_path)
         dst = sqlite3.connect(self.assets_path)
@@ -140,7 +143,7 @@ class TestDualWrite(MirrorTestBase):
         self.assertEqual([r["code"] for r in dragons_mirror.get_dragons(DAY)], ["600001"])
 
     def test_mirror_failure_does_not_break_main_write(self):
-        with patch("dragon_quant.storage.dragons_mirror.save_dragons",
+        with patch("dragon_quant.infra.assets.dragons_mirror.save_dragons",
                    side_effect=RuntimeError("assets db locked")):
             err = io.StringIO()
             with redirect_stderr(err):
@@ -155,7 +158,7 @@ class TestDualWrite(MirrorTestBase):
             time.sleep(0.3)
             return 0
 
-        with patch("dragon_quant.storage.dragons_mirror.save_dragons", side_effect=slow):
+        with patch("dragon_quant.infra.assets.dragons_mirror.save_dragons", side_effect=slow):
             start = time.monotonic()
             threads = [
                 threading.Thread(target=db.save_dragons,
@@ -240,7 +243,7 @@ class TestBackfill(MirrorTestBase):
 
     def test_review_fields_are_copied(self):
         self._seed_source_only({DAY: self._sample_rows("600001")})
-        with patch("dragon_quant.storage.dragons._mirror_write"):
+        with patch("dragon_quant.scan.storage.dragons._mirror_write"):
             db.update_dragon_review(DAY, "600001", buy_date="2026-10-22",
                                     buy_price=10.5, max_return_5d=12.0,
                                     max_return_hold_days=4)
@@ -256,7 +259,7 @@ class TestBackfill(MirrorTestBase):
         self._seed_source_only({DAY: self._sample_rows("600001")})
         dragons_mirror.backfill_dragons()
         # 源库改分（模拟 rebuild 重扫），镜像应跟随
-        with patch("dragon_quant.storage.dragons._mirror_write"):
+        with patch("dragon_quant.scan.storage.dragons._mirror_write"):
             rows = self._sample_rows("600001")
             rows[0]["composite_score"] = 99.0
             db.save_dragons(DAY, rows, version="1.0")
@@ -331,7 +334,7 @@ class TestGuardPropagation(MirrorTestBase):
 
     def test_sell_path_degrades_with_explicit_reason(self):
         """sell 有 try：候选池失败降级为仅持仓判定，文案带 candidate_pool_unavailable。"""
-        from dragon_quant.live_trade import trader as trader_mod
+        from dragon_quant.review_account.live_trade import trader as trader_mod
 
         class _Cfg:
             candidate_lookback_days = 5
@@ -349,7 +352,7 @@ class TestGuardPropagation(MirrorTestBase):
                           return_value=stale_loader), \
              patch.object(trader_mod, "build_shadow_state") as shadow, \
              patch.object(trader_mod, "historical_events", return_value=[]), \
-             patch.object(trader_mod.db, "list_all_signals", return_value=[]):
+             patch.object(trader_mod.signal_store, "list_all_signals", return_value=[]):
             shadow.return_value.positions = []
             shadow.return_value.cash = 100_000.0
             result = trader_mod.LiveTrader(_Cfg(), data=data)._run_sell(

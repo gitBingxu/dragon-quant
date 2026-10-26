@@ -47,7 +47,7 @@ class TestCliHelp(unittest.TestCase):
     def test_scan_help_does_not_run_scan(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "scan", "-h"]), \
-             patch("dragon_quant.orchestrator.scan") as mock_scan:
+             patch("dragon_quant.scan.orchestrator.main.scan") as mock_scan:
             with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
                 cli.main()
 
@@ -114,7 +114,7 @@ class TestCliSourceArgs(unittest.TestCase):
 
     def test_review_source_passes_to_run_review(self):
         with patch("sys.argv", ["dragon-quant", "review", "--source", "v2", "--date", "20260519"]), \
-             patch("dragon_quant.review.run_review") as mock_run:
+             patch("dragon_quant.review.main.run_review") as mock_run:
             cli.main()
 
         mock_run.assert_called_once()
@@ -138,7 +138,7 @@ class TestCliSourceArgs(unittest.TestCase):
         with patch("sys.argv", [
             "dragon-quant", "review-account", "--from", "20260501", "--to", "20260601",
             "--capital", "200000", "--source", "v2",
-        ]), patch("dragon_quant.review_account.run_review_account") as mock_run:
+        ]), patch("dragon_quant.review_account.main.run_review_account") as mock_run:
             cli.main()
 
         mock_run.assert_called_once_with(
@@ -165,7 +165,7 @@ class TestCliSourceArgs(unittest.TestCase):
 
     def test_buy_passes_replay_time(self):
         with patch("sys.argv", ["dragon-quant", "buy", "--date", "20260907", "--at", "10:00"]), \
-             patch("dragon_quant.live_trade.run_buy") as run:
+             patch("dragon_quant.review_account.live_trade.main.run_buy") as run:
             cli.main()
         self.assertEqual(run.call_args.kwargs["as_of"], "10:00")
         self.assertNotIn("account_name", run.call_args.kwargs)
@@ -173,26 +173,30 @@ class TestCliSourceArgs(unittest.TestCase):
 
     def test_buy_passes_force_kwarg(self):
         with patch("sys.argv", ["dragon-quant", "buy", "--force"]), \
-             patch("dragon_quant.live_trade.run_buy") as run:
+             patch("dragon_quant.review_account.live_trade.main.run_buy") as run:
             cli.main()
         self.assertTrue(run.call_args.kwargs["force"])
 
     def test_buy_without_force_passes_false(self):
         with patch("sys.argv", ["dragon-quant", "buy"]), \
-             patch("dragon_quant.live_trade.run_buy") as run:
+             patch("dragon_quant.review_account.live_trade.main.run_buy") as run:
             cli.main()
         self.assertFalse(run.call_args.kwargs["force"])
 
     def test_sell_passes_force_kwarg(self):
         with patch("sys.argv", ["dragon-quant", "sell", "--force"]), \
-             patch("dragon_quant.live_trade.run_sell") as run:
+             patch("dragon_quant.review_account.live_trade.main.run_sell") as run:
             cli.main()
         self.assertTrue(run.call_args.kwargs["force"])
 
     def test_review_account_passes_shared_config(self):
-        with patch("sys.argv", ["dragon-quant", "review-account", "--from", "20260907", "--to", "20260911", "--config", "params.json"]), \
-             patch("dragon_quant.commands._shared.load_strategy_params", return_value={"max_position_pct": 25}), \
-             patch("dragon_quant.review_account.run_review_account") as run:
+        with patch("sys.argv", [
+            "dragon-quant", "review-account", "--from", "20260907",
+            "--to", "20260911", "--config", "params.json",
+        ]), \
+             patch("dragon_quant.commands._shared.load_strategy_params",
+                   return_value={"max_position_pct": 25}), \
+             patch("dragon_quant.review_account.main.run_review_account") as run:
             cli.main()
         self.assertEqual(run.call_args.kwargs["strategy_params"], {"max_position_pct": 25})
 
@@ -200,7 +204,10 @@ class TestCliSourceArgs(unittest.TestCase):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "buy"]), \
              patch.object(cli, "warn_if_unavailable"), \
-             patch("dragon_quant.live_trade.run_buy", side_effect=ValueError("当前午间休市（11:30–13:00），请 13:00 后执行")), \
+             patch(
+                 "dragon_quant.review_account.live_trade.main.run_buy",
+                 side_effect=ValueError(
+                     "当前午间休市（11:30–13:00），请 13:00 后执行")), \
              redirect_stderr(buf):
             with self.assertRaises(SystemExit) as cm:
                 cli.main()
@@ -212,7 +219,7 @@ class TestCliSourceArgs(unittest.TestCase):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "sell"]), \
              patch.object(cli, "warn_if_unavailable"), \
-             patch("dragon_quant.live_trade.run_sell", side_effect=ValueError("当前已收盘")), \
+             patch("dragon_quant.review_account.live_trade.main.run_sell", side_effect=ValueError("当前已收盘")), \
              redirect_stderr(buf):
             with self.assertRaises(SystemExit) as cm:
                 cli.main()
@@ -226,7 +233,7 @@ class TestCliSourceArgs(unittest.TestCase):
         }
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "scan", "--date", "20260519", "--top", "5"]), \
-             patch("dragon_quant.storage.db.get_latest_scan_by_date", return_value=scan) as mock_get, \
+             patch("dragon_quant.scan.storage.main.get_latest_scan_by_date", return_value=scan) as mock_get, \
              redirect_stdout(buf):
             cli.main()
 
@@ -242,8 +249,8 @@ class TestCliSourceArgs(unittest.TestCase):
         }
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "scan", "--date", "20260519", "--top", "5"]), \
-             patch("dragon_quant.storage.db.get_latest_scan_by_date", return_value=scan), \
-             patch("dragon_quant.storage.db.get_scan_stocks") as mock_get_stocks, \
+             patch("dragon_quant.scan.storage.main.get_latest_scan_by_date", return_value=scan), \
+             patch("dragon_quant.scan.storage.main.get_scan_stocks") as mock_get_stocks, \
              redirect_stdout(buf):
             cli.main()
 
@@ -263,7 +270,7 @@ class TestCliSourceArgs(unittest.TestCase):
         }
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "scan_v2", "--date", "20260519", "--top", "5"]), \
-             patch("dragon_quant.storage.db.get_latest_scan_by_date", return_value=scan) as mock_get, \
+             patch("dragon_quant.scan.storage.main.get_latest_scan_by_date", return_value=scan) as mock_get, \
              redirect_stdout(buf):
             cli.main()
 
@@ -302,9 +309,9 @@ class TestCliDragons(unittest.TestCase):
         }
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "dragons"]), \
-             patch("dragon_quant.storage.db.list_dragon_trade_dates",
+             patch("dragon_quant.scan.storage.dragons.list_dragon_trade_dates",
                    return_value=["2026-05-18", "2026-05-19"]) as mock_dates, \
-             patch("dragon_quant.storage.db.get_dragons", return_value=[dragon]) as mock_get, \
+             patch("dragon_quant.scan.storage.dragons.get_dragons", return_value=[dragon]) as mock_get, \
              redirect_stdout(buf):
             cli.main()
 
@@ -321,7 +328,7 @@ class TestCliDragons(unittest.TestCase):
         none_d = {"code": "600519", "name": "C", "is_true_dragon": None, "report_text": ""}
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "dragons", "--date", "20260519", "--true-only"]), \
-             patch("dragon_quant.storage.db.get_dragons",
+             patch("dragon_quant.scan.storage.dragons.get_dragons",
                    return_value=[true_d, false_d, none_d]) as mock_get, \
              redirect_stdout(buf):
             cli.main()
@@ -335,7 +342,7 @@ class TestCliDragons(unittest.TestCase):
         dragon = {"code": "600172", "name": "A", "is_true_dragon": True, "report_text": ""}
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "dragons", "--date", "2026/05/19"]), \
-             patch("dragon_quant.storage.db.get_dragons", return_value=[dragon]) as mock_get, \
+             patch("dragon_quant.scan.storage.dragons.get_dragons", return_value=[dragon]) as mock_get, \
              redirect_stdout(buf):
             cli.main()
 
@@ -344,7 +351,7 @@ class TestCliDragons(unittest.TestCase):
     def test_dragons_no_data_exits_nonzero(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "dragons"]), \
-             patch("dragon_quant.storage.db.list_dragon_trade_dates", return_value=[]), \
+             patch("dragon_quant.scan.storage.dragons.list_dragon_trade_dates", return_value=[]), \
              redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
                 cli.main()
@@ -354,7 +361,7 @@ class TestCliDragons(unittest.TestCase):
 
 
 def _auction_quote(code, prev_close=10.0):
-    from dragon_quant.models.types import Quote
+    from dragon_quant.infra.models import Quote
     return Quote(code=code, name="x", price=10.0, prev_close=prev_close,
                  open_px=10.0, high=10.0, low=10.0, pct=0.0, chg=0.0,
                  turnover_rate=0.0, amplitude=0.0, volume=0.0, amount=0.0,
@@ -364,7 +371,7 @@ def _auction_quote(code, prev_close=10.0):
 
 
 def _quote_payload(code):
-    from dragon_quant.auction.serialize import quote_to_payload
+    from dragon_quant.review_account.auction.serialize import quote_to_payload
     return quote_to_payload(_auction_quote(code))
 
 
@@ -379,7 +386,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
         from contextlib import ExitStack
         from types import SimpleNamespace
         from dragon_quant import commands
-        from dragon_quant.storage import db, assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         if auction_items is None:
             auction_items = [{"time": "09:25:00", "price": 10.0,
@@ -387,7 +394,8 @@ class TestCmdAuctionStorage(unittest.TestCase):
         if quotes is None:
             quotes = [_auction_quote(d["code"]) for d in dragons]
         if replace_side_effect is None:
-            replace_side_effect = lambda trade_date, payloads, source="v2": len(payloads)
+            def replace_side_effect(trade_date, payloads, source="v2"):
+                return len(payloads)
 
         batch_kwargs = ({"side_effect": batch_side_effect}
                         if batch_side_effect is not None else {"return_value": quotes})
@@ -413,7 +421,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
             _save = _persist
 
         with ExitStack() as stack:
-            from dragon_quant.storage import dragons_mirror
+            from dragon_quant.infra.assets import dragons_mirror
             stack.enter_context(
                 patch.object(dragons_mirror, "list_dragon_trade_dates",
                              return_value=["2026-10-20"]))
@@ -425,17 +433,17 @@ class TestCmdAuctionStorage(unittest.TestCase):
                 patch("dragon_quant.commands.auction._resolve_trade_date",
                              return_value="2026-10-20"))
             stack.enter_context(
-                patch("dragon_quant.data.get_auction", return_value=auction_items))
-            get_quote = stack.enter_context(patch("dragon_quant.data.get_quote"))
+                patch("dragon_quant.infra.provider.data.get_auction", return_value=auction_items))
+            get_quote = stack.enter_context(patch("dragon_quant.infra.provider.data.get_quote"))
             batch = stack.enter_context(
-                patch("dragon_quant.data.batch_get_quotes", **batch_kwargs))
+                patch("dragon_quant.infra.provider.data.batch_get_quotes", **batch_kwargs))
             if evaluate_side_effect is not None:
                 stack.enter_context(
-                    patch("dragon_quant.auction.evaluate",
+                    patch("dragon_quant.review_account.auction.evaluate",
                           side_effect=evaluate_side_effect))
             if quote_serialize_side_effect is not None:
                 stack.enter_context(
-                    patch("dragon_quant.auction.serialize.quote_to_payload",
+                    patch("dragon_quant.review_account.auction.serialize.quote_to_payload",
                           side_effect=quote_serialize_side_effect))
             save = stack.enter_context(
                 patch.object(assets_db, "save_auction_asset", side_effect=_save))
@@ -492,10 +500,11 @@ class TestCmdAuctionStorage(unittest.TestCase):
         self.assertEqual(batch.call_args.kwargs["source"], "tdx")
         get_quote.assert_not_called()   # 禁止逐股请求
 
-        from dragon_quant.storage import db
+        from dragon_quant.scan.storage import dragons as dragon_store
         for name in ("save_auction_snapshot", "get_auction_snapshot",
                      "list_auction_snapshots"):
-            self.assertFalse(hasattr(db, name), f"db.{name} 应已移除")
+            self.assertFalse(hasattr(dragon_store, name),
+                             f"dragon_store.{name} 应已移除")
 
     def test_default_human_output(self):
         dragon = {"code": "600172", "name": "黄河旋风"}
@@ -734,10 +743,11 @@ class TestCmdAuctionRecompute(unittest.TestCase):
              today="2026-10-20", as_json=True, list_side_effect=None):
         from types import SimpleNamespace
         from dragon_quant import commands
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         if replace_side_effect is None:
-            replace_side_effect = lambda trade_date, payloads, source="v2": len(payloads)
+            def replace_side_effect(trade_date, payloads, source="v2"):
+                return len(payloads)
         buf, err = io.StringIO(), io.StringIO()
         exit_code = None
         list_kwargs = ({"side_effect": list_side_effect}
@@ -746,8 +756,8 @@ class TestCmdAuctionRecompute(unittest.TestCase):
              patch.object(assets_db, "replace_auction_snapshots",
                           side_effect=replace_side_effect) as replace, \
              patch("dragon_quant.commands.auction._resolve_trade_date", return_value=today), \
-             patch("dragon_quant.data.get_auction") as get_auction, \
-             patch("dragon_quant.data.batch_get_quotes") as batch, \
+             patch("dragon_quant.infra.provider.data.get_auction") as get_auction, \
+             patch("dragon_quant.infra.provider.data.batch_get_quotes") as batch, \
              redirect_stdout(buf), redirect_stderr(err):
             try:
                 commands.dispatch(
@@ -802,7 +812,7 @@ class TestCmdAuctionRecompute(unittest.TestCase):
         self.assertEqual(list(out), ["ok", "mode", "trade_date", "error"])
 
     def test_human_format_failure_keeps_exit_zero(self):
-        with patch("dragon_quant.auction.report.format_auction_report",
+        with patch("dragon_quant.review_account.auction.report.format_auction_report",
                    side_effect=RuntimeError("format boom")):
             _, _, _, out, err, code = self._run(
                 "20261020", [self._asset("600001")], as_json=False)
@@ -908,7 +918,7 @@ class TestBuyJson(unittest.TestCase):
                   "reason_text": "候选池暂无触发买点的标的"}
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "buy", "--json"]), \
-             patch("dragon_quant.live_trade.run_buy", return_value=result) as run, \
+             patch("dragon_quant.review_account.live_trade.main.run_buy", return_value=result) as run, \
              redirect_stdout(buf):
             cli.main()
         payload = json.loads(buf.getvalue())
@@ -921,7 +931,7 @@ class TestBuyJson(unittest.TestCase):
     def test_buy_json_error_envelope(self):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "buy", "--json", "--date", "20260907"]), \
-             patch("dragon_quant.live_trade.run_buy", side_effect=ValueError("bad date")), \
+             patch("dragon_quant.review_account.live_trade.main.run_buy", side_effect=ValueError("bad date")), \
              redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
                 cli.main()
@@ -960,7 +970,7 @@ class TestCliBackfillDragons(unittest.TestCase):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
                                 "--dry-run", "--json"]), \
-             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+             patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    return_value=dict(self.RESULT)) as backfill, \
              redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
@@ -978,7 +988,7 @@ class TestCliBackfillDragons(unittest.TestCase):
         with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
                                 "--from", "20260901", "--to", "20260930",
                                 "--prune"]), \
-             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+             patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    return_value=dict(self.RESULT)) as backfill, \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as cm:
@@ -994,7 +1004,7 @@ class TestCliBackfillDragons(unittest.TestCase):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
                                 "--json"]), \
-             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+             patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    return_value=result), \
              redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
@@ -1009,7 +1019,7 @@ class TestCliBackfillDragons(unittest.TestCase):
                   "failed": [{"date": "2026-10-20", "reason": "boom"}]}
         err = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons"]), \
-             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+             patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    return_value=result), \
              redirect_stdout(io.StringIO()), redirect_stderr(err):
             with self.assertRaises(SystemExit) as cm:
@@ -1024,7 +1034,7 @@ class TestCliBackfillDragons(unittest.TestCase):
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "assets", "backfill-dragons",
                                 "--json"]), \
-             patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+             patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    return_value=result), \
              redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
@@ -1038,9 +1048,9 @@ class TestCliPrepDefaultDate(unittest.TestCase):
         """枚举型读路径：最新日镜像缺行 → 报错，不得静默回退上一交易日。"""
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "prep", "--json"]), \
-             patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+             patch("dragon_quant.infra.assets.dragons_mirror.list_dragon_trade_dates",
                    return_value=["2026-05-18", "2026-05-19"]), \
-             patch("dragon_quant.storage.dragons_mirror.stale_dates",
+             patch("dragon_quant.infra.assets.dragons_mirror.stale_dates",
                    return_value={"2026-05-19": 3}), \
              patch("dragon_quant.review_account.prep.run_prep") as run, \
              redirect_stdout(buf):
@@ -1054,9 +1064,9 @@ class TestCliPrepDefaultDate(unittest.TestCase):
         """镜像为空但源库有行 → 报错并给出回填命令，不得说成「无龙头记录」。"""
         buf = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "prep", "--json"]), \
-             patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+             patch("dragon_quant.infra.assets.dragons_mirror.list_dragon_trade_dates",
                    return_value=[]), \
-             patch("dragon_quant.storage.dragons_mirror.ensure_populated"), \
+             patch("dragon_quant.infra.assets.dragons_mirror.ensure_populated"), \
              redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
                 cli.main()
@@ -1067,9 +1077,9 @@ class TestCliPrepDefaultDate(unittest.TestCase):
         buf = io.StringIO()
         result = {"version": "0.6", "sentiment": {}, "candidates": []}
         with patch("sys.argv", ["dragon-quant", "prep", "--json"]), \
-             patch("dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+             patch("dragon_quant.infra.assets.dragons_mirror.list_dragon_trade_dates",
                    return_value=["2026-05-18", "2026-05-19"]), \
-             patch("dragon_quant.storage.dragons_mirror.stale_dates",
+             patch("dragon_quant.infra.assets.dragons_mirror.stale_dates",
                    return_value={}), \
              patch("dragon_quant.review_account.prep.run_prep",
                    return_value=result) as run, \
@@ -1085,7 +1095,7 @@ class TestCliFactorBuildAll(unittest.TestCase):
                    "build_ids": [1], "reports": [], "warnings": []}
         with patch("sys.argv", ["dragon-quant", "factor", "build", "--all",
                                 "--date", "20260519", "--json"]), \
-             patch("dragon_quant.factors.service.build",
+             patch("dragon_quant.infra.factor.service.build",
                    return_value=payload) as build, \
              redirect_stdout(io.StringIO()):
             cli.main()

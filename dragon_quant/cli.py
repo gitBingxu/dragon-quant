@@ -22,7 +22,7 @@ from dragon_quant.commands._shared import (  # noqa: F401
     resolve_trade_date as _resolve_trade_date,
     to_dict as _to_dict,
 )
-from dragon_quant.providers.tdx import warn_if_unavailable
+from dragon_quant.infra.provider.tdx import warn_if_unavailable
 
 
 

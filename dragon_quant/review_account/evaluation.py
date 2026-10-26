@@ -7,7 +7,7 @@ from typing import Optional
 from dragon_quant.review_account.market import DataCoverageError
 from dragon_quant.review_account.models import BUY_SIGNAL_CODES, StrategyConfig
 from dragon_quant.review_account.simulator import AccountSimulator
-from dragon_quant.review_account.strategy import BUY_CHECK_LABELS
+from dragon_quant.review_account.strategy.main import BUY_CHECK_LABELS
 
 TOTAL_ROW_CODE = "__total__"
 
@@ -148,7 +148,7 @@ def industry_exposure(positions, sector_map: Optional[dict] = None, *,
     """
     if sector_loader is None and sector_map is None:
         def sector_loader(entry_date: str) -> dict:   # 函数内惰性 import（分层约束）
-            from dragon_quant.factors import storage as fstore
+            from dragon_quant.infra.factor import storage as fstore
             return fstore.get_sector_map(entry_date)
 
     fallback_map = sector_map or {}
@@ -248,7 +248,7 @@ def compare_strategies(date_from: str, date_to: str, data, cfg=None, variant_gri
     factor_variants = [name for name, variant in variants.items()
                        if getattr(variant, "factor_ranking_enabled", False)]
     if factor_variants:
-        from dragon_quant.factors.decision import build_completion_rate   # 分层：函数内惰性 import
+        from dragon_quant.infra.factor.decision import build_completion_rate   # 分层：函数内惰性 import
         completion = build_completion_rate(days)
         report["factor_build_completion"] = completion
         if completion is None or completion < FACTOR_BUILD_COMPLETION_MIN:

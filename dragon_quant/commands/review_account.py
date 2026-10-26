@@ -16,7 +16,7 @@ def handle(args, services):
         return
 
     from dragon_quant.commands import _shared
-    from dragon_quant.review_account import run_review_account
+    from dragon_quant.review_account.main import run_review_account
 
     options: dict = (
         {"strategy_params": _shared.load_strategy_params(args.config)}

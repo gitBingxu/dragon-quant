@@ -3,7 +3,7 @@
 本目录保存**开发期产物**（技术调研 / 技术方案 / 方法论 / 终验记录）。它们在对应 feat 落地后归档，只作历史追溯，不是长期维护文档。
 
 - **维护规则**：已归档文档若对应 feat 再次修改，必须在**同一 commit** 内同步更新（CLAUDE.md §6「调研 / 方案文档归档」）。
-- **2026-10-25 整仓结构重构（M0–M12）当前状态**：本目录历史方案中的 `dragon_quant/cli_commands.py`、`dragon_quant/review_account/prep.py` 等实现位置已迁移为 `dragon_quant/commands/<command>.py`、`dragon_quant/review_account/prep/` 包、`dragon_quant/auction/service.py`、`dragon_quant/assets_sync/cli_service.py`。受影响文档已在标题下加同日期「当前状态」指引，历史正文保持原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+- **2026-10-25 整仓结构重构（M0–M12）当前状态**：本目录历史方案中的 `dragon_quant/cli_commands.py`、`dragon_quant/review_account/prep.py` 等实现位置已迁移为 `dragon_quant/commands/<command>.py`、`dragon_quant/review_account/prep/` 包、`dragon_quant/review_account/auction/main.py`、`dragon_quant/infra/assets/sync/cli_service.py`。受影响文档已在标题下加同日期「当前状态」指引，历史正文保持原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
 - **日期**：文档对应 feat 的落地日期（取自首次提交），非移动归档日期。
 - **原路径**：归档前的仓库路径；`—` 表示自创建起就在本目录。
 

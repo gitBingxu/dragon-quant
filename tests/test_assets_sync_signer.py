@@ -3,7 +3,7 @@
 import hashlib
 import unittest
 
-from dragon_quant.assets_sync.backends import signer
+from dragon_quant.infra.assets.sync.backends import signer
 
 ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"
 SECRET_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"

@@ -8,7 +8,7 @@ Two layers:
   comparison against the real sources, so a production method added later
   cannot silently fall through to a real provider.
 * **Runtime (child, injection active):** construct the fake providers through
-  ``dragon_quant.providers.create_providers``, prove fixture-driven responses
+  ``dragon_quant.infra.provider.create_providers``, prove fixture-driven responses
   return real model instances, prove an unconfigured scenario raises
   ``FakeScenarioMissing`` (never a real transport fallback), and prove the
   assets backend adapter round-trips and logs every operation.
@@ -29,7 +29,7 @@ import pytest
 from tests.e2e.harness.sandbox import EnvSandbox
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROVIDERS = REPO_ROOT / "dragon_quant" / "providers"
+PROVIDERS = REPO_ROOT / "dragon_quant" / "infra" / "provider"
 E2E_ROOT = Path(__file__).resolve().parent
 FAKE_SOURCE = E2E_ROOT / "injection" / "fake_providers.py"
 SCENARIO = E2E_ROOT / "fixtures" / "scenario_providers.json"
@@ -288,7 +288,7 @@ print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 
 def test_unconfigured_scenario_fails_closed_without_real_transport(sandbox):
     code = (
-        "from dragon_quant.providers import create_providers\n"
+        "from dragon_quant.infra.provider import create_providers\n"
         "provider = create_providers()['tdx']\n"
         "provider.get_kline('600172')\n"
     )
@@ -308,7 +308,7 @@ def test_configured_scenario_returns_real_model_instances(sandbox):
     code = f"""
 import json
 import os
-from dragon_quant.providers import create_providers
+from dragon_quant.infra.provider import create_providers
 
 CALL_ARGS = {CALL_ARGS!r}
 scenario_names = json.load(open(os.environ["DQ_E2E_SCENARIO"], encoding="utf-8"))["providers"]
@@ -380,7 +380,7 @@ print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 def test_fake_assets_backend_round_trip_and_call_log(sandbox):
     code = """
 import json
-from dragon_quant.assets_sync.backends.s3 import S3Backend
+from dragon_quant.infra.assets.sync.backends.s3 import S3Backend
 
 backend = S3Backend(object())
 backend.put("probe/a.txt", b"payload", metadata={"k": "v"}, content_md5=None)
@@ -417,7 +417,7 @@ print(json.dumps({
 
 def test_fake_assets_backend_error_mode_never_touches_network(sandbox):
     code = (
-        "from dragon_quant.assets_sync.backends.s3 import S3Backend\n"
+        "from dragon_quant.infra.assets.sync.backends.s3 import S3Backend\n"
         "try:\n"
         "    S3Backend(object()).put('probe/k.txt', b'x')\n"
         "except Exception as exc:\n"

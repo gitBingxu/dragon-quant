@@ -11,7 +11,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dragon_quant.storage import assets_db, db, dragons_mirror, paths
+from dragon_quant.infra.assets import db as assets_db
+from dragon_quant.infra.assets import dragons_mirror
+from dragon_quant.infra.storage import paths
+from dragon_quant.scan.storage import dragons as db
+from dragon_quant.infra.storage.connection import init_db
 from tests.support import patch_storage_dbs
 
 ISOLATED = os.environ.get("DQ_TEST_ISOLATED_DATA_DIR")
@@ -27,7 +31,7 @@ class TestDataDirIsolation(unittest.TestCase):
     def test_unpatched_dragon_write_stays_inside_isolated_dir(self):
         """不 patch 任何连接直接写 dragons：两条连接都必须落在隔离目录。"""
         day = "1999-01-04"
-        db.init_db()
+        init_db()
         try:
             db.save_dragons(
                 day, [{"code": "000001", "name": "隔离探针", "rank": 1}],
@@ -57,7 +61,7 @@ class TestPatchStorageDbs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dragon_path = Path(tmp) / "dragon.db"
             with patch_storage_dbs(dragon_path):
-                db.init_db()
+                init_db()
                 db.save_dragons(
                     self.DAY, [{"code": "600001", "name": "镜像探针", "rank": 1}],
                     version="test-isolation")

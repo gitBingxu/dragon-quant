@@ -304,9 +304,9 @@ def test_run_prep_uses_facade_patch_targets_for_gate_plan_and_collection():
             patch.object(prep, "plan_prep", side_effect=fake_plan), \
             patch.object(prep, "_run_collection", side_effect=fake_collect), \
             patch.object(prep, "TdxProvider") as tdx_cls, \
-            patch("dragon_quant.storage.assets_db.get_prep_assets",
+            patch("dragon_quant.infra.assets.db.get_prep_assets",
                   return_value={}), \
-            patch("dragon_quant.storage.assets_db.save_prep_snapshot"):
+            patch("dragon_quant.infra.assets.db.save_prep_snapshot"):
         prep.run_prep(DAY, now=_now())
 
     tdx_cls.assert_called_once_with()
@@ -318,6 +318,33 @@ def test_run_prep_uses_facade_patch_targets_for_gate_plan_and_collection():
 
 
 # ─── legacy 查找与 recompute 离线 ─────────────────────────────────────────
+
+
+def test_prep_facade_points_to_main_and_keeps_legacy():
+    """Task 12: the public entries live on ``prep.main``; the package is a proxy."""
+    from dragon_quant.infra.module_proxy import NameProxyModule
+    from dragon_quant.review_account import prep
+    from dragon_quant.review_account.prep import main
+
+    assert isinstance(prep, NameProxyModule)
+    assert prep.run_prep is main.run_prep
+    assert prep.PrepError is main.PrepError
+    assert callable(prep.legacy) and prep.legacy is main.legacy
+
+
+def test_prep_package_proxy_forwards_facade_patches_but_keeps_submodules_local():
+    """Patch targets on the package must reach ``main``; submodules stay local."""
+    from dragon_quant.review_account import prep
+    from dragon_quant.review_account.prep import main
+
+    assert prep.service is service
+    assert prep.collectors is collectors
+
+    sentinel = object()
+    with patch.object(prep, "TdxProvider", sentinel):
+        assert main.TdxProvider is sentinel
+        assert prep.TdxProvider is sentinel
+    assert prep.TdxProvider is main.TdxProvider
 
 
 def test_legacy_lookup_returns_runtime_facade_bindings():
@@ -333,9 +360,9 @@ def test_legacy_lookup_fails_loudly_for_unknown_names():
 
 def test_recompute_is_offline_and_skips_planning_and_collection():
     assets = {"dragons": {"trade_date": DAY, "count": 0, "rows": []}}
-    with patch("dragon_quant.storage.assets_db.get_prep_assets",
+    with patch("dragon_quant.infra.assets.db.get_prep_assets",
                return_value=assets), \
-            patch("dragon_quant.storage.assets_db.save_prep_snapshot") as save_snap, \
+            patch("dragon_quant.infra.assets.db.save_prep_snapshot") as save_snap, \
             patch.object(prep, "TdxProvider") as tdx_cls, \
             patch.object(prep, "THSProvider") as ths_cls, \
             patch.object(prep, "plan_prep") as plan_mock, \

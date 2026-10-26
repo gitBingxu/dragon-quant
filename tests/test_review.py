@@ -2,11 +2,49 @@
 tests for dragon_quant.review — 龙头回测验证
 """
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 from dragon_quant.review import review_dragon, run_review
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class TestReviewPackageFacade(unittest.TestCase):
+    """Task 12: ``review.py`` is now the ``review`` package + facade proxy."""
+
+    def test_review_package_replaces_module_and_keeps_patch_surface(self):
+        import dragon_quant.review as review
+        import dragon_quant.review.main as main
+
+        assert not (ROOT / "dragon_quant" / "review.py").exists()
+        assert review.run_review.__module__ == "dragon_quant.review.main"
+        assert review.run_review is main.run_review
+        assert review.review_dragon is main.review_dragon
+        assert review.build_trade_calendar is main.build_trade_calendar
+        assert review.XueqiuProvider is main.XueqiuProvider
+
+    def test_review_package_proxy_forwards_patch_to_main(self):
+        import dragon_quant.review as review
+        import dragon_quant.review.main as main
+
+        sentinel = object()
+        with patch.object(review, "build_trade_calendar", sentinel):
+            assert main.build_trade_calendar is sentinel
+            assert review.build_trade_calendar is sentinel
+        assert review.build_trade_calendar is main.build_trade_calendar
+
+    def test_review_main_uses_explicit_store_names(self):
+        """No ambiguous ``db`` alias: review/main names its owners explicitly."""
+        import dragon_quant.review.main as main
+        from dragon_quant.scan.storage import dragons as dragon_store
+        from dragon_quant.vpa import storage as vpa_store
+
+        assert main.dragon_store is dragon_store
+        assert main.vpa_store is vpa_store
+        assert not hasattr(main, "db")
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -55,7 +93,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -88,7 +126,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -118,7 +156,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -146,7 +184,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -169,7 +207,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -211,7 +249,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider.get_kline.return_value = klines
         empty_calendar = {"2026-05-20", "2026-05-21"}
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=empty_calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -232,7 +270,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -254,7 +292,7 @@ class TestReviewDragon(unittest.TestCase):
         mock_provider = MagicMock()
         mock_provider.get_kline.return_value = klines
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
@@ -269,7 +307,7 @@ class TestReviewDragon(unittest.TestCase):
             _mk_kbar("2026-05-20", 10.0, 10.5, 10.5, 9.8, -5.0),
         ]
 
-        with patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.build_trade_calendar",
                    return_value={"2026-05-20"}):
             review_dragon("600172", "2026-05-19", provider=mock_provider)
 
@@ -289,17 +327,17 @@ class TestRunReview(unittest.TestCase):
 
     def test_run_review_no_pending_empty_list(self):
         """无待回测记录 → 返回 []"""
-        with patch("dragon_quant.review.db.get_pending_dragons",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=[]):
             results = run_review(verbose=False)
         self.assertEqual(results, [])
 
     def test_run_review_single_dragon(self):
         """单条 dragon 记录正常回测"""
-        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
-             patch("dragon_quant.review.db.update_dragon_review") as mock_update, \
-             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
-             patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons") as mock_pending, \
+             patch("dragon_quant.review.main.dragon_store.update_dragon_review") as mock_update, \
+             patch("dragon_quant.review.main.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
 
             mock_pending.return_value = [{
@@ -327,10 +365,10 @@ class TestRunReview(unittest.TestCase):
 
     def test_run_review_filter_5_to_20_days(self):
         """自动筛选：跳过不在 5~20 交易日窗口的记录"""
-        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
-             patch("dragon_quant.review.db.update_dragon_review"), \
-             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
-             patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons") as mock_pending, \
+             patch("dragon_quant.review.main.dragon_store.update_dragon_review"), \
+             patch("dragon_quant.review.main.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
 
             mock_pending.return_value = [
@@ -359,10 +397,10 @@ class TestRunReview(unittest.TestCase):
 
     def test_run_review_force_passes_through(self):
         """force=True 时传 review_status=None，不传 status 过滤"""
-        with patch("dragon_quant.review.db.get_pending_dragons",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=[]) as mock_pending, \
-             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
-             patch("dragon_quant.review.build_trade_calendar",
+             patch("dragon_quant.review.main.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
             mock_provider = MagicMock()
             mock_provider_cls.return_value = mock_provider
@@ -374,9 +412,9 @@ class TestRunReview(unittest.TestCase):
 
     def test_run_review_source_passes_through(self):
         """source 参数透传到 pending 查询和回测结果更新。"""
-        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
-             patch("dragon_quant.review.db.update_dragon_review") as mock_update, \
-             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls:
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons") as mock_pending, \
+             patch("dragon_quant.review.main.dragon_store.update_dragon_review") as mock_update, \
+             patch("dragon_quant.review.main.XueqiuProvider") as mock_provider_cls:
             mock_pending.return_value = [{
                 "code": "000001", "name": "平安银行", "trade_date": "2026-05-19",
             }]
@@ -395,10 +433,10 @@ class TestRunReview(unittest.TestCase):
 
     def test_run_review_force_still_filters_window(self):
         """force=True 时仍过滤 5~20 交易日窗口"""
-        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
-             patch("dragon_quant.review.db.update_dragon_review"), \
-             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
-             patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons") as mock_pending, \
+             patch("dragon_quant.review.main.dragon_store.update_dragon_review"), \
+             patch("dragon_quant.review.main.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=self._calendar):
 
             mock_pending.return_value = [
@@ -428,19 +466,19 @@ class TestRunReview(unittest.TestCase):
         """M9A: the 5~20 trading-day window is anchored on ``runtime.clock``."""
         from datetime import timedelta, timezone
 
-        from dragon_quant.runtime import clock as runtime_clock
+        from dragon_quant.infra import clock as runtime_clock
 
         self.addCleanup(runtime_clock.reset_clock)
         runtime_clock.set_clock(runtime_clock.FixedClock(
             datetime(2026, 5, 30, 15, 30,
                      tzinfo=timezone(timedelta(hours=8)))))
 
-        with patch("dragon_quant.review.db.get_pending_dragons",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=[{"code": "600172", "name": "黄河旋风",
                                   "trade_date": "2026-05-19"}]), \
-             patch("dragon_quant.review.db.update_dragon_review"), \
-             patch("dragon_quant.review.XueqiuProvider") as mock_provider_cls, \
-             patch("dragon_quant.review.build_trade_calendar",
+             patch("dragon_quant.review.main.dragon_store.update_dragon_review"), \
+             patch("dragon_quant.review.main.XueqiuProvider") as mock_provider_cls, \
+             patch("dragon_quant.review.main.build_trade_calendar",
                    return_value=set()) as calendar:
             mock_provider_cls.return_value.get_kline.return_value = []
             run_review(verbose=False)
@@ -467,7 +505,7 @@ class TestRunReviewServicesInjection(unittest.TestCase):
         from unittest.mock import MagicMock
 
         from dragon_quant.app import build_services
-        from dragon_quant.runtime.providers import ProviderBundle
+        from dragon_quant.infra.provider.bundle import ProviderBundle
 
         bundle = ProviderBundle(
             tdx=MagicMock(name="tdx"), ths=MagicMock(name="ths"),
@@ -479,10 +517,10 @@ class TestRunReviewServicesInjection(unittest.TestCase):
         xueqiu = MagicMock()
         xueqiu.get_kline.return_value = self._klines()
 
-        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
-                patch("dragon_quant.review.db.update_dragon_review") as mock_update, \
-                patch("dragon_quant.review.XueqiuProvider") as provider_cls, \
-                patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons") as mock_pending, \
+                patch("dragon_quant.review.main.dragon_store.update_dragon_review") as mock_update, \
+                patch("dragon_quant.review.main.XueqiuProvider") as provider_cls, \
+                patch("dragon_quant.review.main.build_trade_calendar",
                       return_value=self._calendar):
             mock_pending.return_value = [{
                 "code": "000001", "name": "平安银行", "trade_date": "2026-05-19",
@@ -502,9 +540,9 @@ class TestRunReviewServicesInjection(unittest.TestCase):
         explicit.get_kline.return_value = self._klines()
         bundled = MagicMock()
 
-        with patch("dragon_quant.review.db.get_pending_dragons") as mock_pending, \
-                patch("dragon_quant.review.db.update_dragon_review"), \
-                patch("dragon_quant.review.build_trade_calendar",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons") as mock_pending, \
+                patch("dragon_quant.review.main.dragon_store.update_dragon_review"), \
+                patch("dragon_quant.review.main.build_trade_calendar",
                       return_value=self._calendar):
             mock_pending.return_value = [{
                 "code": "000001", "name": "平安银行", "trade_date": "2026-05-19",
@@ -517,9 +555,9 @@ class TestRunReviewServicesInjection(unittest.TestCase):
 
     def test_no_pending_records_do_not_touch_supplied_providers(self):
         xueqiu = MagicMock()
-        with patch("dragon_quant.review.db.get_pending_dragons",
+        with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=[]), \
-                patch("dragon_quant.review.XueqiuProvider") as provider_cls:
+                patch("dragon_quant.review.main.XueqiuProvider") as provider_cls:
             results = run_review(verbose=False, services=self._services(xueqiu))
 
         self.assertEqual(results, [])

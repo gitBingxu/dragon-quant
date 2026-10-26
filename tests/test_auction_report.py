@@ -2,7 +2,7 @@
 
 import unittest
 
-from dragon_quant.auction.report import (
+from dragon_quant.review_account.auction.report import (
     format_auction_report,
     format_summary,
     format_verdict_line,

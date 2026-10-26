@@ -12,19 +12,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.auction import registry as auction_registry
-from dragon_quant.factors import engine
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.builtin import auction as factor_auction
-from dragon_quant.factors.builtin import prep as factor_prep
-from dragon_quant.factors.decision import default_snapshot
-from dragon_quant.factors.registry import (
+from dragon_quant.review_account.auction import registry as auction_registry
+from dragon_quant.infra.factor import engine
+from dragon_quant.infra.factor import storage as fstore
+from dragon_quant.infra.factor.builtin import auction as factor_auction
+from dragon_quant.infra.factor.decision import default_snapshot
+from dragon_quant.infra.factor.registry import (
     FACTOR_SPECS, compute_version_info, get_spec, validate_registry,
 )
-from dragon_quant.factors.types import FactorContext, FactorSpec, FactorValue
-from dragon_quant.storage import assets_db
-from dragon_quant.storage import db as dragon_db
-from dragon_quant.storage import factors as sqlstore
+from dragon_quant.infra.factor.types import FactorContext, FactorValue
+from dragon_quant.infra.assets import db as assets_db
+from dragon_quant.infra.storage import connection as dragon_db
+from dragon_quant.infra.factor import sql as sqlstore
 
 DAY = "2026-10-23"
 PREP_NAMES = (
@@ -102,9 +101,9 @@ class TempDb(unittest.TestCase):
         self.assets_path = str(Path(self._tmpdir.name) / "assets.db")
         self.dragon_path = str(Path(self._tmpdir.name) / "dragon.db")
         self._patches = [
-            patch("dragon_quant.storage.assets_db._connect",
+            patch("dragon_quant.infra.assets.db._connect",
                   side_effect=self._assets_connect),
-            patch("dragon_quant.storage.db._connect",
+            patch("dragon_quant.infra.storage.connection._connect",
                   side_effect=self._dragon_connect),
         ]
         for item in self._patches:
@@ -436,8 +435,8 @@ class TestSourceFailure(TempDb):
 
 class TestIsolation(TempDb):
     def test_factors_do_not_import_upper_layers(self):
-        root = Path(__file__).resolve().parents[1] / "dragon_quant" / "factors"
-        forbidden = ("dragon_quant.review_account", "dragon_quant.auction")
+        root = Path(__file__).resolve().parents[1] / "dragon_quant" / "infra" / "factor"
+        forbidden = ("dragon_quant.review_account", "dragon_quant.review")
         for path in root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):

@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.providers.tdx import TdxProvider, _finance_record
+from dragon_quant.infra.provider.tdx import TdxProvider, _finance_record
 
 
 class FakeMarket(enum.IntEnum):
@@ -89,7 +89,7 @@ def _provider(client):
 
 class TestProviderAdapter(unittest.TestCase):
     def setUp(self):
-        self._patch = patch("dragon_quant.providers.tdx._import_easytdx",
+        self._patch = patch("dragon_quant.infra.provider.tdx._import_easytdx",
                             return_value=FAKE_ET)
         self._patch.start()
 
@@ -147,7 +147,7 @@ class TestProviderAdapter(unittest.TestCase):
     def test_missing_client_raises(self):
         provider = TdxProvider()
         provider._fin_client = False
-        with patch("dragon_quant.providers.tdx._import_easytdx",
+        with patch("dragon_quant.infra.provider.tdx._import_easytdx",
                    return_value=FAKE_ET):
             with self.assertRaises(RuntimeError):
                 provider.get_financial_files()

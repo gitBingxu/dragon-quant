@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from dragon_quant.providers.macro import MACRO_INDEX_KEYS
+from dragon_quant.infra.provider.macro import MACRO_INDEX_KEYS
 from dragon_quant.review_account.verdicts import (
     VERDICT_IGNORE, VERDICT_LABELS, VERDICT_LIGHT, VERDICT_STRONG,
 )

@@ -3,8 +3,8 @@
 import json
 import unittest
 
-from dragon_quant.assets_sync import codec
-from dragon_quant.assets_sync.errors import IntegrityError
+from dragon_quant.infra.assets.sync import codec
+from dragon_quant.infra.assets.sync.errors import IntegrityError
 
 
 class TestCanonicalJson(unittest.TestCase):

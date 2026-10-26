@@ -9,7 +9,7 @@ import sys
 def handle_buy(args, services):
     """执行当前时点的买入信号（纯信号记账，非模拟账户）。"""
     from dragon_quant.commands import _shared
-    from dragon_quant.live_trade import run_buy
+    from dragon_quant.review_account.live_trade.main import run_buy
 
     as_json = getattr(args, "json", False)
     raw_date = getattr(args, "date", None)
@@ -35,7 +35,7 @@ def handle_buy(args, services):
 def handle_sell(args, services):
     """执行当前时点的卖出信号（纯信号记账，非模拟账户）。"""
     from dragon_quant.commands import _shared
-    from dragon_quant.live_trade import run_sell
+    from dragon_quant.review_account.live_trade.main import run_sell
 
     trade_date = _resolve_trade_date(args.date)
     try:

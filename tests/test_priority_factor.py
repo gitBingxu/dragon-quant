@@ -2,7 +2,7 @@
 
 import unittest
 
-from dragon_quant.review_account.priority import (
+from dragon_quant.review_account.strategy.priority import (
     FACTOR_RANK_MISSING, FACTOR_RANK_SCORED, key_components, rank_key,
 )
 

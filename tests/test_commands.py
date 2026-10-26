@@ -118,7 +118,7 @@ def _import_roots(path: Path, *, top_level_only: bool) -> set[str]:
 
 
 def _fake_bundle():
-    from dragon_quant.runtime.providers import ProviderBundle
+    from dragon_quant.infra.provider.bundle import ProviderBundle
 
     return ProviderBundle(**{
         name: MagicMock(name=name) for name in ("tdx", "ths", "xueqiu", "tencent")
@@ -278,7 +278,7 @@ class TestDispatchAndServices(unittest.TestCase):
 
         args = SimpleNamespace()
         services = object()
-        with patch("dragon_quant.runtime.providers.build_provider_bundle") as bundle, \
+        with patch("dragon_quant.infra.provider.bundle.build_provider_bundle") as bundle, \
                 patch("dragon_quant.app.build_services", return_value=services) as build, \
                 patch.object(logs_command, "handle") as handler:
             self.assertTrue(commands.dispatch("logs", args))
@@ -298,7 +298,7 @@ class TestDispatchAndServices(unittest.TestCase):
                 args = _args_for(name)
                 services = object()
                 bundle = _fake_bundle()
-                with patch("dragon_quant.runtime.providers.build_provider_bundle",
+                with patch("dragon_quant.infra.provider.bundle.build_provider_bundle",
                            return_value=bundle) as factory, \
                         patch("dragon_quant.app.build_services",
                               return_value=services) as build, \
@@ -320,7 +320,7 @@ class TestDispatchAndServices(unittest.TestCase):
                 entry = commands.COMMANDS[name]
                 module = __import__(entry.module, fromlist=[entry.attribute])
                 services = object()
-                with patch("dragon_quant.runtime.providers.build_provider_bundle") as factory, \
+                with patch("dragon_quant.infra.provider.bundle.build_provider_bundle") as factory, \
                         patch("dragon_quant.app.build_services",
                               return_value=services) as build, \
                         patch.object(module, entry.attribute) as handler:
@@ -345,7 +345,7 @@ class TestDispatchAndServices(unittest.TestCase):
                 entry = commands.COMMANDS[name]
                 module = __import__(entry.module, fromlist=[entry.attribute])
                 services = object()
-                with patch("dragon_quant.runtime.providers.build_provider_bundle") as factory, \
+                with patch("dragon_quant.infra.provider.bundle.build_provider_bundle") as factory, \
                         patch("dragon_quant.app.build_services",
                               return_value=services) as build, \
                         patch.object(module, entry.attribute) as handler:
@@ -378,7 +378,7 @@ class TestDispatchAndServices(unittest.TestCase):
     def test_cli_main_dispatches_migrated_commands_through_the_registry(self):
         with patch("sys.argv", ["dragon-quant", "review", "--date", "20260519"]), \
                 patch.object(cli, "warn_if_unavailable"), \
-                patch("dragon_quant.review.run_review") as run:
+                patch("dragon_quant.review.main.run_review") as run:
             cli.main()
 
         run.assert_called_once()
@@ -390,7 +390,7 @@ class TestDispatchAndServices(unittest.TestCase):
         with patch("sys.argv", ["dragon-quant", "auction", "--recompute", "20261020"]), \
                 patch.object(cli, "warn_if_unavailable"), \
                 patch("dragon_quant.commands.auction.handle") as auction, \
-                patch("dragon_quant.runtime.providers.build_provider_bundle") as factory:
+                patch("dragon_quant.infra.provider.bundle.build_provider_bundle") as factory:
             cli.main()
 
         auction.assert_called_once()
@@ -411,8 +411,8 @@ class TestDispatchAndServices(unittest.TestCase):
         # ``providers=None`` and let the orchestrator construct its own set.
         with patch("sys.argv", ["dragon-quant", "scan"]), \
                 patch.object(cli, "warn_if_unavailable"), \
-                patch("dragon_quant.orchestrator.scan") as orchestrate, \
-                patch("dragon_quant.runtime.providers.build_provider_bundle") as factory:
+                patch("dragon_quant.scan.orchestrator.main.scan") as orchestrate, \
+                patch("dragon_quant.infra.provider.bundle.build_provider_bundle") as factory:
             cli.main()
 
         factory.assert_not_called()
@@ -431,7 +431,7 @@ class TestDispatchAndServices(unittest.TestCase):
                 services = object()
                 bundle = _fake_bundle()
                 expects_providers = entry.providers_needed(args)
-                with patch("dragon_quant.runtime.providers.build_provider_bundle",
+                with patch("dragon_quant.infra.provider.bundle.build_provider_bundle",
                            return_value=bundle) as factory, \
                         patch("dragon_quant.app.build_services",
                               return_value=services) as build, \
@@ -451,8 +451,8 @@ class TestDispatchAndServices(unittest.TestCase):
 
         args = SimpleNamespace(date=None, top=7, candidates=3, workers=2,
                                force=True, no_cache=True)
-        with patch("dragon_quant.orchestrator.scan") as orchestrate, \
-                patch("dragon_quant.runtime.providers.build_provider_bundle") as factory:
+        with patch("dragon_quant.scan.orchestrator.main.scan") as orchestrate, \
+                patch("dragon_quant.infra.provider.bundle.build_provider_bundle") as factory:
             self.assertTrue(commands.dispatch("scan", args))
 
         factory.assert_not_called()
@@ -465,11 +465,11 @@ class TestDispatchAndServices(unittest.TestCase):
 
         args = SimpleNamespace(date="20260907", source="v2", at="10:00",
                                config="params.json", force=False, json=False)
-        with patch("dragon_quant.runtime.providers.build_provider_bundle",
+        with patch("dragon_quant.infra.provider.bundle.build_provider_bundle",
                    return_value=_fake_bundle()), \
                 patch("dragon_quant.commands._shared.load_strategy_params",
                       return_value={"max_position_pct": 25}) as params, \
-                patch("dragon_quant.live_trade.run_buy",
+                patch("dragon_quant.review_account.live_trade.main.run_buy",
                       return_value={"buys": []}) as run:
             self.assertTrue(commands.dispatch("buy", args))
 
@@ -559,7 +559,7 @@ class TestSharedHelpers(unittest.TestCase):
 
     def test_command_helpers_are_reexports_not_copies(self):
         """Each helper has exactly one implementation; command modules re-export it."""
-        from dragon_quant.auction import service as auction_service
+        from dragon_quant.review_account.auction import main as auction_service
         from dragon_quant.commands import _shared, assets, auction, prep
 
         self.assertIs(auction._score_auction_assets,
@@ -624,7 +624,7 @@ class TestMigratedHandlers(unittest.TestCase):
 
         tdx = object()
         services = SimpleNamespace(providers=SimpleNamespace(tdx=tdx))
-        with patch("dragon_quant.utils.trading.tdx_trade_dates",
+        with patch("dragon_quant.infra.market_calendar.tdx_trade_dates",
                    return_value=["2026-10-19"]) as calendar:
             self.assertEqual(auction_command._trade_calendar(services),
                              ["2026-10-19"])
@@ -655,7 +655,7 @@ class TestMigratedHandlers(unittest.TestCase):
         args = SimpleNamespace(
             date=None, top=7, candidates=3, workers=2, force=True, no_cache=True)
         services = object()
-        with patch("dragon_quant.orchestrator.scan") as orchestrate:
+        with patch("dragon_quant.scan.orchestrator.main.scan") as orchestrate:
             scan_command.handle(args, services)
 
         orchestrate.assert_called_once_with(
@@ -671,7 +671,7 @@ class TestMigratedHandlers(unittest.TestCase):
             date=None, top=25, candidates=5, workers=2, force=False, no_cache=False)
         services = object()
         with patch.dict(sys.modules, {"dragon_quant.cli": None}), \
-                patch("dragon_quant.orchestrator.scan") as direct:
+                patch("dragon_quant.scan.orchestrator.main.scan") as direct:
             scan_command.handle(args, services)
 
         direct.assert_called_once()
@@ -683,7 +683,7 @@ class TestMigratedHandlers(unittest.TestCase):
             date="20260519", top=None, force=False, source="v2",
             ui=False, ui_only=False)
         services = object()
-        with patch("dragon_quant.review.run_review") as run:
+        with patch("dragon_quant.review.main.run_review") as run:
             review_command.handle(args, services)
 
         run.assert_called_once_with(
@@ -696,7 +696,7 @@ class TestMigratedHandlers(unittest.TestCase):
         args = SimpleNamespace(
             date=None, top=None, force=False, source="v2", ui=False, ui_only=True,
             port=8765, no_browser=True)
-        with patch("dragon_quant.review.run_review") as run, \
+        with patch("dragon_quant.review.main.run_review") as run, \
                 patch("web_ui.server.start_server") as start:
             review_command.handle(args, object())
 
@@ -708,7 +708,7 @@ class TestMigratedHandlers(unittest.TestCase):
 
         args = SimpleNamespace(logs_action="tail", lines=2, source="v2")
         buf = io.StringIO()
-        with patch("dragon_quant.logging.query.tail_logs",
+        with patch("dragon_quant.scan.logger.main.tail_logs",
                    return_value=[{"a": 1}, {"b": "中"}]) as tail, redirect_stdout(buf):
             logs_command.handle(args, object())
 
@@ -723,7 +723,7 @@ class TestMigratedHandlers(unittest.TestCase):
         args = SimpleNamespace(data_action="kline", code="600001", source="xueqiu", days=20)
         services = object()
         buf = io.StringIO()
-        with patch("dragon_quant.data.get_kline", return_value=[kbar]) as get, \
+        with patch("dragon_quant.infra.provider.data.get_kline", return_value=[kbar]) as get, \
                 redirect_stdout(buf):
             data_command.handle(args, services)
 
@@ -749,7 +749,7 @@ class TestMigratedHandlers(unittest.TestCase):
                                source="tencent")
         services = object()
         buf = io.StringIO()
-        with patch("dragon_quant.data.batch_get_quotes",
+        with patch("dragon_quant.infra.provider.data.batch_get_quotes",
                    return_value=[quote, None]) as batch, redirect_stdout(buf):
             data_command.handle(args, services)
 
@@ -762,13 +762,13 @@ class TestMigratedHandlers(unittest.TestCase):
 
         services = object()
         buf = io.StringIO()
-        with patch("dragon_quant.storage.db.get_sector_blacklist",
+        with patch("dragon_quant.scan.storage.blacklist.get_sector_blacklist",
                    return_value=[]), redirect_stdout(buf):
             blacklist_command.handle(SimpleNamespace(blacklist_action=None), services)
         self.assertEqual(buf.getvalue().strip(), "黑名单为空")
 
         buf = io.StringIO()
-        with patch("dragon_quant.storage.db.add_sector_blacklist") as add, \
+        with patch("dragon_quant.scan.storage.blacklist.add_sector_blacklist") as add, \
                 redirect_stdout(buf):
             blacklist_command.handle(
                 SimpleNamespace(blacklist_action="add", name="次新股"), services)
@@ -779,7 +779,7 @@ class TestMigratedHandlers(unittest.TestCase):
         from dragon_quant.commands import dragons as dragons_command
 
         buf = io.StringIO()
-        with patch("dragon_quant.storage.db.list_dragon_trade_dates", return_value=[]), \
+        with patch("dragon_quant.scan.storage.dragons.list_dragon_trade_dates", return_value=[]), \
                 redirect_stdout(buf):
             with self.assertRaises(SystemExit) as raised:
                 dragons_command.handle(
@@ -815,9 +815,9 @@ class TestMigratedHandlers(unittest.TestCase):
         args = SimpleNamespace(code="600001", source="xueqiu", days=60, no_save=False)
         services = object()
         buf = io.StringIO()
-        with patch("dragon_quant.vpa.analyze", return_value=report) as analyze, \
-                patch("dragon_quant.vpa.report.render", return_value="REPORT"), \
-                patch("dragon_quant.storage.db.upsert_vpa") as upsert, \
+        with patch("dragon_quant.vpa.main.analyze", return_value=report) as analyze, \
+                patch("dragon_quant.vpa.main.render", return_value="REPORT"), \
+                patch("dragon_quant.vpa.main.upsert_vpa") as upsert, \
                 redirect_stdout(buf):
             vpa_command.handle(args, services)
 
@@ -839,9 +839,9 @@ class TestMigratedHandlers(unittest.TestCase):
             with self.subTest(no_save=no_save):
                 args = SimpleNamespace(
                     code="600001", source="xueqiu", days=60, no_save=no_save)
-                with patch("dragon_quant.vpa.analyze", return_value=report), \
-                        patch("dragon_quant.vpa.report.render", return_value="R"), \
-                        patch("dragon_quant.storage.db.upsert_vpa") as upsert, \
+                with patch("dragon_quant.vpa.main.analyze", return_value=report), \
+                        patch("dragon_quant.vpa.main.render", return_value="R"), \
+                        patch("dragon_quant.vpa.main.upsert_vpa") as upsert, \
                         redirect_stdout(io.StringIO()):
                     vpa_command.handle(args, object())
                 upsert.assert_not_called()
@@ -858,7 +858,7 @@ class TestReviewAccountCommand(unittest.TestCase):
             capital=200000.0, source="v2", strategy="dragon_pullback_daily",
             config="params.json")
         services = object()
-        with patch("dragon_quant.review_account.run_review_account") as run, \
+        with patch("dragon_quant.review_account.main.run_review_account") as run, \
                 patch("dragon_quant.commands._shared.load_strategy_params",
                       return_value={"max_position_pct": 25}) as params:
             command.handle(args, services)
@@ -876,7 +876,7 @@ class TestReviewAccountCommand(unittest.TestCase):
         args = SimpleNamespace(
             ui_only=False, ui=False, date_from=None, date_to=None, config=None)
         buf = io.StringIO()
-        with patch("dragon_quant.review_account.run_review_account") as run, \
+        with patch("dragon_quant.review_account.main.run_review_account") as run, \
                 redirect_stderr(buf):
             command.handle(args, object())
 
@@ -891,7 +891,7 @@ class TestReviewAccountCommand(unittest.TestCase):
         args = SimpleNamespace(
             ui_only=True, ui=False, date_from=None, date_to=None, port=8765,
             no_browser=False, source="v2")
-        with patch("dragon_quant.review_account.run_review_account") as run, \
+        with patch("dragon_quant.review_account.main.run_review_account") as run, \
                 patch("web_ui.server.start_server") as server:
             command.handle(args, None)
 
@@ -907,7 +907,7 @@ class TestReviewAccountCommand(unittest.TestCase):
             ui_only=False, ui=True, date_from="20260901", date_to="20260902",
             capital=100000.0, source="v2", strategy="s", config=None,
             port=8765, no_browser=True)
-        with patch("dragon_quant.review_account.run_review_account"), \
+        with patch("dragon_quant.review_account.main.run_review_account"), \
                 patch("web_ui.server.start_server") as server:
             command.handle(args, object())
 
@@ -924,7 +924,7 @@ class TestBuySellCommands(unittest.TestCase):
             date="20260907", source="v2", at="10:00", config=None,
             force=False, json=False)
         services = object()
-        with patch("dragon_quant.live_trade.run_buy",
+        with patch("dragon_quant.review_account.live_trade.main.run_buy",
                    return_value={"buys": []}) as run, \
                 patch("dragon_quant.commands._shared.load_strategy_params",
                       return_value=None) as params:
@@ -941,7 +941,7 @@ class TestBuySellCommands(unittest.TestCase):
         args = SimpleNamespace(
             date=None, source="v2", at=None, config="params.json",
             force=True, json=False)
-        with patch("dragon_quant.live_trade.run_buy",
+        with patch("dragon_quant.review_account.live_trade.main.run_buy",
                    return_value={"buys": []}) as run, \
                 patch("dragon_quant.commands._shared.load_strategy_params",
                       return_value={"max_position_pct": 25}) as params:
@@ -959,7 +959,7 @@ class TestBuySellCommands(unittest.TestCase):
             date="20260907", source="v2", at=None, config=None,
             force=False, json=True)
         buf = io.StringIO()
-        with patch("dragon_quant.live_trade.run_buy",
+        with patch("dragon_quant.review_account.live_trade.main.run_buy",
                    side_effect=ValueError("当前午间休市")), redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
                 command.handle_buy(args, None)
@@ -972,7 +972,7 @@ class TestBuySellCommands(unittest.TestCase):
 
         args.json = False
         buf = io.StringIO()
-        with patch("dragon_quant.live_trade.run_buy",
+        with patch("dragon_quant.review_account.live_trade.main.run_buy",
                    side_effect=ValueError("当前午间休市")), redirect_stderr(buf):
             with self.assertRaises(SystemExit) as cm:
                 command.handle_buy(args, None)
@@ -986,7 +986,7 @@ class TestBuySellCommands(unittest.TestCase):
         args = SimpleNamespace(
             date="20260908", source="v2", at="14:55", config=None, force=False)
         services = object()
-        with patch("dragon_quant.live_trade.run_sell",
+        with patch("dragon_quant.review_account.live_trade.main.run_sell",
                    return_value={"sells": []}) as run:
             command.handle_sell(args, services)
 
@@ -995,7 +995,7 @@ class TestBuySellCommands(unittest.TestCase):
             strategy_params=None, force=False, services=services)
 
         buf = io.StringIO()
-        with patch("dragon_quant.live_trade.run_sell",
+        with patch("dragon_quant.review_account.live_trade.main.run_sell",
                    side_effect=ValueError("当前已收盘")), redirect_stderr(buf):
             with self.assertRaises(SystemExit) as cm:
                 command.handle_sell(args, None)
@@ -1009,7 +1009,7 @@ class TestBuySellCommands(unittest.TestCase):
         args = SimpleNamespace(
             date="20260908", source="v2", at=None, config="params.json",
             force=False)
-        with patch("dragon_quant.live_trade.run_sell",
+        with patch("dragon_quant.review_account.live_trade.main.run_sell",
                    return_value={"sells": []}) as run, \
                 patch("dragon_quant.commands._shared.load_strategy_params",
                       return_value={"max_position_pct": 25}) as params:
@@ -1031,9 +1031,9 @@ class TestPrepCommand(unittest.TestCase):
         buf = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep",
                    return_value={"ok": 1}) as run, \
-                patch("dragon_quant.review_account.advice.format_advice_lines",
+                patch("dragon_quant.review_account.prep.main.format_advice_lines",
                       return_value=["ADVICE"]), \
-                patch("dragon_quant.review_account.advice.format_candidate_lines",
+                patch("dragon_quant.review_account.prep.main.format_candidate_lines",
                       return_value=["CANDIDATE"]), \
                 redirect_stdout(buf):
             command.handle(args, services)
@@ -1097,7 +1097,7 @@ class TestFactorCommand(unittest.TestCase):
         services = object()
         payload = {"ok": True, "mode": "date", "reports": [], "dates": [],
                    "build_ids": [], "warnings": []}
-        with patch("dragon_quant.factors.service.build",
+        with patch("dragon_quant.infra.factor.service.build",
                    return_value=payload) as build, \
                 patch("dragon_quant.commands.factor._print_factor_human"):
             command.handle(args, services)
@@ -1114,7 +1114,7 @@ class TestFactorCommand(unittest.TestCase):
             factor_action="fin", fin_action="sync", snapshot=True, backfill=False,
             date="20260911", from_period=None, to_period=None, force=False,
             host=None, json=False)
-        with patch("dragon_quant.factors.service.fin_sync",
+        with patch("dragon_quant.infra.factor.service.fin_sync",
                    return_value={"ok": True, "mode": "snapshot"}) as sync, \
                 patch("dragon_quant.commands.factor._print_fin_human"):
             command.handle(sync_args, services)
@@ -1124,7 +1124,7 @@ class TestFactorCommand(unittest.TestCase):
         cal_args = SimpleNamespace(
             factor_action="fin", fin_action="calibrate", sample=20,
             period=None, host=None, json=False)
-        with patch("dragon_quant.factors.service.fin_calibrate",
+        with patch("dragon_quant.infra.factor.service.fin_calibrate",
                    return_value={"ok": True, "mode": "calibrate"}) as calibrate, \
                 patch("dragon_quant.commands.factor._print_fin_human"):
             command.handle(cal_args, services)
@@ -1135,7 +1135,7 @@ class TestFactorCommand(unittest.TestCase):
         from dragon_quant.commands import factor as command
 
         status_args = SimpleNamespace(factor_action="status", json=False)
-        with patch("dragon_quant.factors.service.status",
+        with patch("dragon_quant.infra.factor.service.status",
                    return_value={"ok": True}) as status, \
                 patch("dragon_quant.commands.factor._print_factor_human"):
             command.handle(status_args, None)
@@ -1157,7 +1157,7 @@ class TestFactorCommand(unittest.TestCase):
             factor_action="build", date="20260911", from_date=None, to_date=None,
             only=None, all_factors=False, json=True)
         buf = io.StringIO()
-        with patch("dragon_quant.factors.service.build",
+        with patch("dragon_quant.infra.factor.service.build",
                    side_effect=ValueError("bad args")), redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
                 command.handle(args, object())
@@ -1172,7 +1172,7 @@ class TestFactorCommand(unittest.TestCase):
         args = SimpleNamespace(
             factor_action="status", json=True)
         buf = io.StringIO()
-        with patch("dragon_quant.factors.service.status",
+        with patch("dragon_quant.infra.factor.service.status",
                    side_effect=RuntimeError("db gone")), redirect_stdout(buf):
             with self.assertRaises(SystemExit) as cm:
                 command.handle(args, object())

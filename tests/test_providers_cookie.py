@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dragon_quant.providers.cookie import get_xq, COOKIE_DIR
+from dragon_quant.infra.provider.cookie import get_xq, COOKIE_DIR
 
 
 class TestCookiePaths(unittest.TestCase):
@@ -30,7 +30,7 @@ class TestCookiePaths(unittest.TestCase):
 
 
 def _cookie_cli():
-    from dragon_quant.providers import cookie_cli
+    from dragon_quant.infra.provider import cookie_cli
 
     return cookie_cli
 
@@ -88,7 +88,7 @@ def test_cookie_cli_fetch_uses_the_injected_implementation(capsys):
 
 
 def test_cookie_cli_fetch_defaults_to_the_library_function():
-    from dragon_quant.providers import cookie
+    from dragon_quant.infra.provider import cookie
 
     signature = inspect.signature(_cookie_cli().main)
     parameter = signature.parameters["fetch"]

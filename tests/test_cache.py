@@ -1,13 +1,13 @@
 """
-tests for dragon_quant.cache.data_cache — 内存+本地双重缓存
+tests for dragon_quant.infra.storage.cache — 内存+本地双重缓存
 """
-import os
+import shutil
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
-from dragon_quant.cache.data_cache import DataCache, CacheEntry
+from dragon_quant.infra.storage.cache import DataCache, CacheEntry
 
 
 class TestCacheEntry(unittest.TestCase):
@@ -119,6 +119,49 @@ class TestDataCacheThreadSafety(unittest.TestCase):
             t.join(timeout=10)
 
         self.assertEqual(len(errors), 0, f"Errors: {errors}")
+
+
+class TestScanCache(unittest.TestCase):
+    """Task 10: scan 专属缓存门面（通用实现仍在 infra.storage.cache）。"""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+
+    def test_scan_cache_keys_and_type(self):
+        from dragon_quant.infra.storage.cache import DataCache
+        from dragon_quant.scan.cache.main import ScanCache, create_scan_cache
+
+        cache = create_scan_cache(Path(self.tmpdir))
+        self.assertIsInstance(cache, ScanCache)
+        self.assertIsInstance(cache, DataCache)
+        self.assertEqual(cache.sector_ranking_key("tdx", "hy"),
+                         "sector:ranking:tdx:hy")
+
+    def test_scan_cache_delegates_all_scan_keys_to_sectors(self):
+        from dragon_quant.scan import sectors
+        from dragon_quant.scan.cache.main import ScanCache
+
+        cache = ScanCache(cache_dir=Path(self.tmpdir))
+        composite = sectors.sector_key("tdx", "gn", "880683")
+        self.assertEqual(cache.sector_components_key(composite),
+                         sectors.components_key(composite))
+        self.assertEqual(cache.sector_1min_key(composite),
+                         sectors.sector_1min_key(composite))
+        self.assertEqual(cache.sector_5min_key(composite),
+                         sectors.sector_5min_key(composite))
+        self.assertEqual(cache.stock_1min_key("600519"),
+                         "kline:1min:600519")
+        self.assertEqual(cache.stock_5min_key("600519"),
+                         "kline:5min:600519")
+
+    def test_quotes_helper_reads_batch_quotes(self):
+        from dragon_quant.scan.cache.main import ScanCache
+
+        cache = ScanCache(cache_dir=Path(self.tmpdir))
+        self.assertEqual(cache.quotes(), [])
+        cache.set(cache.quotes_key, ["quote"])
+        self.assertEqual(cache.quotes(), ["quote"])
 
 
 if __name__ == "__main__":

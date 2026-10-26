@@ -20,11 +20,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Optional
 
-from dragon_quant.providers.macro import MACRO_INDEX_KEYS
+from dragon_quant.infra.provider.macro import MACRO_INDEX_KEYS
 from dragon_quant.review_account.verdicts import evaluate_candidates
-from dragon_quant.runtime import clock
-from dragon_quant.storage import assets_db
-from dragon_quant.utils.trading import tdx_trade_dates
+from dragon_quant.infra import clock
+from dragon_quant.infra.assets import db as assets_db
+from dragon_quant.infra.market_calendar import tdx_trade_dates
 
 from .collectors import (
     _DRAGON_DEPENDENTS, _asset_codes, _collectors, _prepare_assets,
@@ -41,7 +41,7 @@ from .rebuild import (
 )
 
 if TYPE_CHECKING:  # 仅注解用：运行期一律经 legacy 从包门面解析（旧 patch 目标）
-    from dragon_quant.providers.tdx import TdxProvider
+    from dragon_quant.infra.provider.tdx import TdxProvider
 
 # 盘后运行门禁：当日 ≥16:40 才允许（A50 期指日盘 16:30 收盘 + 缓冲）
 _AFTER_CLOSE = (16, 40)

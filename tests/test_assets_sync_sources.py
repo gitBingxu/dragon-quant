@@ -5,13 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dragon_quant.assets_sync import codec
-from dragon_quant.assets_sync.sources import (
+from dragon_quant.infra.assets.sync import codec
+from dragon_quant.infra.assets.sync.sources import (
     AuctionAssetSource,
     PrepAssetSource,
     build_sources,
 )
-from dragon_quant.storage import assets_db
+from dragon_quant.infra.assets import db as assets_db
 
 
 def _dumps(value) -> str:

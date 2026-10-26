@@ -2,9 +2,9 @@
 
 import unittest
 
-from dragon_quant.models.types import Quote, ScoreResult
-from dragon_quant.auction import AuctionVerdict
-from dragon_quant.auction.serialize import (
+from dragon_quant.infra.models import Quote, ScoreResult
+from dragon_quant.review_account.auction import AuctionVerdict
+from dragon_quant.review_account.auction.serialize import (
     QuotePayloadError,
     quote_from_payload,
     quote_to_payload,
@@ -144,8 +144,8 @@ class TestScorePipelineOrder(unittest.TestCase):
     def test_rank_is_serialized_after_ranking(self):
         """evaluate → rank_auctions → payload：rank 不得因顺序错误丢失。"""
         from unittest.mock import patch
-        from dragon_quant.auction import registry as R
-        from dragon_quant.auction.service import _score_auction_assets
+        from dragon_quant.review_account.auction import registry as R
+        from dragon_quant.review_account.auction.main import _score_auction_assets
 
         items = [
             {"time": "09:20:00", "price": 10.0, "matched": 100, "unmatched": 100},

@@ -46,7 +46,7 @@ def _root() -> Path:
 def _check_mode() -> None:
     if os.environ.get("DQ_E2E_BACKEND_MODE", "ok").strip().lower() != "error":
         return
-    from dragon_quant.assets_sync.errors import StorageError
+    from dragon_quant.infra.assets.sync.errors import StorageError
 
     raise StorageError("E2E injected assets backend failure")
 
@@ -62,7 +62,7 @@ class LocalBackendAdapter:
         max_attempts: int = 5,
         sleep=None,
     ) -> None:
-        from dragon_quant.assets_sync.backends.local import LocalDirBackend
+        from dragon_quant.infra.assets.sync.backends.local import LocalDirBackend
 
         self._impl = LocalDirBackend(_root())
         self.config = config

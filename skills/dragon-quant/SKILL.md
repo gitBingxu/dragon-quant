@@ -15,7 +15,7 @@ metadata:
 ## 权威顺序
 
 1. `AGENTS.md`：项目规则、命令语义、运维契约的权威。
-2. `dragon_quant/review_account/STRATEGY.md`：策略与买卖规则的权威。
+2. `dragon_quant/review_account/strategy/STRATEGY.md`：策略与买卖规则的权威。
 3. 本 skill：只做路由、预检、输出翻译、异常分流、写操作门禁。
 4. 三者冲突时以更高权威为准；skill 不复制权重/参数/表结构。
 5. 本 skill 不提供投资建议，不承诺收益；不用于非 dragon-quant 仓库的通用选股。

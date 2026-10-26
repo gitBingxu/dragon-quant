@@ -191,6 +191,9 @@
           "--date",
           "--top",
           "--force",
+          "--recompute-all",
+          "--dry-run",
+          "--limit",
           "--source",
           "--ui",
           "--ui-only",
@@ -677,16 +680,22 @@
           "dragon_quant/tests/e2e/test_review.py::test_r2_no_entry_keeps_null_contract",
           "dragon_quant/tests/e2e/test_review.py::test_r3_provider_error_isolates_one_stock",
           "dragon_quant/tests/e2e/test_review.py::test_r4_no_pending_dragons_writes_nothing",
-          "dragon_quant/tests/e2e/test_review.py::test_r5_auto_window_skips_recent_and_stale_rows",
           "dragon_quant/tests/e2e/test_review.py::test_r6_date_filter_processes_only_that_day",
           "dragon_quant/tests/e2e/test_review.py::test_r7_force_recomputes_completed_row",
           "dragon_quant/tests/e2e/test_review.py::test_r8_source_v1_updates_v1_only",
           "dragon_quant/tests/e2e/test_web_api.py::test_r9_review_ui_only_serves_root",
+          "dragon_quant/tests/e2e/test_web_api.py::test_r9_explicit_port_conflict_fails_with_friendly_error",
           "dragon_quant/tests/e2e/test_web_api.py::test_r10_review_ui_runs_backtest_then_serves",
           "dragon_quant/tests/e2e/test_web_api.py::test_r11_single_row_write_failure_warns_and_continues",
-          "dragon_quant/tests/e2e/test_review.py::test_r12_runtime_clock_mode_drives_the_auto_window"
+          "dragon_quant/tests/e2e/test_review.py::test_r12_runtime_clock_mode_drives_the_auto_window",
+          "dragon_quant/tests/e2e/test_review.py::test_r5_auto_window_skips_recent_and_processes_stale_rows",
+          "dragon_quant/tests/e2e/test_review.py::test_r13_strict_cannot_evaluate_on_flat_zero_volume_day",
+          "dragon_quant/tests/e2e/test_review.py::test_r14_recompute_all_dry_run_counts_without_fetch_or_write",
+          "dragon_quant/tests/e2e/test_review.py::test_r15_recompute_all_limit_oldest_and_idempotent",
+          "dragon_quant/tests/e2e/test_review.py::test_r16_invalid_recompute_flag_combinations_exit_2",
+          "dragon_quant/tests/e2e/test_review.py::test_r17_recompute_all_summary_separates_failed_and_skipped"
         ],
-        "notes": "R1-R8 CLI; R9-R11 Web/UI and write-back failure covered together; R12 pins the runtime.clock-driven 5~20 window."
+        "notes": "R1-R8/R12-R17 CLI（双口径 / cannot_evaluate / recompute-all dry-run+limit/聚合汇总/非法参数）；R9-R11 Web/UI 与写回失败；R12 固定 runtime.clock 驱动的 ≥5 交易日窗口。"
       },
       "review-account": {
         "tests": [
@@ -1049,10 +1058,11 @@
       "r9_r11_review_ui": {
         "tests": [
           "dragon_quant/tests/e2e/test_web_api.py::test_r9_review_ui_only_serves_root",
+          "dragon_quant/tests/e2e/test_web_api.py::test_r9_explicit_port_conflict_fails_with_friendly_error",
           "dragon_quant/tests/e2e/test_web_api.py::test_r10_review_ui_runs_backtest_then_serves",
           "dragon_quant/tests/e2e/test_web_api.py::test_r11_single_row_write_failure_warns_and_continues"
         ],
-        "notes": "R9 --ui-only, R10 --ui after backtest, R11 single-row write-back failure (SQLite trigger) warns and continues with exit 0."
+        "notes": "R9 --ui-only, R9 explicit --port conflict fails fast without traceback, R10 --ui after backtest, R11 single-row write-back failure (SQLite trigger) warns and continues with exit 0."
       },
       "ra7_review_account_ui": {
         "tests": [

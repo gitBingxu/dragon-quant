@@ -6,4 +6,4 @@
 
 from __future__ import annotations
 
-__all__ = ["main", "scans", "dragons", "logs", "blacklist", "results"]
+__all__ = ["main", "scans", "dragons", "review_strict", "logs", "blacklist", "results"]

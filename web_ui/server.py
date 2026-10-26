@@ -221,9 +221,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
         - name: 名称（模糊匹配）
         - date_from / date_to: 入选日期范围
         - score_min / score_max: 综合分范围
-        - return_min / return_max: 最大收益率范围
-        - status: review_status 过滤（pending/completed/no_entry/error，逗号分隔）
-        - sort_by: 排序字段（默认 composite_score）
+        - return_min / return_max: 最大收益率范围（v2=严格口径，v1=旧口径）
+        - drawdown_min / drawdown_max: 最大回撤范围（v2=严格口径，v1=旧口径）
+        - status: 派生状态过滤（v2: completed/pending/pending_recompute/cannot_evaluate/error；
+          v1: completed/pending/no_entry/error，逗号分隔）
+        - sort_by: 排序字段（默认 composite_score；v2 支持 strict_* 严格键）
         - sort_dir: asc / desc（默认 desc）
         """
         db = _get_db()

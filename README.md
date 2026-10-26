@@ -338,17 +338,29 @@ dragon-quant factor fin status                            # 账本/校准/观测
 ### `review` — 龙头回测
 
 ```bash
-dragon-quant review                       # 自动筛 5~20 交易日内 pending 票全回测
+dragon-quant review                       # 自动回测所有距当日 >=5 交易日的 pending 票（无 20 日上限）
 dragon-quant review --date 20260519 --top 5
 dragon-quant review --date 20260519
 dragon-quant review --force --date 20260519
+dragon-quant review --recompute-all --dry-run          # 全量重算预检（上界统计；不写库、不拉 K 线）
+dragon-quant review --recompute-all --limit 20         # 最老 20 条 canary
+dragon-quant review --recompute-all                    # 全量双口径回填（默认跳过已有严格结果）
 dragon-quant review --ui                  # 回测后启动 Web UI（默认展示 dragons_v2）
 dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 ```
 
-`review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
+`review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表（保持旧 5~20 交易日窗口与旧口径，不写严格结果）。
+
+**双口径**（两种口径共享同一收益 / 回撤窗口与公式，胜利条件均为 `max_return_5d > 0 且 max_drawdown_5d > -5`，0 与 -5 都不算赢）：
+
+- **宽松口径**（历史行为，写 `dragons_v2` 现有 review 字段）：入选后首个 `high != low` 日按**最低价**买入。
+- **严格口径**（写入侧表 `dragon_review_strict`，唯一键 `(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停也按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位记 `cannot_evaluate`（原因措辞「停牌或数据缺失无法区分」）；传输失败不写、不覆盖严格结果；收益窗口为空同样 `cannot_evaluate`，部分窗口沿用公式并标 `partial_window`。
+
+`--recompute-all` 仅 v2，按最老记录优先，默认跳过已有严格行（`--force` 覆盖），`--dry-run` / `--limit` 只可与其组合（非法组合 exit 2）；dry-run 计数是未过滤成熟度的**上界**，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。普通 `review` 仍为每只个股补一段**量价分析**写入 `vpa_analysis`；全量重算刻意跳过 VPA，避免历史污染。Web UI 的收益 / 回撤 / 状态筛选与表格指标固定使用严格口径，并同时展示宽松 / 严格胜率与待重算、失败、无法评估计数；v1 明确标注为旧口径。
 
 Web UI 入口为 `web_ui.start_server(...) -> HTTPServer`：CLI（`--ui` / `--ui-only`）默认 `block=True` 阻塞运行；`--port 0` 由操作系统分配端口并打印真实 URL；测试或嵌入场景可传 `block=False`，拿到 server 后自行 `shutdown()` / `server_close()`。
+
+`review` 的 `--port` 未显式指定时默认 `8765`：若该端口已被占用，stderr 警告一次后仅重试一次 `port=0`（系统分配），日志与浏览器 URL 取实际端口。显式 `--port N` 被占用时不会自动换端口，而是打印可操作的错误并以非零码退出（无 traceback）；其他绑定错误（如权限不足）原样抛出。`review-account` 的端口行为不变。
 
 ### `review-account` — 账户级模拟交易
 
@@ -634,7 +646,7 @@ E2E 的安全边界：永不打开真实 `dragon.db` / `assets.db` / `prep.db`�
 
 SQLite 表分为三类：
 
-- 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
+- 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2` / `dragon_review_strict`（严格口径 review 侧表，唯一键 `(trade_date, code, source)`；无行 = 尚未重算）
 - 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`

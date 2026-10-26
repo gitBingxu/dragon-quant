@@ -288,6 +288,28 @@
         "idx_buy_sell_open_by_date"
       ]
     },
+    "dragon_review_strict": {
+      "columns": [
+        "id",
+        "trade_date",
+        "code",
+        "source",
+        "buy_date",
+        "buy_price",
+        "max_return_5d",
+        "max_drawdown_5d",
+        "max_return_hold_days",
+        "review_status",
+        "reason",
+        "review_version",
+        "computed_at"
+      ],
+      "indexes": [
+        "idx_dragon_review_strict_code",
+        "idx_dragon_review_strict_status",
+        "sqlite_autoindex_dragon_review_strict_1"
+      ]
+    },
     "dragons_v1": {
       "columns": [
         "id",
@@ -812,8 +834,8 @@
     "prep/calls.json": "5e6da0f4086a213c7692709be96205a251c3401b9cc6109afa78563d58f4a0b7",
     "prep/snapshot.json": "13ac9d9bc258bee9d6afc5e8d904711308d1cdb63ce79552333091dc0b0976e1",
     "prep/stdout.txt": "504aeae0c30162cf61e55c0fb874b934898a4d8e14789e4da6b15e956af59dfd",
-    "review/db.json": "99c28053be37462c760d0a813b19548775093bc3a2ed462639618b1f6cbc5975",
-    "review/stdout_lines.json": "45ee833c44e755aab70900680a6e7054c9262a62e5d9fc675c6b168fbf6eabdb",
+    "review/db.json": "25a8fc2e83bc4b2d870992a6131982bb9b93cc2c2fbc9e2231b96ef1d3bd6f1d",
+    "review/stdout_lines.json": "ef65201ffb463d2fff50f9d99e2e6e2dbe4a50466274d093bd9f19bde15b949e",
     "review_account/config_legal.json": "d25147d78680fdc8762eff750334158eae6ca15922d55c13a2cfdcf9d9ca26e0",
     "review_account/golden.json": "df0c2783763e64dc6485aebcb4882a67d5b5f0c8bbb9678e58ab2dc5ca5756d8",
     "review_account/stdout.txt": "bc46cc2620d4a9d69806d593480f88361f16ceffc64028b2e85d0ba005d2de74",

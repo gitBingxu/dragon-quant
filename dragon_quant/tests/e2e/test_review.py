@@ -145,6 +145,29 @@ def vpa_fields(box: EnvSandbox) -> list[dict]:
     return rows
 
 
+def strict_fields(box: EnvSandbox) -> list[dict]:
+    return [{key: row[key] for key in (
+        "trade_date", "code", "buy_date", "buy_price", "max_return_5d",
+        "max_drawdown_5d", "max_return_hold_days", "review_status",
+        "reason")}
+        for row in sqlite_rows(box.data_dir / "dragon.db",
+                               "dragon_review_strict", order_by="trade_date")]
+
+
+def assert_strict_fields(actual: list[dict], expected: list[dict]) -> None:
+    assert len(actual) == len(expected), actual
+    for got, want in zip(actual, expected):
+        for key in ("trade_date", "code", "review_status", "reason"):
+            assert got[key] == want[key], (key, got, want)
+        for key in ("buy_price", "max_return_5d", "max_drawdown_5d"):
+            if want[key] is None:
+                assert got[key] is None, (key, got, want)
+            else:
+                assert floats_close(got[key], want[key], rel=0, abs_tol=1e-9)
+        assert got["buy_date"] == want["buy_date"]
+        assert got["max_return_hold_days"] == want["max_return_hold_days"]
+
+
 def assert_review_fields(actual: list[dict], expected: list[dict]) -> None:
     assert len(actual) == len(expected), actual
     for got, want in zip(actual, expected):
@@ -181,9 +204,12 @@ def test_r1_three_states_persist_exactly_and_write_vpa():
         assert_review_fields(review_fields(box), expected["dragons"])
         assert_json_equal(vpa_fields(box), expected["vpa"])
         assert_review_fields(mirror_fields(box), expected["mirror"])
+        assert_strict_fields(strict_fields(box), expected["strict"])
 
         assert sqlite_count(box.data_dir / "dragon.db", "dragons_v2") == 3
         assert sqlite_count(box.data_dir / "dragon.db", "vpa_analysis") == 2
+        assert sqlite_count(box.data_dir / "dragon.db",
+                            "dragon_review_strict") == 2
         for table in ("buy_sell_signals", "review_account_runs"):
             assert sqlite_count(box.data_dir / "dragon.db", table) == 0
 
@@ -206,6 +232,18 @@ def test_r2_no_entry_keeps_null_contract():
             assert no_entry[key] is None, key
         assert rows["600001"]["review_status"] == "pending"
         assert rows["600003"]["review_status"] == "pending"
+        # 严格口径独立输出：600002 次日（08-24）一字涨停仍按开盘价 11.0 成交。
+        strict = {row["code"]: row for row in strict_fields(box)}
+        assert set(strict) == {"600002"}
+        assert strict["600002"]["review_status"] == "completed"
+        assert strict["600002"]["buy_date"] == "2026-08-24"
+        assert floats_close(strict["600002"]["buy_price"], 11.0, rel=0,
+                            abs_tol=1e-9)
+        assert floats_close(strict["600002"]["max_return_5d"], 0.0, rel=0,
+                            abs_tol=1e-9)
+        assert floats_close(strict["600002"]["max_drawdown_5d"], 0.0, rel=0,
+                            abs_tol=1e-9)
+        assert strict["600002"]["max_return_hold_days"] == 2
 
 
 # ─── R3 provider error is isolated ──────────────────────────────────────────
@@ -223,6 +261,9 @@ def test_r3_provider_error_isolates_one_stock():
         assert rows["600003"]["buy_date"] is None
         assert rows["600001"]["review_status"] == "pending"
         assert rows["600002"]["review_status"] == "pending"
+        # 传输失败不是 cannot_evaluate：不写严格结果。
+        assert sqlite_count(box.data_dir / "dragon.db",
+                            "dragon_review_strict") == 0
 
 
 # ─── R4 no pending rows ─────────────────────────────────────────────────────
@@ -240,21 +281,22 @@ def test_r4_no_pending_dragons_writes_nothing():
 # ─── R5 automatic 5–20 trading-day window ───────────────────────────────────
 
 
-def test_r5_auto_window_skips_recent_and_stale_rows():
+def test_r5_auto_window_skips_recent_and_processes_stale_rows():
     extra = [dragon_row("600004", "2026-09-10"),
              dragon_row("600005", "2026-07-01")]
     with sandbox("r5") as box:
         seed_sandbox(box, base_seed(extra))
         result = run_review(box, ["review"])
         assert_exit(result, 0)
-        assert "🔍 自动筛选：跳过 2 条（不在 5~20 交易日窗口）" in result.stdout
-        assert "共 3 条待处理" in result.stdout
+        assert "🔍 自动筛选：跳过 1 条（距当日不足 5 个交易日）" in result.stdout
+        assert "共 4 条待处理" in result.stdout
         rows = {row["code"]: row for row in review_fields(box)}
         assert rows["600001"]["review_status"] == "completed"
         assert rows["600002"]["review_status"] == "no_entry"
         assert rows["600003"]["review_status"] == "error"
+        # 超过 20 个交易日的旧记录不再被丢弃（但 fixture 无 600005 K 线 → 传输错误）。
+        assert rows["600005"]["review_status"] == "error"
         assert rows["600004"]["review_status"] == "pending"
-        assert rows["600005"]["review_status"] == "pending"
 
 
 # ─── R6 explicit --date ─────────────────────────────────────────────────────
@@ -280,7 +322,9 @@ def test_r7_force_recomputes_completed_row():
         seed_sandbox(box, base_seed())
         assert_exit(run_review(box, ["review"]), 0)
         before = {row["code"]: row for row in review_fields(box)}
+        strict_before = {row["code"]: row for row in strict_fields(box)}
         assert before["600001"]["max_return_5d"] == 8.0
+        assert strict_before["600001"]["max_return_5d"] == 6.93
 
         scenario = json.loads(SCENARIO.read_text(encoding="utf-8"))
         # Raise the 08-21 high to 11.00 so max_return_5d becomes 10.00.
@@ -296,6 +340,7 @@ def test_r7_force_recomputes_completed_row():
                             scenario=variant)
         assert_exit(result, 0)
         after = {row["code"]: row for row in review_fields(box)}
+        strict_after = {row["code"]: row for row in strict_fields(box)}
         assert after["600001"]["review_status"] == "completed"
         assert after["600001"]["buy_date"] == "2026-08-18"
         assert floats_close(after["600001"]["buy_price"], 10.0, rel=0,
@@ -303,6 +348,16 @@ def test_r7_force_recomputes_completed_row():
         assert floats_close(after["600001"]["max_return_5d"], 10.0, rel=0,
                             abs_tol=1e-9)
         assert after["600001"]["max_return_hold_days"] == 3
+        # --force 同时覆盖严格口径（开盘价 10.1，峰值 11.0）。
+        assert strict_after["600001"]["buy_date"] == "2026-08-18"
+        assert floats_close(strict_after["600001"]["buy_price"], 10.1, rel=0,
+                            abs_tol=1e-9)
+        assert floats_close(strict_after["600001"]["max_return_5d"], 8.91,
+                            rel=0, abs_tol=1e-9)
+        assert floats_close(strict_after["600001"]["max_drawdown_5d"], -4.95,
+                            rel=0, abs_tol=1e-9)
+        assert strict_after["600001"]["max_return_hold_days"] == 3
+        assert strict_after["600002"] == strict_before["600002"]
         for code in ("600002", "600003"):
             assert after[code] == before[code]
 
@@ -326,6 +381,9 @@ def test_r8_source_v1_updates_v1_only():
         assert floats_close(v1["buy_price"], 10.0, rel=0, abs_tol=1e-9)
         assert floats_close(v1["max_return_5d"], 8.0, rel=0, abs_tol=1e-9)
         assert review_fields(box) == v2_before
+        # v1 不写严格口径。
+        assert sqlite_count(box.data_dir / "dragon.db",
+                            "dragon_review_strict") == 0
 
 
 # ─── R12: single runtime-clock seam (M9C) ───────────────────────────────────
@@ -354,12 +412,12 @@ def test_r12_runtime_clock_mode_drives_the_auto_window():
         assert payload["runtime_clock_type"] == "FixedClock"
         assert payload["runtime_clock_now"].startswith("2026-09-11T15:30")
 
-        assert "🔍 自动筛选：跳过 2 条（不在 5~20 交易日窗口）" in result.stdout
-        assert "共 3 条待处理" in result.stdout
+        assert "🔍 自动筛选：跳过 1 条（距当日不足 5 个交易日）" in result.stdout
+        assert "共 4 条待处理" in result.stdout
 
         rows = {row["code"]: row for row in review_fields(box)}
         assert rows["600004"]["review_status"] == "pending"
-        assert rows["600005"]["review_status"] == "pending"
+        assert rows["600005"]["review_status"] == "error"
         expected = {row["code"]: row for row in golden("db.json")["dragons"]}
         ordered = sorted(expected)
         assert_review_fields([rows[code] for code in ordered],
@@ -368,3 +426,120 @@ def test_r12_runtime_clock_mode_drives_the_auto_window():
         mirror = {row["code"]: row for row in mirror_fields(box)}
         assert_review_fields([mirror[code] for code in ordered],
                              [expected[code] for code in ordered])
+
+
+# ─── R13: 严格口径 cannot_evaluate（次日零成交平盘占位）─────────────────────
+
+
+def test_r13_strict_cannot_evaluate_on_flat_zero_volume_day():
+    extra = [dragon_row("600006", "2026-08-26")]
+    with sandbox("r13") as box:
+        seed_sandbox(box, base_seed(extra))
+        result = run_review(box, ["review", "--date", "20260826"])
+        assert_exit(result, 0)
+
+        loose = {row["code"]: row for row in review_fields(box)}
+        assert loose["600006"]["review_status"] == "completed"
+        assert loose["600006"]["buy_date"] == "2026-08-28"
+
+        strict = {row["code"]: row for row in strict_fields(box)}
+        assert set(strict) == {"600006"}
+        assert strict["600006"]["review_status"] == "cannot_evaluate"
+        assert strict["600006"]["reason"] == "停牌或数据缺失无法区分"
+        assert strict["600006"]["buy_date"] is None
+        assert strict["600006"]["buy_price"] is None
+
+
+# ─── R14: --recompute-all --dry-run 只统计，不触网、不写库 ─────────────────
+
+
+def provider_calls(box: EnvSandbox) -> list[dict]:
+    if not box.call_log.exists():
+        return []
+    return [json.loads(line) for line in
+            box.call_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_r14_recompute_all_dry_run_counts_without_fetch_or_write():
+    with sandbox("r14") as box:
+        seed_sandbox(box, base_seed())
+        before = review_fields(box)
+        result = run_review(box, ["review", "--recompute-all", "--dry-run"])
+        assert_exit(result, 0)
+        assert "候选记录: 3 条" in result.stdout
+        assert "已有严格结果跳过: 0 条" in result.stdout
+        assert "预计处理上界: 3 条" in result.stdout
+        assert review_fields(box) == before
+        assert sqlite_count(box.data_dir / "dragon.db",
+                            "dragon_review_strict") == 0
+        assert not [c for c in provider_calls(box)
+                    if c.get("provider") == "xueqiu"
+                    and c.get("method") == "get_kline"]
+
+
+# ─── R15: --recompute-all --limit 只处理最老 N 条并可幂等续跑 ──────────────
+
+
+def test_r15_recompute_all_limit_oldest_and_idempotent():
+    with sandbox("r15") as box:
+        seed_sandbox(box, base_seed())
+
+        first = run_review(box, ["review", "--recompute-all", "--limit", "1"])
+        assert_exit(first, 0)
+        strict = strict_fields(box)
+        assert [row["code"] for row in strict] == ["600001"]
+        assert strict[0]["review_status"] == "completed"
+        loose = {row["code"]: row for row in review_fields(box)}
+        assert loose["600001"]["review_status"] == "completed"
+        assert loose["600002"]["review_status"] == "pending"
+        assert loose["600003"]["review_status"] == "pending"
+
+        dry = run_review(box, ["review", "--recompute-all", "--dry-run"])
+        assert_exit(dry, 0)
+        assert "已有严格结果跳过: 1 条" in dry.stdout
+        assert "预计处理上界: 2 条" in dry.stdout
+
+        second = run_review(box, ["review", "--recompute-all", "--limit", "1"])
+        assert_exit(second, 0)
+        strict = strict_fields(box)
+        assert [row["code"] for row in strict] == ["600001", "600002"]
+
+
+# ─── R16: 非法参数组合退出 2 ───────────────────────────────────────────────
+
+
+def test_r16_invalid_recompute_flag_combinations_exit_2():
+    with sandbox("r16") as box:
+        seed_sandbox(box, base_seed())
+        cases = [
+            ["review", "--dry-run"],
+            ["review", "--limit", "1"],
+            ["review", "--recompute-all", "--source", "v1"],
+            ["review", "--recompute-all", "--date", "20260817"],
+            ["review", "--recompute-all", "--top", "1"],
+        ]
+        for args in cases:
+            result = run_review(box, args)
+            assert_exit(result, 2)
+            assert "review:" in result.stderr, args
+        assert all(row["review_status"] == "pending"
+                   for row in review_fields(box))
+
+
+# ─── R17: recompute-all 聚合汇总区分 completed / failed / skipped ───────────
+
+
+def test_r17_recompute_all_summary_separates_failed_and_skipped():
+    with sandbox("r17") as box:
+        seed_sandbox(box, base_seed())
+        result = run_review(box, ["review", "--recompute-all"])
+        assert_exit(result, 0)
+        # 3 条全部处理：600001/600002 严格完成，600003 传输失败。
+        assert "📊 重算完成: processed=3" in result.stdout
+        assert "   completed=2" in result.stdout
+        assert "   cannot_evaluate=0" in result.stdout
+        assert "   failed=1" in result.stdout
+        assert "   skipped=0" in result.stdout
+        assert "汇总校验: processed == completed + cannot_evaluate + failed -> True" in result.stdout
+        assert sqlite_count(box.data_dir / "dragon.db",
+                            "dragon_review_strict") == 2

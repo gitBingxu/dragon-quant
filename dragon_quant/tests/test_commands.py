@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import errno
 import inspect
 import io
 import json
@@ -31,7 +32,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 from dragon_quant import cli
 
@@ -506,6 +507,25 @@ class TestParserSurface(unittest.TestCase):
         self.assertEqual(set(live), set(expected))
         self.assertEqual(live, expected)
 
+    def test_review_port_default_is_sentinel_and_review_account_keeps_8765(self):
+        parser = _capture_parser()
+        sub = next(
+            action for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+
+        def port_action(name: str) -> argparse.Action:
+            return next(
+                action for action in sub.choices[name]._actions
+                if "--port" in action.option_strings
+            )
+
+        self.assertIsNone(port_action("review").default)
+        self.assertEqual(port_action("review-account").default, 8765)
+        # An explicit --port still parses through unchanged.
+        self.assertEqual(
+            sub.choices["review"].parse_args(["--port", "9000"]).port, 9000)
+
 
 def _capture_parser() -> argparse.ArgumentParser:
     captured: dict[str, argparse.ArgumentParser] = {}
@@ -690,7 +710,8 @@ class TestMigratedHandlers(unittest.TestCase):
 
         run.assert_called_once_with(
             trade_date="2026-05-19", top_n=None, force=False, verbose=True,
-            source="v2", services=services)
+            source="v2", services=services, recompute_all=False,
+            dry_run=False, limit=None)
 
     def test_review_handle_ui_only_starts_the_server_without_backtesting(self):
         from dragon_quant.commands import review as review_command
@@ -704,6 +725,81 @@ class TestMigratedHandlers(unittest.TestCase):
 
         run.assert_not_called()
         start.assert_called_once_with(port=8765, open_browser=False, default_source="v2")
+
+    def test_review_ui_only_default_port_retries_ephemeral_on_address_in_use(self):
+        from dragon_quant.commands import review as review_command
+
+        args = SimpleNamespace(
+            date=None, top=None, force=False, source="v2", ui=False, ui_only=True,
+            port=None, no_browser=True)
+        conflict = OSError(errno.EADDRINUSE, "Address already in use")
+        stderr = io.StringIO()
+        with patch("dragon_quant.review.main.run_review") as run, \
+                patch("web_ui.server.start_server",
+                      side_effect=[conflict, None]) as start, \
+                redirect_stderr(stderr):
+            review_command.handle(args, object())
+
+        run.assert_not_called()
+        self.assertEqual(start.call_args_list, [
+            call(port=8765, open_browser=False, default_source="v2"),
+            call(port=0, open_browser=False, default_source="v2"),
+        ])
+        message = stderr.getvalue()
+        self.assertIn("8765", message)
+        self.assertIn("占用", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_review_ui_only_explicit_port_conflict_fails_without_retry(self):
+        from dragon_quant.commands import review as review_command
+
+        args = SimpleNamespace(
+            date=None, top=None, force=False, source="v2", ui=False, ui_only=True,
+            port=8799, no_browser=True)
+        conflict = OSError(errno.EADDRINUSE, "Address already in use")
+        stderr = io.StringIO()
+        with patch("dragon_quant.review.main.run_review") as run, \
+                patch("web_ui.server.start_server", side_effect=conflict) as start, \
+                redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            review_command.handle(args, object())
+
+        run.assert_not_called()
+        self.assertNotEqual(raised.exception.code, 0)
+        start.assert_called_once_with(port=8799, open_browser=False, default_source="v2")
+        message = stderr.getvalue()
+        self.assertIn("8799", message)
+        self.assertIn("--port", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_review_ui_only_non_address_in_use_error_is_not_swallowed(self):
+        from dragon_quant.commands import review as review_command
+
+        args = SimpleNamespace(
+            date=None, top=None, force=False, source="v2", ui=False, ui_only=True,
+            port=8799, no_browser=True)
+        denied = OSError(errno.EACCES, "Permission denied")
+        stderr = io.StringIO()
+        with patch("dragon_quant.review.main.run_review") as run, \
+                patch("web_ui.server.start_server", side_effect=denied) as start, \
+                redirect_stderr(stderr), self.assertRaises(OSError):
+            review_command.handle(args, object())
+
+        run.assert_not_called()
+        self.assertEqual(start.call_count, 1)
+        self.assertEqual(start.call_args.kwargs["port"], 8799)
+        self.assertNotIn("8765", stderr.getvalue())
+
+    def test_review_is_addr_in_use_matches_posix_errno_and_windows_winerror(self):
+        from dragon_quant.commands import review as review_command
+
+        self.assertTrue(
+            review_command._is_addr_in_use(OSError(errno.EADDRINUSE, "in use")))
+        self.assertFalse(
+            review_command._is_addr_in_use(OSError(errno.EACCES, "denied")))
+        self.assertTrue(
+            review_command._is_addr_in_use(SimpleNamespace(errno=None, winerror=10048)))
+        self.assertFalse(
+            review_command._is_addr_in_use(SimpleNamespace(errno=None, winerror=10013)))
 
     def test_logs_handle_tail_prints_json_lines_with_source(self):
         from dragon_quant.commands import logs as logs_command

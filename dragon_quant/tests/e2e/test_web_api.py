@@ -94,8 +94,37 @@ def account_row() -> dict:
     return sb.dragon_row("2026-09-04", "600001", "样本", 1, 80.0, ["AI算力"])
 
 
+STRICT_COLUMNS = {
+    "trade_date": "TEXT NOT NULL", "code": "TEXT NOT NULL",
+    "source": "TEXT NOT NULL", "buy_date": "TEXT", "buy_price": "REAL",
+    "max_return_5d": "REAL", "max_drawdown_5d": "REAL",
+    "max_return_hold_days": "INTEGER", "review_status": "TEXT NOT NULL",
+    "reason": "TEXT", "review_version": "TEXT", "computed_at": "TEXT",
+}
+
+
+def web_strict_rows() -> list[dict]:
+    """Strict-caliber row for the completed dragon (600001)."""
+
+    return [{
+        "trade_date": "2026-08-17", "code": "600001", "source": "v2",
+        "buy_date": "2026-08-18", "buy_price": 10.1,
+        "max_return_5d": 9.0, "max_drawdown_5d": -4.0,
+        "max_return_hold_days": 3, "review_status": "completed",
+        "reason": None, "review_version": "0.7.2",
+        "computed_at": "2026-09-11 15:30:00",
+    }]
+
+
 def seed_dragons(box: EnvSandbox, rows: list[dict]) -> None:
-    seed_db(box, sb.dragon_db_seed(rows))
+    dragon_spec = sb.dragon_db_seed(rows)
+    if any(row.get("review_status") == "completed" for row in rows):
+        dragon_spec["tables"]["dragon_review_strict"] = {
+            "columns": STRICT_COLUMNS,
+            "primary_key": ["trade_date", "code", "source"],
+            "rows": web_strict_rows(),
+        }
+    seed_db(box, dragon_spec)
     seed_db(box, sb.mirror_db_seed(rows), db_name="assets.db")
 
 
@@ -167,13 +196,29 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
             assert payload["count"] == 3
             assert [row["code"] for row in payload["data"]] == [
                 "600001", "600002", "600003"]
+            # 旧宽松字段保留；严格字段只对已完成记录存在。
             assert [row["review_status"] for row in payload["data"]] == [
                 "completed", "pending", "pending"]
+            assert [row["strict_reviewed"] for row in payload["data"]] == [
+                True, False, False]
+            assert payload["data"][0]["strict_max_return_5d"] == 9.0
+            assert payload["data"][0]["strict_buy_date"] == "2026-08-18"
+            assert payload["data"][1]["strict_review_status"] is None
 
             filtered = server.request(
                 "GET", "/api/dragons?status=completed&code=6000")
             assert filtered.json()["count"] == 1
             assert filtered.json()["data"][0]["code"] == "600001"
+
+            # 状态筛选按严格派生状态：pending / pending_recompute 分离。
+            assert server.request(
+                "GET", "/api/dragons?status=pending").json()["count"] == 2
+            assert server.request(
+                "GET", "/api/dragons?status=pending_recompute"
+            ).json()["count"] == 0
+            # 收益筛选固定使用严格口径：宽松 8.0 不命中，严格 9.0 命中。
+            assert server.request(
+                "GET", "/api/dragons?return_min=8.5").json()["count"] == 1
 
             summary = server.request("GET", "/api/summary").json()
             assert summary == {
@@ -186,6 +231,17 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
                 "best_stock_name": "龙头A",
                 "best_return": 8.0,
                 "source": "v2",
+                "avg_return_strict": 9.0,
+                "win_rate_loose": 100.0,
+                "win_rate_strict": 100.0,
+                "win_rate_loose_n": 1,
+                "win_rate_strict_n": 1,
+                "cannot_evaluate": 0,
+                "pending_recompute": 0,
+                "failed_recompute": 0,
+                "best_stock_code_strict": "600001",
+                "best_stock_name_strict": "龙头A",
+                "best_return_strict": 9.0,
             }
 
             missing = server.request("GET", "/api/does-not-exist")
@@ -349,6 +405,30 @@ def test_r9_review_ui_only_serves_root():
             assert server.request("GET", "/").status == 200
         assert server.returncode is not None
         assert port_is_free(server.port)
+
+
+def test_r9_explicit_port_conflict_fails_with_friendly_error():
+    """An explicit ``--port`` that is taken must fail fast, not pick port 0."""
+
+    with sandbox("m1f1-r9-port-conflict") as box:
+        seed_dragons(box, web_dragon_rows())
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            blocker.bind(("127.0.0.1", 0))
+            blocker.listen(1)
+            blocked_port = blocker.getsockname()[1]
+            result = runner().run_cli(
+                ["review", "--ui-only", "--no-browser", "--port", str(blocked_port)],
+                sandbox=box, timeout=60, allow_localhost=True)
+        finally:
+            blocker.close()
+
+        assert result.returncode != 0
+        assert str(blocked_port) in result.stderr
+        assert "--port" in result.stderr
+        assert "占用" in result.stderr
+        assert "Traceback" not in result.stderr
+        assert "已启动" not in result.stdout
 
 
 # ─── R10: --ui runs the review backtest before serving ──────────────────────

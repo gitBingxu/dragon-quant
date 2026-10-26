@@ -1923,7 +1923,129 @@
           ],
           "600003": {
             "error": "RuntimeError: 模拟K线故障"
-          }
+          },
+          "600006": [
+            {
+              "timestamp": 1787554800000,
+              "volume": 1000000.0,
+              "open": 10.0,
+              "high": 10.05,
+              "low": 9.95,
+              "close": 10.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1787641200000,
+              "volume": 1000000.0,
+              "open": 10.0,
+              "high": 10.05,
+              "low": 9.95,
+              "close": 10.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1787727600000,
+              "volume": 1000000.0,
+              "open": 10.0,
+              "high": 11.0,
+              "low": 10.0,
+              "close": 11.0,
+              "chg": 0.0,
+              "pct": 10.0,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1787814000000,
+              "volume": 0.0,
+              "open": 11.0,
+              "high": 11.0,
+              "low": 11.0,
+              "close": 11.0,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1787900400000,
+              "volume": 1000000.0,
+              "open": 11.0,
+              "high": 11.5,
+              "low": 10.8,
+              "close": 11.2,
+              "chg": 0.0,
+              "pct": 1.8,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1788159600000,
+              "volume": 1000000.0,
+              "open": 11.2,
+              "high": 11.6,
+              "low": 11.0,
+              "close": 11.4,
+              "chg": 0.0,
+              "pct": 1.8,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1788246000000,
+              "volume": 1000000.0,
+              "open": 11.4,
+              "high": 11.8,
+              "low": 11.2,
+              "close": 11.6,
+              "chg": 0.0,
+              "pct": 1.8,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1788332400000,
+              "volume": 1000000.0,
+              "open": 11.6,
+              "high": 12.0,
+              "low": 11.4,
+              "close": 11.8,
+              "chg": 0.0,
+              "pct": 1.7,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1788418800000,
+              "volume": 1000000.0,
+              "open": 11.8,
+              "high": 12.0,
+              "low": 11.5,
+              "close": 11.7,
+              "chg": 0.0,
+              "pct": -0.8,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1788505200000,
+              "volume": 1000000.0,
+              "open": 11.7,
+              "high": 11.9,
+              "low": 11.3,
+              "close": 11.5,
+              "chg": 0.0,
+              "pct": -1.7,
+              "turnover": 3.0,
+              "amount": 10000000.0
+            }
+          ]
         }
       }
     }

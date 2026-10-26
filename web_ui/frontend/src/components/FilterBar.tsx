@@ -29,8 +29,10 @@ const STATUS_OPTIONS = [
   { value: "completed", label: "已完成" },
   { value: "", label: "全部状态" },
   { value: "pending", label: "待回测" },
-  { value: "no_entry", label: "无介入日" },
-  { value: "error", label: "错误" },
+  { value: "pending_recompute", label: "待重算" },
+  { value: "cannot_evaluate", label: "无法评估" },
+  { value: "no_entry", label: "无介入（v1）" },
+  { value: "error", label: "失败" },
 ];
 
 const SOURCE_OPTIONS = [
@@ -170,6 +172,13 @@ export function FilterBar({ filters, count, onChange, onSearch }: Props) {
             {textInput("version_max", "版本≤", "如 0.2.4", 90)}
           </Group>
         </Collapse>
+
+        {/* v1 历史口径提示 */}
+        {filters.source === "v1" && (
+          <Text size="xs" c="dimmed">
+            v1 历史数据使用旧口径（首个非一字板日最低价买入），不提供严格口径。
+          </Text>
+        )}
 
         {/* 计数 */}
         <Group gap="xs" align="center">

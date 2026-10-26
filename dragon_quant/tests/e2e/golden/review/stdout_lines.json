@@ -8,6 +8,8 @@
   "summary": [
     "📊 回测完成: completed=1",
     "   no_entry=1",
-    "   error=1"
+    "   error=1",
+    "   strict_completed=2",
+    "   strict_cannot_evaluate=0"
   ]
 }

@@ -172,6 +172,28 @@ CREATE TABLE IF NOT EXISTS buy_sell_signals (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_buy_sell_open ON buy_sell_signals(code) WHERE status = 'open';
 CREATE INDEX IF NOT EXISTS idx_buy_sell_open_by_date ON buy_sell_signals(status, entry_date, code);
+
+CREATE TABLE IF NOT EXISTS dragon_review_strict (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date            TEXT NOT NULL,
+    code                  TEXT NOT NULL,
+    source                TEXT NOT NULL DEFAULT 'v2',
+    buy_date              TEXT,
+    buy_price             REAL,
+    max_return_5d         REAL,
+    max_drawdown_5d       REAL,
+    max_return_hold_days  INTEGER,
+    review_status         TEXT NOT NULL,
+    reason                TEXT,
+    review_version        TEXT,
+    computed_at           TEXT DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(trade_date, code, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dragon_review_strict_status
+    ON dragon_review_strict(source, review_status, trade_date);
+CREATE INDEX IF NOT EXISTS idx_dragon_review_strict_code
+    ON dragon_review_strict(code);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；

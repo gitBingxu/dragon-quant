@@ -194,9 +194,21 @@ def test_current_navigation_has_no_removed_modules():
         assert "review_account/prep.py" not in navigation, (
             f"{document.name} navigation tree still lists the removed review_account/prep.py module"
         )
+        assert "providers/" not in navigation, (
+            f"{document.name} navigation tree still lists the removed providers/ package"
+        )
+        assert "cookie_cli.py" not in navigation, (
+            f"{document.name} navigation tree still lists the removed cookie_cli.py module"
+        )
         text = _read(document)
         assert "dragon_quant/cli_commands" not in text
         assert "dragon_quant/review_account/prep.py" not in text
+        assert "dragon_quant.providers" not in text, (
+            f"{document.name} still documents the removed providers package entry"
+        )
+        assert "cookie_cli" not in text, (
+            f"{document.name} still documents the removed cookie_cli adapter"
+        )
 
 
 def test_docs_describe_the_new_tree_first():
@@ -237,7 +249,6 @@ def test_new_architecture_packages_are_documented():
         "dragon_quant/review_account/live_trade/main.py",
         "dragon_quant/review_account/strategy/main.py",
         "dragon_quant/vpa/main.py",
-        "dragon_quant/providers/cookie.py",
     ]
     missing = [name for name in required if name not in documented]
     assert not missing, f"AGENTS.md architecture overview misses: {missing}"

@@ -68,7 +68,9 @@ It also pins:
   what the parser does — this is a pinned baseline fact, not a fix);
 - group-without-action behavior (`logs`/`data`/`storage` silent exit 0;
   `blacklist` defaults to list; `assets`/`factor`/`factor fin` error exit 2);
-- independent entries: real Cookie module, real HTTP server, real Node installer;
+- independent entries: real HTTP server and real Node installer; Cookie is no
+  longer an independent entry and is covered by the formal
+  `data cookie-status|cookie-set|cookie-fetch` cases (D7/D8/D9);
 - cross-cutting notes: R9–R11/RA7 Web mappings, the merged npm N4/N5 lifecycle,
   and AS16's shared `push`/`pull` lock.
 

@@ -8,7 +8,7 @@ and the E2E test sources, then proves:
 * every test function under ``tests/e2e`` is referenced by the map (no
   silently unmapped cases);
 * hidden aliases, invocation facts (including the no-argument actual help),
-  group-without-action behavior and the cookie/web/npm independent entries are
+  group-without-action behavior and the web/npm independent entries are
   explicitly mapped;
 * the only remaining skip in the E2E suite is the declared filesystem-capability
   condition, never an unexplained placeholder.
@@ -128,7 +128,7 @@ def test_hidden_alias_invocation_facts_and_independent_entries_are_present():
     assert set(coverage["hidden_aliases"]) == {"scan_v2"}
     assert "no_argument_actual_help" in coverage["invocation_facts"]
     assert "group_without_action" in coverage["invocation_facts"]
-    assert set(coverage["independent_entries"]) == {"cookie", "web", "npm"}
+    assert set(coverage["independent_entries"]) == {"web", "npm"}
 
     for section in ("hidden_aliases", "invocation_facts", "independent_entries"):
         for name, entry in coverage[section].items():

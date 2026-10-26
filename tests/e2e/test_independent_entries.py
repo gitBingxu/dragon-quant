@@ -1,14 +1,13 @@
 """Independent entry points.
 
-* I1-I4 (M1A): ``python -m dragon_quant.providers.cookie`` status / set /
-  fetch (ok, empty, error) / unknown action.  The cookie module is *not*
-  shadowed by the injection layer: the real code path runs, and only the
-  object-storage/playwright/network seams are faked, so these tests cover the
-  actual entry point without a browser or a socket.
 * N1-N7 (M1F): the npm installer binary driven through a real ``node``
   subprocess with an isolated HOME/TMPDIR/npm cache and an unreachable
   ``npm_config_registry`` so any real registry access fails instead of leaking
   to the network.
+
+The Cookie CLI is not an independent entry any more: it is covered by the formal
+``data cookie-status|cookie-set|cookie-fetch`` cases in
+``test_logs_data_storage.py`` (D7/D8/D9).
 """
 
 from __future__ import annotations
@@ -23,13 +22,6 @@ import pytest
 from tests.e2e.harness.sandbox import EnvSandbox
 
 NOW = "2026-09-11T15:30:00+08:00"
-SYNTHETIC_COOKIE = "xq_a_token=e2e-synthetic-token; u=e2e-synthetic-user"
-
-
-def runner():
-    from tests.e2e.harness import runner as module
-
-    return module
 
 
 @pytest.fixture
@@ -39,89 +31,6 @@ def sandbox():
         yield box
     finally:
         box.cleanup()
-
-
-def _cookie_module(args, sandbox, **kwargs):
-    return runner().run_module(
-        "dragon_quant.providers.cookie", args, sandbox=sandbox, **kwargs
-    )
-
-
-def _cookie_file(sandbox: EnvSandbox):
-    return sandbox.data_dir / "cookies" / "xueqiu"
-
-
-def test_i1_status_reports_empty_and_present_cookie(sandbox):
-    empty = _cookie_module(["status"], sandbox)
-    assert empty.returncode == 0, empty.stderr
-    assert empty.stdout.strip() == "雪球: ❌ (0字符)"
-
-    _cookie_file(sandbox).parent.mkdir(parents=True, exist_ok=True)
-    _cookie_file(sandbox).write_text("xq_a_token=abc; xq_is_login=1", encoding="utf-8")
-    present = _cookie_module(["status"], sandbox)
-    assert present.returncode == 0, present.stderr
-    assert present.stdout.strip() == "雪球: ✅ (29字符)"
-
-
-def test_i2_set_writes_cookie_only_when_value_is_given(sandbox):
-    missing_value = _cookie_module(["set"], sandbox)
-    assert missing_value.returncode == 0, missing_value.stderr
-    assert missing_value.stdout == ""
-    assert not _cookie_file(sandbox).exists()
-
-    written = _cookie_module(["set", "--cookie", "tok=1; u=2"], sandbox)
-    assert written.returncode == 0, written.stderr
-    assert "✅ 雪球 Cookie ->" in written.stdout
-    assert _cookie_file(sandbox).read_text(encoding="utf-8") == "tok=1; u=2"
-
-    status = _cookie_module(["status"], sandbox)
-    assert status.stdout.strip() == "雪球: ✅ (10字符)"
-
-
-def test_i3_fetch_ok_uses_fake_playwright_without_network(sandbox):
-    result = _cookie_module(
-        ["fetch"], sandbox, env_override={"DQ_E2E_COOKIE_FETCH": "ok"}
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stderr == ""
-    assert _cookie_file(sandbox).read_text(encoding="utf-8") == SYNTHETIC_COOKIE
-
-    status = _cookie_module(["status"], sandbox)
-    assert status.stdout.strip() == f"雪球: ✅ ({len(SYNTHETIC_COOKIE)}字符)"
-
-    calls = [
-        json.loads(line)
-        for line in sandbox.call_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(
-        record["provider"] == "playwright" and record["method"] == "chromium.launch"
-        for record in calls
-    )
-
-
-def test_i3_fetch_empty_and_error_are_offline_and_write_nothing(sandbox):
-    empty = _cookie_module(
-        ["fetch"], sandbox, env_override={"DQ_E2E_COOKIE_FETCH": "empty"}
-    )
-    assert empty.returncode == 0, empty.stderr
-    assert "⚠️ 雪球 Cookie 获取失败" in empty.stdout
-    assert not _cookie_file(sandbox).exists()
-
-    broken = _cookie_module(
-        ["fetch"], sandbox, env_override={"DQ_E2E_COOKIE_FETCH": "error"}
-    )
-    assert broken.returncode == 0, broken.stderr
-    assert "E2E fake playwright failure" in broken.stderr
-    assert not _cookie_file(sandbox).exists()
-
-
-def test_i4_unknown_action_exits_two(sandbox):
-    result = _cookie_module(["bogus"], sandbox)
-    assert result.returncode == 2
-    assert result.stdout == ""
-    assert "invalid choice" in result.stderr
-    assert "bogus" in result.stderr
 
 
 # ─── N1-N7: npm installer over a real node subprocess ───────────────────────

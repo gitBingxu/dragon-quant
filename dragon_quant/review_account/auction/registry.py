@@ -34,7 +34,7 @@ STRENGTH_LEVELS = ((70.0, "强"), (40.0, "中"), (0.0, "弱"))
 # ─── 空明细哨兵 ───
 # strength.evaluate 在 items 为空时返回该 reject_reason，但 unverified 走 dataclass 默认
 # False；下游（review_account.priority）必须把它当作 Unknown，不能当作「明确弱」。
-# 生产者文案变化由 tests/test_priority.py 的联动断言兜住。
+# 生产者文案变化由 dragon_quant/tests/test_priority.py 的联动断言兜住。
 AUCTION_ITEMS_MISSING = "竞价明细缺失"
 
 # ─── 中性分 / 降级 ───

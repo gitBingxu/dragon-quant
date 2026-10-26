@@ -1,0 +1,553 @@
+"""
+tests for orchestrator helper functions:
+  _is_valid_candidate, _compute_consecutive_boards, _compute_5day_return, _to_serializable
+"""
+import time
+import unittest
+import io
+import json
+import sqlite3
+import tempfile
+from pathlib import Path
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from unittest.mock import Mock, patch
+from dragon_quant.scan.orchestrator import main as orch
+from dragon_quant.scan.cache.main import ScanCache
+from dragon_quant.infra.models import SectorPerformance
+from dragon_quant.scan.storage import dragons as db
+from dragon_quant.tests.test_scorers import _min_bars, _quote
+from dragon_quant.tests.support import patch_storage_dbs
+from dragon_quant.infra.models import StockInfo, KBar
+from dragon_quant.scan.orchestrator.main import (
+    _is_valid_candidate,
+    _compute_consecutive_boards,
+    _compute_5day_return,
+    _to_serializable,
+)
+
+
+def _make_kbar(ts, pct, close=10.0):
+    return KBar(timestamp=ts, volume=1e6, open=close, high=close,
+                low=close, close=close, chg=0, pct=pct, turnover=1.0, amount=1e7)
+
+
+class TestIsValidCandidate(unittest.TestCase):
+
+    def test_normal(self):
+        s = StockInfo(code="600519", name="贵州茅台")
+        self.assertTrue(_is_valid_candidate(s))
+
+    def test_st_filtered(self):
+        s = StockInfo(code="000620", name="*ST新华联")
+        self.assertFalse(_is_valid_candidate(s))
+
+    def test_star_board_filtered(self):
+        s = StockInfo(code="688981", name="中芯国际")
+        self.assertFalse(_is_valid_candidate(s))
+
+    def test_chi_next_filtered(self):
+        s = StockInfo(code="300750", name="宁德时代")
+        self.assertFalse(_is_valid_candidate(s))
+
+    def test_beijing_exchange_8(self):
+        s = StockInfo(code="834021", name="北交所某股")
+        self.assertFalse(_is_valid_candidate(s))
+
+    def test_beijing_exchange_92(self):
+        s = StockInfo(code="920100", name="三协电机")
+        self.assertFalse(_is_valid_candidate(s))
+
+    def test_empty_code(self):
+        s = StockInfo(code="", name="无名")
+        self.assertFalse(_is_valid_candidate(s))
+
+    def test_empty_name(self):
+        s = StockInfo(code="600519", name="")
+        self.assertTrue(_is_valid_candidate(s))
+
+
+class TestComputeConsecutiveBoards(unittest.TestCase):
+
+    def test_empty(self):
+        self.assertEqual(_compute_consecutive_boards([]), 0)
+
+    def test_single_limit_up(self):
+        now = int(time.time() * 1000)
+        klines = [_make_kbar(now, 10.0)]
+        self.assertEqual(_compute_consecutive_boards(klines), 1)
+
+    def test_single_non_limit(self):
+        now = int(time.time() * 1000)
+        klines = [_make_kbar(now, 5.0)]
+        self.assertEqual(_compute_consecutive_boards(klines), 0)
+
+    def test_three_consecutive(self):
+        now = int(time.time() * 1000)
+        day = 86400 * 1000
+        klines = [
+            _make_kbar(now - 2 * day, 10.0),
+            _make_kbar(now - 1 * day, 10.02),
+            _make_kbar(now, 9.95),
+        ]
+        self.assertEqual(_compute_consecutive_boards(klines), 3)
+
+    def test_broken_by_non_limit(self):
+        now = int(time.time() * 1000)
+        day = 86400 * 1000
+        klines = [
+            _make_kbar(now - 3 * day, 10.0),
+            _make_kbar(now - 2 * day, 10.0),
+            _make_kbar(now - 1 * day, 2.0),
+            _make_kbar(now, 10.0),
+        ]
+        self.assertEqual(_compute_consecutive_boards(klines), 1)
+
+    def test_pct_zero_breaks(self):
+        now = int(time.time() * 1000)
+        day = 86400 * 1000
+        klines = [
+            _make_kbar(now - 2 * day, 10.0),
+            _make_kbar(now - 1 * day, 0.0),
+            _make_kbar(now, 10.0),
+        ]
+        self.assertEqual(_compute_consecutive_boards(klines), 1)
+
+
+class TestCompute5DayReturn(unittest.TestCase):
+
+    def test_six_bars_normal(self):
+        now = int(time.time() * 1000)
+        day = 86400 * 1000
+        klines = [
+            _make_kbar(now - 5 * day, 0, close=10.0),
+            _make_kbar(now - 4 * day, 0, close=10.5),
+            _make_kbar(now - 3 * day, 0, close=11.0),
+            _make_kbar(now - 2 * day, 0, close=10.8),
+            _make_kbar(now - 1 * day, 0, close=11.5),
+            _make_kbar(now, 0, close=12.0),
+        ]
+        expected = (12.0 / 10.0 - 1) * 100
+        self.assertAlmostEqual(_compute_5day_return(klines), expected, places=4)
+
+    def test_less_than_six_bars(self):
+        now = int(time.time() * 1000)
+        klines = [_make_kbar(now, 5.0, close=10.0)]
+        self.assertEqual(_compute_5day_return(klines), 0.0)
+
+    def test_zero_close_guard(self):
+        now = int(time.time() * 1000)
+        day = 86400 * 1000
+        klines = [
+            _make_kbar(now - 5 * day, 0, close=0.0),
+            _make_kbar(now - 4 * day, 0, close=10.0),
+            _make_kbar(now - 3 * day, 0, close=10.0),
+            _make_kbar(now - 2 * day, 0, close=10.0),
+            _make_kbar(now - 1 * day, 0, close=10.0),
+            _make_kbar(now, 0, close=12.0),
+        ]
+        self.assertEqual(_compute_5day_return(klines), 0.0)
+
+    def test_negative_return(self):
+        now = int(time.time() * 1000)
+        day = 86400 * 1000
+        klines = [
+            _make_kbar(now - 5 * day, 0, close=10.0),
+            _make_kbar(now - 4 * day, 0, close=9.5),
+            _make_kbar(now - 3 * day, 0, close=9.0),
+            _make_kbar(now - 2 * day, 0, close=8.5),
+            _make_kbar(now - 1 * day, 0, close=8.0),
+            _make_kbar(now, 0, close=7.5),
+        ]
+        expected = (7.5 / 10.0 - 1) * 100
+        self.assertAlmostEqual(_compute_5day_return(klines), expected, places=4)
+        self.assertLess(_compute_5day_return(klines), 0)
+
+
+class TestToSerializable(unittest.TestCase):
+
+    def test_dataclass(self):
+        s = StockInfo(code="600519", name="茅台")
+        d = _to_serializable(s)
+        self.assertEqual(d["code"], "600519")
+        self.assertEqual(d["name"], "茅台")
+
+    def test_list_of_dataclasses(self):
+        klines = [_make_kbar(1000, 5.0), _make_kbar(2000, -2.0)]
+        result = _to_serializable(klines)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["pct"], 5.0)
+
+    def test_bytes(self):
+        result = _to_serializable(b"hello")
+        self.assertEqual(result, "hello")
+
+    def test_dict(self):
+        d = {"a": 1, "b": b"world"}
+        result = _to_serializable(d)
+        self.assertEqual(result["a"], 1)
+        self.assertEqual(result["b"], "world")
+
+    def test_primitive(self):
+        self.assertEqual(_to_serializable(42), 42)
+        self.assertEqual(_to_serializable("hello"), "hello")
+        self.assertEqual(_to_serializable(3.14), 3.14)
+
+
+class TestScanScoringIntegration(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.db_path = str(Path(self.tmp.name) / "test.db")
+        # orch.scan() 的 Phase F 会 save_dragons → 锁外 fan-out 双写 assets.db 镜像，
+        # 必须两个连接点一起隔离，否则镜像写落到真实数据目录。
+        self.stack.enter_context(patch_storage_dbs(self.db_path))
+        self.stack.enter_context(
+            patch("dragon_quant.infra.storage.paths.RESULTS_DIR",
+                  Path(self.tmp.name)))
+        self.cache = ScanCache(cache_dir="")
+        self.stack.enter_context(
+            patch.object(orch, "create_scan_cache", return_value=self.cache))
+        self.stack.enter_context(patch.object(orch, "_get_trade_date", return_value="2026-09-11"))
+        self.stack.enter_context(
+            patch("dragon_quant.infra.market_calendar.build_trade_calendar",
+                  return_value={"2026-09-11"}))
+        self.ths, self.xq, self.tx = Mock(), Mock(), Mock()
+        # tdx 主链路：mock 返回空，让板块链锚点/个股链全部回退到老链路
+        self.tdx = Mock()
+        self.tdx.get_sector_ranking.side_effect = lambda asc=False, category="hy", **kw: []
+        self.tdx.get_kline.return_value = []
+        self.tdx.get_minute_kline.return_value = []
+        self.tdx.batch_get_quotes.return_value = []
+        # 默认仅行业维度可用（gn/dq 为空 → degraded），保持既有测试语义
+        self.ths.get_sector_ranking.side_effect = (
+            lambda asc=False, category="hy", **kw: (
+                [SectorPerformance("881001", "S", 2, 2, 0.0, category, "ths")]
+                if category == "hy" else []))
+        self.ths.get_sector_components.return_value = [
+            StockInfo("600001", "Rejected", pct=10),
+            StockInfo("600002", "Passed", pct=10),
+        ]
+        self.ths.get_sector_5min_kline_history.return_value = []
+        self.ths.get_sector_1min_kline.return_value = _min_bars(100, [0, 1])
+        self.xq.get_kline.return_value = _min_bars(10, [0, 1, 2, 3, 4, 10])
+        self.xq.get_minute_kline.return_value = _min_bars(10, [0, 10])
+        self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11) for c in codes]
+        self.stack.enter_context(patch.object(
+            orch, "create_providers",
+            return_value={"tdx": self.tdx, "ths": self.ths, "xueqiu": self.xq, "tencent": self.tx}))
+        limiter = Mock()
+        limiter.submit.side_effect = lambda provider, fn: fn()
+        self.stack.enter_context(patch.object(orch, "RateLimiter", return_value=limiter))
+        self.pass_codes = {"600002"}
+        self.real_score_one = orch._score_one
+        self.stack.enter_context(patch.object(orch, "_score_one", side_effect=self.fake_score))
+
+    def fake_score(self, cand, *args):
+        passed = cand.code in self.pass_codes
+        return {"code": cand.code, "name": cand.name, "concepts": cand.concepts,
+                "board_count": cand.board_count, "primary_sector": cand.primary_sector,
+                "primary_sector_name": "S", "composite_score": 60 if passed else 80,
+                "dimensions": {}, "is_true_dragon": passed,
+                "reject_reason": None if passed else "drive below floor"}
+
+    def rows(self, table):
+        with sqlite3.connect(self.db_path) as conn:
+            return conn.execute(f"SELECT code, rank, is_true_dragon FROM {table} ORDER BY code").fetchall()
+
+    def test_real_scorers_run_through_full_scan(self):
+        self.ths.get_sector_components.return_value = [StockInfo("600001", "Dragon", pct=10)]
+        self.ths.get_sector_1min_kline.return_value = _min_bars(100, [0, 0, 0, 0, .1, .5, .6, .6, .6, .6])
+        self.xq.get_minute_kline.side_effect = lambda code: (
+            _min_bars(3000, [0] * 10) if code == "SH000001"
+            else _min_bars(10, [0, 0, 0, 1, 4, 7, 10, 10, 10, 10]))
+        self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11, bid1=50000, tr=15) for c in codes]
+        with patch.object(orch, "_score_one", side_effect=self.real_score_one):
+            output = orch.scan(top_n=1, verbose=False, force=True)
+        result = output["ranking"][0]
+        self.assertTrue(result["is_true_dragon"])
+        self.assertEqual(result["rank"], 1)
+        self.assertEqual(set(result["dimensions"]), {"drive", "leadership", "anti_drop", "liquidity", "absorption"})
+        self.assertEqual(self.rows("dragons_v2"), [("600001", 1, 1)])
+
+    def test_veto_never_occupies_top_slot_and_all_details_are_saved(self):
+        output = orch.scan(top_n=1, verbose=False, force=True)
+        self.assertEqual(self.rows("dragons_v2"), [("600002", 1, 1)])
+        self.assertEqual(self.rows("scan_stocks_v2"), [("600001", None, 0), ("600002", 1, 1)])
+        self.assertEqual(len(output["ranking"]), 2)
+        self.assertNotIn("Rejected", output["report_text"])
+        self.assertIn("Passed", output["report_text"])
+        self.xq.get_minute_kline.assert_any_call("SH000001")
+        self.assertIsNotNone(self.cache.get("kline:1min:SH000001"))
+        with redirect_stdout(io.StringIO()) as stream:
+            orch._print_cached_output(output, 1)
+        self.assertIn("Passed", stream.getvalue())
+        self.assertNotIn("Rejected", stream.getvalue())
+        with sqlite3.connect(self.db_path) as conn:
+            raw = json.loads(conn.execute("SELECT raw_output FROM scans_v2").fetchone()[0])
+        self.assertEqual(raw["ranking"], output["ranking"])
+
+    def test_no_dragon_still_persists_scan_and_reasons(self):
+        self.pass_codes.clear()
+        output = orch.scan(top_n=1, verbose=False, force=True)
+        self.assertEqual(self.rows("dragons_v2"), [])
+        self.assertEqual(len(self.rows("scan_stocks_v2")), 2)
+        self.assertIn("本轮无符合条件的真龙", output["report_text"])
+        with redirect_stdout(io.StringIO()) as stream:
+            orch._print_cached_output(output, 1)
+        self.assertIn("本轮无符合条件的真龙", stream.getvalue())
+
+    def test_quotes_over_two_hundred_are_sorted_and_complete(self):
+        stocks = [StockInfo(str(600000 + i), str(i), pct=10 if i == 204 else 0) for i in range(205)]
+        self.ths.get_sector_components.return_value = list(reversed(stocks))
+        orch.scan(top_n=1, verbose=False, force=True)
+        batches = [call.args[0] for call in self.tx.batch_get_quotes.call_args_list]
+        self.assertEqual([len(batch) for batch in batches], [200, 5])
+        self.assertEqual([c for batch in batches for c in batch], sorted(s.code for s in stocks))
+        self.assertEqual(len(self.cache.get("quotes:batch")), 205)
+
+    def test_five_day_dedupe_preserves_original_rank(self):
+        self.pass_codes = {"600001", "600002"}
+        with patch.object(
+                db, "get_last_entry_with_rank",
+                side_effect=lambda code, **kw: ("2000-01-01", 1) if code == "600001" else None), \
+                patch("dragon_quant.infra.market_calendar.trade_days_between", return_value=1):
+            orch.scan(top_n=2, verbose=False, force=True)
+        self.assertEqual(self.rows("dragons_v2"), [("600002", 2, 1)])
+
+    def test_phase_f_calls_persist_once_and_backfills_output(self):
+        """Phase F 只调用一次 persist_scan_result，并用返回 counts/path 回填。"""
+        from dragon_quant.scan.storage.main import PersistResult
+
+        report_path = Path(self.tmp.name) / "r.txt"
+        with patch.object(
+                orch, "persist_scan_result",
+                return_value=PersistResult(
+                    log_count=7, report_path=report_path,
+                    saved_dragons=1, skipped_dragons=0, updated_dragons=0,
+                    errors=[])) as persist:
+            output = orch.scan(top_n=2, verbose=False, force=True)
+
+        self.assertEqual(persist.call_count, 1)
+        kwargs = persist.call_args.kwargs
+        timestamp = kwargs["timestamp"]
+        self.assertEqual(kwargs["scan_id"], f"v2_{timestamp[:8]}_2")
+        self.assertEqual(
+            kwargs["scan_date_fmt"],
+            f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}")
+        self.assertEqual([row["code"] for row in kwargs["dragon_rows"]], ["600002"])
+        self.assertEqual(kwargs["dragon_rows"][0]["scan_id"], kwargs["scan_id"])
+        self.assertIn(output["report_text"], kwargs["report_text"])
+        self.assertTrue(callable(kwargs["trade_calendar"]))
+        self.assertEqual(kwargs["trade_calendar"](), {"2026-09-11"})
+        self.assertEqual(kwargs["version"], orch.__version__)
+        self.assertEqual(output["log_count"], 7)
+        self.assertEqual(output["report_path"], str(report_path))
+
+    def test_phase_f_log_error_is_visible_before_report_failure(self):
+        """日志失败先于报告失败时，verbose 必须已打印日志错误（旧行为）。"""
+        stderr = io.StringIO()
+        with patch("dragon_quant.scan.storage.logs.save_scan_logs",
+                   side_effect=RuntimeError("log down")), \
+                patch("dragon_quant.scan.storage.main.write_scan_report",
+                      side_effect=OSError("disk full")), \
+                redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            with self.assertRaises(OSError):
+                orch.scan(top_n=2, verbose=True, force=True)
+
+        self.assertIn("日志持久化失败: log down", stderr.getvalue())
+
+    def test_rebuild_does_not_promote_rejected_or_beyond_topn(self):
+        self.pass_codes = {"600002", "600003"}
+        self.ths.get_sector_components.return_value.append(StockInfo("600003", "Passed2", pct=10))
+        output = orch.scan(top_n=1, verbose=False, force=True)
+        day = output["timestamp"][:8]
+        date = f"{day[:4]}-{day[4:6]}-{day[6:]}"
+        db.rebuild_dragons_for_date(date, version="test", calendar={date}, apply_5day_gate=False)
+        self.assertEqual(self.rows("dragons_v2"), [("600002", 1, 1)])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestScanServicesInjection(TestScanScoringIntegration):
+    """M2A: a supplied ProviderBundle drives Phase A–F; omission keeps the factory."""
+
+    def _bundle(self):
+        from dragon_quant.infra.provider.bundle import ProviderBundle
+
+        return ProviderBundle(tdx=self.tdx, ths=self.ths,
+                              xueqiu=self.xq, tencent=self.tx)
+
+    def _services(self, clock=None):
+        from dragon_quant.app import build_services
+
+        return build_services(providers=self._bundle(), clock=clock)
+
+    def test_supplied_bundle_drives_all_phases_and_skips_factory(self):
+        output = orch.scan(top_n=1, verbose=False, force=True,
+                           services=self._services())
+
+        # Phase A: TDX primary + THS fallback ranking
+        self.tdx.get_sector_ranking.assert_called()
+        self.ths.get_sector_ranking.assert_called()
+        # Phase B: sector components + daily klines
+        self.ths.get_sector_components.assert_called()
+        self.xq.get_kline.assert_called()
+        # Phase D: sector history/1min + minute klines + batch quotes
+        self.ths.get_sector_5min_kline_history.assert_called()
+        self.ths.get_sector_1min_kline.assert_called()
+        self.xq.get_minute_kline.assert_called()
+        self.tx.batch_get_quotes.assert_called()
+        # Phase F: persistence unchanged (diagnostic ranking keeps both codes)
+        self.assertEqual(self.rows("dragons_v2"), [("600002", 1, 1)])
+        self.assertEqual({r["code"] for r in output["ranking"]},
+                         {"600001", "600002"})
+        orch.create_providers.assert_not_called()
+
+    def test_omitted_services_keep_the_existing_factory_path(self):
+        orch.scan(top_n=1, verbose=False, force=True)
+        orch.create_providers.assert_called_once()
+
+    def test_services_without_providers_fall_back_to_factory(self):
+        from dragon_quant.app import build_services
+
+        orch.scan(top_n=1, verbose=False, force=True, services=build_services())
+        orch.create_providers.assert_called_once()
+
+    def test_services_clock_remains_passive_while_the_runtime_seam_owns_time(self):
+        from datetime import datetime
+
+        from dragon_quant.infra.clock import FixedClock
+
+        output = orch.scan(
+            top_n=1, verbose=False, force=True,
+            services=self._services(clock=FixedClock(datetime(2020, 1, 1, 9, 30))),
+        )
+
+        # ``services.clock`` stays assembly metadata; the module seam is the
+        # single production time source (M9A).
+        self.assertFalse(output["timestamp"].startswith("20200101"))
+        self.assertTrue(
+            output["timestamp"].startswith(datetime.now().strftime("%Y%m%d")))
+
+    def _install_fixed_clock(self, moment):
+        from dragon_quant.infra import clock as runtime_clock
+
+        self.addCleanup(runtime_clock.reset_clock)
+        runtime_clock.set_clock(runtime_clock.FixedClock(moment))
+
+    def test_runtime_clock_drives_gate_timestamp_and_scan_id(self):
+        from datetime import datetime, timedelta, timezone
+
+        bj_tz = timezone(timedelta(hours=8))
+
+        self._install_fixed_clock(datetime(2026, 9, 11, 10, 0, tzinfo=bj_tz))
+        blocked = orch.scan(top_n=1, verbose=False)
+        self.assertEqual(blocked["error"], "未收盘")
+        self.assertFalse(Path(self.db_path).exists())
+
+        self._install_fixed_clock(datetime(2026, 9, 11, 15, 30, tzinfo=bj_tz))
+        output = orch.scan(top_n=1, verbose=False, force=True)
+
+        self.assertEqual(output["timestamp"], "20260911_153000")
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT id, scan_date FROM scans_v2").fetchone()
+        self.assertEqual(row, ("v2_20260911_1", "2026-09-11"))
+
+
+
+class TestApiFailureAttribution(unittest.TestCase):
+
+    def test_fallback_rescue_is_per_dimension(self):
+        from dragon_quant.scan.logger.events import ScanLogger
+        logger = ScanLogger()
+        logger.api("tdx", "sector_ranking", ok=False, error="boom-1",
+                   dimension="gn")
+        logger.api("tdx", "sector_ranking", ok=False, error="boom-2",
+                   dimension="dq")
+        logger.warn("fallback:sector_ranking", "gn 已回退", dimension="gn")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            orch._report_api_failures(logger, 0, True)
+        text = err.getvalue()
+        self.assertIn("[gn]", text)
+        self.assertIn("已回退老链路", text.split("[dq]")[0])
+        self.assertIn("[dq]", text)
+        self.assertNotIn("[dq] 失败 1 次（已回退老链路）", text)
+
+
+class TestGetTradeDate(unittest.TestCase):
+    """_get_trade_date：TDX 优先（无 Cookie），雪球兜底，全失败返回 None。"""
+
+    @staticmethod
+    def _bar(date_str):
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        dt = _dt.strptime(date_str, "%Y-%m-%d").replace(tzinfo=_tz(_td(hours=8)))
+        return _make_kbar(int(dt.timestamp() * 1000), 1.0)
+
+    def _run(self, tdx=None, xq=None):
+        providers = {"tdx": tdx, "ths": None, "xueqiu": xq, "tencent": None}
+        with patch.object(orch, "create_providers", return_value=providers):
+            return orch._get_trade_date()
+
+    def test_tdx_minute_first(self):
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = [self._bar("2026-10-23")]
+        xq = Mock()
+        self.assertEqual(self._run(tdx, xq), "2026-10-23")
+        tdx.get_minute_kline.assert_called_once_with(orch.R.MARKET_SYMBOL)
+        xq.get_minute_kline.assert_not_called()
+        xq.get_kline.assert_not_called()
+
+    def test_tdx_daily_fallback_when_minute_empty(self):
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = []
+        tdx.get_kline.return_value = [self._bar("2026-10-22")]
+        self.assertEqual(self._run(tdx, Mock()), "2026-10-22")
+        tdx.get_kline.assert_called_once_with(orch.R.MARKET_SYMBOL, days=5)
+
+    def test_tdx_empty_lists_fall_through_to_xueqiu(self):
+        """TDX 两层都返回空列表（生产主路径：tdx 内部吞异常返回 []）→ 雪球兜底。"""
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = []
+        tdx.get_kline.return_value = []
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
+        self.assertEqual(self._run(tdx, xq), "2026-10-21")
+
+    def test_tdx_provider_missing_uses_xueqiu(self):
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-20")]
+        self.assertEqual(self._run(None, xq), "2026-10-20")
+
+    def test_supplied_providers_bypass_create_providers(self):
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = [self._bar("2026-10-24")]
+        providers = {"tdx": tdx, "ths": None, "xueqiu": None, "tencent": None}
+        with patch.object(orch, "create_providers") as factory:
+            result = orch._get_trade_date(providers=providers)
+        self.assertEqual(result, "2026-10-24")
+        factory.assert_not_called()
+
+    def test_xueqiu_fallback_when_tdx_fails(self):
+        tdx = Mock()
+        tdx.get_minute_kline.side_effect = RuntimeError("tdx down")
+        tdx.get_kline.side_effect = RuntimeError("tdx down")
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
+        self.assertEqual(self._run(tdx, xq), "2026-10-21")
+
+    def test_all_sources_fail_returns_none(self):
+        tdx = Mock()
+        tdx.get_minute_kline.side_effect = RuntimeError("boom")
+        tdx.get_kline.side_effect = RuntimeError("boom")
+        xq = Mock()
+        xq.get_minute_kline.side_effect = RuntimeError("boom")
+        xq.get_kline.side_effect = RuntimeError("boom")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertIsNone(self._run(tdx, xq))
+        self.assertIn("无法确定最近交易日", err.getvalue())

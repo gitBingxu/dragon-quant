@@ -3,7 +3,7 @@
 数据源：``assets.db / auction_snapshots.analysis_json``（engine 的
 ``_load_auction_source`` 适配为纯 dict，逐行 JSON 损坏已隔离）。本模块不发
 请求、不读库、不 import ``review_account.auction``（哨兵字面量本地复制，联动断言
-在 ``tests/test_factors_prep_auction.py``）。
+在 ``dragon_quant/tests/test_factors_prep_auction.py``）。
 
 缺失语义（方案 §15.1.2 / §15.7）：
   - ``_usable_row`` 是所有 auction 因子的公共门槛：无 ``error`` 键、

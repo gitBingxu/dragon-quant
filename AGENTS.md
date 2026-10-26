@@ -214,6 +214,7 @@ dragon_quant/
 │           ├── doctor.py / errors.py
 │           └── backends/
 │               ├── __init__.py / base.py / local.py / s3.py / signer.py
+├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
 
 # 同级仓库包（不是 dragon_quant 的子包）
 web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer；web_ui.start_server）
@@ -357,15 +358,15 @@ web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine /
 
 仓库内置单主 Agent Skill 与零运行时依赖的 npm 安装器，让 agent 不必读完整 `AGENTS.md` 就能完成命令路由、前置自检、输出解读、异常分流与写操作确认。
 
-- **布局**：`skills/dragon-quant/SKILL.md`（薄路由层）+ `references/{commands,outputs,playbooks,operations,safety}.md`（按需加载）；根 `package.json`（`name=dragon-quant-skills`）+ `bin/dragon-quant-skills.mjs` + `lib/*.mjs`（安装器）；`test/*.test.mjs`（`node:test`，零依赖）；Python 侧 `tests/test_skill_{package,content,routes}.py`。
+- **布局**：`skills/dragon-quant/SKILL.md`（薄路由层）+ `references/{commands,outputs,playbooks,operations,safety}.md`（按需加载）；根 `package.json`（`name=dragon-quant-skills`）+ `bin/dragon-quant-skills.mjs` + `lib/*.mjs`（安装器）；`test/*.test.mjs`（`node:test`，零依赖）；Python 侧 `dragon_quant/tests/test_skill_{package,content,routes}.py`。
 - **安装**：`npx dragon-quant-skills install` 默认写项目 `.claude/skills/dragon-quant`；`--global` 才写用户目录；`--target-dir DIR` 表示项目根；`--dry-run` 不写盘并打印最终绝对路径。`doctor` 检查安装完整性、CLI 版本、多 scope 遮蔽与外来源 lockfile；`uninstall` 只删 manifest 内文件。
 - **状态机**：`absent/foreign/corrupt/clean/modified/up-to-date` 由 `lib/manifest.mjs` 单一分类，install/uninstall/doctor 共用。manifest（`.dragon-quant-skill.json`）记录内容 SHA-256、包版本与 `min_cli_version`；默认拒绝覆盖用户修改，`--force` 先整目录备份再替换；卸载不删用户新增文件。
 - **版本策略**：npm `MAJOR.MINOR` 跟随 Python 包，`PATCH` 可独立；兼容性唯一契约是 `metadata.min-cli-version`，不是版本相等。测试校验 npm major.minor == pyproject major.minor、skill-version == package version。
 - **安装与 CLI 解耦**：安装器只读探测 Python CLI（`--python` > `DQ_PYTHON` > PATH > `python3 -m` > `python -m`），绝不执行 pip；CLI 缺失/过低时 install 仍 exit 0 并警告，doctor exit 1 并给修复命令。
 - **安全边界**：skill 安全矩阵覆盖全部 15 个顶层命令；T0 只读、T1 写本地/远端探针需确认、T2 外发/破坏性需 dry-run + 二次确认。`assets doctor` 会远端写探针（T1），`storage clear` 不删 `.db` 但属破坏性（T2）。
-- **内容边界**：skill 只做路由/预检/解读/异常/门禁，**不复制评分权重、策略参数数值、SQLite 表结构**；`AGENTS.md` 与 `review_account/strategy/STRATEGY.md` 是权威。`tests/test_skill_content.py` 用禁用模式与 `StrategyConfig` 字段表强制校验。
+- **内容边界**：skill 只做路由/预检/解读/异常/门禁，**不复制评分权重、策略参数数值、SQLite 表结构**；`AGENTS.md` 与 `review_account/strategy/STRATEGY.md` 是权威。`dragon_quant/tests/test_skill_content.py` 用禁用模式与 `StrategyConfig` 字段表强制校验。
 - **兼容通道**：`npx skills add gitBingxu/dragon-quant` 与手工复制均不校验 CLI 版本、无 manifest；安装器会把无 manifest 的目录判为 `foreign`，不静默覆盖。远端通用安装与 Windows 路径本期未实测。
-- **测试**：`npm test` 跑 Node 全量；`.venv/bin/python -m pytest tests/test_skill_package.py tests/test_skill_content.py tests/test_skill_routes.py` 跑内容/路由对齐。`test/packaging.test.mjs` 做 `npm pack` 白名单与本地 tarball `npm exec` E2E（隔离 HOME/目标目录）。
+- **测试**：`npm test` 跑 Node 全量；`.venv/bin/python -m pytest dragon_quant/tests/test_skill_package.py dragon_quant/tests/test_skill_content.py dragon_quant/tests/test_skill_routes.py` 跑内容/路由对齐。`test/packaging.test.mjs` 做 `npm pack` 白名单与本地 tarball `npm exec` E2E（隔离 HOME/目标目录）。
 - **发布**：npm 包 `dragon-quant-skills` 已发布，可通过 `npx dragon-quant-skills install` 安装；官方 registry 与 npmmirror 的仓库外 dry-run 已实测。未配置 provenance/Trusted Publishing，不自动提交 git。方案与残余风险见 `docs/solutions/2026-10-24-agent-skills-design.md`。
 
 ### 龙头回测
@@ -688,20 +689,20 @@ main 把需求拆解为用户故事、可测试验收标准、约束、明确非
 ### 测试与 E2E 门禁
 ```bash
 # M0 harness 自检（不跑业务用例）
-.venv/bin/python tests/e2e/harness/runner.py --self-check
-.venv/bin/python -m pytest tests/e2e/test_harness_safety.py tests/e2e/test_architecture_rules.py -q
+.venv/bin/python dragon_quant/tests/e2e/harness/runner.py --self-check
+.venv/bin/python -m pytest dragon_quant/tests/e2e/test_harness_safety.py dragon_quant/tests/e2e/test_architecture_rules.py -q
 
 # 全量离线 E2E（真实 CLI 子进程 + golden）
-.venv/bin/python -m pytest tests/e2e -q
+.venv/bin/python -m pytest dragon_quant/tests/e2e -q
 
 # 单元 / 集成测试（排除 e2e 与需要真实网络的 smoke）
-.venv/bin/python -m pytest tests -q --ignore=tests/e2e --ignore=tests/smoke
+.venv/bin/python -m pytest dragon_quant/tests -q --ignore=dragon_quant/tests/e2e --ignore=dragon_quant/tests/smoke
 
 # Node 安装器测试（隔离 HOME/TMPDIR/npm cache，不访问 registry）
 npm test
 ```
-- **安全边界**：`tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射**：`tests/e2e/coverage-map.json` 固定 51 个 parser 节点 / 15 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。
+- **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
+- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 51 个 parser 节点 / 15 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。
 - **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
 
 ### Git 规范
@@ -727,12 +728,12 @@ npm test
 - v2 物理分表（`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`）+ `review --source v1` 历史兼容 / Web UI source 切换
 - 量价分析 `vpa/`、结构化日志 `scan/logger/`、统一持久化 `infra/storage/` + 领域仓储、交易日历 `infra/market_calendar.py`、龙头回测 `review/`、Web UI
 - CLI `dragons` 命令：导出某交易日扫描物化的龙头 JSON（`--date` 默认最新有数据交易日，`--true-only` 仅真龙）
-- 全量单测覆盖 `tests/test_scorers.py`、`tests/test_storage.py` 等核心路径
-- 因子层 P0：`infra/factor/`（types/registry/engine/storage/service + builtin/five_dim、vpa）与 `assets.db` 五张 `factor_*` 表；`factor build/list/query/status` CLI；12 个因子只读迁移（五维 7 + vpa 5）、`canonical_scan` 同日归并、三套 `pit_rule` PIT 解析、整日整因子原子替换、主板块快照；新增 `tests/test_factors_registry.py` / `test_factors_storage.py` / `test_factors_engine.py` / `test_factors_integration.py`
-- 因子层 P0.5：`infra/provider/tdx.py` 财务方法（独立 `TdxClient` 第二连接）、`infra/factor/finance_store.py`（`fin_*` 五表、观测 UPSERT、追加式 vintage、as-of）、`infra/factor/finance.py`（`fin sync/calibrate/status`、法定截止日/三桶 PIT/字段校准）、`builtin/financial.py`（6 个财务因子、严格 cohort、分母保护）；新增 `tests/test_finance_provider.py` / `test_finance_storage.py` / `test_factors_pit.py` / `test_factors_gaps.py`
-- 因子层 P1：`infra/factor/matrix.py`（`factor export`，CSV/JSON + sidecar、当日截面清洗）、`infra/factor/evaluation.py` + `infra/factor/stats.py`（RankIC/ICIR/Newey-West/分组/换手/覆盖率、PIT `strict|research`、1q block bootstrap）、`infra/factor/sql.py` 区间读取；`assets status` 的 `not_synced` 恒为 `{}`（M6 起 `factor_*` / `fin_*` 已纳入同步）；新增 `tests/test_factors_matrix.py` / `test_factors_evaluation.py` / `test_p1_main_acceptance.py`
-- 因子层 P2：`infra/factor/decision.py`（FactorModel 协议 / EqualWeightRankModel 按候选入选日 cohort rank 归一 / annotate_pool / 模型快照读写 / build 完成率）、`priority.key_components`+`rank_key` 因子分量（默认关、缺失桶、逐位等价）、`market.collect_candidates_ex` 因子注解、`StrategyConfig` 四字段、`evaluation.sharpe_ratio` + `industry_exposure`、`compare_strategies` 因子 variant 门禁；新增 `tests/test_factors_decision.py` / `test_priority_factor.py` / `test_p2_integration.py` / `test_factors_p1_gaps.py`
-- 因子层 P1.5：`infra/factor/builtin/prep.py`（7 个）+ `infra/factor/builtin/auction.py`（8 个）默认关因子；`infra/factor/engine.py` 新增 `_load_prep_source` / `_load_auction_source`（只读 assets.db、逐行/整族损坏隔离、全量 unverified 抑制 empty 告警）；`assets_db.get_prep_snapshot` / `list_auction_snapshots` 增加 `with_meta` 只增参数；新增 `tests/test_factors_prep_auction.py`（映射 / unrated / 缺失规则 / derived PIT / 源故障不删行 / AST 隔离 / 默认快照零影响 / 注册表 / 报告告警）
+- 全量单测覆盖 `dragon_quant/tests/test_scorers.py`、`dragon_quant/tests/test_storage.py` 等核心路径
+- 因子层 P0：`infra/factor/`（types/registry/engine/storage/service + builtin/five_dim、vpa）与 `assets.db` 五张 `factor_*` 表；`factor build/list/query/status` CLI；12 个因子只读迁移（五维 7 + vpa 5）、`canonical_scan` 同日归并、三套 `pit_rule` PIT 解析、整日整因子原子替换、主板块快照；新增 `dragon_quant/tests/test_factors_registry.py` / `test_factors_storage.py` / `test_factors_engine.py` / `test_factors_integration.py`
+- 因子层 P0.5：`infra/provider/tdx.py` 财务方法（独立 `TdxClient` 第二连接）、`infra/factor/finance_store.py`（`fin_*` 五表、观测 UPSERT、追加式 vintage、as-of）、`infra/factor/finance.py`（`fin sync/calibrate/status`、法定截止日/三桶 PIT/字段校准）、`builtin/financial.py`（6 个财务因子、严格 cohort、分母保护）；新增 `dragon_quant/tests/test_finance_provider.py` / `test_finance_storage.py` / `test_factors_pit.py` / `test_factors_gaps.py`
+- 因子层 P1：`infra/factor/matrix.py`（`factor export`，CSV/JSON + sidecar、当日截面清洗）、`infra/factor/evaluation.py` + `infra/factor/stats.py`（RankIC/ICIR/Newey-West/分组/换手/覆盖率、PIT `strict|research`、1q block bootstrap）、`infra/factor/sql.py` 区间读取；`assets status` 的 `not_synced` 恒为 `{}`（M6 起 `factor_*` / `fin_*` 已纳入同步）；新增 `dragon_quant/tests/test_factors_matrix.py` / `test_factors_evaluation.py` / `test_p1_main_acceptance.py`
+- 因子层 P2：`infra/factor/decision.py`（FactorModel 协议 / EqualWeightRankModel 按候选入选日 cohort rank 归一 / annotate_pool / 模型快照读写 / build 完成率）、`priority.key_components`+`rank_key` 因子分量（默认关、缺失桶、逐位等价）、`market.collect_candidates_ex` 因子注解、`StrategyConfig` 四字段、`evaluation.sharpe_ratio` + `industry_exposure`、`compare_strategies` 因子 variant 门禁；新增 `dragon_quant/tests/test_factors_decision.py` / `test_priority_factor.py` / `test_p2_integration.py` / `test_factors_p1_gaps.py`
+- 因子层 P1.5：`infra/factor/builtin/prep.py`（7 个）+ `infra/factor/builtin/auction.py`（8 个）默认关因子；`infra/factor/engine.py` 新增 `_load_prep_source` / `_load_auction_source`（只读 assets.db、逐行/整族损坏隔离、全量 unverified 抑制 empty 告警）；`assets_db.get_prep_snapshot` / `list_auction_snapshots` 增加 `with_meta` 只增参数；新增 `dragon_quant/tests/test_factors_prep_auction.py`（映射 / unrated / 缺失规则 / derived PIT / 源故障不删行 / AST 隔离 / 默认快照零影响 / 注册表 / 报告告警）
 
 ### ⚠️ 待完成/观察
 - 因子层后续里程碑：P3（替换五维需满足方案 §1.3-D1 五条准入条件、行业中性化、ML 模型）；财务真实网络冒烟（少量 code）待补，方案见 `archived_md/factor_framework/2026-10-22-factor-framework-design.md`

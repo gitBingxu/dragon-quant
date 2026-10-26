@@ -7,7 +7,7 @@ import json
 
 def handle(args, services):
     """日志命令。"""
-    from dragon_quant.logging.query import (
+    from dragon_quant.scan.logger.main import (
         tail_logs, query_logs, clear_logs, list_logs, log_summary,
     )
 

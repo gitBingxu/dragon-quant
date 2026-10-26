@@ -15,12 +15,12 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from dragon_quant.assets_sync.backends.local import LocalDirBackend
-from dragon_quant.assets_sync.backends.s3 import S3Backend
-from dragon_quant.assets_sync.backends.signer import sign_request
-from dragon_quant.assets_sync.credentials import AssetsConfig, load_config
-from dragon_quant.assets_sync.doctor import run_doctor
-from dragon_quant.assets_sync.errors import ConfigError, NotFoundError, StorageError
+from dragon_quant.infra.assets.sync.backends.local import LocalDirBackend
+from dragon_quant.infra.assets.sync.backends.s3 import S3Backend
+from dragon_quant.infra.assets.sync.backends.signer import sign_request
+from dragon_quant.infra.assets.sync.credentials import AssetsConfig, load_config
+from dragon_quant.infra.assets.sync.doctor import run_doctor
+from dragon_quant.infra.assets.sync.errors import ConfigError, NotFoundError, StorageError
 
 
 class TestLocalDirBackend(unittest.TestCase):
@@ -419,7 +419,7 @@ class TestCliAssetsDoctor(unittest.TestCase):
         from dragon_quant import cli
         buffer = io.StringIO()
         with patch("sys.argv", ["dragon-quant", "assets", "doctor"]), \
-             patch("dragon_quant.assets_sync.credentials.load_config",
+             patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=ConfigError("missing")):
             with self.assertRaises(SystemExit) as raised, redirect_stdout(buffer):
                 cli.main()

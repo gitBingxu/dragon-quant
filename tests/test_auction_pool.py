@@ -51,38 +51,38 @@ class TestAuctionPool(unittest.TestCase):
             stack.enter_context(patch(
                 "dragon_quant.commands.auction._resolve_trade_date", return_value=DAY))
             stack.enter_context(patch(
-                "dragon_quant.utils.trading.tdx_trade_dates",
+                "dragon_quant.infra.market_calendar.tdx_trade_dates",
                 side_effect=fake_calendar))
             stack.enter_context(patch(
-                "dragon_quant.providers.tdx.TdxProvider", return_value=object()))
+                "dragon_quant.infra.provider.tdx.TdxProvider", return_value=object()))
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.get_prep_snapshot",
+                "dragon_quant.infra.assets.db.get_prep_snapshot",
                 side_effect=fake_snapshot))
             stack.enter_context(patch(
-                "dragon_quant.storage.dragons_mirror.list_dragon_trade_dates",
+                "dragon_quant.infra.assets.dragons_mirror.list_dragon_trade_dates",
                 return_value=legacy_dates))
             stack.enter_context(patch(
-                "dragon_quant.storage.dragons_mirror.get_dragons",
+                "dragon_quant.infra.assets.dragons_mirror.get_dragons",
                 **({"side_effect": get_dragons} if get_dragons is not None
                    else {"return_value": dragons})))
             stack.enter_context(patch(
-                "dragon_quant.storage.dragons_mirror.get_dragons_by_date",
+                "dragon_quant.infra.assets.dragons_mirror.get_dragons_by_date",
                 return_value=dragons))
             stack.enter_context(patch(
-                "dragon_quant.storage.dragons_mirror.stale_dates",
+                "dragon_quant.infra.assets.dragons_mirror.stale_dates",
                 return_value={}))
             stack.enter_context(patch(
-                "dragon_quant.data.get_auction", side_effect=fake_auction))
+                "dragon_quant.infra.provider.data.get_auction", side_effect=fake_auction))
             stack.enter_context(patch(
-                "dragon_quant.data.batch_get_quotes", side_effect=fake_batch))
+                "dragon_quant.infra.provider.data.batch_get_quotes", side_effect=fake_batch))
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.save_auction_asset",
+                "dragon_quant.infra.assets.db.save_auction_asset",
                 side_effect=lambda *a, **k: saved.append(a[1] if len(a) > 1 else k.get("code"))))
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.list_auction_assets",
+                "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=[]))
             stack.enter_context(patch(
-                "dragon_quant.storage.assets_db.replace_auction_snapshots",
+                "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 return_value=0))
             stack.enter_context(redirect_stdout(buf))
             stack.enter_context(redirect_stderr(err))
@@ -255,7 +255,7 @@ class TestAuctionPool(unittest.TestCase):
             {"code": "A", "composite_score": 80, "is_true_dragon": True,
              "verdict": "strong"}]}
         out, _, _, _, _ = self._run(snapshot=snapshot)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snapshot):
             _, ctx = collect_candidates_ex(
                 [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])
@@ -271,14 +271,14 @@ class TestAuctionPool(unittest.TestCase):
         snap = {"candidates": [{"code": "A", "composite_score": 80,
                                 "is_true_dragon": True, "verdict": "strong"}],
                 "sentiment": {"degraded": ["macro_same_day_missing"]}}
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             _, ctx = collect_candidates_ex(
                 [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])
         self.assertFalse(ctx["prep_degraded"])
         snap["sentiment"]["degraded"] = ["macro_same_day_missing",
                                          "ths_limit_up_pool"]
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value=snap):
             _, ctx = collect_candidates_ex(
                 [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])

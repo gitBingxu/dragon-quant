@@ -9,12 +9,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors import stats as fstats
-from dragon_quant.factors.matrix import (
+from dragon_quant.infra.factor import stats as fstats
+from dragon_quant.infra.factor.matrix import (
     CleanConfig, export_matrix, identity_clean,
 )
-from dragon_quant.factors.types import FactorValue
-from dragon_quant.factors import storage as fstore
+from dragon_quant.infra.factor.types import FactorValue
+from dragon_quant.infra.factor import storage as fstore
 
 
 class TestStats(unittest.TestCase):
@@ -71,7 +71,7 @@ class MatrixBase(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
         self._patch = patch(
-            "dragon_quant.storage.assets_db._connect",
+            "dragon_quant.infra.assets.db._connect",
             side_effect=self._connect)
         self._patch.start()
 

@@ -152,11 +152,11 @@ result["app_feature_imported"] = sorted(
     and name not in {
         "dragon_quant",
         "dragon_quant._version",
-        "dragon_quant.runtime",
-        "dragon_quant.runtime.clock",
+        "dragon_quant.infra",
+        "dragon_quant.infra.clock",
     }
 )
-from dragon_quant.runtime import clock as runtime_clock
+from dragon_quant.infra import clock as runtime_clock
 
 result["runtime_clock_now"] = runtime_clock.now(tz8).isoformat()
 result["runtime_clock_type"] = type(runtime_clock.get_clock()).__name__
@@ -632,7 +632,7 @@ def self_check() -> int:
             print("OK external network blocked")
 
         providers = run_python(
-            "from dragon_quant.providers import create_providers\n"
+            "from dragon_quant.infra.provider.main import create_providers\n"
             "print(type(create_providers()['tdx']).__module__)\n",
             sandbox=sandbox,
         )
@@ -679,7 +679,7 @@ def self_check() -> int:
             failures.append("legacy clock mode was accepted")
 
         runtime_clock = run_python(
-            "from dragon_quant.runtime import clock\n"
+            "from dragon_quant.infra import clock\n"
             "print(clock.now().strftime('%Y-%m-%d %H:%M'))\n"
             "print(type(clock.get_clock()).__name__)\n",
             sandbox=sandbox,

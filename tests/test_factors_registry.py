@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from dragon_quant.factors.registry import (
+from dragon_quant.infra.factor.registry import (
     FactorRegistryError,
     canonical_json,
     compute_version,
@@ -12,7 +12,7 @@ from dragon_quant.factors.registry import (
     spec_hash,
     validate_registry,
 )
-from dragon_quant.factors.types import FactorFrame, FactorSpec
+from dragon_quant.infra.factor.types import FactorFrame, FactorSpec
 
 
 def _spec(**overrides) -> FactorSpec:
@@ -71,7 +71,7 @@ class TestVersionHash(unittest.TestCase):
 
     def test_comment_only_change_keeps_version(self):
         """token 级规范化：仅注释不同的实现 → 同一版本。"""
-        with patch("dragon_quant.factors.registry.inspect.getsource",
+        with patch("dragon_quant.infra.factor.registry.inspect.getsource",
                    side_effect=[
                        "def f(ctx):\n    # 只改注释\n    return 1\n",
                        "def f(ctx):\n    return 1\n",
@@ -82,10 +82,10 @@ class TestVersionHash(unittest.TestCase):
 
     def test_hash_string_literal_is_not_stripped(self):
         """含 # 的字符串字面量必须保留：正则剥注释会误删，导致伪版本。"""
-        from dragon_quant.factors.registry import _normalize_tokens
+        from dragon_quant.infra.factor.registry import _normalize_tokens
         kept = _normalize_tokens("x = 'a#b'\n")
         self.assertIn("#", kept)
-        with patch("dragon_quant.factors.registry.inspect.getsource",
+        with patch("dragon_quant.infra.factor.registry.inspect.getsource",
                    side_effect=[
                        "def f(ctx):\n    return 'a#b'\n",
                        "def f(ctx):\n    return 'ab'\n",
@@ -95,7 +95,7 @@ class TestVersionHash(unittest.TestCase):
         self.assertNotEqual(left, right)
 
     def test_getsource_failure_falls_back_to_impl_key(self):
-        with patch("dragon_quant.factors.registry.inspect.getsource",
+        with patch("dragon_quant.infra.factor.registry.inspect.getsource",
                    side_effect=OSError("no source")):
             version, source = compute_version_info(_spec(compute=_compute_b))
         self.assertEqual(source, "impl_key")
@@ -120,7 +120,7 @@ class TestVersionHash(unittest.TestCase):
         self.assertEqual(len(spec_hash(_spec())), 64)
 
     def test_all_builtin_factors_have_source_fingerprints(self):
-        from dragon_quant.factors.registry import FACTOR_SPECS
+        from dragon_quant.infra.factor.registry import FACTOR_SPECS
         for spec in FACTOR_SPECS:
             with self.subTest(spec=spec.name):
                 _, source = compute_version_info(spec)
@@ -129,7 +129,7 @@ class TestVersionHash(unittest.TestCase):
 
 class TestRegistryValidation(unittest.TestCase):
     def test_builtin_registry_is_valid(self):
-        from dragon_quant.factors.registry import FACTOR_SPECS
+        from dragon_quant.infra.factor.registry import FACTOR_SPECS
         validate_registry(FACTOR_SPECS)
 
     def test_duplicate_name_rejected(self):
@@ -166,7 +166,7 @@ class TestRegistryValidation(unittest.TestCase):
         self.assertEqual([s.name for s in specs], sorted(s.name for s in specs))
 
     def test_builtin_count_and_names(self):
-        from dragon_quant.factors.registry import spec_names
+        from dragon_quant.infra.factor.registry import spec_names
         names = set(spec_names())
         # 18 = 五维 7 + vpa 5 + 财务 6；P1.5 新增 prep 7 + auction 8。
         self.assertEqual(len(names), 33)
@@ -177,7 +177,7 @@ class TestRegistryValidation(unittest.TestCase):
                         if name.startswith(("prep_", "auction_"))}
         self.assertEqual(len(prep_auction), 15)
         # 财务 / prep / auction 因子默认关：build without --only 不得静默计算
-        from dragon_quant.factors.registry import get_spec
+        from dragon_quant.infra.factor.registry import get_spec
         self.assertTrue(all(not get_spec(name).default_enabled
                             for name in fin_names | prep_auction))
 

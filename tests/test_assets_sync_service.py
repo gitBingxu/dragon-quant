@@ -8,15 +8,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.assets_sync import codec, manifest as manifest_mod, service
-from dragon_quant.assets_sync.backends.local import LocalDirBackend
-from dragon_quant.assets_sync.errors import StorageError
-from dragon_quant.assets_sync.sources import (
+from dragon_quant.infra.assets.sync import codec, manifest as manifest_mod, service
+from dragon_quant.infra.assets.sync.backends.local import LocalDirBackend
+from dragon_quant.infra.assets.sync.errors import StorageError
+from dragon_quant.infra.assets.sync.sources import (
     AuctionAssetSource,
     build_sources,
 )
-from dragon_quant.assets_sync.state import default_paths
-from dragon_quant.storage import assets_db
+from dragon_quant.infra.assets.sync.state import default_paths
+from dragon_quant.infra.assets import db as assets_db
 
 
 def _dumps(value) -> str:
@@ -374,7 +374,7 @@ class TestPull(ServiceTestBase):
         self._seed_prep()
         self._push()
         scratch = self.root / "scratch"
-        with patch("dragon_quant.assets_sync.service.shutil.disk_usage",
+        with patch("dragon_quant.infra.assets.sync.service.shutil.disk_usage",
                    return_value=SimpleNamespace(total=1, used=1, free=1)):
             result = self._pull(
                 scratch, date_from="2026-10-21", date_to="2026-10-21", apply=True)

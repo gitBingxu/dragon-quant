@@ -1,6 +1,6 @@
 """pytest 全局隔离：把数据目录重定向到一次性临时目录。
 
-背景：``dragon_quant.storage.paths`` 在 import 时解析 ``DATA_DIR``。测试若漏 patch
+背景：``dragon_quant.infra.storage.paths`` 在 import 时解析 ``DATA_DIR``。测试若漏 patch
 某条连接（例如 ``storage.dragons.save_dragons`` 内部往 assets.db 镜像的
 fan-out 双写），写入就会落到开发者真实的 dragon.db / assets.db
 （2026-10-23 发生过：单测往真实 assets.db.dragons 灌了 16 行假数据）。

@@ -1,16 +1,17 @@
-import copy
 import unittest
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
-from dragon_quant.models.types import KBar
-from dragon_quant.review_account.data import MarketData, historical_events
+from dragon_quant.infra.models import KBar
+from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
-from dragon_quant.review_account.execution import break_even_price, buy_quantity, fee, fill_price
-from dragon_quant.review_account.market import DataCoverageError, at, bar_times, build_row, collect_candidates, validate_bars
+from dragon_quant.review_account.strategy.execution import break_even_price, buy_quantity, fee, fill_price
+from dragon_quant.review_account.market import (
+    DataCoverageError, at, bar_times, build_row, collect_candidates, validate_bars,
+)
 from dragon_quant.review_account.models import AccountState, MarketEvent, Position, StrategyConfig
 from dragon_quant.review_account.simulator import AccountSimulator
-from dragon_quant.review_account.strategy import evaluate_buy, evaluate_sell
+from dragon_quant.review_account.strategy.main import evaluate_buy, evaluate_sell
 
 DAY = "2026-09-07"
 CAND = {"code": "600001", "name": "样本", "rank": 1, "composite_score": 80,
@@ -78,7 +79,7 @@ class TestStrategy(unittest.TestCase):
         self.assertIsNone(evaluate_buy(CAND, row(), StrategyConfig(require_rising_ma5=True), row()["prev_row"]))
 
     def test_entry_quality_gate_rejects_volatile_chased_weak(self):
-        from dragon_quant.review_account.strategy import explain_buy_candidate
+        from dragon_quant.review_account.strategy.main import explain_buy_candidate
         cfg = StrategyConfig(max_avg_amplitude=9, max_return_3d=15, drawdown_5d_floor=-15)
         # 波动过大
         r = row()
@@ -114,7 +115,7 @@ class TestStrategy(unittest.TestCase):
         self.assertIsNone(evaluate_buy(CAND, r, StrategyConfig(), r["prev_row"]))
 
     def test_explain_no_pattern_gives_specific_reason(self):
-        from dragon_quant.review_account.strategy import explain_buy_candidate
+        from dragon_quant.review_account.strategy.main import explain_buy_candidate
         cfg = StrategyConfig()
         # 开盘高开远离MA5：说明具体距离
         r = row(price=10.9)
@@ -198,7 +199,7 @@ class TestEngine(unittest.TestCase):
         low = {**CAND, "code": "600001", "composite_score": 60, "rank": 1}
         high = {**CAND, "code": "600002", "composite_score": 95, "rank": 4}
         rows = {"600001": row(), "600002": row()}
-        result = TradingEngine(cfg, state).step(MarketEvent(at(DAY, "09:30"), "open", rows, [low, high]))
+        TradingEngine(cfg, state).step(MarketEvent(at(DAY, "09:30"), "open", rows, [low, high]))
         self.assertEqual(state.pending[0]["stock_code"], "600002")
 
     def test_signal_then_fill_and_duplicate(self):
@@ -281,7 +282,7 @@ class TestMarketAndSimulator(unittest.TestCase):
         self.assertEqual(StrategyConfig().candidate_lookback_days, 5)
         loader = MagicMock(return_value=[])
         calendar = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", DAY]
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=None):
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot", return_value=None):
             collect_candidates(calendar, DAY,
                                StrategyConfig(candidate_lookback_days=3), loader)
         self.assertEqual([c.args[0] for c in loader.call_args_list],
@@ -326,7 +327,9 @@ class TestMarketAndSimulator(unittest.TestCase):
         self.assertEqual(len(r["intraday_bars"]), 1)
 
     def test_simulator_can_buy_first_requested_day(self):
-        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
+        with patch(
+                "dragon_quant.review_account.simulator.candidate_loader",
+                return_value=MagicMock(return_value=[CAND])):
             result = AccountSimulator(StrategyConfig(), data=FakeData()).run(DAY, DAY)
         self.assertEqual(len(result["trades"]), 1)
         self.assertEqual(result["trades"][0].trade_date, DAY)
@@ -334,7 +337,9 @@ class TestMarketAndSimulator(unittest.TestCase):
 
     def test_daily_fallback_runs_when_intraday_missing(self):
         data = FakeData(intraday_missing={DAY})
-        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
+        with patch(
+                "dragon_quant.review_account.simulator.candidate_loader",
+                return_value=MagicMock(return_value=[CAND])):
             result = AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
         self.assertEqual(result["data_quality"], "daily_fallback")
         self.assertEqual(result["fallback_days"], 1)
@@ -344,11 +349,14 @@ class TestMarketAndSimulator(unittest.TestCase):
     def test_missing_daily_still_fails(self):
         data = FakeData(intraday_missing={DAY})
         data.daily = MagicMock(side_effect=DataCoverageError("no daily"))
-        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])), self.assertRaises(DataCoverageError):
+        with patch(
+                "dragon_quant.review_account.simulator.candidate_loader",
+                return_value=MagicMock(return_value=[CAND])), \
+                self.assertRaises(DataCoverageError):
             AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
 
     def test_daily_fallback_stop_loss_price_by_reason(self):
-        from dragon_quant.review_account.execution import daily_fallback_sell_price
+        from dragon_quant.review_account.strategy.execution import daily_fallback_sell_price
         cfg = StrategyConfig()
         p = position()
         row_gap = {"open": 9.0, "bar_close": 9.5}
@@ -358,12 +366,17 @@ class TestMarketAndSimulator(unittest.TestCase):
         self.assertAlmostEqual(daily_fallback_sell_price(p, {"open": 9.9, "bar_close": 9.4}, "hard_stop_loss", cfg),
                                10 * (1 + cfg.stop_loss_pct / 100))
         # 其它原因 → 收盘价
-        self.assertEqual(daily_fallback_sell_price(p, {"open": 10, "bar_close": 10.6}, "trailing_take_profit", cfg), 10.6)
+        self.assertEqual(
+            daily_fallback_sell_price(p, {"open": 10, "bar_close": 10.6}, "trailing_take_profit", cfg),
+            10.6)
 
     def test_missing_intraday_fails_instead_of_faking_returns(self):
         data = FakeData()
         data.daily = MagicMock(side_effect=DataCoverageError("missing"))
-        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])), self.assertRaises(DataCoverageError):
+        with patch(
+                "dragon_quant.review_account.simulator.candidate_loader",
+                return_value=MagicMock(return_value=[CAND])), \
+                self.assertRaises(DataCoverageError):
             AccountSimulator(StrategyConfig(), data=data).run(DAY, DAY)
 
     def test_historical_fill_is_after_signal(self):
@@ -388,14 +401,16 @@ class TestMarketAndSimulator(unittest.TestCase):
                 StrategyConfig.from_dict(values)
 
     def test_provider_intraday_unadjusted(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
-        with patch("dragon_quant.providers.xueqiu._fetch", return_value={}) as fetch:
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+        with patch("dragon_quant.infra.provider.xueqiu._fetch", return_value={}) as fetch:
             XueqiuProvider().get_5min_kline_for("600001", at(DAY, "09:30"), fq_type="normal")
         self.assertIn("type=normal", fetch.call_args.args[0])
 
     def test_daily_lookback_scales(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
-        with patch("dragon_quant.providers.xueqiu.time.time", return_value=1800000000), patch("dragon_quant.providers.xueqiu._fetch", return_value={}) as fetch:
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+        with patch(
+                "dragon_quant.infra.provider.xueqiu.time.time", return_value=1800000000), \
+                patch("dragon_quant.infra.provider.xueqiu._fetch", return_value={}) as fetch:
             XueqiuProvider().get_kline("600001", days=500)
         self.assertIn(f"begin={1800000000000 - 1000 * 86400000}", fetch.call_args.args[0])
 

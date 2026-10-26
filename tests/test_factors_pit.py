@@ -10,12 +10,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from dragon_quant.factors import engine
-from dragon_quant.factors import finance as fin
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.builtin import financial
-from dragon_quant.factors.types import FactorContext
-from dragon_quant.storage import finance as fin_store
+from dragon_quant.infra.factor import engine
+from dragon_quant.infra.factor import finance as fin
+from dragon_quant.infra.factor import storage as fstore
+from dragon_quant.infra.factor.builtin import financial
+from dragon_quant.infra.factor.types import FactorContext
+from dragon_quant.infra.factor import finance_store as fin_store
 
 
 class TempDbBase(unittest.TestCase):
@@ -23,7 +23,7 @@ class TempDbBase(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
         self._patch = patch(
-            "dragon_quant.storage.assets_db._connect",
+            "dragon_quant.infra.assets.db._connect",
             side_effect=self._connect)
         self._patch.start()
 
@@ -263,7 +263,7 @@ class TestBuiltinFinancial(unittest.TestCase):
         self.assertEqual(financial.compute_net_profit_yoy(ctx).values, {})
 
     def test_all_six_specs_are_asof_and_default_off(self):
-        from dragon_quant.factors.registry import get_spec
+        from dragon_quant.infra.factor.registry import get_spec
         for spec in financial.SPECS:
             self.assertEqual(spec.source, "fin")
             self.assertEqual(spec.frequency, "1q")
@@ -427,7 +427,7 @@ class TestEngineFinWiring(TempDbBase):
             "available_at": "2026-08-31T23:59:59",
             "earliest_available": None, "warnings": [], "degraded": [],
         }
-        with patch("dragon_quant.factors.engine._load_fin_source",
+        with patch("dragon_quant.infra.factor.engine._load_fin_source",
                    return_value=source):
             report = engine.build_date(
                 "2026-09-01", names=["fin_bps"], db_path=self._db_path)
@@ -478,7 +478,7 @@ class TestFinanceServicesInjection(TempDbBase):
 
     def test_sync_backfill_uses_injected_bundle_tdx(self):
         fake = self.FakeBackfillTdx()
-        with patch("dragon_quant.providers.tdx.TdxProvider",
+        with patch("dragon_quant.infra.provider.tdx.TdxProvider",
                    side_effect=AssertionError("default provider constructed")):
             payload = fin.sync_backfill(services=self._services(fake),
                                         db_path=self._db_path,
@@ -502,7 +502,7 @@ class TestFinanceServicesInjection(TempDbBase):
 
     def test_sync_snapshots_uses_injected_bundle_tdx(self):
         fake = self.FakeSnapshotTdx()
-        with patch("dragon_quant.providers.tdx.TdxProvider",
+        with patch("dragon_quant.infra.provider.tdx.TdxProvider",
                    side_effect=AssertionError("default provider constructed")):
             payload = fin.sync_snapshots(fin._today(), ["600001"],
                                          services=self._services(fake),
@@ -522,7 +522,7 @@ class TestFinanceServicesInjection(TempDbBase):
                 return []
 
         fake = FakeCalibrateTdx()
-        with patch("dragon_quant.providers.tdx.TdxProvider",
+        with patch("dragon_quant.infra.provider.tdx.TdxProvider",
                    side_effect=AssertionError("default provider constructed")):
             with self.assertRaises(ValueError):
                 fin.calibrate_field_map(services=self._services(fake),
@@ -532,9 +532,9 @@ class TestFinanceServicesInjection(TempDbBase):
 
     def test_load_trade_calendar_uses_injected_bundle_tdx(self):
         fake = MagicMock(name="bundle.tdx")
-        with patch("dragon_quant.utils.trading.tdx_trade_dates",
+        with patch("dragon_quant.infra.market_calendar.tdx_trade_dates",
                    return_value=["2026-10-19"]) as dates, \
-             patch("dragon_quant.providers.tdx.TdxProvider",
+             patch("dragon_quant.infra.provider.tdx.TdxProvider",
                    side_effect=AssertionError("default provider constructed")):
             loaded, error = fin.load_trade_calendar(
                 days=5, services=self._services(fake))
@@ -561,7 +561,7 @@ class TestFinanceServicesInjection(TempDbBase):
     def test_load_fin_source_same_day_auto_sync_never_builds_a_default_tdx(self):
         fake = self.FakeSnapshotTdx()
         with patch.object(fin, "_today", return_value="2026-10-19"), \
-             patch("dragon_quant.providers.tdx.TdxProvider",
+             patch("dragon_quant.infra.provider.tdx.TdxProvider",
                    side_effect=AssertionError("default provider constructed")):
             payload = fin.load_fin_source("2026-10-19", ["600001"],
                                           services=self._services(fake),
@@ -583,7 +583,7 @@ class TestEngineFinServicesForwarding(TempDbBase):
     def test_load_fin_source_forwards_services_to_finance(self):
         services = object()
         with patch.object(engine, "_load_scan_source", return_value=self.SCAN), \
-             patch("dragon_quant.factors.finance.load_fin_source",
+             patch("dragon_quant.infra.factor.finance.load_fin_source",
                    return_value={"status": "no_report_yet"}) as loader:
             engine._load_fin_source("2026-09-01", {}, services=services,
                                     db_path=self._db_path)
@@ -593,7 +593,7 @@ class TestEngineFinServicesForwarding(TempDbBase):
     def test_build_date_forwards_services_to_the_fin_source(self):
         services = object()
         with patch.object(engine, "_load_scan_source", return_value=self.SCAN), \
-             patch("dragon_quant.factors.finance.load_fin_source",
+             patch("dragon_quant.infra.factor.finance.load_fin_source",
                    return_value={"status": "no_report_yet"}) as loader:
             engine.build_date("2026-09-01", names=["fin_bps"],
                               db_path=self._db_path, services=services)

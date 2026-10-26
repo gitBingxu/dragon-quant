@@ -9,12 +9,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.assets_sync import codec, manifest as manifest_mod, service, tables
-from dragon_quant.assets_sync.backends.local import LocalDirBackend
-from dragon_quant.assets_sync.errors import IntegrityError
-from dragon_quant.assets_sync.sources import build_sources
-from dragon_quant.assets_sync.state import default_paths
-from dragon_quant.storage import assets_db
+from dragon_quant.infra.assets.sync import codec, manifest as manifest_mod, service, tables
+from dragon_quant.infra.assets.sync.backends.local import LocalDirBackend
+from dragon_quant.infra.assets.sync.errors import IntegrityError
+from dragon_quant.infra.assets.sync.sources import build_sources
+from dragon_quant.infra.assets.sync.state import default_paths
+from dragon_quant.infra.assets import db as assets_db
 
 
 def _dumps(value) -> str:

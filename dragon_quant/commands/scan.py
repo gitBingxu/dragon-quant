@@ -12,7 +12,7 @@ def handle(args, services):
         _scan_history(args, source="v2")
         return
 
-    from dragon_quant.orchestrator import scan as orchestrate_scan
+    from dragon_quant.scan.orchestrator.main import scan as orchestrate_scan
 
     orchestrate_scan(
         top_n=args.top,
@@ -35,8 +35,10 @@ def _scan_history(args, source: str = "v2"):
         print("错误: --date 格式应为 YYYYMMDD", file=sys.stderr)
         return
 
-    from dragon_quant.storage import db
-    scan = db.get_latest_scan_by_date(date_str, args.top, source=source)
+    from dragon_quant.scan.storage.main import (
+        get_latest_scan_by_date, get_scans_by_date,
+    )
+    scan = get_latest_scan_by_date(date_str, args.top, source=source)
     if scan and scan.get("raw_output"):
         output = json.loads(scan["raw_output"])
         print(json.dumps(output, ensure_ascii=False, indent=2))
@@ -49,7 +51,7 @@ def _scan_history(args, source: str = "v2"):
             "source": source,
         }, ensure_ascii=False, indent=2))
     else:
-        scans = db.get_scans_by_date(date_str, source=source)
+        scans = get_scans_by_date(date_str, source=source)
         if scans:
             tops = sorted(set(s["top_n"] for s in scans))
             print(json.dumps({

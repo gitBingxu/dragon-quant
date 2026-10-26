@@ -391,7 +391,7 @@ class TestTdxFgBoards(unittest.TestCase):
     def _provider(self):
         from types import SimpleNamespace
         from unittest.mock import patch as _patch
-        from dragon_quant.providers import tdx
+        from dragon_quant.infra.provider import tdx
 
         et = SimpleNamespace(
             BoardType=SimpleNamespace(FG="FG"),
@@ -464,11 +464,11 @@ class TestRunPrepIntegration(unittest.TestCase):
                        return_value=["2026-10-15", "2026-10-16"]), \
                  patch("dragon_quant.review_account.prep.TdxProvider"), \
                  patch("dragon_quant.review_account.prep.THSProvider"), \
-                 patch("dragon_quant.storage.assets_db._connect",
+                 patch("dragon_quant.infra.assets.db._connect",
                        side_effect=lambda *args, **kwargs: sqlite3.connect(db_path)):
                 out = prep_mod.run_prep("2026-10-16")
 
-                from dragon_quant.storage import assets_db
+                from dragon_quant.infra.assets import db as assets_db
                 assets = assets_db.get_prep_assets("2026-10-16")
                 snap = assets_db.get_prep_snapshot("2026-10-16")
 
@@ -572,9 +572,9 @@ class TestPrepServicesInjection(unittest.TestCase):
                           return_value=prep.PrepPlan(["dragons"], {})), \
              patch.object(prep, "_run_collection", side_effect=fake_collect), \
              patch.object(prep, "TdxProvider") as tdx_cls, \
-             patch("dragon_quant.storage.assets_db.get_prep_assets",
+             patch("dragon_quant.infra.assets.db.get_prep_assets",
                    return_value=_assets(self.day)), \
-             patch("dragon_quant.storage.assets_db.save_prep_snapshot"):
+             patch("dragon_quant.infra.assets.db.save_prep_snapshot"):
             prep.run_prep(self.day, now=self._now(), services=services)
 
         tdx_cls.assert_not_called()
@@ -870,16 +870,16 @@ class TestCollectMacroSources(unittest.TestCase):
 class TestRunPrepRecompute(unittest.TestCase):
     def test_recompute_without_assets_raises(self):
         from dragon_quant.review_account.prep import PrepError, run_prep
-        with patch("dragon_quant.storage.assets_db.get_prep_assets", return_value={}):
+        with patch("dragon_quant.infra.assets.db.get_prep_assets", return_value={}):
             with self.assertRaises(PrepError):
                 run_prep("2026-10-19", recompute=True)
 
     def test_recompute_uses_stored_assets_only(self):
         from dragon_quant.review_account.prep import run_prep
         day = "2026-10-16"   # 历史日（今日 2026-10-18，未来日期会被门禁拒绝）
-        with patch("dragon_quant.storage.assets_db.get_prep_assets",
+        with patch("dragon_quant.infra.assets.db.get_prep_assets",
                    return_value=_assets(day)) as ga, \
-             patch("dragon_quant.storage.assets_db.save_prep_snapshot") as save, \
+             patch("dragon_quant.infra.assets.db.save_prep_snapshot") as save, \
              patch("dragon_quant.review_account.prep.TdxProvider") as tdx_cls, \
              patch("dragon_quant.review_account.prep.THSProvider") as ths_cls:
             out = run_prep(day, recompute=True)
@@ -898,9 +898,9 @@ class TestRunPrepRecompute(unittest.TestCase):
         day = "2026-10-16"
         assets = _assets(day)
         assets.pop("macro_global")
-        with patch("dragon_quant.storage.assets_db.get_prep_assets",
+        with patch("dragon_quant.infra.assets.db.get_prep_assets",
                    return_value=assets), \
-             patch("dragon_quant.storage.assets_db.save_prep_snapshot"), \
+             patch("dragon_quant.infra.assets.db.save_prep_snapshot"), \
              patch("dragon_quant.review_account.prep.TdxProvider"), \
              patch("dragon_quant.review_account.prep.THSProvider"):
             out = run_prep(day, recompute=True)
@@ -1036,12 +1036,12 @@ class TestRunPrepRecompute(unittest.TestCase):
 
 class TestQuotesMainNetAmountMapping(unittest.TestCase):
     def test_missing_field_stays_none(self):
-        from dragon_quant.providers.tdx import _to_quote
+        from dragon_quant.infra.provider.tdx import _to_quote
         q = _to_quote({"code": "600001", "close": 10.0, "pre_close": 9.0})
         self.assertIsNone(q.main_net_amount)
 
     def test_present_field_mapped(self):
-        from dragon_quant.providers.tdx import _to_quote
+        from dragon_quant.infra.provider.tdx import _to_quote
         q = _to_quote({"code": "600001", "close": 10.0, "pre_close": 9.0,
                        "main_net_amount": 1234.0})
         self.assertEqual(q.main_net_amount, 1234.0)
@@ -1049,7 +1049,7 @@ class TestQuotesMainNetAmountMapping(unittest.TestCase):
 
 class TestNormalizeRows(unittest.TestCase):
     def test_nan_and_numpy_like_values(self):
-        from dragon_quant.providers.tdx import _normalize_value
+        from dragon_quant.infra.provider.tdx import _normalize_value
         self.assertIsNone(_normalize_value(float("nan")))
         self.assertIsNone(_normalize_value(float("inf")))
         self.assertEqual(_normalize_value(3), 3)
@@ -1065,7 +1065,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
     """THS 涨停池分页：去重、页数上限、末页终止。"""
 
     def _provider(self):
-        from dragon_quant.providers.ths import THSProvider
+        from dragon_quant.infra.provider.ths import THSProvider
         return THSProvider()
 
     def _payload(self, rows, total):
@@ -1074,7 +1074,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
                            "data": {"page": {"total": total}, "info": rows}})
 
     def test_multi_page_collects_all(self):
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         page1 = [{"code": f"{i:06d}"} for i in range(200)]
         page2 = [{"code": f"{i:06d}"} for i in range(200, 400)]
         replies = iter([self._payload(page1, 400), self._payload(page2, 400)])
@@ -1086,7 +1086,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
 
     def test_server_ignoring_page_does_not_duplicate(self):
         """服务端忽略 page 时仍返回同一页 → 去重后不重复累计。"""
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         page = [{"code": f"{i:06d}"} for i in range(200)]
         with patch.object(ths, "_fetch_with_retry",
                           side_effect=lambda *a, **k: self._payload(page, 800)):
@@ -1095,7 +1095,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
         self.assertLessEqual(len(out["rows"]), 800)
 
     def test_page_cap_limits_requests(self):
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         calls = {"n": 0}
 
         def fake(*a, **k):
@@ -1109,7 +1109,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
 
     def test_block_top_parsing(self):
         import json
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         payload = json.dumps({"status_code": 0,
                               "data": [{"name": "低空经济", "limit_up_num": 23}]})
         with patch.object(ths, "_fetch_with_retry", return_value=payload):
@@ -1118,7 +1118,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
 
     def test_error_status_raises(self):
         import json
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         payload = json.dumps({"status_code": -1, "status_msg": "limit must be <= 200"})
         with patch.object(ths, "_fetch_with_retry", return_value=payload):
             with self.assertRaises(RuntimeError) as cm:
@@ -1126,7 +1126,7 @@ class TestLimitUpPoolPagination(unittest.TestCase):
         self.assertIn("200", str(cm.exception))
 
     def test_truncated_flag_when_cap_reached(self):
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         counter = {"n": 0}
 
         def fake(*a, **k):
@@ -1142,14 +1142,14 @@ class TestLimitUpPoolPagination(unittest.TestCase):
 
 class TestThsRetry(unittest.TestCase):
     def test_ranking_returns_none_on_exhaust(self):
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         with patch.object(ths.urllib.request, "urlopen",
                           side_effect=OSError("403")), \
              patch.object(ths.time, "sleep", return_value=None):
             self.assertIsNone(ths._fetch_with_retry("http://x", attempts=3))
 
     def test_raise_on_exhaust_for_dataapi(self):
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         with patch.object(ths.urllib.request, "urlopen",
                           side_effect=OSError("403")), \
              patch.object(ths.time, "sleep", return_value=None):
@@ -1157,7 +1157,7 @@ class TestThsRetry(unittest.TestCase):
                 ths._fetch_with_retry("http://x", attempts=3, raise_on_exhaust=True)
 
     def test_succeeds_after_retry(self):
-        from dragon_quant.providers import ths
+        from dragon_quant.infra.provider import ths
         calls = {"n": 0}
 
         class Resp:
@@ -1193,7 +1193,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
             {"code": "D", "composite_score": 80, "is_true_dragon": False},
         ]}
         loader = MagicMock(return_value=[])
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=snap):
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot", return_value=snap):
             got = collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(), loader)
         self.assertEqual([c["code"] for c in got], ["A", "B"])
         loader.assert_not_called()
@@ -1201,7 +1201,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
     def test_falls_back_when_no_snapshot(self):
         from dragon_quant.review_account.market import collect_candidates
         loader = MagicMock(return_value=[])
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=None):
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot", return_value=None):
             collect_candidates(
                 ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07"],
                 "2026-09-07", StrategyConfig(), loader)
@@ -1213,7 +1213,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
         from dragon_quant.review_account.market import collect_candidates
         loader = MagicMock(return_value=[{"code": "X", "composite_score": 60,
                                           "is_true_dragon": True}])
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    side_effect=RuntimeError("db down")):
             got = collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(), loader)
         self.assertEqual([c["code"] for c in got], ["X"])
@@ -1221,7 +1221,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
     def test_v1_source_skips_snapshot(self):
         from dragon_quant.review_account.market import collect_candidates
         loader = MagicMock(return_value=[])
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot") as gp:
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot") as gp:
             collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(source="v1"), loader)
         gp.assert_not_called()
 
@@ -1230,7 +1230,7 @@ class TestCollectCandidatesSnapshot(unittest.TestCase):
         snap = {"candidates": [{"code": "LOW", "composite_score": 10, "is_true_dragon": True}]}
         loader = MagicMock(return_value=[{"code": "X", "composite_score": 60,
                                           "is_true_dragon": True}])
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=snap):
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot", return_value=snap):
             got = collect_candidates(["2026-09-04"], "2026-09-07", StrategyConfig(), loader)
         self.assertEqual([c["code"] for c in got], ["X"])
 
@@ -1886,7 +1886,7 @@ class TestCmdPrepOutput(unittest.TestCase):
         from contextlib import redirect_stderr
         err = io.StringIO()
         with patch("dragon_quant.review_account.prep.run_prep", return_value=self._result()), \
-             patch("dragon_quant.review_account.advice.format_advice_lines",
+             patch("dragon_quant.review_account.prep.main.format_advice_lines",
                    side_effect=RuntimeError("format boom")), \
              redirect_stderr(err):
             commands.dispatch("prep", self._args())
@@ -2035,7 +2035,7 @@ def _patched_assets_db(tmp):
     import sqlite3
     from pathlib import Path
     db_path = str(Path(tmp) / "assets.db")
-    return patch("dragon_quant.storage.assets_db._connect",
+    return patch("dragon_quant.infra.assets.db._connect",
                  side_effect=lambda *a, **k: sqlite3.connect(db_path))
 
 
@@ -2073,7 +2073,7 @@ class TestPrepPlanHint(unittest.TestCase):
         from types import SimpleNamespace
         from zoneinfo import ZoneInfo
         from dragon_quant.commands.prep import _prep_plan_hint
-        from dragon_quant.runtime import clock
+        from dragon_quant.infra import clock
         plan = SimpleNamespace(collect=[], repairs={})
         buf = io.StringIO()
         moment = fake_now
@@ -2341,17 +2341,17 @@ class TestRunPrepIncremental(unittest.TestCase):
 
     def test_healthy_rerun_zero_collection_and_report_unchanged(self):
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             self._seed(assets_db, self.day)
             before = assets_db.get_prep_assets(self.day)
             calls, plans = [], []
-            with patch("dragon_quant.storage.db.get_dragons") as gd, \
-                 patch("dragon_quant.storage.assets_db.save_prep_assets") as save:
+            with patch("dragon_quant.scan.storage.dragons.get_dragons") as gd, \
+                 patch("dragon_quant.infra.assets.db.save_prep_assets") as save:
                 out1 = self._run(self.day, calls, None, _sh_now(), plans=plans)
                 snap1 = assets_db.get_prep_snapshot(self.day)
-                out2 = self._run(self.day, calls, None, _sh_now(), plans=plans)
+                self._run(self.day, calls, None, _sh_now(), plans=plans)
                 snap2 = assets_db.get_prep_snapshot(self.day)
             self.assertEqual(calls, [])
             gd.assert_not_called()
@@ -2364,7 +2364,7 @@ class TestRunPrepIncremental(unittest.TestCase):
 
     def test_partial_unhealthy_collects_only_that_type(self):
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             report = _ok_report()
@@ -2387,7 +2387,7 @@ class TestRunPrepIncremental(unittest.TestCase):
     def test_midnight_rerun_is_clean(self):
         """AC3：23:45 完整采集 → 次日 00:59 重跑：零采集、report 无污染、快照完整。"""
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             self._seed(assets_db, self.day)
@@ -2405,7 +2405,7 @@ class TestRunPrepIncremental(unittest.TestCase):
     def test_historical_first_run_skips_same_day_only(self):
         """AC4：历史日首采 → 可采资产照采；same_day_only 不尝试、不写 report。"""
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             payloads = _payloads_of(self.day)
@@ -2430,10 +2430,10 @@ class TestRunPrepIncremental(unittest.TestCase):
     def test_recompute_skips_plan_and_collection(self):
         from dragon_quant.review_account import prep
         day = "2026-10-16"
-        with patch("dragon_quant.storage.assets_db.get_prep_assets",
+        with patch("dragon_quant.infra.assets.db.get_prep_assets",
                    return_value=_assets(day)), \
-             patch("dragon_quant.storage.assets_db.save_prep_snapshot") as save_snap, \
-             patch("dragon_quant.storage.assets_db.save_prep_assets") as save_assets, \
+             patch("dragon_quant.infra.assets.db.save_prep_snapshot") as save_snap, \
+             patch("dragon_quant.infra.assets.db.save_prep_assets") as save_assets, \
              patch.object(prep, "plan_prep") as plan_mock, \
              patch.object(prep, "_collect_all") as collect_mock, \
              patch.object(prep, "TdxProvider") as tdx_cls, \
@@ -2449,7 +2449,7 @@ class TestRunPrepIncremental(unittest.TestCase):
 
     def test_force_recollects_all_collectable(self):
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             self._seed(assets_db, self.day)
@@ -2463,7 +2463,7 @@ class TestRunPrepIncremental(unittest.TestCase):
 
     def test_force_historical_repairs_same_day_only(self):
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             report = _ok_report()
@@ -2485,7 +2485,7 @@ class TestRunPrepIncremental(unittest.TestCase):
     def test_repairs_persist_when_nothing_to_collect(self):
         """M1：collect=[] + repairs 非空 → 仍落库并重算（用户 10-20 场景）。"""
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             report = _ok_report()
@@ -2506,7 +2506,7 @@ class TestRunPrepIncremental(unittest.TestCase):
 
     def test_dragons_failure_does_not_write_empty_dependent_payload(self):
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             report = _ok_report()
@@ -2528,7 +2528,7 @@ class TestRunPrepIncremental(unittest.TestCase):
     def test_code_change_cascades_dependents(self):
         """dragons code 集合变化 → 级联补采 fund_flow/cninfo（同日）。"""
         import tempfile
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
 
         with tempfile.TemporaryDirectory() as tmp, _patched_assets_db(tmp):
             assets = _assets(self.day)

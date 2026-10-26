@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors.engine import (
+from dragon_quant.infra.factor.engine import (
     PHASE_TIMES,
     AsOfViolation,
     BackfilledSource,
@@ -18,7 +18,7 @@ from dragon_quant.factors.engine import (
     resolve_available_at,
     timezone_warning,
 )
-from dragon_quant.factors.types import FactorSpec
+from dragon_quant.infra.factor.types import FactorSpec
 
 
 def _spec(pit_rule="recorded", phase="close", name="demo"):
@@ -107,7 +107,7 @@ class TestTimezone(unittest.TestCase):
     """时区告警读 runtime clock 的 UTC 偏移，而不是进程真实 ``time.localtime``。"""
 
     def _warn_at(self, moment):
-        from dragon_quant.runtime import clock
+        from dragon_quant.infra import clock
 
         previous = clock.set_clock(clock.FixedClock(moment))
         try:
@@ -130,11 +130,11 @@ class TestCanonicalScan(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "dragon.db")
         self._patch = patch(
-            "dragon_quant.storage.db._connect",
+            "dragon_quant.infra.storage.connection._connect",
             side_effect=lambda *a, **kw: sqlite3.connect(self._db_path))
         self._patch.start()
-        from dragon_quant.storage import db
-        db.init_db()
+        from dragon_quant.infra.storage.connection import init_db
+        init_db()
 
     def tearDown(self):
         self._patch.stop()

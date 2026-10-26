@@ -134,7 +134,7 @@ def _build_services(needs_providers: bool):
 
     if not needs_providers:
         return build_services()
-    from dragon_quant.runtime.providers import build_provider_bundle
+    from dragon_quant.infra.provider.bundle import build_provider_bundle
 
     return build_services(providers=build_provider_bundle())
 

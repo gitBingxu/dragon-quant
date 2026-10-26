@@ -17,9 +17,9 @@ from dragon_quant.app import (
     build_services,
     ensure_storage,
 )
-from dragon_quant.runtime.clock import Clock, FixedClock, SystemClock
-from dragon_quant.runtime.providers import ProviderBundle, build_provider_bundle
-from dragon_quant.storage import paths
+from dragon_quant.infra.clock import Clock, FixedClock, SystemClock
+from dragon_quant.infra.provider.bundle import ProviderBundle, build_provider_bundle
+from dragon_quant.infra.storage import paths
 
 _PROVIDER_NAMES = ("tdx", "ths", "xueqiu", "tencent")
 
@@ -29,11 +29,11 @@ def _fake_mapping() -> dict[str, MagicMock]:
 
 
 class TestProviderBundle(unittest.TestCase):
-    """ProviderBundle is the single provider assembly unit in runtime."""
+    """ProviderBundle is the single provider assembly unit in infra."""
 
     def test_build_provider_bundle_delegates_to_create_providers(self):
         fakes = _fake_mapping()
-        with patch("dragon_quant.runtime.providers.create_providers",
+        with patch("dragon_quant.infra.provider.main.create_providers",
                    return_value=fakes) as factory:
             bundle = build_provider_bundle()
 
@@ -46,7 +46,7 @@ class TestProviderBundle(unittest.TestCase):
 
     def test_build_provider_bundle_forwards_logger(self):
         logger = MagicMock()
-        with patch("dragon_quant.runtime.providers.create_providers",
+        with patch("dragon_quant.infra.provider.main.create_providers",
                    return_value=_fake_mapping()) as factory:
             build_provider_bundle(logger=logger)
 
@@ -84,7 +84,7 @@ class TestClock(unittest.TestCase):
 
     def test_module_seam_defaults_to_system_clock_and_round_trips(self):
         """M9A: production call sites read this module-level seam."""
-        from dragon_quant.runtime import clock as runtime_clock
+        from dragon_quant.infra import clock as runtime_clock
 
         self.assertIsInstance(runtime_clock.get_clock(), SystemClock)
         moment = datetime(2026, 5, 19, 15, 30, tzinfo=timezone.utc)
@@ -103,7 +103,7 @@ class TestClock(unittest.TestCase):
         self.assertIsInstance(runtime_clock.get_clock(), SystemClock)
 
     def test_set_clock_rejects_incomplete_duck_types(self):
-        from dragon_quant.runtime import clock as runtime_clock
+        from dragon_quant.infra import clock as runtime_clock
 
         self.addCleanup(runtime_clock.reset_clock)
         with self.assertRaises(TypeError):
@@ -114,12 +114,12 @@ class TestBuildServices(unittest.TestCase):
     """build_services assembles config + clock; providers stay lazy."""
 
     def test_defaults_do_not_construct_providers(self):
-        with patch("dragon_quant.runtime.providers.create_providers") as runtime_factory, \
-                patch("dragon_quant.providers.create_providers") as legacy_factory:
+        with patch("dragon_quant.infra.provider.main.create_providers") as main_factory, \
+                patch("dragon_quant.infra.provider.data.create_providers") as data_factory:
             services = build_services()
 
-        runtime_factory.assert_not_called()
-        legacy_factory.assert_not_called()
+        main_factory.assert_not_called()
+        data_factory.assert_not_called()
         self.assertEqual(services.config, RuntimeConfig(data_dir=paths.DATA_DIR))
         self.assertEqual(services.config.source, "v2")
         self.assertIs(services.config.verbose, True)
@@ -137,7 +137,7 @@ class TestBuildServices(unittest.TestCase):
 
     def test_default_clock_binds_the_active_runtime_seam(self):
         """No second clock source: services.clock is the active runtime instance."""
-        from dragon_quant.runtime import clock as runtime_clock
+        from dragon_quant.infra import clock as runtime_clock
 
         self.assertIs(build_services().clock, runtime_clock.get_clock())
 
@@ -188,7 +188,7 @@ class TestEnsureStorage(unittest.TestCase):
                     patch("dragon_quant.app._paths.LOG_DIR", dirs["logs"]), \
                     patch("dragon_quant.app._paths.RESULTS_DIR", dirs["results"]), \
                     patch("dragon_quant.app._paths.SHARED_DIR", dirs["shared"]), \
-                    patch("dragon_quant.storage.db.init_db") as init_db:
+                    patch("dragon_quant.infra.storage.connection.init_db") as init_db:
                 ensure_storage(services)
                 ensure_storage(services)
 
@@ -205,14 +205,16 @@ class TestFeatureServicesContract(unittest.TestCase):
     def test_feature_entrypoints_accept_optional_services(self):
         import inspect
 
-        from dragon_quant import data, orchestrator, review
-        from dragon_quant.factors import finance
-        from dragon_quant.live_trade import service as live_service
+        from dragon_quant import review
+        from dragon_quant.infra.provider import data
+        from dragon_quant.infra.factor import finance
+        from dragon_quant.review_account.live_trade import service as live_service
         from dragon_quant.review_account import prep, service as account_service
+        from dragon_quant.scan.orchestrator import main as scan_orchestrator
         from dragon_quant.vpa import engine as vpa_engine
 
         entrypoints = {
-            "orchestrator.scan": orchestrator.scan,
+            "scan.orchestrator.main.scan": scan_orchestrator.scan,
             "review.run_review": review.run_review,
             "review_account.run_review_account": account_service.run_review_account,
             "live_trade.run_buy": live_service.run_buy,

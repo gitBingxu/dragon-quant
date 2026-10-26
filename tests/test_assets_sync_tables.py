@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dragon_quant.assets_sync import codec, tables
-from dragon_quant.assets_sync.models import AssetShard
-from dragon_quant.storage import assets_db
+from dragon_quant.infra.assets.sync import codec, tables
+from dragon_quant.infra.assets.sync.models import AssetShard
+from dragon_quant.infra.assets import db as assets_db
 
 
 def _dumps(value) -> str:

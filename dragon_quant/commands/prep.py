@@ -6,7 +6,7 @@ import json
 import sys
 from zoneinfo import ZoneInfo
 
-from dragon_quant.runtime import clock
+from dragon_quant.infra import clock
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -16,8 +16,8 @@ def handle(args, services):
 
     默认输出 4 行中文摘要（是否买入/仓位/等级/理由）；--json 输出完整 JSON。
     """
-    from dragon_quant.review_account.prep import PrepError, run_prep
-    from dragon_quant.storage import dragons_mirror
+    from dragon_quant.review_account.prep.main import PrepError, run_prep
+    from dragon_quant.infra.assets.main import dragons_mirror
 
     as_json = getattr(args, "json", False)
     auto_date = not args.date
@@ -66,7 +66,7 @@ def handle(args, services):
         return
 
     # 降级信息已并入理由行（details 见 prep_assets.collection_report / --json）
-    from dragon_quant.review_account.advice import (
+    from dragon_quant.review_account.prep.main import (
         format_advice_lines, format_candidate_lines,
     )
     try:

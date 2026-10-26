@@ -12,12 +12,12 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.assets_sync.cli_service import parse_asset_date
-from dragon_quant.assets_sync.state import now_iso
+from dragon_quant.infra.assets.sync.cli_service import parse_asset_date
+from dragon_quant.infra.assets.sync.state import now_iso
 from dragon_quant.commands._shared import resolve_trade_date
 from dragon_quant.commands.prep import _prep_plan_hint
 from dragon_quant.commands.vpa import handle as vpa_handle
-from dragon_quant.runtime import clock
+from dragon_quant.infra import clock
 
 
 def shanghai(day: str, hour: int, minute: int, second: int = 0) -> datetime:
@@ -70,9 +70,9 @@ def _vpa_report() -> SimpleNamespace:
 def test_vpa_command_saves_the_runtime_clock_date(capsys):
     args = SimpleNamespace(code="600001", source="tdx", days=30, no_save=False)
     with fixed(shanghai("2026-09-11", 15, 30)), \
-            patch("dragon_quant.vpa.analyze", return_value=_vpa_report()), \
-            patch("dragon_quant.vpa.report.render", return_value="report"), \
-            patch("dragon_quant.storage.db.upsert_vpa") as upsert:
+            patch("dragon_quant.vpa.main.analyze", return_value=_vpa_report()), \
+            patch("dragon_quant.vpa.main.render", return_value="report"), \
+            patch("dragon_quant.vpa.main.upsert_vpa") as upsert:
         vpa_handle(args, services=None)
 
     assert upsert.call_count == 1
@@ -83,9 +83,9 @@ def test_vpa_command_saves_the_runtime_clock_date(capsys):
 def test_vpa_command_no_save_never_writes():
     args = SimpleNamespace(code="600001", source="tdx", days=30, no_save=True)
     with fixed(shanghai("2026-09-11", 15, 30)), \
-            patch("dragon_quant.vpa.analyze", return_value=_vpa_report()), \
-            patch("dragon_quant.vpa.report.render", return_value="report"), \
-            patch("dragon_quant.storage.db.upsert_vpa") as upsert:
+            patch("dragon_quant.vpa.main.analyze", return_value=_vpa_report()), \
+            patch("dragon_quant.vpa.main.render", return_value="report"), \
+            patch("dragon_quant.vpa.main.upsert_vpa") as upsert:
         vpa_handle(args, services=None)
     assert upsert.call_count == 0
 

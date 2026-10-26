@@ -6,7 +6,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.providers.macro import (
+from dragon_quant.infra.provider.macro import (
     MACRO_INDEX_KEYS, MACRO_KEYS, MACRO_SPECS, MacroSpec, build_macro_record,
     collect_macro,
 )
@@ -168,13 +168,13 @@ def _tdx_records(with_t_plus_one=True):
 
 class TestTdxMacroDailyK(unittest.TestCase):
     def _provider(self, records=None):
-        from dragon_quant.providers.tdx import TdxProvider
+        from dragon_quant.infra.provider.tdx import TdxProvider
         p = TdxProvider()
         p._macro_client = _FakeKlineClient(records or _tdx_records())
         ex = SimpleNamespace(INTL_INDEX=12, COMEX_FUTURES=16,
                              SH_GOLD=46, MACRO_INDICATOR=38)
         period = SimpleNamespace(DAILY=4)
-        return p, patch("dragon_quant.providers.tdx._ex_enums",
+        return p, patch("dragon_quant.infra.provider.tdx._ex_enums",
                         return_value=(ex, period))
 
     def test_same_day_indices_include_t_bar(self):
@@ -249,7 +249,7 @@ class TestTdxMacroDailyK(unittest.TestCase):
         self.assertEqual(gold["price"], 4142.5)
 
     def test_unavailable_client_raises(self):
-        from dragon_quant.providers.tdx import TdxProvider
+        from dragon_quant.infra.provider.tdx import TdxProvider
         p = TdxProvider()
         with patch.object(p, "_get_macro_client", return_value=None):
             with self.assertRaises(RuntimeError):
@@ -272,21 +272,21 @@ class TestTencentMacro(unittest.TestCase):
         return f'v_{code}="' + "~".join(fields) + '";'
 
     def test_no_route_returns_empty_without_fetch(self):
-        from dragon_quant.providers.tencent import TencentProvider
-        with patch("dragon_quant.providers.tencent._fetch_macro_raw") as fetch:
+        from dragon_quant.infra.provider.tencent import TencentProvider
+        with patch("dragon_quant.infra.provider.tencent._fetch_macro_raw") as fetch:
             out = TencentProvider().get_macro_quotes(list(MACRO_SPECS), TRADE_DATE)
         self.assertEqual(out, {})
         fetch.assert_not_called()
 
     def test_completed_session_only(self):
-        from dragon_quant.providers.tencent import TencentProvider
+        from dragon_quant.infra.provider.tencent import TencentProvider
         raw = "\n".join([
             self._line("道琼斯", "usDJI", "51966.03", "52002.41", "-0.07",
                        "2026-10-20 16:00:00"),
             self._line("纳斯达克", "usIXIC", "26430.89", "26140.03", "1.11",
                        "2026-10-21 12:00:00"),
         ])
-        with patch("dragon_quant.providers.tencent._fetch_macro_raw",
+        with patch("dragon_quant.infra.provider.tencent._fetch_macro_raw",
                    return_value=raw):
             out = TencentProvider().get_macro_quotes(
                 [_LEGACY_INDEX_SPEC], TRADE_DATE)
@@ -295,8 +295,8 @@ class TestTencentMacro(unittest.TestCase):
         self.assertEqual(out["legacy_us_index"]["session_date"], "2026-10-20")
 
     def test_http_failure_raises(self):
-        from dragon_quant.providers.tencent import TencentProvider
-        with patch("dragon_quant.providers.tencent._fetch_macro_raw",
+        from dragon_quant.infra.provider.tencent import TencentProvider
+        with patch("dragon_quant.infra.provider.tencent._fetch_macro_raw",
                    side_effect=RuntimeError("429")):
             with self.assertRaises(RuntimeError):
                 TencentProvider().get_macro_quotes(
@@ -313,22 +313,22 @@ class TestXueqiuMacro(unittest.TestCase):
                                    "timestamp": ts}}}
 
     def test_no_route_returns_empty(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
-        with patch("dragon_quant.providers.xueqiu.get_xq", return_value=None):
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+        with patch("dragon_quant.infra.provider.xueqiu.get_xq", return_value=None):
             out = XueqiuProvider().get_macro_quotes(list(MACRO_SPECS), TRADE_DATE)
         self.assertEqual(out, {})
 
     def test_no_cookie_returns_empty(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
-        with patch("dragon_quant.providers.xueqiu.get_xq", return_value=None):
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+        with patch("dragon_quant.infra.provider.xueqiu.get_xq", return_value=None):
             out = XueqiuProvider().get_macro_quotes(
                 [_LEGACY_INDEX_SPEC], TRADE_DATE)
         self.assertEqual(out, {})
 
     def test_success(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
-        with patch("dragon_quant.providers.xueqiu.get_xq", return_value="ck"), \
-             patch("dragon_quant.providers.xueqiu._fetch_macro_quote_json",
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+        with patch("dragon_quant.infra.provider.xueqiu.get_xq", return_value="ck"), \
+             patch("dragon_quant.infra.provider.xueqiu._fetch_macro_quote_json",
                    return_value=self._data()):
             out = XueqiuProvider().get_macro_quotes(
                 [_LEGACY_INDEX_SPEC], TRADE_DATE)
@@ -336,9 +336,9 @@ class TestXueqiuMacro(unittest.TestCase):
         self.assertEqual(out["legacy_us_index"]["source"], "xueqiu")
 
     def test_http_failure_raises(self):
-        from dragon_quant.providers.xueqiu import XueqiuProvider
-        with patch("dragon_quant.providers.xueqiu.get_xq", return_value="ck"), \
-             patch("dragon_quant.providers.xueqiu._fetch_macro_quote_json",
+        from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+        with patch("dragon_quant.infra.provider.xueqiu.get_xq", return_value="ck"), \
+             patch("dragon_quant.infra.provider.xueqiu._fetch_macro_quote_json",
                    side_effect=RuntimeError("403")):
             with self.assertRaises(RuntimeError):
                 XueqiuProvider().get_macro_quotes(
@@ -357,8 +357,8 @@ class TestYahooMacro(unittest.TestCase):
         }]}}
 
     def test_uses_completed_bars(self):
-        from dragon_quant.providers.macro import YahooMacroSource
-        with patch("dragon_quant.providers.macro._fetch_yahoo_chart",
+        from dragon_quant.infra.provider.macro import YahooMacroSource
+        with patch("dragon_quant.infra.provider.macro._fetch_yahoo_chart",
                    return_value=self._payload()):
             out = YahooMacroSource().get_macro_quotes(
                 [s for s in MACRO_SPECS if s.key == "ust10y"], TRADE_DATE)
@@ -369,19 +369,19 @@ class TestYahooMacro(unittest.TestCase):
         self.assertFalse(rec["chg_bp_approx"])
 
     def test_same_day_spec_not_supported(self):
-        from dragon_quant.providers.macro import YahooMacroSource
+        from dragon_quant.infra.provider.macro import YahooMacroSource
         spec = MacroSpec(key="fake_same_day", label="同日", kind="index",
                          price_unit="points", chg_unit="pct", tdx=(),
                          priority=("yahoo",), yahoo="^N225",
                          same_day_close=True)
-        with patch("dragon_quant.providers.macro._fetch_yahoo_chart",
+        with patch("dragon_quant.infra.provider.macro._fetch_yahoo_chart",
                    return_value=self._payload()):
             out = YahooMacroSource().get_macro_quotes([spec], TRADE_DATE)
         self.assertEqual(out, {})        # 不支持同日口径 → 不返回记录
 
     def test_failure_raises(self):
-        from dragon_quant.providers.macro import YahooMacroSource
-        with patch("dragon_quant.providers.macro._fetch_yahoo_chart",
+        from dragon_quant.infra.provider.macro import YahooMacroSource
+        with patch("dragon_quant.infra.provider.macro._fetch_yahoo_chart",
                    side_effect=RuntimeError("429")):
             with self.assertRaises(RuntimeError):
                 YahooMacroSource().get_macro_quotes(

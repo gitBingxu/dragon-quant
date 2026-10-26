@@ -6,16 +6,16 @@ from unittest.mock import MagicMock, patch
 
 from tests.test_review_account import CAND, DAY, FakeData, row, position
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.data import historical_events
 from dragon_quant.review_account.engine import TradingEngine
-from dragon_quant.review_account.execution import (
+from dragon_quant.review_account.strategy.execution import (
     apply_sell_fill, buy_quantity, daily_fallback_sell_price, sell_quantity,
 )
 from dragon_quant.review_account.market import at, load_market_sentiment
 from dragon_quant.review_account.models import AccountState, MarketEvent, StrategyConfig, Trade
-from dragon_quant.review_account.risk import risk_governor
-from dragon_quant.review_account.strategy import (
+from dragon_quant.review_account.strategy.risk import risk_governor
+from dragon_quant.review_account.strategy.main import (
     BuyRejected, entry_veto, evaluate_buy, evaluate_sell, explain_buy_candidate,
 )
 
@@ -25,7 +25,7 @@ class TestVetoAndSentiment(unittest.TestCase):
         self.assertIsNone(entry_veto(StrategyConfig(), CAND, row()))
 
     def test_entry_veto_mounted_raises_buyrejected(self):
-        with patch("dragon_quant.review_account.strategy.entry_veto", return_value="竞价弱"):
+        with patch("dragon_quant.review_account.strategy.buy.entry_veto", return_value="竞价弱"):
             with self.assertRaises(BuyRejected) as cm:
                 evaluate_buy(CAND, row(), StrategyConfig(), row()["prev_row"])
             self.assertEqual(cm.exception.code, "vetoed")
@@ -95,7 +95,7 @@ class TestSellRuleTogglesAndTimeStop(unittest.TestCase):
 
 class TestTieredTrailing(unittest.TestCase):
     def test_tiered_drawdown_thresholds(self):
-        from dragon_quant.review_account.strategy import _tiered_drawdown
+        from dragon_quant.review_account.strategy.main import _tiered_drawdown
         cfg = StrategyConfig()
         self.assertEqual(_tiered_drawdown(10, cfg, 3.5), 3.5)  # tier1 基准
         self.assertEqual(_tiered_drawdown(16, cfg, 3.5), 5.0)  # tier2
@@ -221,7 +221,9 @@ class TestEvaluationInfra(unittest.TestCase):
     def test_plateau_scan_structure(self):
         from dragon_quant.review_account.evaluation import plateau_scan
         data = FakeData()
-        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
+        with patch(
+                "dragon_quant.review_account.simulator.candidate_loader",
+                return_value=MagicMock(return_value=[CAND])):
             r = plateau_scan(DAY, DAY, data, StrategyConfig(), "max_position_pct", [25, 50, 100])
         self.assertIn("grid", r)
         self.assertEqual(r["trial_count"], 3)
@@ -229,7 +231,9 @@ class TestEvaluationInfra(unittest.TestCase):
     def test_ablation_structure(self):
         from dragon_quant.review_account.evaluation import ablation
         data = FakeData()
-        with patch("dragon_quant.review_account.simulator.candidate_loader", return_value=MagicMock(return_value=[CAND])):
+        with patch(
+                "dragon_quant.review_account.simulator.candidate_loader",
+                return_value=MagicMock(return_value=[CAND])):
             r = ablation(DAY, DAY, data, StrategyConfig(), ["hard_stop", "trailing"])
         self.assertIn("baseline", r)
         self.assertEqual(set(r["marginal"]), {"hard_stop", "trailing"})
@@ -240,19 +244,19 @@ class TestLoadMarketSentiment(unittest.TestCase):
         self.assertIsNone(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig(source="v1")))
 
     def test_missing_snapshot_returns_none(self):
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot", return_value=None):
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot", return_value=None):
             self.assertIsNone(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()))
 
     def test_hit_returns_clamped_pct(self):
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value={"sentiment": {"position_pct": 0.8}}):
             self.assertEqual(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()), 0.8)
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value={"sentiment": {"position_pct": 1.5}}):
             self.assertEqual(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()), 1.0)
 
     def test_invalid_pct_returns_none(self):
-        with patch("dragon_quant.storage.assets_db.get_prep_snapshot",
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
                    return_value={"sentiment": {"position_pct": "not-a-number"}}):
             self.assertIsNone(load_market_sentiment(["2026-09-04", DAY], DAY, StrategyConfig()))
 
@@ -290,8 +294,8 @@ class _FallbackDaily:
         series = [KBar(at(d.isoformat(), "15:00"), 1_000_000, 10.0, 10.2, 9.8, 10.0, 0, 0, 12, 1e9)
                   for d in (end - timedelta(days=n) for n in range(50, 0, -1))
                   if d.weekday() < 5 and d.isoformat() not in skip]
-        series += [KBar(at(day, "15:00"), 1_000_000, o, h, l, c, 0, 0, 12, 1e9)
-                   for day, (o, h, l, c) in ohlc_by_day.items()]
+        series += [KBar(at(day, "15:00"), 1_000_000, o, h, lo, c, 0, 0, 12, 1e9)
+                   for day, (o, h, lo, c) in ohlc_by_day.items()]
         self._bars = sorted(series, key=lambda b: b.timestamp)
 
     def daily(self, code, start, refresh=False):
@@ -558,7 +562,7 @@ class TestFirstDayStopRedesign(unittest.TestCase):
     def test_rule_registry_consistency(self):
         """结构性守护：_SELL_RULES 顺序 == SELL_RULE_NAMES，默认关清单与 models 同一真值来源。"""
         from dragon_quant.review_account.models import DEFAULT_OFF_SELL_RULES, SELL_RULE_NAMES
-        from dragon_quant.review_account.strategy import _DEFAULT_OFF_RULES, _SELL_RULES
+        from dragon_quant.review_account.strategy.main import _DEFAULT_OFF_RULES, _SELL_RULES
         self.assertEqual(tuple(rule.name for rule in _SELL_RULES), SELL_RULE_NAMES)
         self.assertEqual(_DEFAULT_OFF_RULES, set(DEFAULT_OFF_SELL_RULES))
         self.assertLessEqual(_DEFAULT_OFF_RULES, set(SELL_RULE_NAMES))

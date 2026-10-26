@@ -25,8 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Callable, Optional
 
-from dragon_quant.runtime import clock
-from dragon_quant.storage.dragons_mirror import BACKFILL_HINT, DragonsMirrorStale
+from dragon_quant.infra import clock
+from dragon_quant.infra.assets.dragons_mirror import BACKFILL_HINT, DragonsMirrorStale
 
 from .compute import SHANGHAI, _list_of_dicts
 from .rebuild import (
@@ -35,8 +35,8 @@ from .rebuild import (
 )
 
 if TYPE_CHECKING:  # 仅注解用：运行期一律经 legacy 从包门面解析（旧 patch 目标）
-    from dragon_quant.providers.tdx import TdxProvider
-    from dragon_quant.providers.ths import THSProvider
+    from dragon_quant.infra.provider.tdx import TdxProvider
+    from dragon_quant.infra.provider.ths import THSProvider
 
 
 # ─── 常量（集中调参）────────────────────────────────────────────────────────

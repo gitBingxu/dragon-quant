@@ -1,8 +1,8 @@
 """auction 命令 — 集合竞价采集/重算的薄 CLI adapter。
 
-采集/重算编排在 ``dragon_quant.auction``（service facade + collect/recompute/scoring/dates；
-M4）；本模块只负责日期 patch 点、人读/JSON 输出与进程退出码，行为、JSON 键序与
-stdout/stderr 通道保持不变。
+采集/重算编排在 ``dragon_quant.review_account.auction``（main facade +
+collect/recompute/scoring/dates；Task 13）；本模块只负责日期 patch 点、人读/JSON
+输出与进程退出码，行为、JSON 键序与 stdout/stderr 通道保持不变。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import json
 import sys
 
 # 稳定公共入口 re-export（既有测试直接从这里取）：同一实现，不复制。
-from dragon_quant.auction.service import (  # noqa: F401
+from dragon_quant.review_account.auction.main import (  # noqa: F401
     _score_auction_assets,
     _trade_calendar,
 )
@@ -33,7 +33,7 @@ def _emit_auction_error(payload: dict, as_json: bool):
 
 def _render_report(outcome):
     """采集/重算成功结果的人读摘要（纯展示；失败不改变退出码）。"""
-    from dragon_quant.auction import format_report
+    from dragon_quant.review_account.auction.main import format_report
 
     payload = outcome.payload
     if outcome.mode == "recompute":
@@ -74,7 +74,7 @@ def _emit(outcome, as_json: bool):
     elif outcome.mode == "error":
         _emit_auction_error(payload, False)   # 立即退出 1
     elif outcome.mode == "empty":
-        from dragon_quant.auction import format_report
+        from dragon_quant.review_account.auction.main import format_report
         print("\n".join(format_report(
             [], trade_date=payload["trade_date"],
             pool_source=payload["pool_source"],
@@ -100,7 +100,7 @@ def handle(args, services):
 
     默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。
     """
-    from dragon_quant.auction import run_auction, run_auction_recompute
+    from dragon_quant.review_account.auction.main import run_auction, run_auction_recompute
 
     as_json = getattr(args, "json", False)
     recompute = getattr(args, "recompute", None)

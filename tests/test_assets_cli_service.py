@@ -21,9 +21,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dragon_quant.assets_sync import cli_service
-from dragon_quant.assets_sync.credentials import AssetsConfig
-from dragon_quant.assets_sync.errors import ConfigError, LockBusyError, StorageError
+from dragon_quant.infra.assets.sync import cli_service
+from dragon_quant.infra.assets.sync.credentials import AssetsConfig
+from dragon_quant.infra.assets.sync.errors import ConfigError, LockBusyError, StorageError
 
 
 def _config() -> AssetsConfig:
@@ -100,9 +100,9 @@ class TestBackendInjection(unittest.TestCase):
                     captured["backend"] = backend_arg
                     return _ok_result()
 
-                with patch(f"dragon_quant.assets_sync.service.{service_name}",
+                with patch(f"dragon_quant.infra.assets.sync.service.{service_name}",
                            side_effect=fake_service), \
-                     patch("dragon_quant.assets_sync.credentials.load_config",
+                     patch("dragon_quant.infra.assets.sync.credentials.load_config",
                            side_effect=AssertionError("注入 backend 时不得读凭据")):
                     outcome = cli_service.run(
                         action, _args(action, **overrides), backend=backend)
@@ -120,9 +120,9 @@ class TestBackendInjection(unittest.TestCase):
             captured["samples"] = samples
             return {"ok": True, "errors": [], "cleanup_errors": []}
 
-        with patch("dragon_quant.assets_sync.doctor.run_doctor",
+        with patch("dragon_quant.infra.assets.sync.doctor.run_doctor",
                    side_effect=fake_doctor), \
-             patch("dragon_quant.assets_sync.credentials.load_config",
+             patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=AssertionError("注入 backend 时不得读凭据")):
             outcome = cli_service.run(
                 "doctor", _args("doctor", samples=4), backend=backend)
@@ -140,10 +140,10 @@ class TestBackendInjection(unittest.TestCase):
                 created["timeout"] = timeout
 
         config = _config()
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=config), \
-             patch("dragon_quant.assets_sync.backends.s3.S3Backend", FakeS3), \
-             patch("dragon_quant.assets_sync.service.push",
+             patch("dragon_quant.infra.assets.sync.backends.s3.S3Backend", FakeS3), \
+             patch("dragon_quant.infra.assets.sync.service.push",
                    return_value=_ok_result()):
             outcome = cli_service.run("push", _args("push"))
 
@@ -152,9 +152,9 @@ class TestBackendInjection(unittest.TestCase):
         self.assertEqual(created["timeout"], 30.0)
 
     def test_missing_credentials_fail_before_backend_construction(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=ConfigError("缺少配置项: endpoint")), \
-             patch("dragon_quant.assets_sync.backends.s3.S3Backend",
+             patch("dragon_quant.infra.assets.sync.backends.s3.S3Backend",
                    side_effect=AssertionError("缺凭据时不得构造后端")):
             outcome = cli_service.run("status", _args("status"))
 
@@ -165,7 +165,7 @@ class TestBackendInjection(unittest.TestCase):
 
 class TestErrorCoordination(unittest.TestCase):
     def test_invalid_dates_never_touch_configuration(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=AssertionError("日期非法时不得读凭据")):
             outcome = cli_service.run(
                 "push", _args("push", from_date="2026-13-01"))
@@ -180,9 +180,9 @@ class TestErrorCoordination(unittest.TestCase):
         self.assertIn("不能晚于", outcome.payload["failed"][0]["reason"])
 
     def test_lock_conflict_maps_to_exit_1(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.service.push",
+             patch("dragon_quant.infra.assets.sync.service.push",
                    side_effect=LockBusyError("进程锁被占用")):
             outcome = cli_service.run("push", _args("push"))
 
@@ -191,9 +191,9 @@ class TestErrorCoordination(unittest.TestCase):
         self.assertIn("进程锁被占用", outcome.payload["failed"][0]["reason"])
 
     def test_assets_sync_error_maps_to_exit_2_with_kind(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.service.verify",
+             patch("dragon_quant.infra.assets.sync.service.verify",
                    side_effect=StorageError("boom")):
             outcome = cli_service.run("verify", _args("verify"))
 
@@ -201,9 +201,9 @@ class TestErrorCoordination(unittest.TestCase):
         self.assertEqual(outcome.payload["failed"][0]["kind"], "StorageError")
 
     def test_unexpected_error_is_reported_with_type(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.service.status",
+             patch("dragon_quant.infra.assets.sync.service.status",
                    side_effect=RuntimeError("kaput")):
             outcome = cli_service.run("status", _args("status"))
 
@@ -218,9 +218,9 @@ class TestErrorCoordination(unittest.TestCase):
         )
         for args, needle in cases:
             with self.subTest(needle=needle):
-                with patch("dragon_quant.assets_sync.credentials.load_config",
+                with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                            side_effect=AssertionError("参数错误不得读凭据")), \
-                     patch("dragon_quant.assets_sync.backends.s3.S3Backend",
+                     patch("dragon_quant.infra.assets.sync.backends.s3.S3Backend",
                            side_effect=AssertionError("参数错误不得构造后端")):
                     outcome = cli_service.run("verify", args)
                 self.assertEqual(outcome.exit_code, 2)
@@ -240,10 +240,10 @@ class TestTargetDirIsolation(unittest.TestCase):
                 return {"ok": True, "fatal": False, "failed": [],
                         "summary": {"restored": 0}}
 
-            with patch("dragon_quant.assets_sync.credentials.load_config",
+            with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                        return_value=_config()), \
-                 patch("dragon_quant.storage.paths.DATA_DIR", main_data), \
-                 patch("dragon_quant.assets_sync.service.pull",
+                 patch("dragon_quant.infra.storage.paths.DATA_DIR", main_data), \
+                 patch("dragon_quant.infra.assets.sync.service.pull",
                        side_effect=fake_pull):
                 outcome = cli_service.run("pull", _args(
                     "pull", from_date="2026-10-21", to_date="2026-10-21",
@@ -260,9 +260,9 @@ class TestTargetDirIsolation(unittest.TestCase):
 
 class TestDoctor(unittest.TestCase):
     def test_samples_validation_precedes_backend(self):
-        with patch("dragon_quant.assets_sync.doctor.run_doctor",
+        with patch("dragon_quant.infra.assets.sync.doctor.run_doctor",
                    side_effect=AssertionError("不得执行 doctor")), \
-             patch("dragon_quant.assets_sync.credentials.load_config",
+             patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=AssertionError("不得读凭据")):
             outcome = cli_service.run("doctor", _args("doctor", samples=0))
 
@@ -273,9 +273,9 @@ class TestDoctor(unittest.TestCase):
     def test_doctor_reports_errors_and_cleanup_failures(self):
         summary = {"ok": False, "samples": 2, "errors": [{"op": "io"}],
                    "cleanup_errors": ["delete failed"]}
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.doctor.run_doctor",
+             patch("dragon_quant.infra.assets.sync.doctor.run_doctor",
                    return_value=summary):
             outcome = cli_service.run("doctor", _args("doctor", samples=2))
 
@@ -285,9 +285,9 @@ class TestDoctor(unittest.TestCase):
         self.assertIs(outcome.payload["summary"], summary)
 
     def test_doctor_assets_sync_error_exits_2(self):
-        with patch("dragon_quant.assets_sync.credentials.load_config",
+        with patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    return_value=_config()), \
-             patch("dragon_quant.assets_sync.doctor.run_doctor",
+             patch("dragon_quant.infra.assets.sync.doctor.run_doctor",
                    side_effect=StorageError("backend down")):
             outcome = cli_service.run("doctor", _args("doctor", samples=2))
 
@@ -299,11 +299,11 @@ class TestBackfill(unittest.TestCase):
     def test_backfill_is_local_and_never_builds_a_backend(self):
         result = {"ok": True, "mode": "backfill-dragons", "dates": [],
                   "failed": [], "inserted": 0}
-        with patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+        with patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    return_value=result) as backfill, \
-             patch("dragon_quant.assets_sync.credentials.load_config",
+             patch("dragon_quant.infra.assets.sync.credentials.load_config",
                    side_effect=AssertionError("回填不得读凭据")), \
-             patch("dragon_quant.assets_sync.backends.s3.S3Backend",
+             patch("dragon_quant.infra.assets.sync.backends.s3.S3Backend",
                    side_effect=AssertionError("回填不得构造后端")):
             outcome = cli_service.run(
                 "backfill-dragons",
@@ -323,14 +323,14 @@ class TestBackfill(unittest.TestCase):
             {"date": "2026-10-20", "reason": "row bad"}]}
         for result, expected in ((fatal, 2), (partial, 1)):
             with self.subTest(expected=expected), \
-                 patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+                 patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                        return_value=result):
                 outcome = cli_service.run(
                     "backfill-dragons", _args("backfill-dragons"))
             self.assertEqual(outcome.exit_code, expected)
 
     def test_backfill_value_error_is_a_parameter_error(self):
-        with patch("dragon_quant.storage.dragons_mirror.backfill_dragons",
+        with patch("dragon_quant.infra.assets.dragons_mirror.backfill_dragons",
                    side_effect=ValueError("--from 不能晚于 --to")):
             outcome = cli_service.run(
                 "backfill-dragons",
@@ -358,7 +358,7 @@ class TestThinCommand(unittest.TestCase):
         from dragon_quant.commands import assets as command
 
         out, err = io.StringIO(), io.StringIO()
-        with patch("dragon_quant.assets_sync.cli_service.run",
+        with patch("dragon_quant.infra.assets.main.run",
                    return_value=outcome), \
              redirect_stdout(out), redirect_stderr(err):
             with self.assertRaises(SystemExit) as raised:

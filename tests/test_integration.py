@@ -13,14 +13,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from dragon_quant.live_trade.trader import LiveTrader
-from dragon_quant.models.types import KBar
+from dragon_quant.review_account.live_trade.trader import LiveTrader
+from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.evaluation import TOTAL_ROW_CODE, compare_strategies, entry_reason_stats
 from dragon_quant.review_account.market import bar_times, validate_bars
 from dragon_quant.review_account.models import ClosedPosition, StrategyConfig
 from dragon_quant.review_account.service import run_review_account
 from dragon_quant.review_account.simulator import AccountSimulator
-from dragon_quant.storage import db
+from dragon_quant.infra.storage.connection import init_db
+from dragon_quant.review_account import storage as review_storage
+from dragon_quant.review_account.live_trade import storage as signal_storage
 from tests.test_review_account import CAND, DAY, FakeData
 
 
@@ -31,10 +33,10 @@ class IntegrationBase(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "test.db")
         self._conn = sqlite3.connect(self._db_path)
-        self._patch = patch("dragon_quant.storage.db._connect",
+        self._patch = patch("dragon_quant.infra.storage.connection._connect",
                             side_effect=lambda: sqlite3.connect(self._db_path))
         self._patch.start()
-        db.init_db()
+        init_db()
 
     def tearDown(self):
         self._patch.stop()
@@ -53,18 +55,18 @@ class _DropData(FakeData):
 
 class TestLiveTradeIntegration(IntegrationBase):
     def test_buy_end_to_end_records_signal(self):
-        with patch("dragon_quant.storage.dragons_mirror.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.infra.assets.dragons_mirror.get_dragons_by_date", return_value=[CAND]):
             result = LiveTrader(StrategyConfig(), source="v2", data=FakeData()).buy(DAY, "10:00")
         self.assertEqual(result["action"], "buy")
         self.assertEqual([b["code"] for b in result["buys"]], [CAND["code"]])
-        self.assertEqual([s["code"] for s in db.list_open_signals(source="v2")], [CAND["code"]])
+        self.assertEqual([s["code"] for s in signal_storage.list_open_signals(source="v2")], [CAND["code"]])
 
     def test_sell_end_to_end_closes_signal(self):
-        db.insert_signal(CAND["code"], CAND["name"], "2026-09-04", 10.0, "buy", "买", {}, "v2")
+        signal_storage.insert_signal(CAND["code"], CAND["name"], "2026-09-04", 10.0, "buy", "买", {}, "v2")
         result = LiveTrader(StrategyConfig(), source="v2", data=_DropData()).sell(DAY, "10:00")
         self.assertEqual(result["action"], "sell")
         self.assertEqual([s["code"] for s in result["sells"]], [CAND["code"]])
-        self.assertEqual(db.list_open_signals(source="v2"), [])
+        self.assertEqual(signal_storage.list_open_signals(source="v2"), [])
 
 
 class TestReviewAccountIntegration(IntegrationBase):
@@ -76,7 +78,7 @@ class TestReviewAccountIntegration(IntegrationBase):
             Sim.return_value.run.return_value = fake
             result = run_review_account("2026-09-07", "2026-09-08", source="v2", verbose=False)
         self.assertIsNotNone(result["run_id"])
-        runs = db.query_review_account_runs(source="v2")
+        runs = review_storage.query_review_account_runs(source="v2")
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["date_from"], "2026-09-07")
         self.assertEqual(runs[0]["date_to"], "2026-09-08")
@@ -94,14 +96,14 @@ class TestReviewAccountIntegration(IntegrationBase):
         sim.data = FakeData()   # daily() 返回截至 2026-09-08 的日K
         with patch("dragon_quant.review_account.service.AccountSimulator", return_value=sim):
             result = run_review_account("2026-09-04", "2026-09-08", source="v2", verbose=False)
-        rows = db.query_review_account_positions(result["run_id"])
+        rows = review_storage.query_review_account_positions(result["run_id"])
         self.assertEqual(len(rows), 1)
         self.assertAlmostEqual(rows[0]["post_exit_max_return"], 2.0)
         self.assertAlmostEqual(rows[0]["post_exit_max_drawdown"], -2.0)
         self.assertEqual(rows[0]["post_exit_window_days"], 2)
 
     def test_entry_stats_win_rate_matches_simulator_result(self):
-        with patch("dragon_quant.storage.dragons_mirror.get_dragons_by_date", return_value=[CAND]):
+        with patch("dragon_quant.infra.assets.dragons_mirror.get_dragons_by_date", return_value=[CAND]):
             result = AccountSimulator(StrategyConfig(), data=_DropData()).run(
                 "2026-09-04", "2026-09-08")
         stats = entry_reason_stats([p.__dict__ for p in result["positions"]],
@@ -138,7 +140,7 @@ class TestReviewAccountIntegration(IntegrationBase):
             "post_exit_window_days": None,
         }]
         fake_db.get_review_account_run.return_value = {"initial_cash": 100000.0}
-        with patch("web_ui.server._get_db", return_value=fake_db):
+        with patch("web_ui.server._get_account_store", return_value=fake_db):
             handler._serve_api_account_positions({"run_id": ["1"]})
         payload = captured["payload"]
         self.assertEqual(len(payload["data"]), 1)
@@ -160,7 +162,7 @@ class TestReviewAccountIntegration(IntegrationBase):
         fake_db = MagicMock()
         fake_db.query_review_account_positions.return_value = []
         fake_db.get_review_account_run.return_value = None
-        with patch("web_ui.server._get_db", return_value=fake_db):
+        with patch("web_ui.server._get_account_store", return_value=fake_db):
             handler._serve_api_account_positions({"run_id": ["999"]})
         payload = captured["payload"]
         self.assertEqual(payload["data"], [])

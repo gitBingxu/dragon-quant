@@ -1,4 +1,4 @@
-"""tests for dragon_quant.providers.tdx — TdxProvider 数据转换与 fallback 路由。
+"""tests for dragon_quant.infra.provider.tdx — TdxProvider 数据转换与 fallback 路由。
 
 覆盖（均无需安装 tmdx）：
   - 纯函数转换 _to_kbars/_to_quote/_to_sector/_to_stockinfo
@@ -12,9 +12,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from unittest.mock import patch
 
-from dragon_quant.models.types import SectorPerformance, StockInfo
-from dragon_quant.orchestrator import _try_primary
-from dragon_quant.providers.tdx import (
+from dragon_quant.infra.models import SectorPerformance, StockInfo
+from dragon_quant.scan.orchestrator.main import _try_primary
+from dragon_quant.infra.provider.tdx import (
     TdxProvider,
     _easy_tdx_installed,
     _market_of,
@@ -157,7 +157,7 @@ class TestTdxProviderDegrade(unittest.TestCase):
     """easy_tdx 未安装时所有方法优雅降级返回空/None，触发 orchestrator 回退。"""
 
     def test_all_empty_without_easytdx(self):
-        with patch("dragon_quant.providers.tdx._import_easytdx", return_value=None):
+        with patch("dragon_quant.infra.provider.tdx._import_easytdx", return_value=None):
             p = TdxProvider()
             self.assertEqual(p.get_sector_ranking(), [])
             self.assertEqual(p.get_sector_components("881101"), [])
@@ -188,14 +188,14 @@ class TestWarnIfUnavailable(unittest.TestCase):
     """warn_if_unavailable：已安装不打印；缺失时打印补装建议到 stderr。"""
 
     def test_no_warning_when_installed(self):
-        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=True):
+        with patch("dragon_quant.infra.provider.tdx._easy_tdx_installed", return_value=True):
             buf = io.StringIO()
             with redirect_stderr(buf):
                 warn_if_unavailable()
             self.assertEqual(buf.getvalue(), "")
 
     def test_warn_when_not_installed(self):
-        with patch("dragon_quant.providers.tdx._easy_tdx_installed", return_value=False):
+        with patch("dragon_quant.infra.provider.tdx._easy_tdx_installed", return_value=False):
             buf = io.StringIO()
             with redirect_stderr(buf):
                 warn_if_unavailable()
@@ -266,7 +266,7 @@ class TestCategoryMapping(unittest.TestCase):
                                       "price": 1.1, "pre_close": 1.0}])
 
         p = TdxProvider()
-        with patch("dragon_quant.providers.tdx._import_easytdx", return_value=_Et), \
+        with patch("dragon_quant.infra.provider.tdx._import_easytdx", return_value=_Et), \
                 patch.object(TdxProvider, "_get_client", return_value=_Client()):
             for cat in ("hy", "gn", "dq"):
                 rows = p.get_sector_ranking(category=cat)

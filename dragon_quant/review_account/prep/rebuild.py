@@ -16,8 +16,8 @@ from __future__ import annotations
 import sys
 from typing import Any, Optional
 
-from dragon_quant.runtime import clock
-from dragon_quant.storage.dragons_mirror import BACKFILL_HINT
+from dragon_quant.infra import clock
+from dragon_quant.infra.assets.dragons_mirror import BACKFILL_HINT
 
 from .compute import SHANGHAI, _list_of_dicts
 

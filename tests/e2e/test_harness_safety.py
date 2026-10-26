@@ -344,7 +344,7 @@ def test_fake_assets_backend_is_active(sandbox):
     code = (
         "import os\n"
         "from pathlib import Path\n"
-        "from dragon_quant.assets_sync.backends.s3 import S3Backend\n"
+        "from dragon_quant.infra.assets.sync.backends.s3 import S3Backend\n"
         "backend = S3Backend(object())\n"
         "backend.put('probe/key.txt', b'payload')\n"
         "print(S3Backend.__module__)\n"
@@ -358,7 +358,7 @@ def test_fake_assets_backend_is_active(sandbox):
 
 def test_c7_fake_providers_are_active(sandbox):
     code = (
-        "from dragon_quant.providers import create_providers\n"
+        "from dragon_quant.infra.provider.main import create_providers\n"
         "providers = create_providers()\n"
         "for name in ('tdx', 'ths', 'xueqiu', 'tencent'):\n"
         "    cls = type(providers[name])\n"
@@ -373,7 +373,7 @@ def test_c7_fake_providers_are_active(sandbox):
 def test_c8_datetime_and_time_are_not_globally_replaced(sandbox):
     """M9C: neither ``datetime.datetime`` nor ``time.time`` is patched.
 
-    The frozen instant lives only on ``dragon_quant.runtime.clock``; every
+    The frozen instant lives only on ``dragon_quant.infra.clock``; every
     stdlib consumer keeps the real classes and functions.
     """
 
@@ -403,14 +403,14 @@ def test_runtime_clock_is_frozen_and_isinstance_semantics_stay_intact(sandbox):
 
     ``factors/evaluation.py`` checks ``isinstance(stamp, datetime)``.  With no
     global replacement that check is ordinary Python; the frozen moment is
-    visible only through ``dragon_quant.runtime.clock``.
+    visible only through ``dragon_quant.infra.clock``.
     """
 
     code = (
         "import datetime\n"
         "from datetime import datetime as datetime_cls\n"
-        "from dragon_quant.factors.evaluation import _bar_date\n"
-        "from dragon_quant.runtime import clock\n"
+        "from dragon_quant.infra.factor.evaluation import _bar_date\n"
+        "from dragon_quant.infra import clock\n"
         "print('CLOCK', clock.now().strftime('%Y-%m-%d %H:%M'),\n"
         "      type(clock.get_clock()).__name__)\n"
         "print('NOW', type(datetime_cls.now()).__module__,\n"

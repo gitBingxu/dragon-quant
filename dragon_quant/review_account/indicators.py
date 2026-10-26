@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 
 
 def is_tradable_daily_bar(bar: Optional[KBar]) -> bool:

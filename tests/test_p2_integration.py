@@ -11,10 +11,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.models.types import KBar
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.decision import default_snapshot, save_default_model_snapshot
-from dragon_quant.factors.types import FactorValue
+from dragon_quant.infra.models import KBar
+from dragon_quant.infra.factor import storage as fstore
+from dragon_quant.infra.factor.decision import default_snapshot, save_default_model_snapshot
+from dragon_quant.infra.factor.types import FactorValue
 from dragon_quant.review_account.evaluation import (
     compare_strategies, industry_exposure, metrics, sharpe_ratio,
 )
@@ -93,7 +93,7 @@ class TempDbBase(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
-        self._patch = patch("dragon_quant.storage.assets_db._connect",
+        self._patch = patch("dragon_quant.infra.assets.db._connect",
                             side_effect=self._connect)
         self._patch.start()
 

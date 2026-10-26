@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.storage.paths import ASSETS_DB_PATH
+from dragon_quant.infra.storage.paths import ASSETS_DB_PATH
 
 
 def _signature(path: Path):
@@ -36,7 +36,7 @@ class AssetsDbTestBase(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def _patch(self):
-        return patch("dragon_quant.storage.assets_db._connect",
+        return patch("dragon_quant.infra.assets.db._connect",
                      side_effect=lambda *args, **kwargs: sqlite3.connect(self._db_path))
 
     def _table_names(self) -> set[str]:
@@ -50,7 +50,7 @@ class AssetsDbTestBase(unittest.TestCase):
 
 class TestAssetsSchema(AssetsDbTestBase):
     def test_four_tables_exist(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.get_prep_assets("1999-01-01")   # 触发 _ensure_schema
         self.assertTrue({
@@ -58,7 +58,7 @@ class TestAssetsSchema(AssetsDbTestBase):
         }.issubset(self._table_names()))
 
     def test_manager_and_paths_share_assets_db_path(self):
-        from dragon_quant.storage import manager, paths
+        from dragon_quant.infra.storage import manager, paths
         self.assertIs(manager.ASSETS_DB_PATH, paths.ASSETS_DB_PATH)
 
     def test_wrong_shaped_table_raises(self):
@@ -72,7 +72,7 @@ class TestAssetsSchema(AssetsDbTestBase):
         finally:
             conn.close()
 
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(assets_db.AssetsDbSchemaError):
                 assets_db.get_prep_assets("1999-01-01")
@@ -80,7 +80,7 @@ class TestAssetsSchema(AssetsDbTestBase):
 
 class TestPrepAssets(AssetsDbTestBase):
     def test_roundtrip(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"dragons": {"count": 2}},
                                        {"dragons": {"status": "ok"}})
@@ -91,7 +91,7 @@ class TestPrepAssets(AssetsDbTestBase):
             self.assertEqual(assets["collection_report"]["dragons"]["status"], "ok")
 
     def test_upsert_single_row_and_idempotent(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}}, {})
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 2}}, {})
@@ -106,7 +106,7 @@ class TestPrepAssets(AssetsDbTestBase):
 
     def test_partial_report_merge_keeps_existing(self):
         """逐键合并：未出现在本次 report 的条目沿用存量。"""
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
                                        {"dragons": {"status": "ok"}})
@@ -118,7 +118,7 @@ class TestPrepAssets(AssetsDbTestBase):
 
     def test_empty_report_leaves_report_untouched(self):
         """report 为空 → 不触碰 report 行（整日零采集语义）。"""
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
                                        {"dragons": {"status": "ok"}})
@@ -130,7 +130,7 @@ class TestPrepAssets(AssetsDbTestBase):
         self.assertEqual(payload, {"v": 3})
 
     def test_malformed_report_is_reset_with_audit_key(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
                                        {"dragons": {"status": "ok"}})
@@ -150,13 +150,13 @@ class TestPrepAssets(AssetsDbTestBase):
                                   "report_reset": "malformed"})
 
     def test_noop_when_payloads_and_report_empty(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {}, {})
         self.assertFalse(Path(self._db_path).exists())
 
     def test_rollback_covers_report_merge(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}},
                                        {"dragons": {"status": "ok"}})
@@ -170,7 +170,7 @@ class TestPrepAssets(AssetsDbTestBase):
 
     def test_single_transaction_rollback(self):
         """任一 payload 序列化失败 → 整批不落库（无部分新旧混合）。"""
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(ValueError):
                 assets_db.save_prep_assets("2026-10-19",
@@ -178,7 +178,7 @@ class TestPrepAssets(AssetsDbTestBase):
             self.assertEqual(assets_db.get_prep_assets("2026-10-19"), {})
 
     def test_missing_asset_returns_none(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             self.assertIsNone(assets_db.get_prep_asset("1999-01-01", "x"))
             self.assertEqual(assets_db.get_prep_assets("1999-01-01"), {})
@@ -186,7 +186,7 @@ class TestPrepAssets(AssetsDbTestBase):
 
 class TestPrepSnapshots(AssetsDbTestBase):
     def test_roundtrip_and_upsert(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_snapshot("2026-10-19", {"sentiment": {"limit_up_cnt": 59}})
             self.assertTrue(assets_db.has_prep_snapshot("2026-10-19"))
@@ -196,20 +196,20 @@ class TestPrepSnapshots(AssetsDbTestBase):
             self.assertEqual(assets_db.get_prep_snapshot("2026-10-19"), {"v": 2})
 
     def test_missing_returns_none(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             self.assertIsNone(assets_db.get_prep_snapshot("1999-01-01"))
             self.assertFalse(assets_db.has_prep_snapshot("1999-01-01"))
 
     def test_nan_rejected(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(ValueError):
                 assets_db.save_prep_snapshot("2026-10-19", {"v": float("inf")})
 
     def test_assets_and_snapshots_isolated(self):
         """两表互不影响：删/写其一不改变另一。"""
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_prep_assets("2026-10-19", {"a": {"v": 1}}, {})
             assets_db.save_prep_snapshot("2026-10-19", {"s": 1})
@@ -219,7 +219,7 @@ class TestPrepSnapshots(AssetsDbTestBase):
 
 class TestAuctionAssets(AssetsDbTestBase):
     def test_roundtrip_and_upsert(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         items = [{"time": "09:25:00", "price": 10.0, "matched": 100, "unmatched": 50}]
         with self._patch():
             assets_db.save_auction_asset("2026-10-20", "600172", "黄河旋风", items)
@@ -236,7 +236,7 @@ class TestAuctionAssets(AssetsDbTestBase):
             self.assertEqual(len(assets_db.list_auction_assets("2026-10-20")), 1)
 
     def test_list_sorted_by_code(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             for code in ("600002", "000001"):
                 assets_db.save_auction_asset(code=code, trade_date="2026-10-20",
@@ -245,13 +245,13 @@ class TestAuctionAssets(AssetsDbTestBase):
         self.assertEqual(codes, ["000001", "600002"])
 
     def test_missing_returns_none_and_empty(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             self.assertIsNone(assets_db.get_auction_asset("1999-01-01", "600172"))
             self.assertEqual(assets_db.list_auction_assets("1999-01-01"), [])
 
     def test_quote_roundtrip_and_null(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         items = [{"time": "09:25:00", "price": 10.0, "matched": 100, "unmatched": 50}]
         quote = {"code": "600172", "prev_close": 10.0, "limit_down": 9.0,
                  "float_market_cap": 3.2e9, "price": 10.5}
@@ -266,7 +266,7 @@ class TestAuctionAssets(AssetsDbTestBase):
             self.assertIsNone(by_code["600001"]["quote"])
 
     def test_nan_rejected(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(ValueError):
                 assets_db.save_auction_asset(
@@ -276,7 +276,7 @@ class TestAuctionAssets(AssetsDbTestBase):
 
     def test_null_quote_keeps_previous_quote(self):
         """同日重采行情缺失不得抹掉上次成功快照（原始资产不可再生）。"""
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         quote = {"code": "600172", "prev_close": 10.0, "limit_down": 9.0}
         with self._patch():
             assets_db.save_auction_asset("2026-10-20", "600172", "x", [], quote=quote)
@@ -285,7 +285,7 @@ class TestAuctionAssets(AssetsDbTestBase):
                 assets_db.get_auction_asset("2026-10-20", "600172")["quote"], quote)
 
     def test_quote_nan_rejected(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(ValueError):
                 assets_db.save_auction_asset(
@@ -293,7 +293,7 @@ class TestAuctionAssets(AssetsDbTestBase):
                     quote={"code": "600172", "price": float("nan")})
 
     def test_isolated_from_prep_tables(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_auction_asset("2026-10-20", "600172", "x", [])
             self.assertEqual(assets_db.get_prep_assets("2026-10-20"), {})
@@ -303,7 +303,7 @@ class TestReadDoesNotCreateDb(AssetsDbTestBase):
     """只读路径在库不存在时必须返回空值，且不落空库（防回归）。"""
 
     def test_reads_do_not_create_missing_db(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         missing = Path(self._tmpdir.name) / "missing-assets.db"
         with patch.object(assets_db, "ASSETS_DB_PATH", missing):
             self.assertIsNone(assets_db.get_prep_asset("2026-10-20", "x"))
@@ -346,7 +346,7 @@ class TestLegacyPrepDbCompatibility(AssetsDbTestBase):
         finally:
             conn.close()
 
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             self.assertEqual(assets_db.get_prep_assets("2026-10-20"), {})
             assets_db.save_auction_asset("2026-10-20", "600172", "x", [])
@@ -358,7 +358,7 @@ class TestAuctionSnapshotsTable(AssetsDbTestBase):
 
     def test_table_accepts_analysis_json(self):
         import json
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         payload = {"version": "1", "code": "600172", "is_weak": False,
                    "strength": 72.5, "direction": "bull", "level": "强",
                    "dims": {}, "reject_reason": None, "unverified": True, "rank": 1}
@@ -422,7 +422,7 @@ class TestAuctionQuoteMigration(AssetsDbTestBase):
 
     def test_read_path_does_not_migrate(self):
         self._create_old_schema()
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             asset = assets_db.get_auction_asset("2026-10-19", "600001")
             self.assertEqual(asset["items"], [])
@@ -432,7 +432,7 @@ class TestAuctionQuoteMigration(AssetsDbTestBase):
 
     def test_write_path_migrates_idempotently(self):
         self._create_old_schema()
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         quote = {"code": "600172", "prev_close": 10.0}
         with self._patch():
             assets_db.save_auction_asset("2026-10-20", "600172", "x", [], quote=quote)
@@ -449,7 +449,7 @@ class TestAuctionQuoteMigration(AssetsDbTestBase):
             conn.commit()
         finally:
             conn.close()
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(assets_db.AssetsDbSchemaError):
                 assets_db.get_auction_asset("2026-10-20", "600172")
@@ -479,7 +479,7 @@ class TestAuctionQuoteMigration(AssetsDbTestBase):
         finally:
             conn.close()
 
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             with self.assertRaises(assets_db.AssetsDbSchemaError):
                 assets_db.save_auction_asset("2026-10-20", "600172", "x", [])
@@ -499,7 +499,7 @@ class TestAuctionSnapshotsReplace(AssetsDbTestBase):
             conn.close()
 
     def test_replace_rerun_and_stale_removal(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         p1 = {"version": "1", "code": "600001", "strength": 10.0}
         p2 = {"version": "1", "code": "600002", "strength": 20.0}
         with self._patch():
@@ -514,7 +514,7 @@ class TestAuctionSnapshotsReplace(AssetsDbTestBase):
         self.assertEqual(rows[0][0], "600001")
 
     def test_empty_payloads_keeps_old_rows(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         p1 = {"version": "1", "code": "600001"}
         with self._patch():
             assets_db.replace_auction_snapshots("2026-10-20", {"600001": p1})
@@ -522,7 +522,7 @@ class TestAuctionSnapshotsReplace(AssetsDbTestBase):
         self.assertEqual(len(self._rows()), 1)
 
     def test_nan_payload_rolls_back(self):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         p1 = {"version": "1", "code": "600001"}
         with self._patch():
             assets_db.replace_auction_snapshots("2026-10-20", {"600001": p1})
@@ -538,13 +538,13 @@ class TestAuctionSnapshotRead(AssetsDbTestBase):
     """竞价快照读接口：无库降级、摊平契约、逐行损坏隔离。"""
 
     def _seed(self, payloads):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.replace_auction_snapshots("2026-10-20", payloads, source="v2")
 
     def test_missing_db_returns_empty_and_none(self):
-        from dragon_quant.storage import assets_db
-        with patch("dragon_quant.storage.assets_db._connect", return_value=None):
+        from dragon_quant.infra.assets import db as assets_db
+        with patch("dragon_quant.infra.assets.db._connect", return_value=None):
             self.assertEqual(assets_db.list_auction_snapshots("2026-10-20"), [])
             self.assertIsNone(assets_db.get_auction_snapshot("2026-10-20", "600001"))
 
@@ -553,7 +553,7 @@ class TestAuctionSnapshotRead(AssetsDbTestBase):
                    "strength": 72.5, "direction": "bull", "level": "强",
                    "dims": {}, "reject_reason": None, "unverified": True, "rank": None}
         self._seed({"600001": payload})
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             rows = assets_db.list_auction_snapshots("2026-10-20")
             hit = assets_db.get_auction_snapshot("2026-10-20", "600001")
@@ -577,7 +577,7 @@ class TestAuctionSnapshotRead(AssetsDbTestBase):
             conn.commit()
         finally:
             conn.close()
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             rows = assets_db.list_auction_snapshots("2026-10-20")
             bad = assets_db.get_auction_snapshot("2026-10-20", "600001")
@@ -594,7 +594,7 @@ class TestAuctionCorruptJson(AssetsDbTestBase):
     """单行 JSON 损坏必须逐行隔离，不得打断整批读取。"""
 
     def _seed(self, code, items_json, quote_json):
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             assets_db.save_auction_asset("2026-10-20", code, "x", [])
         conn = sqlite3.connect(self._db_path)
@@ -609,7 +609,7 @@ class TestAuctionCorruptJson(AssetsDbTestBase):
 
     def test_corrupt_quote_isolated(self):
         self._seed("600001", "[]", "{not-json")
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             asset = assets_db.get_auction_asset("2026-10-20", "600001")
             self.assertIsNone(asset["quote"])
@@ -621,7 +621,7 @@ class TestAuctionCorruptJson(AssetsDbTestBase):
 
     def test_corrupt_items_isolated(self):
         self._seed("600001", "{bad", None)
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         with self._patch():
             asset = assets_db.get_auction_asset("2026-10-20", "600001")
             self.assertEqual(asset["items"], [])

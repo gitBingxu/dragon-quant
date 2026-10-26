@@ -7,7 +7,7 @@ config) are constructed by their own feature factories, never here.
 
 Dependency direction: ``app`` may import runtime contracts, storage and
 providers, but never ``cli``/``commands``; feature modules must not import
-``app``.  ``ProviderBundle`` is defined in :mod:`dragon_quant.runtime.providers`
+``app``.  ``ProviderBundle`` is defined in :mod:`dragon_quant.infra.provider.bundle`
 and is only imported/used here.
 
 Provider construction stays lazy: ``build_services()`` never calls the provider
@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
 
-from dragon_quant.runtime.clock import Clock, get_clock
-from dragon_quant.runtime.providers import ProviderBundle
-from dragon_quant.storage import paths as _paths
+from dragon_quant.infra.clock import Clock, get_clock
+from dragon_quant.infra.provider.bundle import ProviderBundle
+from dragon_quant.infra.storage import paths as _paths
 
 # Keep the historical default; source routing remains a per-feature argument.
 DEFAULT_SOURCE = "v2"
@@ -81,11 +81,11 @@ def build_services(*, providers: Optional[ProviderBundle] = None,
 def ensure_storage(services: Services) -> None:
     """Idempotently ensure the established data directories and dragon.db schema.
 
-    The storage location is always the one resolved by :mod:`dragon_quant.storage.paths`
+    The storage location is always the one resolved by :mod:`dragon_quant.infra.storage.paths`
     (``DQ_DATA_DIR``/platform default).  ``services.config.data_dir`` is
     informational and deliberately does not become a second storage root.
     """
-    from dragon_quant.storage import db
+    from dragon_quant.infra.storage import connection
 
     for directory in (
         _paths.COOKIE_DIR,
@@ -95,4 +95,4 @@ def ensure_storage(services: Services) -> None:
         _paths.SHARED_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
-    db.init_db()
+    connection.init_db()

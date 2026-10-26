@@ -1,0 +1,266 @@
+"""
+原子数据查询 API — 暴露底层 Provider 的原子能力
+
+将雪球/腾讯等数据源的查询接口作为顶层函数暴露，
+Agent 可以直接调用获取个股K线、实时行情、板块数据等。
+
+用法（Python API）:
+  from dragon_quant.infra.provider.data import (
+      get_sector_ranking, get_sector_components, get_sector_5min_kline,
+      get_kline, get_minute_kline, get_quote, batch_get_quotes,
+      cookie_status, fetch_cookies,
+  )
+
+  # 板块排行
+  sectors = get_sector_ranking()   # 涨幅榜
+  sectors = get_sector_ranking(asc=True)  # 跌幅榜
+
+  # 板块成分股
+  stocks = get_sector_components("881167")
+
+  # 个股日K线
+  kline = get_kline("600172", source="xueqiu", days=20)
+
+  # 个股1分钟K线（分时）
+  mline = get_minute_kline("600172")
+
+  # 实时行情
+  quote = get_quote("600172")
+  quotes = batch_get_quotes(["600172", "000001", "002409"])
+
+  # Cookie 管理
+  cookie_status()     # 查看 Cookie 状态
+  fetch_cookies()     # 自动刷新所有 Cookie
+  fetch_cookies(source="xueqiu")  # 只刷新雪球
+
+CLI 用法:
+  python -m dragon_quant data sector
+  python -m dragon_quant data sector --asc
+  python -m dragon_quant data components --sector 881167
+  python -m dragon_quant data kline --code 600172 [--source xueqiu] [--days 20]
+  python -m dragon_quant data minute --code 600172
+  python -m dragon_quant data quote --code 600172
+  python -m dragon_quant data batch-quote --codes 600172,000001,002409
+  python -m dragon_quant data cookie-status
+  python -m dragon_quant data cookie-fetch
+"""
+
+import threading
+from typing import Optional
+
+from dragon_quant.infra.models import Quote, KBar, StockInfo, SectorPerformance
+from dragon_quant.infra.provider.main import create_providers
+
+# 懒加载 — 首次调用时初始化所有 Provider
+_lock = threading.Lock()
+_providers: Optional[dict] = None
+
+
+def _get_providers() -> dict:
+    global _providers
+    if _providers is None:
+        with _lock:
+            if _providers is None:
+                _providers = create_providers()
+    return _providers
+
+
+def _providers_from_services(services) -> Optional[dict]:
+    """Optional M2 assembly seam: return the injected provider mapping or None.
+
+    ``None`` means "no injection" so the historical lazy ``create_providers()``
+    path (and its patch target) stays in force.  A feature may pass a
+    ``Services`` whose ``providers`` is also ``None`` (read-only assembly); that
+    is treated the same as omitting the argument.
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return bundle.as_dict()
+
+
+def _resolve_providers(services) -> dict:
+    injected = _providers_from_services(services)
+    return _get_providers() if injected is None else injected
+
+
+# ═══ 板块相关 ═══
+
+def get_sector_ranking(asc: bool = False, services=None) -> list[SectorPerformance]:
+    """获取行业板块涨跌幅排行榜（同花顺）
+
+    Args:
+        asc: False=涨幅榜, True=跌幅榜
+        services: 可选 M2 装配注入；有 providers 时使用其 ``ths``。
+    Returns:
+        list[SectorPerformance] 按涨跌幅排序的板块列表
+    """
+    providers = _resolve_providers(services)
+    ths = providers["ths"]
+    return ths.get_sector_ranking(asc=asc)
+
+
+def get_sector_components(sector_code: str, page: int = 1,
+                          all_pages: bool = False,
+                          page_size: int = 50,
+                          services=None) -> list[StockInfo]:
+    """获取行业板块成分股列表（同花顺，按涨跌幅降序）
+
+    Args:
+        sector_code: 同花顺行业板块 6 位代码，如 "881167"
+        page: 页码（默认第一页）
+        all_pages: 是否自动拉取全量分页
+        page_size: 每页大小
+        services: 可选 M2 装配注入；有 providers 时使用其 ``ths``。
+    Returns:
+        list[StockInfo] 成分股列表
+    """
+    providers = _resolve_providers(services)
+    ths = providers["ths"]
+    return ths.get_sector_components(
+        sector_code,
+        page=page,
+        all_pages=all_pages,
+        page_size=page_size,
+    )
+
+
+def get_sector_5min_kline(sector_code: str, bars: int = 100, services=None) -> list[KBar]:
+    """获取行业板块 5 分钟 K 线（同花顺，1 分钟分时聚合）
+
+    Args:
+        sector_code: 同花顺行业板块 6 位代码，如 "881167"
+        bars: K 线根数（默认 100）
+        services: 可选 M2 装配注入；有 providers 时使用其 ``ths``。
+    """
+    providers = _resolve_providers(services)
+    ths = providers["ths"]
+    return ths.get_sector_5min_kline(sector_code, bars=bars)
+
+
+# ═══ 个股相关 ═══
+
+def get_kline(code: str, source: str = "xueqiu", days: int = 20,
+              services=None) -> list[KBar]:
+    """获取个股日 K 线
+
+    Args:
+        code: 股票代码，如 "600172"
+        source: 数据源，xueqiu=雪球, tencent=腾讯
+        days: 天数
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
+    Returns:
+        list[KBar] 日K线数据
+    """
+    providers = _resolve_providers(services)
+    p = providers.get(source, providers["xueqiu"])
+    return p.get_kline(code, days=days)
+
+
+def get_minute_kline(code: str, source: str = "xueqiu", services=None) -> list[KBar]:
+    """获取个股 1分钟K线（分时数据）
+
+    Args:
+        code: 股票代码
+        source: 数据源，xueqiu 或 tencent
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
+    """
+    providers = _resolve_providers(services)
+    p = providers.get(source, providers["xueqiu"])
+    if source == "tencent":
+        return p.get_5min_kline(code)
+    # 雪球直接用 get_minute_kline
+    return p.get_minute_kline(code) if hasattr(p, 'get_minute_kline') else p.get_5min_kline(code)
+
+
+def get_quote(code: str, source: str = "tencent", services=None) -> Optional[Quote]:
+    """获取个股实时行情
+
+    Args:
+        code: 股票代码
+        source: 数据源，tencent=腾讯（推荐）, xueqiu=雪球
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
+    Returns:
+        Quote 或 None（获取失败时）
+    """
+    providers = _resolve_providers(services)
+    p = providers.get(source, providers["tencent"])
+    return p.get_quote(code)
+
+
+def batch_get_quotes(codes: list[str], source: str = "tencent",
+                     services=None) -> list[Quote]:
+    """批量获取实时行情
+
+    Args:
+        codes: 股票代码列表
+        source: 数据源
+        services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
+    Returns:
+        list[Quote]
+    """
+    providers = _resolve_providers(services)
+    p = providers.get(source, providers["tencent"])
+    if hasattr(p, 'batch_get_quotes'):
+        return p.batch_get_quotes(codes)
+    # fallback: 逐个请求
+    return [p.get_quote(c) for c in codes]
+
+
+def get_auction(code: str, services=None) -> list[dict]:
+    """获取个股当日集合竞价盘口（TDX，仅当日 9:25 后可用，无历史回看）。
+
+    Args:
+        code: 股票代码，如 "600172"
+        services: 可选 M2 装配注入；有 providers 时使用其 ``tdx``。
+    Returns:
+        list[dict]，每项含 time/price/matched/unmatched；失败或非交易时段返回空列表。
+    """
+    providers = _resolve_providers(services)
+    tdx = providers["tdx"]
+    return tdx.get_auction(code)
+
+
+# ═══ Cookie 管理 ═══
+
+def cookie_status() -> dict:
+    """查看当前 Cookie 状态
+
+    返回雪球 Cookie 是否存在及长度。
+    如果返回空字符串，说明 Cookie 缺失或过期，需要刷新。
+
+    Returns:
+        {"xueqiu": {"ok": False, "length": 0}}
+    """
+    from dragon_quant.infra.provider.cookie import get_xq
+
+    xq = get_xq()
+    return {
+        "xueqiu": {"ok": bool(xq), "length": len(xq)},
+    }
+
+
+def fetch_cookies(source: str = "all") -> dict:
+    """自动刷新 Cookie（使用无头浏览器 Playwright）
+
+    Cookie 过期会导致 API 返回 400 / 401 / 空数据。
+    遇到接口异常时，优先尝试此方法刷新 Cookie，然后重试业务请求。
+
+    Args:
+        source: "all" 或 "xueqiu"，均刷新雪球
+    Returns:
+        {"xueqiu": {"ok": True, "length": 567}}
+    """
+    from dragon_quant.infra.provider.cookie import fetch_xq
+
+    if source in ("all", "xueqiu"):
+        fetch_xq()
+
+    # 重置 Provider 缓存，下次调用时重新初始化
+    global _providers
+    with _lock:
+        _providers = None
+
+    return cookie_status()

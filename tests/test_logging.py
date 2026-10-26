@@ -1,12 +1,14 @@
 """
-tests for dragon_quant.logging — ScanLogger + ReportBuilder
+tests for dragon_quant.scan.logger — ScanLogger + ReportBuilder + query/facade
 """
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from dragon_quant.logging.logger import ScanLogger, LogEntry
-from dragon_quant.logging.reporter import ReportBuilder
+
+from dragon_quant.scan.logger.events import ScanLogger, LogEntry
+from dragon_quant.scan.logger.report import ReportBuilder
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestLogEntry(unittest.TestCase):
@@ -125,7 +127,7 @@ class TestReportBuilder(unittest.TestCase):
         self.assertIn("盘口缺失", report)
 
     def test_absorption_report_explains_independent_events_and_decay(self):
-        from dragon_quant.scorers import absorption
+        from dragon_quant.scan.scores import absorption
         from tests.test_scorers import TestAbsorptionAggregation
         from datetime import date
         event = TestAbsorptionAggregation().event()
@@ -218,6 +220,31 @@ class TestReportBuilder(unittest.TestCase):
         self.assertIn("白酒回落-1.10%", report)
         self.assertIn("煤炭(-1.10%)", report)
         self.assertIn("承接上述板块出逃资金", report)
+
+
+class TestLoggerFacadeAndBoundary(unittest.TestCase):
+    """Task 10: canonical facade + query 只经 scan.storage.logs 读取。"""
+
+    def test_main_facade_reexports_public_surface(self):
+        from dragon_quant.scan.logger import main as facade
+
+        for name in ("ScanLogger", "LogEntry", "ReportBuilder", "tail_logs",
+                     "query_logs", "clear_logs", "list_logs", "log_summary"):
+            self.assertTrue(hasattr(facade, name), name)
+        self.assertIs(facade.ScanLogger, ScanLogger)
+        self.assertIs(facade.ReportBuilder, ReportBuilder)
+
+    def test_query_module_delegates_to_scan_storage(self):
+        from dragon_quant.scan.logger import query as log_query
+        from dragon_quant.scan.storage import logs as scan_logs
+
+        self.assertIs(log_query.store, scan_logs)
+
+    def test_query_source_has_no_sql_or_writes(self):
+        source = (ROOT / "dragon_quant/scan/logger/query.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("sqlite3", source)
+        self.assertNotIn("save_scan_logs", source)
 
 
 if __name__ == "__main__":

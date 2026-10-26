@@ -51,11 +51,19 @@ _BUILD_HINT = (
 
 
 def _get_db():
-    """延迟导入 db 模块，避免启动时初始化数据库"""
+    """延迟导入 scan 领域仓储，避免启动时初始化数据库"""
     sys.path.insert(0, str(_PROJECT_ROOT))
-    from dragon_quant.storage import db
-    db.init_db()
-    return db
+    from dragon_quant.infra.storage.connection import init_db
+    init_db()
+    from dragon_quant.scan.storage import dragons
+    return dragons
+
+
+def _get_account_store():
+    """延迟导入 review_account 仓储（Task 12 canonical 路径）。"""
+    sys.path.insert(0, str(_PROJECT_ROOT))
+    from dragon_quant.review_account import storage
+    return storage
 
 
 def _resolve_static(path: str) -> Optional[Path]:
@@ -235,13 +243,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def _serve_api_account_runs(self, params: dict):
         """GET /api/account/runs?source=v2"""
-        db = _get_db()
+        account_store = _get_account_store()
         source = _parse_source(params, getattr(self.server, "default_source", "v2"))
         try:
             limit = int(_first(params, "limit") or "20")
         except ValueError:
             limit = 20
-        rows = db.query_review_account_runs(limit=limit, source=source)
+        rows = account_store.query_review_account_runs(limit=limit, source=source)
         self._send_json({"data": rows, "count": len(rows)})
 
     def _serve_api_account_run_create(self):
@@ -275,7 +283,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if initial_cash <= 0:
             raise ValueError("initial_cash must be greater than 0")
 
-        from dragon_quant.review_account import run_review_account
+        from dragon_quant.review_account.main import run_review_account
 
         result = run_review_account(
             date_from=date_from,
@@ -288,15 +296,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             strategy_params=payload.get("strategy_params"),
         )
 
-        db = _get_db()
-        run = db.get_review_account_run(int(result["run_id"]))
+        account_store = _get_account_store()
+        run = account_store.get_review_account_run(int(result["run_id"]))
         self._send_json({"data": run, "run_id": result["run_id"]}, 201)
 
     def _serve_api_account_run_delete(self, params: dict):
         """DELETE /api/account/runs?run_id=1 — 删除账户级回测记录及级联数据。"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        deleted = db.delete_review_account_run(run_id)
+        deleted = account_store.delete_review_account_run(run_id)
         if not deleted:
             self._send_json({"error": "run not found"}, 404)
             return
@@ -304,20 +312,20 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def _serve_api_account_snapshots(self, params: dict):
         """GET /api/account/snapshots?run_id=1"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_snapshots(run_id)})
+        self._send_json({"data": account_store.query_review_account_snapshots(run_id)})
 
     def _serve_api_account_benchmark(self, params: dict):
         """GET /api/account/benchmark?run_id=1&code=SH000001"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
         code = (_first(params, "code") or "SH000001").upper()
-        run = db.get_review_account_run(run_id)
+        run = account_store.get_review_account_run(run_id)
         if not run:
             self._send_json({"error": "run not found"}, 404)
             return
-        snapshots = db.query_review_account_snapshots(run_id)
+        snapshots = account_store.query_review_account_snapshots(run_id)
         rows = _build_benchmark_series(
             code=code,
             dates=[s["trade_date"] for s in snapshots],
@@ -327,25 +335,25 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def _serve_api_account_trades(self, params: dict):
         """GET /api/account/trades?run_id=1"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_trades(run_id)})
+        self._send_json({"data": account_store.query_review_account_trades(run_id)})
 
     def _serve_api_account_positions(self, params: dict):
         """GET /api/account/positions?run_id=1 — 已平仓持仓 + 买点统计"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        rows = db.query_review_account_positions(run_id)
-        run = db.get_review_account_run(run_id)
+        rows = account_store.query_review_account_positions(run_id)
+        run = account_store.get_review_account_run(run_id)
         from dragon_quant.review_account.evaluation import entry_reason_stats
         stats = entry_reason_stats(rows, (run or {}).get("initial_cash") or 0.0)
         self._send_json({"data": rows, "stats": stats})
 
     def _serve_api_account_events(self, params: dict):
         """GET /api/account/events?run_id=1"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_events(run_id)})
+        self._send_json({"data": account_store.query_review_account_events(run_id)})
 
     # ---------- 日志静默 ----------
 
@@ -479,7 +487,7 @@ def _build_benchmark_series(code: str, dates: list[str], initial_cash: float) ->
     if not dates or initial_cash <= 0:
         return []
     from datetime import datetime
-    from dragon_quant.providers.xueqiu import XueqiuProvider
+    from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 
     days = max(60, len(dates) + 30)
     provider = XueqiuProvider()

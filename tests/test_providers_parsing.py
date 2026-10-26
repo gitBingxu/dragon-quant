@@ -5,9 +5,9 @@ tests for provider pure functions:
 """
 import unittest
 from unittest.mock import patch
-from dragon_quant.providers.xueqiu import XueqiuProvider
-from dragon_quant.providers.xueqiu import _symbol, _parse_kline
-from dragon_quant.providers.tencent import _gtimg_codes, _parse_gtimg_quote
+from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+from dragon_quant.infra.provider.xueqiu import _symbol, _parse_kline
+from dragon_quant.infra.provider.tencent import _gtimg_codes, _parse_gtimg_quote
 
 
 class TestXueqiuSymbol(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestXueqiuSymbol(unittest.TestCase):
         self.assertEqual(_symbol("000001"), "SZ000001")
 
     def test_explicit_market_and_stock_symbols_are_distinct(self):
-        with patch("dragon_quant.providers.xueqiu._fetch", return_value={}) as fetch:
+        with patch("dragon_quant.infra.provider.xueqiu._fetch", return_value={}) as fetch:
             provider = XueqiuProvider()
             provider.get_minute_kline("SH000001")
             provider.get_minute_kline("000001")

@@ -525,7 +525,7 @@ def test_a12c_snapshot_reads_isolate_corrupt_rows():
         ]), db_name="assets.db")
         result = runner().run_python(
             "import json\n"
-            "from dragon_quant.storage import assets_db\n"
+            "from dragon_quant.infra.assets import db as assets_db\n"
             "rows = assets_db.list_auction_snapshots('2026-09-11')\n"
             "print(json.dumps(rows, ensure_ascii=False, sort_keys=True))\n",
             sandbox=box, timeout=60)
@@ -544,7 +544,7 @@ def test_a13_runtime_clock_mode_recompute_future_gate_uses_the_runtime_clock():
     """Runtime mode: ``_today()`` reads the frozen clock for recompute gates."""
     with sandbox("a13", now="2026-09-11T09:30:00+08:00") as box:
         code = (
-            "from dragon_quant.auction.recompute import run_auction_recompute\n"
+            "from dragon_quant.review_account.auction.recompute import run_auction_recompute\n"
             "out = run_auction_recompute('20260912')\n"
             "print(out.exit_code)\n"
             "print(out.payload.get('error', ''))\n"

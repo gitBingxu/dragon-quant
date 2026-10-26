@@ -735,8 +735,8 @@ import json
 import os
 from pathlib import Path
 
-from dragon_quant.cache.data_cache import CacheEntry, DataCache, _today_end
-from dragon_quant.runtime import clock
+from dragon_quant.infra.storage.cache import CacheEntry, DataCache, _today_end
+from dragon_quant.infra import clock
 
 root = Path(os.environ["DQ_DATA_DIR"]) / "cache-probe"
 root.mkdir(parents=True, exist_ok=True)

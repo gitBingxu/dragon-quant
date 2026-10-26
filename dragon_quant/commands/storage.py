@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dragon_quant.storage.manager import StorageManager
+from dragon_quant.infra.storage.manager import StorageManager
+from dragon_quant.scan.storage import logs as scan_logs
 
 
 def handle(args, services):
@@ -35,6 +36,9 @@ def handle(args, services):
     elif args.storage_action == "clear":
         if args.all:
             r = mgr.clear_all()
+            # 日志文件清理在 infra.storage；scan_logs 数据行归 scan.storage.logs。
+            # 合并计数以保持 `storage clear --all` 的输出口径不变。
+            r["logs"] += scan_logs.clear_scan_logs()
             for k, v in r.items():
                 if k == "protected_databases":
                     continue
@@ -56,6 +60,7 @@ def handle(args, services):
                     print(f"    (保留最近 {args.days} 天)")
             if args.logs:
                 n = mgr.clear_logs(days=args.days)
+                n += scan_logs.clear_scan_logs(days=args.days)
                 print(f"  清理 logs: {n} 个文件")
                 if args.days:
                     print(f"    (保留最近 {args.days} 天)")
@@ -63,6 +68,6 @@ def handle(args, services):
     elif args.storage_action == "size":
         s = mgr.size()
         print(f"总占用: {s['total']}")
-        from dragon_quant.storage.manager import _fmt_size
+        from dragon_quant.infra.storage.manager import _fmt_size
         for k, b in s["by_dir"].items():
             print(f"  {k}: {_fmt_size(b)}")

@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors import service
-from dragon_quant.factors.registry import spec_names
+from dragon_quant.infra.factor import service
+from dragon_quant.infra.factor.registry import spec_names
 
 
 class BuildAllBase(unittest.TestCase):
@@ -20,9 +20,9 @@ class BuildAllBase(unittest.TestCase):
         self.assets_path = root / "assets.db"
         self.dragon_path = root / "dragon.db"
         self._patches = [
-            patch("dragon_quant.storage.assets_db._connect",
+            patch("dragon_quant.infra.assets.db._connect",
                   side_effect=self._assets_connect),
-            patch("dragon_quant.storage.db._connect",
+            patch("dragon_quant.infra.storage.connection._connect",
                   side_effect=lambda *a, **k: sqlite3.connect(self.dragon_path)),
         ]
         for item in self._patches:
@@ -43,7 +43,7 @@ class BuildAllBase(unittest.TestCase):
 class TestBuildAllSelection(BuildAllBase):
     def test_all_expands_to_every_registered_factor(self):
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.factors.service.engine.build_date",
+        with patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
             out = service.build(date="2026-10-19", all_factors=True)
         names = build_date.call_args.kwargs["names"]
@@ -52,7 +52,7 @@ class TestBuildAllSelection(BuildAllBase):
 
     def test_default_build_keeps_enabled_only(self):
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.factors.service.engine.build_date",
+        with patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
             service.build(date="2026-10-19")
         self.assertIsNone(build_date.call_args.kwargs["names"])
@@ -65,9 +65,9 @@ class TestBuildAllSelection(BuildAllBase):
 
     def test_range_all_expands_each_date(self):
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.factors.service._resolve_dates",
+        with patch("dragon_quant.infra.factor.service._resolve_dates",
                    return_value=(["2026-10-19", "2026-10-20"], "range")), \
-             patch("dragon_quant.factors.service.engine.build_date",
+             patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
             out = service.build(date_from="2026-10-19", date_to="2026-10-20",
                                 all_factors=True)
@@ -79,10 +79,10 @@ class TestBuildAllNetworkBoundary(BuildAllBase):
     def test_no_fin_data_does_not_load_calendar(self):
         """无财务数据时不触网：不调用 load_trade_calendar，fin 因子 fail-closed。"""
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.storage.finance.has_any_fin_data",
+        with patch("dragon_quant.infra.factor.finance_store.has_any_fin_data",
                    return_value=False), \
-             patch("dragon_quant.factors.finance.load_trade_calendar") as loader, \
-             patch("dragon_quant.factors.service.engine.build_date",
+             patch("dragon_quant.infra.factor.finance.load_trade_calendar") as loader, \
+             patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
             out = service.build(date="2026-10-19", all_factors=True)
         loader.assert_not_called()
@@ -91,11 +91,11 @@ class TestBuildAllNetworkBoundary(BuildAllBase):
 
     def test_fin_data_present_loads_calendar(self):
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.storage.finance.has_any_fin_data",
+        with patch("dragon_quant.infra.factor.finance_store.has_any_fin_data",
                    return_value=True), \
-             patch("dragon_quant.factors.finance.load_trade_calendar",
+             patch("dragon_quant.infra.factor.finance.load_trade_calendar",
                    return_value=(["2026-10-16", "2026-10-19"], None)) as loader, \
-             patch("dragon_quant.factors.service.engine.build_date",
+             patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
             service.build(date="2026-10-19", all_factors=True)
         loader.assert_called_once()
@@ -104,11 +104,11 @@ class TestBuildAllNetworkBoundary(BuildAllBase):
 
     def test_calendar_failure_is_warning_not_block(self):
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.storage.finance.has_any_fin_data",
+        with patch("dragon_quant.infra.factor.finance_store.has_any_fin_data",
                    return_value=True), \
-             patch("dragon_quant.factors.finance.load_trade_calendar",
+             patch("dragon_quant.infra.factor.finance.load_trade_calendar",
                    return_value=([], "stale_calendar_missing: boom")), \
-             patch("dragon_quant.factors.service.engine.build_date",
+             patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake):
             out = service.build(date="2026-10-19", all_factors=True)
         self.assertTrue(out["ok"])
@@ -118,11 +118,11 @@ class TestBuildAllNetworkBoundary(BuildAllBase):
     def test_build_forwards_services_to_calendar_and_engine(self):
         services = object()
         fake = {"ok": True, "build_id": 1, "factors": {}}
-        with patch("dragon_quant.storage.finance.has_any_fin_data",
+        with patch("dragon_quant.infra.factor.finance_store.has_any_fin_data",
                    return_value=True), \
-             patch("dragon_quant.factors.finance.load_trade_calendar",
+             patch("dragon_quant.infra.factor.finance.load_trade_calendar",
                    return_value=(["2026-10-16"], None)) as calendar, \
-             patch("dragon_quant.factors.service.engine.build_date",
+             patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
             service.build(date="2026-10-19", all_factors=True, services=services)
 

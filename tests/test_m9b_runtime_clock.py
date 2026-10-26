@@ -16,10 +16,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dragon_quant.auction.dates import _today
-from dragon_quant.auction.recompute import run_auction_recompute
-from dragon_quant.live_trade.trader import LiveTrader
-from dragon_quant.models.types import KBar
+from dragon_quant.review_account.auction.dates import _today
+from dragon_quant.review_account.auction.recompute import run_auction_recompute
+from dragon_quant.review_account.live_trade.trader import LiveTrader
+from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.data import MarketData, historical_day
 from dragon_quant.review_account.market import SHANGHAI, at
 from dragon_quant.review_account.models import StrategyConfig
@@ -28,8 +28,8 @@ from dragon_quant.review_account.prep import (
     rebuild_dragons_for_recompute, run_prep,
 )
 from dragon_quant.review_account.prep.collectors import CollectorSpec
-from dragon_quant.runtime import clock
-from dragon_quant.utils.trading import build_trade_calendar
+from dragon_quant.infra import clock
+from dragon_quant.infra.market_calendar import build_trade_calendar
 
 
 def sh(day: str, hour: int, minute: int, second: int = 0) -> datetime:
@@ -113,7 +113,7 @@ def test_trader_legacy_datetime_patch_still_drives_the_gate():
     fake.now.return_value = sh("2026-09-11", 12, 0)
     # clock 给 10:00（交易时段内），旧 patch 给 12:00：patched 值必须生效。
     with fixed(sh("2026-09-11", 10, 0)), \
-            patch("dragon_quant.live_trade.trader.datetime", fake), \
+            patch("dragon_quant.review_account.live_trade.trader.datetime", fake), \
             patch.object(LiveTrader, "_run_buy", return_value={}):
         with pytest.raises(ValueError) as exc:
             trader.buy("2026-09-11")
@@ -126,11 +126,11 @@ def test_trader_legacy_datetime_patch_still_drives_the_gate():
 def test_build_trade_calendar_uses_the_runtime_clock():
     provider = _KlineProvider([daily_bar("2026-09-10"), daily_bar("2026-09-11")])
     with fixed(sh("2026-09-11", 10, 0)), \
-            patch("dragon_quant.providers.xueqiu.XueqiuProvider",
+            patch("dragon_quant.infra.provider.xueqiu.XueqiuProvider",
                   lambda: provider):
         assert build_trade_calendar("2026-09-01", "2026-09-11") == {"2026-09-10"}
     with fixed(sh("2026-09-11", 16, 0)), \
-            patch("dragon_quant.providers.xueqiu.XueqiuProvider",
+            patch("dragon_quant.infra.provider.xueqiu.XueqiuProvider",
                   lambda: provider):
         assert build_trade_calendar("2026-09-01", "2026-09-11") == {
             "2026-09-10", "2026-09-11"}
@@ -245,7 +245,7 @@ class _DurationClock:
 
 
 def test_engine_audit_timestamps_and_timezone_probe_use_the_runtime_clock():
-    from dragon_quant.factors import engine as fengine
+    from dragon_quant.infra.factor import engine as fengine
 
     with fixed(sh("2026-09-11", 15, 30)):
         assert fengine._now_str() == "2026-09-11T15:30:00"
@@ -257,7 +257,7 @@ def test_engine_audit_timestamps_and_timezone_probe_use_the_runtime_clock():
 
 
 def test_engine_elapsed_uses_clock_monotonic_not_wall_clock():
-    from dragon_quant.factors import engine as fengine
+    from dragon_quant.infra.factor import engine as fengine
 
     previous = clock.set_clock(
         _DurationClock(sh("2026-09-11", 15, 30), monotonic=10.25))
@@ -271,7 +271,7 @@ def test_engine_elapsed_uses_clock_monotonic_not_wall_clock():
 
 
 def test_matrix_generated_at_uses_the_runtime_clock():
-    from dragon_quant.factors import matrix as fmatrix
+    from dragon_quant.infra.factor import matrix as fmatrix
 
     with fixed(sh("2026-09-11", 15, 30)):
         assert fmatrix._now() == "2026-09-11T15:30:00"
@@ -281,12 +281,12 @@ def test_matrix_generated_at_uses_the_runtime_clock():
 
 
 def test_service_today_and_fin_snapshot_gate_use_the_runtime_clock():
-    from dragon_quant.factors import service as fservice
+    from dragon_quant.infra.factor import service as fservice
 
     with fixed(sh("2026-09-11", 15, 30)):
         assert fservice._today() == "2026-09-11"
         with patch.object(fservice, "_candidate_codes", return_value=["600001"]), \
-                patch("dragon_quant.factors.finance.sync_snapshots",
+                patch("dragon_quant.infra.factor.finance.sync_snapshots",
                       return_value={"status": "ok",
                                     "captured_at": "2026-09-11T15:30:00"}) as sync:
             payload = fservice.fin_sync(snapshot=True, date="20260911")
@@ -295,7 +295,7 @@ def test_service_today_and_fin_snapshot_gate_use_the_runtime_clock():
 
 
 def test_service_build_calendar_span_uses_the_runtime_clock():
-    from dragon_quant.factors import service as fservice
+    from dragon_quant.infra.factor import service as fservice
 
     captured: dict = {}
 
@@ -304,9 +304,9 @@ def test_service_build_calendar_span_uses_the_runtime_clock():
         return [], None
 
     with fixed(sh("2026-09-11", 15, 30)), \
-            patch("dragon_quant.storage.finance.has_any_fin_data",
+            patch("dragon_quant.infra.factor.finance_store.has_any_fin_data",
                   return_value=True), \
-            patch("dragon_quant.factors.finance.load_trade_calendar",
+            patch("dragon_quant.infra.factor.finance.load_trade_calendar",
                   side_effect=fake_calendar), \
             patch.object(fservice.engine, "build_date",
                          return_value={"ok": True, "trade_date": "2026-01-05"}):
@@ -319,7 +319,7 @@ def test_service_build_calendar_span_uses_the_runtime_clock():
 
 
 def test_finance_today_snapshot_capture_and_overdue_use_the_runtime_clock():
-    from dragon_quant.factors import finance as ffinance
+    from dragon_quant.infra.factor import finance as ffinance
 
     class _Tdx:
         def get_finance_info(self, code):
@@ -328,7 +328,7 @@ def test_finance_today_snapshot_capture_and_overdue_use_the_runtime_clock():
     with fixed(sh("2026-09-11", 15, 30)):
         assert ffinance._today() == "2026-09-11"
         with patch.object(ffinance, "_match_period", return_value=None), \
-                patch("dragon_quant.storage.finance.upsert_observed_snapshots",
+                patch("dragon_quant.infra.factor.finance_store.upsert_observed_snapshots",
                       return_value=1):
             payload = ffinance.sync_snapshots(
                 "2026-09-11", ["600001"], tdx=_Tdx())
@@ -363,7 +363,7 @@ def test_finance_today_snapshot_capture_and_overdue_use_the_runtime_clock():
 
 
 def test_evaluation_datetime_isinstance_path_works_without_a_global_freeze():
-    from dragon_quant.factors.evaluation import _bar_date
+    from dragon_quant.infra.factor.evaluation import _bar_date
 
     assert _bar_date(SimpleNamespace(timestamp=sh("2026-09-11", 10, 0))) == \
         "2026-09-11"
@@ -375,7 +375,7 @@ def test_evaluation_datetime_isinstance_path_works_without_a_global_freeze():
 
 
 def test_cache_ttl_and_persisted_timestamps_use_the_wall_clock(tmp_path):
-    from dragon_quant.cache.data_cache import CacheEntry, DataCache, _today_end
+    from dragon_quant.infra.storage.cache import CacheEntry, DataCache, _today_end
 
     with fixed(sh("2026-09-11", 15, 30)):
         now = clock.now().timestamp()
@@ -397,7 +397,7 @@ def test_cache_ttl_and_persisted_timestamps_use_the_wall_clock(tmp_path):
 
 
 def test_cache_load_persisted_age_uses_the_wall_clock(tmp_path):
-    from dragon_quant.cache.data_cache import DataCache
+    from dragon_quant.infra.storage.cache import DataCache
 
     with fixed(sh("2026-09-11", 15, 30)):
         now = clock.now().timestamp()
@@ -411,11 +411,11 @@ def test_cache_load_persisted_age_uses_the_wall_clock(tmp_path):
         assert not (tmp_path / "stale.json").exists()
 
 
-# ─── logging/logger.py + logging/query.py ─────────────────────────────────
+# ─── scan/logger/events.py + scan/logger/query.py ─────────────────────────
 
 
 def test_scan_logger_timestamps_and_elapsed_use_the_runtime_clock():
-    from dragon_quant.logging.logger import ScanLogger
+    from dragon_quant.scan.logger.events import ScanLogger
 
     with fixed(sh("2026-09-11", 15, 30)):
         expected = clock.now().timestamp()
@@ -428,7 +428,7 @@ def test_scan_logger_timestamps_and_elapsed_use_the_runtime_clock():
 
 
 def test_clear_logs_cutoff_uses_the_runtime_clock():
-    from dragon_quant.logging import query as log_query
+    from dragon_quant.scan.logger import query as log_query
 
     with fixed(sh("2026-09-11", 15, 30)):
         expected_cutoff = clock.now().timestamp() - 7 * 86400
@@ -444,7 +444,7 @@ def test_clear_logs_cutoff_uses_the_runtime_clock():
 
 
 def test_clear_dir_days_uses_the_runtime_clock(tmp_path):
-    from dragon_quant.storage import manager as storage_manager
+    from dragon_quant.infra.storage import manager as storage_manager
 
     old = tmp_path / "old.txt"
     fresh = tmp_path / "fresh.txt"
@@ -459,15 +459,12 @@ def test_clear_dir_days_uses_the_runtime_clock(tmp_path):
     assert fresh.exists()
 
 
-def test_storage_clear_logs_cutoff_uses_the_runtime_clock(tmp_path, monkeypatch):
-    from dragon_quant.storage import manager as storage_manager
+def test_scan_log_clear_cutoff_uses_the_runtime_clock(tmp_path, monkeypatch):
+    from dragon_quant.scan.storage import logs as scan_logs
 
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
     db_path = tmp_path / "dragon.db"
     db_path.write_bytes(b"")
-    monkeypatch.setattr(storage_manager, "LOG_DIR", log_dir)
-    monkeypatch.setattr(storage_manager, "DB_PATH", db_path)
+    monkeypatch.setattr(scan_logs._connection, "DB_PATH", db_path)
     calls: list[tuple[float, str]] = []
 
     def fake_delete(cutoff, source):  # noqa: ANN001 - test stub
@@ -476,9 +473,9 @@ def test_storage_clear_logs_cutoff_uses_the_runtime_clock(tmp_path, monkeypatch)
 
     with fixed(sh("2026-09-11", 15, 30)):
         expected_cutoff = clock.now().timestamp() - 7 * 86400
-        with patch("dragon_quant.storage.db.delete_old_scan_logs",
+        with patch("dragon_quant.scan.storage.logs.delete_old_scan_logs",
                    side_effect=fake_delete):
-            assert storage_manager.StorageManager().clear_logs(days=7) == 0
+            assert scan_logs.clear_scan_logs(days=7) == 0
     assert [source for _, source in calls] == ["v1", "v2"]
     assert all(cutoff == expected_cutoff for cutoff, _ in calls)
 

@@ -3,11 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dragon_quant.cache.data_cache import (
+from dragon_quant.infra.storage.cache import (
     DataCache, _resolve_type, _from_dict, _deserialize,
 )
-from dragon_quant.models.types import KBar, StockInfo, Quote, SectorPerformance
-from dragon_quant import orchestrator as orch
+from dragon_quant.infra.models import KBar, StockInfo, Quote, SectorPerformance
+from dragon_quant.scan.orchestrator import main as orch
 
 
 def _mk_kbar(ts=1700000000000):
@@ -41,7 +41,7 @@ class TestTypeRegistry(unittest.TestCase):
 class TestFromDict(unittest.TestCase):
 
     def test_round_trip_kbar(self):
-        from dragon_quant.cache.data_cache import _to_json_safe
+        from dragon_quant.infra.storage.cache import _to_json_safe
         d = _to_json_safe(_mk_kbar())
         obj = _from_dict(KBar, d)
         self.assertIsInstance(obj, KBar)
@@ -68,7 +68,7 @@ class TestFromDict(unittest.TestCase):
         self.assertFalse(hasattr(obj, "unknown_field"))
 
     def test_deserialize_list(self):
-        from dragon_quant.cache.data_cache import _to_json_safe
+        from dragon_quant.infra.storage.cache import _to_json_safe
         raw = _to_json_safe([_mk_kbar(), _mk_kbar(1700000060000)])
         out = _deserialize("kline:day:600000", raw)
         self.assertEqual(len(out), 2)
@@ -125,8 +125,10 @@ class TestTradeDateCache(unittest.TestCase):
         second.close = 1.9
         self.cache.set_for_trade_date("kline:5min:600000", [first], "2026-06-26", namespace="normal")
         self.cache.set_for_trade_date("kline:5min:600000", [second], "2026-06-29", namespace="normal")
-        self.assertEqual(self.cache.load_for_trade_date("kline:5min:600000", "2026-06-26", namespace="normal")[0].close, 1.5)
-        self.assertIsNone(self.cache.load_for_trade_date("kline:5min:600000", "2026-06-26", namespace="after"))
+        loaded = self.cache.load_for_trade_date("kline:5min:600000", "2026-06-26", namespace="normal")
+        self.assertEqual(loaded[0].close, 1.5)
+        self.assertIsNone(self.cache.load_for_trade_date(
+            "kline:5min:600000", "2026-06-26", namespace="after"))
 
     def test_meta_not_resolved(self):
         # __meta__ 不在注册表，磁盘恢复时原样返回 dict（不还原 dataclass）

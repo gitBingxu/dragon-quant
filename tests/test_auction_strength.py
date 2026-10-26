@@ -2,10 +2,10 @@
 
 import unittest
 
-from dragon_quant.models.types import Quote
-from dragon_quant.auction import evaluate, rank_auctions, AuctionVerdict
-from dragon_quant.auction import registry as R
-from dragon_quant.auction.strength import normalize
+from dragon_quant.infra.models import Quote
+from dragon_quant.review_account.auction import evaluate, rank_auctions, AuctionVerdict
+from dragon_quant.review_account.auction import registry as R
+from dragon_quant.review_account.auction.strength import normalize
 
 
 def _item(h, m, s, price, matched, unmatched):
@@ -163,7 +163,7 @@ class TestScoring(unittest.TestCase):
             self.assertEqual(sr.weight, R.AUCTION_DIM_WEIGHTS[dim])
 
     def test_level_buckets(self):
-        from dragon_quant.auction.strength import _level_of
+        from dragon_quant.review_account.auction.strength import _level_of
         self.assertEqual(_level_of(80.0), "强")
         self.assertEqual(_level_of(50.0), "中")
         self.assertEqual(_level_of(20.0), "弱")

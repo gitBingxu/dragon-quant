@@ -1,18 +1,17 @@
 """tests for 板块三维融合：规范化键、合并/去重/冲突剔除、扫描集成。"""
-import io
-import json
 import tempfile
 import unittest
-from contextlib import ExitStack, redirect_stdout
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from dragon_quant import orchestrator as orch
-from dragon_quant.cache.data_cache import DataCache
-from dragon_quant.models.types import Candidate, SectorPerformance, StockInfo
-from dragon_quant.sectors import (
+from dragon_quant.scan.orchestrator import main as orch
+from dragon_quant.infra.models import SectorPerformance, StockInfo
+from dragon_quant.scan.cache.main import ScanCache
+from dragon_quant.scan.sectors import (
     SECTOR_TOP_N, components_key, sector_1min_key, sector_5min_key,
-    sector_key, split_sector_key,
+    sector_key, sector_ranking_key, split_sector_key, stock_1min_key,
+    stock_5min_key,
 )
 from tests.test_scorers import _min_bars, _quote
 from tests.support import patch_storage_dbs
@@ -38,6 +37,11 @@ class TestSectorKey(unittest.TestCase):
         self.assertEqual(components_key("tdx:gn:1"), "sector:components:tdx:gn:1")
         self.assertEqual(sector_1min_key("tdx:gn:1"), "kline:1min:sector:tdx:gn:1")
         self.assertEqual(sector_5min_key("tdx:gn:1"), "kline:5min:sector:tdx:gn:1")
+
+    def test_scan_only_key_helpers(self):
+        self.assertEqual(sector_ranking_key("tdx", "hy"), "sector:ranking:tdx:hy")
+        self.assertEqual(stock_1min_key("600519"), "kline:1min:600519")
+        self.assertEqual(stock_5min_key("600519"), "kline:5min:600519")
 
 
 class TestMergeSectorRankings(unittest.TestCase):
@@ -112,12 +116,16 @@ class TestThreeDimensionScan(unittest.TestCase):
         # orch.scan() 会 save_dragons → 锁外 fan-out 双写 assets.db 镜像，
         # 必须两个连接点一起隔离，否则镜像写落到真实数据目录。
         self.stack.enter_context(patch_storage_dbs(self.db_path))
-        self.stack.enter_context(patch.object(orch, "RESULTS_DIR", Path(self.tmp.name)))
-        self.cache = DataCache(cache_dir="")
-        self.stack.enter_context(patch.object(orch, "DataCache", return_value=self.cache))
+        self.stack.enter_context(
+            patch("dragon_quant.infra.storage.paths.RESULTS_DIR",
+                  Path(self.tmp.name)))
+        self.cache = ScanCache(cache_dir="")
+        self.stack.enter_context(
+            patch.object(orch, "create_scan_cache", return_value=self.cache))
         self.stack.enter_context(patch.object(orch, "_get_trade_date", return_value="2026-09-11"))
         self.stack.enter_context(patch(
-            "dragon_quant.utils.trading.build_trade_calendar", return_value={"2026-09-11"}))
+            "dragon_quant.infra.market_calendar.build_trade_calendar",
+            return_value={"2026-09-11"}))
 
         self.tdx, self.ths, self.xq, self.tx = Mock(), Mock(), Mock(), Mock()
         self.tdx.get_kline.return_value = []

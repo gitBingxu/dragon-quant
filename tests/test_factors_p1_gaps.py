@@ -9,8 +9,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors import evaluation, storage as fstore
-from dragon_quant.factors.types import FactorValue
+from dragon_quant.infra.factor import evaluation, storage as fstore
+from dragon_quant.infra.factor.types import FactorValue
 
 
 def _calendar(length):
@@ -57,7 +57,7 @@ class Base(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
-        self._patch = patch("dragon_quant.storage.assets_db._connect",
+        self._patch = patch("dragon_quant.infra.assets.db._connect",
                             side_effect=self._connect)
         self._patch.start()
 

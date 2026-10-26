@@ -12,11 +12,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors import engine
-from dragon_quant.factors import storage as fstore
-from dragon_quant.factors.registry import compute_version_info
-from dragon_quant.factors.types import FactorSpec, FactorValue
-from dragon_quant.storage import factors as store
+from dragon_quant.infra.factor import engine
+from dragon_quant.infra.factor import storage as fstore
+from dragon_quant.infra.factor.registry import compute_version_info
+from dragon_quant.infra.factor.types import FactorSpec, FactorValue
+from dragon_quant.infra.factor import sql as store
 
 
 class FactorIntegrationBase(unittest.TestCase):
@@ -28,15 +28,15 @@ class FactorIntegrationBase(unittest.TestCase):
         self.dragon_path = str(Path(self._tmpdir.name) / "dragon.db")
         self.assets_path = str(Path(self._tmpdir.name) / "assets.db")
         self._patches = [
-            patch("dragon_quant.storage.db._connect",
+            patch("dragon_quant.infra.storage.connection._connect",
                   side_effect=lambda *a, **kw: sqlite3.connect(self.dragon_path)),
-            patch("dragon_quant.storage.assets_db._connect",
+            patch("dragon_quant.infra.assets.db._connect",
                   side_effect=self._assets_connect),
         ]
         for item in self._patches:
             item.start()
-        from dragon_quant.storage import db
-        db.init_db()
+        from dragon_quant.infra.storage.connection import init_db
+        init_db()
         self._seed_scan()
         self._seed_vpa()
 
@@ -106,7 +106,7 @@ class FactorIntegrationBase(unittest.TestCase):
 
     def _seed_scan(self, *, trade_date=None, scan_id=None, top_n=25,
                    created_at=None, stocks=None, raw_output=None):
-        from dragon_quant.storage import db
+        from dragon_quant.scan.storage import scans as db
         trade_date = trade_date or self.TRADE_DATE
         scan_id = scan_id or self.SCAN_ID
         created_at = created_at or f"{trade_date} 15:30:00"
@@ -120,7 +120,7 @@ class FactorIntegrationBase(unittest.TestCase):
                    (created_at, scan_id))
 
     def _seed_vpa(self, *, trade_date=None):
-        from dragon_quant.storage import db
+        from dragon_quant.vpa import storage as db
         trade_date = trade_date or self.TRADE_DATE
         factors = [
             {"name": "vol_amount", "title": "量能", "signal": "bullish",
@@ -444,7 +444,14 @@ class TestCliContract(FactorIntegrationBase):
 
 
 class TestDependencyIsolation(unittest.TestCase):
-    """静态约束：factors/* 不 import scorers / providers / review_account。"""
+    """静态约束：factors/* 不 import scores / providers / review_account。
+
+    Task 8 把五维评分器迁到 ``scan.scores``、``scan.sectors``；禁止边必须覆盖
+    **新 canonical 路径**（``scan.scores`` / ``scan.orchestrator`` / ``scan.cache``
+    / ``scan.logger``），不能只检查旧的 ``dragon_quant.scorers`` 别名 shim。
+    Task 9 起 ``scan.storage`` 与 ``vpa.storage`` 是因子层唯一被批准的只读仓储
+    入口，且必须是**函数内 lazy import**（禁止模块级）。
+    """
 
     def _imports(self, path: Path) -> set[str]:
         import ast
@@ -457,16 +464,35 @@ class TestDependencyIsolation(unittest.TestCase):
                 modules.add(node.module)
         return modules
 
+    def _top_level_imports(self, path: Path) -> set[str]:
+        import ast
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        modules = set()
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules.add(node.module)
+        return modules
+
     def test_factors_do_not_import_scorers_or_providers(self):
-        root = Path(__file__).resolve().parents[1] / "dragon_quant" / "factors"
+        root = Path(__file__).resolve().parents[1] / "dragon_quant" / "infra" / "factor"
         forbidden_prefixes = (
-            "dragon_quant.scorers", "dragon_quant.providers",
-            "dragon_quant.review_account", "dragon_quant.vpa",
+            "dragon_quant.scorers", "dragon_quant.scan.scores",
+            "dragon_quant.scan.sectors", "dragon_quant.scan.orchestrator",
+            "dragon_quant.scan.cache", "dragon_quant.scan.logger",
+            "dragon_quant.infra.provider",
+            "dragon_quant.review_account",
         )
         for path in root.rglob("*.py"):
-            # 方案 §3.4 修订：factors/finance.py 是唯一允许触网的模块
-            allowed = {"dragon_quant.providers"} if path.name == "finance.py" else set()
+            # 方案 §3.4 修订：infra/factor/finance.py 是唯一允许触网的模块
+            allowed = {"dragon_quant.infra.provider"} if path.name == "finance.py" else set()
             for module in self._imports(path):
+                if module.startswith("dragon_quant.vpa"):
+                    with self.subTest(file=path.name, module=module):
+                        self.assertEqual(module, "dragon_quant.vpa.storage",
+                                         f"{path} 只允许只读 vpa.storage")
+                    continue
                 for prefix in forbidden_prefixes:
                     if prefix in allowed:
                         continue
@@ -474,12 +500,35 @@ class TestDependencyIsolation(unittest.TestCase):
                         self.assertFalse(module.startswith(prefix),
                                          f"{path} 违规 import {module}")
 
-    def test_storage_does_not_import_factors(self):
-        root = Path(__file__).resolve().parents[1] / "dragon_quant" / "storage"
+    def test_factor_storage_reads_are_function_local(self):
+        """Task 9：只读仓储必须函数内 lazy import，禁止模块级 feature 依赖。"""
+        root = Path(__file__).resolve().parents[1] / "dragon_quant" / "infra" / "factor"
         for path in root.rglob("*.py"):
-            for module in self._imports(path):
+            for module in self._top_level_imports(path):
                 with self.subTest(file=path.name, module=module):
-                    self.assertFalse(module.startswith("dragon_quant.factors"))
+                    self.assertFalse(
+                        module.startswith("dragon_quant.scan.storage"),
+                        f"{path} 不得模块级 import {module}")
+                    self.assertFalse(
+                        module.startswith("dragon_quant.vpa"),
+                        f"{path} 不得模块级 import {module}")
+
+    def test_storage_does_not_import_factors(self):
+        """存储层不依赖因子层（infra.storage / scan.storage / vpa.storage）。"""
+        package = Path(__file__).resolve().parents[1] / "dragon_quant"
+        roots = [
+            package / "infra" / "storage",
+            package / "scan" / "storage",
+            package / "vpa",
+        ]
+        offenders: dict[str, list[str]] = {}
+        for root in roots:
+            for path in root.rglob("*.py"):
+                for module in self._imports(path):
+                    if (module == "dragon_quant.infra.factor"
+                            or module.startswith("dragon_quant.infra.factor.")):
+                        offenders.setdefault(path.name, []).append(module)
+        self.assertEqual(offenders, {})
 
 
 if __name__ == "__main__":

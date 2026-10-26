@@ -13,7 +13,7 @@ import json
 from datetime import timedelta, timezone
 from typing import Any, Optional
 
-from dragon_quant.runtime import clock
+from dragon_quant.infra import clock
 
 _SHANGHAI = timezone(timedelta(hours=8))
 
@@ -26,7 +26,7 @@ def load_strategy_params(path: Optional[str]) -> Optional[dict]:
     """
     if not path:
         return None
-    from dragon_quant.review_account.models import StrategyConfig
+    from dragon_quant.review_account.main import StrategyConfig
 
     with open(path, encoding="utf-8") as handle:
         values = json.load(handle)

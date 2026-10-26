@@ -1,6 +1,6 @@
 """assets 命令：数据资产云端同步的薄 CLI adapter。
 
-M6 起装配与动作分派在 :mod:`dragon_quant.assets_sync.cli_service`（默认
+M6 起装配与动作分派在 :mod:`dragon_quant.infra.assets.sync.cli_service`（默认
 ``S3Backend`` + 可注入后端；日期/错误协调）。本模块只保留参数映射、人读/JSON
 输出与进程退出码，**不构造后端、不调用同步函数、不拼资产源**。
 
@@ -123,7 +123,7 @@ def _emit_backfill(outcome, *, as_json: bool) -> None:
 
 def handle(args, services):
     """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。"""
-    from dragon_quant.assets_sync.cli_service import SYNC_ACTIONS, run
+    from dragon_quant.infra.assets.main import SYNC_ACTIONS, run
 
     action = getattr(args, "assets_action", None)
     outcome = run(action, args, services=services)

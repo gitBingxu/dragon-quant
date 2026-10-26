@@ -11,8 +11,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from dragon_quant.factors import evaluation, storage as fstore
-from dragon_quant.factors.types import FactorValue
+from dragon_quant.infra.factor import evaluation, storage as fstore
+from dragon_quant.infra.factor.types import FactorValue
 
 
 def _calendar(length):
@@ -69,7 +69,7 @@ class EvalBase(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._db_path = str(Path(self._tmpdir.name) / "assets.db")
         self._patch = patch(
-            "dragon_quant.storage.assets_db._connect",
+            "dragon_quant.infra.assets.db._connect",
             side_effect=self._connect)
         self._patch.start()
 
@@ -308,7 +308,7 @@ class TestCliExportContract(EvalBase):
         bars, dates, labels = build_panel(days=25)
         self.seed_values(dates, labels)
         fake = FakeData(bars, dates)
-        with patch("dragon_quant.review_account.data.MarketData",
+        with patch("dragon_quant.review_account.main.MarketData",
                    return_value=fake):
             code, text, err = self._run([
                 "factor", "eval", "--name", "five_dim_composite",

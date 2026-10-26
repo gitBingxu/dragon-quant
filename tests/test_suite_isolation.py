@@ -54,7 +54,8 @@ def test_data_dir_is_redirected_into_the_isolated_temp_root():
     assert isolated.name.startswith("dragon-quant-tests-")
 
     # 业务流程 import 后创建的所有目录都必须落在隔离根内。
-    from dragon_quant.storage import assets_db, paths
+    from dragon_quant.infra.assets import db as assets_db
+    from dragon_quant.infra.storage import paths
 
     for path in (
         paths.DATA_DIR,

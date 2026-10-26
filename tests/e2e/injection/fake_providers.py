@@ -142,7 +142,7 @@ def _respond(provider: str, method: str, **args: object):
 
 
 def _model(name: str):
-    from dragon_quant.models import types as model_types
+    from dragon_quant.infra import models as model_types
 
     return getattr(model_types, name)
 

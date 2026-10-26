@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["dragon_quant", "dragon_quant.*", "web_ui", "web_ui.*"]
+exclude = ["dragon_quant.tests", "dragon_quant.tests.*"]
 
 [tool.setuptools.package-data]
 web_ui = ["dist/**/*"]

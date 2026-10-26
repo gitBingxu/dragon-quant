@@ -3,4 +3,5 @@ prune bin
 prune lib
 prune skills
 prune test
+prune dragon_quant/tests
 prune node_modules

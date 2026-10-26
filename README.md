@@ -586,6 +586,7 @@ dragon_quant/
 │           ├── doctor.py / errors.py
 │           └── backends/
 │               ├── __init__.py / base.py / local.py / s3.py / signer.py
+├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
 
 # 同级仓库包（不是 dragon_quant 的子包）
 web_ui/                          # 回测 Web UI（Vite+React+TS / stdlib HTTPServer；web_ui.start_server）
@@ -613,19 +614,19 @@ web_ui/                          # 回测 Web UI（Vite+React+TS / stdlib HTTPSe
 
 ```bash
 # M0 harness 自检（不跑业务用例）
-python tests/e2e/harness/runner.py --self-check
+python dragon_quant/tests/e2e/harness/runner.py --self-check
 
 # 全量离线 E2E（真实 CLI 子进程 + golden；51 个 parser 节点 / 15 个顶层命令）
-python -m pytest tests/e2e -q
+python -m pytest dragon_quant/tests/e2e -q
 
 # 单元 / 集成测试（排除 e2e 与需要真实网络的 smoke）
-python -m pytest tests -q --ignore=tests/e2e --ignore=tests/smoke
+python -m pytest dragon_quant/tests -q --ignore=dragon_quant/tests/e2e --ignore=dragon_quant/tests/smoke
 
 # Node 安装器测试（隔离 HOME/TMPDIR/npm cache，不访问 registry）
 npm test
 ```
 
-E2E 的安全边界：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟并拦截 socket/DNS，禁止真实网络、Cookie、R2/B2。`tests/e2e/coverage-map.json` 强制每个 parser 节点映射到真实测试，新增命令必须同步更新。
+E2E 的安全边界：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟并拦截 socket/DNS，禁止真实网络、Cookie、R2/B2。`dragon_quant/tests/e2e/coverage-map.json` 强制每个 parser 节点映射到真实测试，新增命令必须同步更新。
 
 ## 持久化
 

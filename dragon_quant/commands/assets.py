@@ -114,8 +114,9 @@ def _emit_backfill(outcome, *, as_json: bool) -> None:
                     print(f"  - {item.get('date') or '(全局)'}: {item.get('reason')}",
                           file=sys.stderr)
         if not payload.get("ok"):
-            reasons = [item.get("reason") for item in payload.get("failed") or []
-                       if isinstance(item, dict) and item.get("reason")]
+            reasons = [reason for item in payload.get("failed") or []
+                       if isinstance(item, dict)
+                       and isinstance(reason := item.get("reason"), str) and reason]
             detail = "；".join(reasons[:3]) or payload.get("error") or "未知错误"
             print(f"❌ {outcome.command} 失败：{detail}", file=sys.stderr)
     sys.exit(outcome.exit_code)

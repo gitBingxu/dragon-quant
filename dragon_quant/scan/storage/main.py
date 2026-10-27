@@ -154,8 +154,10 @@ def _serialize_raw_output(raw_output) -> Optional[str]:
     return json.dumps(raw_output, ensure_ascii=False)
 
 
-def _dedupe_dragon_rows(rows: list[dict], *, scan_date_fmt: str,
-                        source: str, calendar) -> tuple[list[dict], int, int]:
+def _dedupe_dragon_rows(
+        rows: list[dict], *, scan_date_fmt: str, source: str,
+        calendar: set[str] | Callable[[], Optional[set[str]]] | None,
+) -> tuple[list[dict], int, int]:
     """5 日去重：跨日重复入选且距上次 < 5 个交易日时保留 rank 更优者。
 
     ``calendar`` 可为交易日集合或返回集合的零参 callable。``None`` 表示调用方

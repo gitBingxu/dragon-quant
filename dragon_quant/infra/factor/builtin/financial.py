@@ -20,7 +20,12 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from dragon_quant.infra.factor.types import FactorContext, FactorFrame, FactorSpec
+from dragon_quant.infra.factor.types import (
+    FactorContext,
+    FactorFrame,
+    FactorSpec,
+    SpecDefaultsWithParams,
+)
 
 SOURCE = "fin"
 IMPL_PREFIX = "builtin.financial"
@@ -35,6 +40,11 @@ def _number(value) -> Optional[float]:
     return numeric if math.isfinite(numeric) else None
 
 
+def _sorted_texts(values) -> list[str]:
+    """去重排序的文本集合（源列均为 TEXT；``None`` / 空串按原真值过滤语义排除）。"""
+    return sorted({value for value in values if isinstance(value, str) and value})
+
+
 def _records(ctx: FactorContext) -> dict[str, dict]:
     """观测回退 + 账本选中记录（账本优先；load 已保证两者不相交）。"""
     rows = dict(ctx.source_rows.get("observed") or {})
@@ -45,8 +55,8 @@ def _records(ctx: FactorContext) -> dict[str, dict]:
 def _base_meta(ctx: FactorContext) -> dict:
     cohort = dict(ctx.source_rows.get("cohort") or {})
     records = _records(ctx)
-    pit_basis = sorted({row.get("pit_basis") for row in records.values()
-                        if row.get("pit_basis")})
+    pit_basis = _sorted_texts(
+        row.get("pit_basis") for row in records.values())
     return {
         "period": cohort.get("modal_period"),
         "pit_basis": (pit_basis[0] if len(pit_basis) == 1
@@ -55,10 +65,10 @@ def _base_meta(ctx: FactorContext) -> dict:
             basis: sum(1 for row in records.values() if row.get("pit_basis") == basis)
             for basis in pit_basis
         },
-        "layout_keys": sorted({row.get("layout_key") for row in records.values()
-                               if row.get("layout_key")}),
-        "file_md5s": sorted({row.get("file_md5") for row in records.values()
-                             if row.get("file_md5")}),
+        "layout_keys": _sorted_texts(
+            row.get("layout_key") for row in records.values()),
+        "file_md5s": _sorted_texts(
+            row.get("file_md5") for row in records.values()),
         "cohort": {
             "modal_period": cohort.get("modal_period"),
             "n_total": cohort.get("n_total"),
@@ -220,7 +230,7 @@ def compute_revenue_yoy(ctx: FactorContext) -> FactorFrame:
     return _yoy_frame(ctx, "zhuying_shouru")
 
 
-_SPEC_FIELDS = dict(
+_SPEC_FIELDS = SpecDefaultsWithParams(
     frequency="1q",
     source=SOURCE,
     available_phase="prep",

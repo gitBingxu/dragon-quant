@@ -134,8 +134,11 @@ class _Market:
         getter = getattr(self.data, "calendar", None)
         if callable(getter):
             try:
-                dates = sorted({_normalize_date(item)
-                                for item in getter(start, end) if item})
+                raw_dates = getter(start, end)
+                if not isinstance(raw_dates, (list, tuple, set)):
+                    # 与原生 for 循环不可迭代时抛出的 TypeError 文案逐字一致
+                    raise TypeError(f"'{type(raw_dates).__name__}' object is not iterable")
+                dates = sorted({_normalize_date(item) for item in raw_dates if item})
             except Exception as exc:
                 degraded.append(f"calendar_unavailable: {type(exc).__name__}: {exc}")
         if not dates:
@@ -171,8 +174,12 @@ def _forward_return(available_at: str, horizon: int, calendar: list[str],
     end_bar = bars.get(calendar[end_index])
     if not _tradable(start_bar) or not _tradable(end_bar):
         return None
-    start_open = float(_bar_attr(start_bar, "open"))
-    end_open = float(_bar_attr(end_bar, "open"))
+    start_open_raw = _bar_attr(start_bar, "open")
+    end_open_raw = _bar_attr(end_bar, "open")
+    if start_open_raw is None or end_open_raw is None:
+        return None      # 不可达：_tradable 已保证 open 非空
+    start_open = float(start_open_raw)
+    end_open = float(end_open_raw)
     if start_open <= 0:
         return None
     return (end_open / start_open - 1.0) * 100.0
@@ -261,7 +268,9 @@ def _aggregate_ic(days: list[dict], horizon: int) -> dict:
     }
 
 
-def _group_stats(days: list[dict], groups: int) -> tuple[list[dict], Optional[float], Optional[float]]:
+def _group_stats(
+        days: list[dict], groups: int,
+) -> tuple[list[dict], Optional[float], list[dict[str, int]]]:
     totals = [{"n": 0, "sum": 0.0, "hits": 0} for _ in range(groups)]
     memberships: list[dict[str, int]] = []
     pool_sum = 0.0

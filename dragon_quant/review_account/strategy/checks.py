@@ -311,7 +311,7 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
             if exc.signal is not None:
                 detail["vetoed_signal"] = exc.signal
             return _enrich_detail(detail, candidate, cfg)
-    if signal:
+    if signal and row is not None:
         reason, text = signal["code"], signal["reason_text"]
         checks = explain_buy_checks(candidate, row, cfg, prev_row, hist_rows, intraday_bars,
                                     selected_rule=signal["code"])

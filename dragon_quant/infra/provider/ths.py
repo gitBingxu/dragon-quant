@@ -21,7 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Optional
+from typing import Literal, Optional, overload
 
 from dragon_quant.infra.models import Quote, KBar, StockInfo, SectorPerformance
 from dragon_quant.infra.provider.base import StockProvider
@@ -97,7 +97,7 @@ _FETCH_FAILURES: "dict[str, int]" = {}
 _FETCH_LOCK = threading.Lock()
 
 
-def _record_failure(e: Exception) -> None:
+def _record_failure(e: Optional[Exception]) -> None:
     """把一次取数失败按类别累加（仅计数，不打印）。"""
     if isinstance(e, urllib.error.HTTPError):
         label = f"HTTP {e.code}"
@@ -141,6 +141,18 @@ def _fetch(url: str, referer: str = "", gbk: bool = False) -> Optional[str]:
     return None
 
 
+@overload
+def _fetch_with_retry(url: str, referer: str = "", gbk: bool = False,
+                      attempts: int = 3, backoff: float = 0.8,
+                      raise_on_exhaust: Literal[False] = False) -> Optional[str]: ...
+@overload
+def _fetch_with_retry(url: str, referer: str = "", gbk: bool = False,
+                      attempts: int = 3, backoff: float = 0.8,
+                      raise_on_exhaust: Literal[True] = True) -> str: ...
+@overload
+def _fetch_with_retry(url: str, referer: str = "", gbk: bool = False,
+                      attempts: int = 3, backoff: float = 0.8,
+                      raise_on_exhaust: bool = False) -> Optional[str]: ...
 def _fetch_with_retry(url: str, referer: str = "", gbk: bool = False,
                       attempts: int = 3, backoff: float = 0.8,
                       raise_on_exhaust: bool = False) -> Optional[str]:

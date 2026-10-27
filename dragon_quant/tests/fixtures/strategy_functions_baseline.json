@@ -24,7 +24,7 @@
   "_rule_hard_stop": "f69173b3973afce89eee905d6cee5e4394376b2c0f9354829deb0a7bbb462920",
   "_rule_hard_time_stop": "80449574ef4f81b8281029e117eeccb54d0d1be0b4e83b5fefded49b9d7259f7",
   "_rule_high_open_clear": "111857790e9989944f2e4c08ed0e235dd3e5e169fb6cd789e53d58bded9fbacb",
-  "_rule_ma5_pullback": "febc11cf45c09b5ffab09e9166e05abbd21c24527c48a4ed104c1e9b49931c73",
+  "_rule_ma5_pullback": "838998dd6322ad18af5d976c4127debc66ec7c4483e1a03b0795c3d51b2ffe34",
   "_rule_soft_time_stop": "3f06255bbdc0c9982986f68307ee9c0812d990f71c4870b855dfe44cf9a67b33",
   "_rule_trailing": "22598d44efb1bde1e047549d13d16bdb94bb6ac4a936b8576e45db895f883b4b",
   "_rule_turn_strong": "045f5e06b9bb26e3d8944e0051c3c778aab54c617408d821fa50b759b924661d",
@@ -34,7 +34,7 @@
   "_sell": "ce3306427b00867727a30d3d78c206a347d88db528e1cf698f6edba95095491d",
   "_tiered_drawdown": "758c2d2e6c6edf72472c6a5e0d4c9ef31c5330dcef3d00f4ee21b3a4ad14ba10",
   "_turn_strong_check": "89a66f1c5ae9637d06f4958274998178348382e07bc597b55a4cf1144323a272",
-  "_turn_strong_preconditions": "6deec6b9d04342d09c4aee10c158c685680a0d49ac265e68a639e41e3623aa4f",
+  "_turn_strong_preconditions": "ce7ec23893a4b7fe416053d85177999ecdebe099c9ddb32386d866ca82cd5089",
   "_weak_close_break": "8f41a9dd8478dc288d15252eaa81725685a5bc3ffe10b97f6d9e1a71bf31828e",
   "_window_label": "be6013e12e9ac1ddff18c1a00395e590abf9fa53552dd3138d799f04c9c13207",
   "buy_check_placeholders": "d0fb313d9204a5c643aa123643748194419a4a8031f59f01fcba8b25c43925e7",
@@ -43,6 +43,6 @@
   "evaluate_buy_checks": "77cbfbef810f9257990051cea800973eddb7384c5d839224b879b0c546ac2740",
   "evaluate_divergence_buy": "9dfe6810a894a2e00f8b324be4fe35eda00a87fcdb2e2fcc8b87b3ba62582659",
   "evaluate_sell": "364108b333642ec4a981d835d5487de28702b9cc7ea874af2719ee00805d94b8",
-  "explain_buy_candidate": "44fc456ea1bae6979b601f6a7122558845eb91603c47501b0cdc4c39e733c4b3",
+  "explain_buy_candidate": "e302e53ea04ed0ab0e506dfd906641608a388645a1d08817f9c2a73ff2fc3df4",
   "explain_buy_checks": "f98b9d17acc92d79dfe0623b324a513d244738c5832c8db4eb546026c521e41e"
 }

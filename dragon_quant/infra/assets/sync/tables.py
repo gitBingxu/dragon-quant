@@ -58,6 +58,19 @@ class TableSpec:
     def unit_key(self) -> str:
         return f"{self.source}:{self.asset_type}"
 
+    @property
+    def static_key(self) -> str:
+        """static 分区的字面量键。
+
+        非 static 单元访问属注册错误：``_validate_specs()`` 在模块导入期已拦截
+        （``partition_kind="static"`` 必须声明 ``static_partition``），因此
+        ``RuntimeError`` 分支在正常运行期不可达。
+        """
+        if self.static_partition is None:
+            raise RuntimeError(
+                f"static 单元必须声明 static_partition: {self.unit_key}")
+        return self.static_partition
+
 
 TABLE_SPECS: tuple[TableSpec, ...] = (
     # ── 快照（volatile：原地 UPSERT）────────────────────────────────────────
@@ -435,11 +448,11 @@ class CompositeTableSource:
         try:
             for spec in self.specs:
                 if spec.partition_kind == "static":
-                    where, params = _where_clause(spec, spec.static_partition)
+                    where, params = _where_clause(spec, spec.static_key)
                     row = conn.execute(
                         f"SELECT 1 FROM {spec.table}{where} LIMIT 1", params).fetchone()
                     if row is not None:
-                        found.add(spec.static_partition)
+                        found.add(spec.static_key)
                     continue
                 # 分区枚举只保留 filter_sql（不带单分区等值条件）。
                 clauses = [f"({spec.filter_sql})"] if spec.filter_sql else []
@@ -548,7 +561,7 @@ class CompositeTableSource:
                     rows = conn.execute(
                         f"SELECT MAX({clock}), COUNT(*), "
                         f"COALESCE(SUM({size}), 0) FROM {spec.table}{where}", ()).fetchall()
-                    keyed = [(spec.static_partition, row) for row in rows]
+                    keyed = [(spec.static_key, row) for row in rows]
                 else:
                     sql = (f"SELECT {spec.partition_column}, MAX({clock}), COUNT(*), "
                            f"COALESCE(SUM({size}), 0) FROM {spec.table}{where} "
@@ -581,7 +594,7 @@ class CompositeTableSource:
                 if not spec.volatile:
                     continue
                 if spec.partition_kind == "static":
-                    found.add(spec.static_partition)
+                    found.add(spec.static_key)
                     continue
                 clauses = [f"({spec.filter_sql})"] if spec.filter_sql else []
                 sql = f"SELECT DISTINCT {spec.partition_column} FROM {spec.table}"

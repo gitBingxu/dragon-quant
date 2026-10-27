@@ -29,7 +29,12 @@ from dragon_quant.infra.assets import db as assets_db
 _ASSET_TYPE_RE = re.compile(r"^[a-z0-9_]+$")
 
 
-def _check_asset_type(source: str, asset_type: str) -> None:
+def _check_asset_type(source: str, asset_type: object) -> None:
+    """校验 ``asset_type`` 形如 ``[a-z0-9_]+``；非 str 一律 ValueError。
+
+    形参声明为 ``object``：校验器本就要处理「任意来源取值」，函数体的
+    ``isinstance`` 守卫是唯一判定真源，运行期行为与 ``str`` 注解时完全相同。
+    """
     if not isinstance(asset_type, str) or not _ASSET_TYPE_RE.match(asset_type):
         raise ValueError(f"非法 asset_type: {source}:{asset_type}")
 
@@ -86,10 +91,11 @@ class PrepAssetSource:
                 continue
             try:
                 _check_asset_type(self.name, asset_type)
-                shards.append(codec.build_shard(
-                    trade_date, asset_type, self.name, row.get("payload"),
-                    created_at=row.get("created_at") or "",
-                ))
+                if isinstance(asset_type, str):
+                    shards.append(codec.build_shard(
+                        trade_date, asset_type, self.name, row.get("payload"),
+                        created_at=row.get("created_at") or "",
+                    ))
             except (TypeError, ValueError) as exc:
                 failed.append({
                     "source": self.name,

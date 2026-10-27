@@ -14,7 +14,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, TypedDict
+
+
+class SpecDefaults(TypedDict, total=False):
+    """``FactorSpec`` 构造参数的默认值包。
+
+    ``builtin/*`` 用 ``SpecDefaults(...)``（等价于 ``dict(...)`` 的运行期行为）
+    声明共享默认值，供 ``FactorSpec(**defaults)`` 解包；TypedDict 让每个键
+    保留各自的精确类型，避免 ``dict(...)`` 被推断为 ``dict[str, str | bool]``。
+
+    ``params`` 刻意**不在此处**：需要它的注册表使用 ``SpecDefaultsWithParams``，
+    本身在个别 ``FactorSpec`` 上显式传 ``params=`` 的注册表继续用本类型，
+    两者不会在同一个 ``**`` 解包里与显式参数冲突。
+    """
+
+    frequency: str
+    source: str
+    available_phase: str
+    pit_rule: str
+    lookback: int
+    default_enabled: bool
+    owner: str
+
+
+class SpecDefaultsWithParams(SpecDefaults, total=False):
+    """``SpecDefaults`` + 共享 ``params``（仅整族共用同一参数集的注册表使用）。"""
+
+    params: Mapping[str, object]
 
 
 @dataclass(frozen=True)

@@ -477,7 +477,7 @@ def _macro_session(instruments: dict) -> Optional[str]:
     return kinds[0]
 
 
-def _normalize_macro_record(rec: dict, key: str, trade_date: str) -> Optional[dict]:
+def _normalize_macro_record(rec: object, key: str, trade_date: str) -> Optional[dict]:
     spec = SPEC_BY_KEY.get(key)
     if spec is None or not isinstance(rec, dict):
         return None

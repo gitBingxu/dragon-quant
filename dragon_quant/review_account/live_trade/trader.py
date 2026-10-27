@@ -89,7 +89,7 @@ class LiveTrader:
         # cutoff 只截断事件流（强制模式下钳到最后一根已完成K，避免日K兜底路径
         # 以当日收盘价补成交）；target 仍作影子状态 as-of，保持真实当前时点，
         # 使同日在 cutoff 之后的既有平仓腿（如 15:00:00.001）仍参与 sold_today/风控。
-        cutoff = min(target, until) if forced else target
+        cutoff = min(target, until) if (forced and until is not None) else target
 
         if command == "buy":
             result = self._run_buy(day, target, until, calendar, cutoff, forced)

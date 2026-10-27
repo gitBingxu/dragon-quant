@@ -112,25 +112,25 @@ def historical_events(day: str, candidates: list[dict], codes: set[str], data: M
     `until` 用于盘中（实时今日）只取到最新已完成的5分钟K。买卖决策始终复用同一
     evaluate_buy/evaluate_sell，本函数只决定数据可用性与成交口径。
     """
-    codes = sorted(codes)
-    if not codes:
+    ordered_codes = sorted(codes)
+    if not ordered_codes:
         yield from _daily_events(day, candidates, [], {}, {})
         return
     # 无日K历史仍抛错（数据源故障，不是停牌）；有历史但当日缺行由可用性判定处理。
-    histories = {code: data.daily(code, day) for code in codes}
-    intraday = {code: data.try_intraday(code, day, until) for code in codes}
+    histories = {code: data.daily(code, day) for code in ordered_codes}
+    intraday = {code: data.try_intraday(code, day, until) for code in ordered_codes}
 
     if not historical_day(day):
-        if all(intraday[code] is not None for code in codes):
-            yield from _intraday_events(day, candidates, codes, histories, intraday, {})
+        if all(intraday[code] is not None for code in ordered_codes):
+            yield from _intraday_events(day, candidates, ordered_codes, histories, intraday, {})
         else:
-            yield from _daily_events(day, candidates, codes, histories, {})
+            yield from _daily_events(day, candidates, ordered_codes, histories, {})
         return
 
-    has_daily = {code: is_tradable_daily_bar(daily_bar(histories[code], day)) for code in codes}
-    unavailable = {code: UNAVAILABLE_SUSPENDED for code in codes
+    has_daily = {code: is_tradable_daily_bar(daily_bar(histories[code], day)) for code in ordered_codes}
+    unavailable = {code: UNAVAILABLE_SUSPENDED for code in ordered_codes
                    if intraday[code] is None and not has_daily[code]}
-    active = [code for code in codes if code not in unavailable]
+    active = [code for code in ordered_codes if code not in unavailable]
 
     if not active:  # 全部停牌：一条空白占位事件，净值不变、推进引擎换日
         yield MarketEvent(at(day, "15:00"), "late", {}, candidates,

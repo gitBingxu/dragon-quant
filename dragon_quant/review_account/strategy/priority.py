@@ -106,6 +106,8 @@ def _factor_component(candidate: dict, enabled: bool) -> tuple[int, float, str]:
     if block.get("mode") != "on":
         return FACTOR_RANK_SCORED, 0.0, "degraded"
     score = block.get("score")
+    if score is None:        # 原路径 float(None) → TypeError，返回相同缺失桶
+        return FACTOR_RANK_MISSING, 0.0, "on"
     try:
         number = float(score)
     except (TypeError, ValueError):

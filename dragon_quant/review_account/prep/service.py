@@ -159,8 +159,13 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
             errors[name] = f"{type(e).__name__}: {e}"
             return default
 
-    sentiment = _guard("sentiment", lambda: compute_sentiment(usable),
-                       {"degraded": ["compute_error"]})
+    sentiment_result = _guard("sentiment", lambda: compute_sentiment(usable),
+                              {"degraded": ["compute_error"]})
+    # 降级兜底与 compute_sentiment 的返回点恒为 dict；显式窄化后写入异构键
+    # （factor_errors / degraded）不再被推断成 dict[str, list[str]]。
+    sentiment: dict[str, object] = (
+        dict(sentiment_result) if isinstance(sentiment_result, dict)
+        else {"degraded": ["compute_error"]})
     main_boards = _guard("main_boards", lambda: compute_main_boards(usable), [])
     candidates = _guard("candidates", lambda: compute_candidates(usable, trade_date), [])
     candidates = _guard("verdicts",
@@ -184,9 +189,14 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
             macro_marks.append("macro_same_day_missing")
 
     if errors:
-        sentiment["factor_errors"] = {**sentiment.get("factor_errors", {}), **errors}
+        existing_errors = sentiment.get("factor_errors")
+        merged_errors = dict(existing_errors) if isinstance(existing_errors, dict) else {}
+        merged_errors.update(errors)
+        sentiment["factor_errors"] = merged_errors
+    existing_degraded = sentiment.get("degraded")
+    base_degraded = existing_degraded if isinstance(existing_degraded, list) else []
     sentiment["degraded"] = sorted(
-        set(sentiment.get("degraded") or []) | set(degraded) | set(macro_marks))
+        set(base_degraded) | set(degraded) | set(macro_marks))
     return {
         "trade_date": trade_date,
         "version": "0.6",

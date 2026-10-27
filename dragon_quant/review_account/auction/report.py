@@ -21,15 +21,21 @@ def _code_of(snapshot: dict) -> str:
 
 
 def _strength_of(snapshot: dict) -> float:
+    raw = snapshot.get("strength")
+    if raw is None:          # None 原本走 float(None) 的 TypeError 兜底
+        return 0.0
     try:
-        return float(snapshot.get("strength"))
+        return float(raw)
     except (TypeError, ValueError):
         return 0.0
 
 
 def _strength_text(snapshot: dict) -> str:
+    raw = snapshot.get("strength")
     try:
-        return f"{float(snapshot.get('strength')):.1f}"
+        if raw is None:      # None 原本走 float(None) 的 TypeError 兜底
+            raise ValueError("missing strength")
+        return f"{float(raw):.1f}"
     except (TypeError, ValueError):
         return "—"
 

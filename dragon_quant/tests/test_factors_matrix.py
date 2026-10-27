@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from dragon_quant.infra.factor import stats as fstats
 from dragon_quant.infra.factor.matrix import (
-    CleanConfig, export_matrix, identity_clean,
+    CleanConfig, _clean_cross_section, export_matrix, identity_clean,
 )
 from dragon_quant.infra.factor.types import FactorValue
 from dragon_quant.infra.factor import storage as fstore
@@ -95,6 +95,26 @@ class MatrixBase(unittest.TestCase):
             source_meta_json=(json.dumps(meta) if meta else None))
             for code, value in values.items()]
         fstore.replace_factor_day(trade_date, name, version, rows)
+
+
+class TestCleanCrossSectionSkipContract(unittest.TestCase):
+    """§8.5-2：单日截面清洗的 skipped 键集合是导出 sidecar 的锁定契约。"""
+
+    def test_skipped_keys_are_locked(self):
+        skipped = {}
+        _clean_cross_section([("A", 1.0), ("B", 1.0)],
+                             CleanConfig(winsorize="mad", normalize="none"), skipped)
+        self.assertEqual(set(skipped), {"winsorize_skipped"})
+        self.assertEqual(skipped["winsorize_skipped"], "mad_zero")
+
+        skipped = {}
+        _clean_cross_section([("A", 1.0)],
+                             CleanConfig(winsorize="none", normalize="rank"), skipped)
+        self.assertEqual(set(skipped), {"normalize_skipped"})
+        self.assertEqual(skipped["normalize_skipped"], "insufficient_cross_section")
+
+        allowed = {"winsorize_skipped", "normalize_skipped"}
+        self.assertTrue(set(skipped) <= allowed)
 
 
 class TestExportMatrix(MatrixBase):

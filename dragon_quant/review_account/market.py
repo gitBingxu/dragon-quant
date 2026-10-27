@@ -5,11 +5,12 @@ import math
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.indicators import (
-    enrich_daily_klines, is_tradable_daily_bar,
+    enrich_daily_klines,
+    is_tradable_daily_bar as is_tradable_daily_bar,
 )
-from dragon_quant.review_account.priority import (
+from dragon_quant.review_account.strategy.priority import (
     PREP_RECOMMENDED, auction_state, prep_state, ranking_mode,
 )
 
@@ -33,16 +34,10 @@ def daily_bar(history: list[KBar], day: str) -> Optional[KBar]:
     return next((b for b in history if event_date(b.timestamp) == day), None)
 
 
-# is_tradable_daily_bar 的唯一实现在 indicators.py（无 market 依赖，避免循环导入）；
-# 此处经顶部 import re-export，保持既有 `from market import is_tradable_daily_bar` 调用点不变。
-
-
 def last_close(history: list[KBar], day: str) -> Optional[float]:
     """day 之前最后一根日K的收盘价（停牌持仓估值用；无历史 → None）。"""
     prior = [b for b in history if event_date(b.timestamp) < day]
     return prior[-1].close if prior else None
-
-
 def bar_times(day: str) -> list[int]:
     return [at(day, start) + i * 300_000 for start, count in (("09:35", 24), ("13:05", 24))
             for i in range(count)]
@@ -76,7 +71,7 @@ def prep_snapshot_for(day: str, source: str,
         return None, None, "calendar"
     snapshot_date = dates[-1]
     try:
-        from dragon_quant.storage import assets_db
+        from dragon_quant.infra.assets import db as assets_db
         snap = assets_db.get_prep_snapshot(snapshot_date, source=source)
     except Exception:
         return None, None, "read_error"
@@ -121,7 +116,7 @@ def _annotate(candidate: dict, prep_block: dict, auction_block: dict) -> None:
 
 
 def _default_auction_loader(day: str, source: str = "v2") -> list[dict]:
-    from dragon_quant.storage import assets_db
+    from dragon_quant.infra.assets import db as assets_db
     return assets_db.list_auction_snapshots(day, source=source)
 
 
@@ -137,7 +132,7 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
     - 旧快照完全不含 verdict → 使用快照候选、P 全 Unknown（C7）。
 
     因子注解（P2）：``factor_ranking_enabled`` 关闭 → 零读取（``factor_mode="off"``）；
-    开启 → ``factors.decision.annotate_pool`` 按**每只候选自己的 trade_date** 读因子值，
+    开启 → ``infra.factor.decision.annotate_pool`` 按**每只候选自己的 trade_date** 读因子值，
     写 ``entry_priority.factor``，并把 ``factor_mode`` / ``factor_model`` /
     ``factor_coverage`` / ``factor_degraded`` 只增地放回 ``ctx``。读取失败或覆盖率
     不足只降级整日排序，绝不中断 buy/review-account。
@@ -224,7 +219,8 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
         pool = _legacy_candidates(calendar, day, cfg, loader)
         ctx["pool_source"] = "legacy"
         for cand in pool:
-            snap_cand = verdict_map.get(cand.get("code"))
+            code = cand.get("code")
+            snap_cand = verdict_map.get(code) if isinstance(code, str) else None
             state = prep_state(snap_cand) if snap_cand is not None else None
             _annotate(cand, _prep_block(snap_cand, snapshot_date, state),
                       _auction_block(None, day))
@@ -256,7 +252,7 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
     # 因子注解（P2）：关闭 → 零读取；开启 → 按每只候选自己的 trade_date 读因子值。
     # 任何失败只把整日排序降级，绝不中断回测/buy。
     if factor_on:
-        from dragon_quant.factors import decision as factor_decision
+        from dragon_quant.infra.factor import decision as factor_decision
         if source != "v2":
             reason = "factor_source_not_v2: 只有 v2 池支持因子接入"
             factor_decision.annotate_degraded(
@@ -301,9 +297,9 @@ def candidate_loader(source: str = "v2"):
     返回签名与 ``db.get_dragons_by_date(date, top_n=None, source=...)`` 兼容。
     """
     if (source or "v2").lower().strip() == "v1":
-        from dragon_quant.storage import db
-        return db.get_dragons_by_date
-    from dragon_quant.storage import dragons_mirror
+        from dragon_quant.scan.storage import dragons as dragon_store
+        return dragon_store.get_dragons_by_date
+    from dragon_quant.infra.assets import dragons_mirror
     return dragons_mirror.get_dragons_by_date
 
 

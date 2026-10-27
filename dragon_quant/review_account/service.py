@@ -1,12 +1,26 @@
-"""账户级 review 的 CLI/service 入口。"""
+"""账户级回测用例实现（公共入口见 :mod:`dragon_quant.review_account.main`）。"""
 
 import json
 from typing import Optional
 
+from . import storage as account_store
 from dragon_quant.review_account.models import StrategyConfig
-from dragon_quant.review_account.priority import RANKING_MODE_LABELS
+from dragon_quant.review_account.strategy.priority import RANKING_MODE_LABELS
 from dragon_quant.review_account.simulator import AccountSimulator, annotate_post_exit
-from dragon_quant.storage import db
+
+
+def _xueqiu_from_services(services):
+    """可选 M2 装配注入：取出 bundle 的雪球 provider；无注入返回 None。
+
+    None 表示沿用 ``AccountSimulator`` → ``MarketData`` 的既有默认构造，
+    旧调用与 ``MarketData(provider=...)`` / provider patch 行为不变。
+    """
+    if services is None:
+        return None
+    bundle = getattr(services, "providers", None)
+    if bundle is None:
+        return None
+    return bundle.xueqiu
 
 
 def run_review_account(date_from: str,
@@ -17,18 +31,24 @@ def run_review_account(date_from: str,
                        strategy_name: str = "dragon_pullback_daily",
                        verbose: bool = True,
                        display_name: Optional[str] = None,
-                       strategy_params: Optional[dict] = None) -> dict:
-    """运行账户级交易模拟并持久化结果。"""
+                       strategy_params: Optional[dict] = None,
+                       services=None) -> dict:
+    """运行账户级交易模拟并持久化结果。
+
+    ``services`` 为可选 M2 装配注入口：传入且其 ``providers`` 非空时，K 线
+    加载使用 ``services.providers.xueqiu``；不传时保持原有 ``XueqiuProvider()``
+    构造路径。策略、成交、候选池、信号与输出不变。
+    """
     if strategy_params is not None and not isinstance(strategy_params, dict):
         raise ValueError("strategy_params 必须是 JSON 对象")
     cfg = StrategyConfig.from_dict({**(strategy_params or {}), "source": source,
                                     "strategy_name": strategy_name, "initial_cash": initial_cash})
-    sim = AccountSimulator(cfg)
+    sim = AccountSimulator(cfg, provider=_xueqiu_from_services(services))
     result = sim.run(date_from, date_to)
     # 事后评估：清仓后窗口指标。放在 run() 之外，回测核心保持纯 as-of；失败逐条降级。
     annotate_post_exit(result["positions"], sim.data)
 
-    run_id = db.create_review_account_run(
+    run_id = account_store.create_review_account_run(
         source=source,
         strategy_name=strategy_name,
         strategy_params_json=json.dumps(cfg.to_json_dict(), ensure_ascii=False),
@@ -42,7 +62,7 @@ def run_review_account(date_from: str,
         win_rate=result["win_rate"],
         display_name=display_name,
     )
-    db.save_review_account_results(
+    account_store.save_review_account_results(
         run_id,
         snapshots=[s.__dict__ for s in result["snapshots"]],
         trades=[

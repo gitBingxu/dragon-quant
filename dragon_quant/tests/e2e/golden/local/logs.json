@@ -1,0 +1,203 @@
+{
+  "tail": [
+    {
+      "scan_id": "v2_20260911_5",
+      "ts": 1789092060.0,
+      "category": "scorer:liquidity",
+      "level": "error",
+      "message": "流动性异常",
+      "code": "600002",
+      "data": {
+        "error": "x"
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260911_5",
+      "ts": 1789092000.0,
+      "category": "phase:F",
+      "level": "info",
+      "message": "完成",
+      "code": "",
+      "data": {},
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788919500.0,
+      "category": "scorer:drive",
+      "level": "info",
+      "message": "drive ok",
+      "code": "600001",
+      "data": {
+        "score": 72.5
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788919200.0,
+      "category": "api:tdx",
+      "level": "info",
+      "message": "TDX ok",
+      "code": "",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 30
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788314400.0,
+      "category": "api:ths",
+      "level": "warn",
+      "message": "THS 403",
+      "code": "",
+      "data": {
+        "ok": false,
+        "elapsed_ms": 120
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788228000.0,
+      "category": "phase:A",
+      "level": "info",
+      "message": "板块排行",
+      "code": "",
+      "data": {
+        "degraded": []
+      },
+      "source": "v2"
+    }
+  ],
+  "query_phase": [
+    {
+      "scan_id": "v2_20260911_5",
+      "ts": 1789092000.0,
+      "category": "phase:F",
+      "level": "info",
+      "message": "完成",
+      "code": "",
+      "data": {},
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788228000.0,
+      "category": "phase:A",
+      "level": "info",
+      "message": "板块排行",
+      "code": "",
+      "data": {
+        "degraded": []
+      },
+      "source": "v2"
+    }
+  ],
+  "query_date_0910": [
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788919500.0,
+      "category": "scorer:drive",
+      "level": "info",
+      "message": "drive ok",
+      "code": "600001",
+      "data": {
+        "score": 72.5
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788919200.0,
+      "category": "api:tdx",
+      "level": "info",
+      "message": "TDX ok",
+      "code": "",
+      "data": {
+        "ok": true,
+        "elapsed_ms": 30
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788314400.0,
+      "category": "api:ths",
+      "level": "warn",
+      "message": "THS 403",
+      "code": "",
+      "data": {
+        "ok": false,
+        "elapsed_ms": 120
+      },
+      "source": "v2"
+    },
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788228000.0,
+      "category": "phase:A",
+      "level": "info",
+      "message": "板块排行",
+      "code": "",
+      "data": {
+        "degraded": []
+      },
+      "source": "v2"
+    }
+  ],
+  "query_code": [
+    {
+      "scan_id": "v2_20260910_5",
+      "ts": 1788919500.0,
+      "category": "scorer:drive",
+      "level": "info",
+      "message": "drive ok",
+      "code": "600001",
+      "data": {
+        "score": 72.5
+      },
+      "source": "v2"
+    }
+  ],
+  "summary": {
+    "scan_id": "v2_20260911_5",
+    "total_entries": 6,
+    "phases": {
+      "F": "完成",
+      "A": "板块排行"
+    },
+    "api_stats": {
+      "total": 2,
+      "ok": 1,
+      "error": 1,
+      "total_ms": 150,
+      "by_provider": {
+        "tdx": {
+          "count": 1,
+          "total_ms": 30
+        },
+        "ths": {
+          "count": 1,
+          "total_ms": 120
+        }
+      }
+    },
+    "error_count": 1,
+    "scorer_count": 2,
+    "source": "v2"
+  },
+  "list_rows": [
+    [
+      "v2_20260911_5",
+      2
+    ],
+    [
+      "v2_20260910_5",
+      4
+    ]
+  ]
+}

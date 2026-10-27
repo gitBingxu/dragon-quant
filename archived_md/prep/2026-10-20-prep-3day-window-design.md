@@ -1,4 +1,8 @@
 # prep 复盘近三日龙头窗口 + CLI 输出精简 — 技术方案（v2）
+> **当前状态（2026-10-25 整仓结构重构 M0–M12）**：本文中的 `dragon_quant/cli_commands.py` / `dragon_quant/review_account/prep.py` 等实现位置已迁移：命令入口在 `dragon_quant/commands/<command>.py`（经 `commands.dispatch`），prep 在 `dragon_quant/review_account/prep/` 包（service/collectors/compute/rebuild），auction 编排在 `dragon_quant/auction/service.py`，assets CLI 装配在 `dragon_quant/assets_sync/cli_service.py`。历史设计正文保留原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+> **窗口/快照口径后续演进**：复盘窗口已从本文的近三日扩为含 T 的最近 5 个交易日，快照 `version=0.6`；详见 `AGENTS.md` 的 `prep` 段。
+
+
 
 日期：2026-10-20 · 分支：feat/reviewa-account-op · 状态：待复审
 v2 修订：吸收 solution-reviewer 首轮 findings（6 MAJOR / 9 MINOR），逐条处理见 §13。

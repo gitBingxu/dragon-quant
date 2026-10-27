@@ -6,9 +6,10 @@
 用法：
     from dragon_quant.vpa import analyze
     report = analyze("600519")
+
+公共入口在 :mod:`dragon_quant.vpa.main`（Task 12）；本包保持轻量显式重导出。
 """
 
-from dragon_quant.vpa.engine import analyze
-from dragon_quant.vpa.types import VPAReport, FactorResult
+from dragon_quant.vpa.main import FactorResult, VPAReport, analyze
 
 __all__ = ["analyze", "VPAReport", "FactorResult"]

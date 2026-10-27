@@ -1,0 +1,640 @@
+{
+  "case": "local",
+  "now": "2026-09-11T15:30:00+08:00",
+  "trade_date": "2026-09-11",
+  "note": "M1C local query/data commands; sector asc/desc, kline/minute/quote, VPA success/insufficient/error.",
+  "providers": {
+    "ths": {
+      "get_sector_ranking": {
+        "by_asc": {
+          "False": [
+            {
+              "code": "881001",
+              "name": "半导体",
+              "pct": 5.0,
+              "amplitude": 1.2,
+              "turnover_rate": 3.0,
+              "category": "hy",
+              "source": "ths"
+            },
+            {
+              "code": "881002",
+              "name": "银行",
+              "pct": -2.0,
+              "amplitude": 0.8,
+              "turnover_rate": 1.0,
+              "category": "hy",
+              "source": "ths"
+            }
+          ],
+          "True": [
+            {
+              "code": "881002",
+              "name": "银行",
+              "pct": -2.0,
+              "amplitude": 0.8,
+              "turnover_rate": 1.0,
+              "category": "hy",
+              "source": "ths"
+            },
+            {
+              "code": "881001",
+              "name": "半导体",
+              "pct": 5.0,
+              "amplitude": 1.2,
+              "turnover_rate": 3.0,
+              "category": "hy",
+              "source": "ths"
+            }
+          ]
+        }
+      },
+      "get_sector_components": {
+        "by_code": {
+          "881001": [
+            {
+              "code": "600010",
+              "name": "甲公司",
+              "pct": 9.9,
+              "price": 10.8,
+              "exchange": "SH",
+              "sector_code": "881001",
+              "sector_name": "半导体"
+            },
+            {
+              "code": "600011",
+              "name": "乙公司",
+              "pct": 1.0,
+              "price": 8.18,
+              "exchange": "SH",
+              "sector_code": "881001",
+              "sector_name": "半导体"
+            }
+          ]
+        }
+      }
+    },
+    "xueqiu": {
+      "get_kline": {
+        "by_code": {
+          "600010": [
+            {
+              "timestamp": 1789000000000,
+              "volume": 1234567.0,
+              "open": 10.0,
+              "high": 10.5,
+              "low": 9.9,
+              "close": 10.4,
+              "chg": 0.4,
+              "pct": 4.0,
+              "turnover": 2.0,
+              "amount": 12345678.0
+            },
+            {
+              "timestamp": 1789086400000,
+              "volume": 2234567.0,
+              "open": 10.4,
+              "high": 10.9,
+              "low": 10.3,
+              "close": 10.8,
+              "chg": 0.4,
+              "pct": 3.85,
+              "turnover": 2.5,
+              "amount": 22345678.0
+            }
+          ],
+          "600001": [
+            {
+              "timestamp": 1786291200000,
+              "volume": 1000000.0,
+              "open": 9.95,
+              "high": 10.02,
+              "low": 9.95,
+              "close": 10.0,
+              "chg": 0.0,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1786377600000,
+              "volume": 1100000.0,
+              "open": 10.05,
+              "high": 10.12,
+              "low": 10.05,
+              "close": 10.1,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 11110000.0
+            },
+            {
+              "timestamp": 1786464000000,
+              "volume": 1200000.0,
+              "open": 10.15,
+              "high": 10.22,
+              "low": 10.15,
+              "close": 10.2,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 12240000.0
+            },
+            {
+              "timestamp": 1786550400000,
+              "volume": 1300000.0,
+              "open": 10.25,
+              "high": 10.32,
+              "low": 10.25,
+              "close": 10.3,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 13390000.0
+            },
+            {
+              "timestamp": 1786636800000,
+              "volume": 1400000.0,
+              "open": 10.35,
+              "high": 10.42,
+              "low": 10.35,
+              "close": 10.4,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 14560000.0
+            },
+            {
+              "timestamp": 1786723200000,
+              "volume": 1500000.0,
+              "open": 10.45,
+              "high": 10.52,
+              "low": 10.45,
+              "close": 10.5,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 15750000.0
+            },
+            {
+              "timestamp": 1786809600000,
+              "volume": 1600000.0,
+              "open": 10.55,
+              "high": 10.62,
+              "low": 10.55,
+              "close": 10.6,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 16960000.0
+            },
+            {
+              "timestamp": 1786896000000,
+              "volume": 1700000.0,
+              "open": 10.65,
+              "high": 10.72,
+              "low": 10.65,
+              "close": 10.7,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 18190000.0
+            },
+            {
+              "timestamp": 1786982400000,
+              "volume": 1800000.0,
+              "open": 10.75,
+              "high": 10.82,
+              "low": 10.75,
+              "close": 10.8,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 19440000.0
+            },
+            {
+              "timestamp": 1787068800000,
+              "volume": 1900000.0,
+              "open": 10.85,
+              "high": 10.92,
+              "low": 10.85,
+              "close": 10.9,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 20710000.0
+            },
+            {
+              "timestamp": 1787155200000,
+              "volume": 2000000.0,
+              "open": 10.95,
+              "high": 11.02,
+              "low": 10.95,
+              "close": 11.0,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 22000000.0
+            },
+            {
+              "timestamp": 1787241600000,
+              "volume": 2100000.0,
+              "open": 11.05,
+              "high": 11.12,
+              "low": 11.05,
+              "close": 11.1,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 23310000.0
+            },
+            {
+              "timestamp": 1787328000000,
+              "volume": 2200000.0,
+              "open": 11.15,
+              "high": 11.22,
+              "low": 11.15,
+              "close": 11.2,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 24640000.0
+            },
+            {
+              "timestamp": 1787414400000,
+              "volume": 2300000.0,
+              "open": 11.25,
+              "high": 11.32,
+              "low": 11.25,
+              "close": 11.3,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 25990000.0
+            },
+            {
+              "timestamp": 1787500800000,
+              "volume": 2400000.0,
+              "open": 11.35,
+              "high": 11.42,
+              "low": 11.35,
+              "close": 11.4,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 27360000.0
+            },
+            {
+              "timestamp": 1787587200000,
+              "volume": 2500000.0,
+              "open": 11.45,
+              "high": 11.52,
+              "low": 11.45,
+              "close": 11.5,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 28750000.0
+            },
+            {
+              "timestamp": 1787673600000,
+              "volume": 2600000.0,
+              "open": 11.55,
+              "high": 11.62,
+              "low": 11.55,
+              "close": 11.6,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 30160000.0
+            },
+            {
+              "timestamp": 1787760000000,
+              "volume": 2700000.0,
+              "open": 11.65,
+              "high": 11.72,
+              "low": 11.65,
+              "close": 11.7,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 31590000.0
+            },
+            {
+              "timestamp": 1787846400000,
+              "volume": 2800000.0,
+              "open": 11.75,
+              "high": 11.82,
+              "low": 11.75,
+              "close": 11.8,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 33040000.0
+            },
+            {
+              "timestamp": 1787932800000,
+              "volume": 2900000.0,
+              "open": 11.85,
+              "high": 11.92,
+              "low": 11.85,
+              "close": 11.9,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 34510000.0
+            },
+            {
+              "timestamp": 1788019200000,
+              "volume": 3000000.0,
+              "open": 11.95,
+              "high": 12.02,
+              "low": 11.95,
+              "close": 12.0,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 36000000.0
+            },
+            {
+              "timestamp": 1788105600000,
+              "volume": 3100000.0,
+              "open": 12.05,
+              "high": 12.12,
+              "low": 12.05,
+              "close": 12.1,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 37510000.0
+            },
+            {
+              "timestamp": 1788192000000,
+              "volume": 3200000.0,
+              "open": 12.15,
+              "high": 12.22,
+              "low": 12.15,
+              "close": 12.2,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 39040000.0
+            },
+            {
+              "timestamp": 1788278400000,
+              "volume": 3300000.0,
+              "open": 12.25,
+              "high": 12.32,
+              "low": 12.25,
+              "close": 12.3,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 40590000.0
+            },
+            {
+              "timestamp": 1788364800000,
+              "volume": 6200000.0,
+              "open": 12.35,
+              "high": 12.42,
+              "low": 12.35,
+              "close": 12.4,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 76880000.0
+            }
+          ],
+          "600003": [
+            {
+              "timestamp": 1786291200000,
+              "volume": 1000000.0,
+              "open": 9.95,
+              "high": 10.02,
+              "low": 9.95,
+              "close": 10.0,
+              "chg": 0.0,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 10000000.0
+            },
+            {
+              "timestamp": 1786377600000,
+              "volume": 1100000.0,
+              "open": 10.05,
+              "high": 10.12,
+              "low": 10.05,
+              "close": 10.1,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 11110000.0
+            },
+            {
+              "timestamp": 1786464000000,
+              "volume": 1200000.0,
+              "open": 10.15,
+              "high": 10.22,
+              "low": 10.15,
+              "close": 10.2,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 12240000.0
+            },
+            {
+              "timestamp": 1786550400000,
+              "volume": 1300000.0,
+              "open": 10.25,
+              "high": 10.32,
+              "low": 10.25,
+              "close": 10.3,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 13390000.0
+            },
+            {
+              "timestamp": 1786636800000,
+              "volume": 1400000.0,
+              "open": 10.35,
+              "high": 10.42,
+              "low": 10.35,
+              "close": 10.4,
+              "chg": 0.1,
+              "pct": 1.0,
+              "turnover": 2.0,
+              "amount": 14560000.0
+            }
+          ],
+          "600009": {
+            "error": "模拟K线故障"
+          },
+          "600020": []
+        }
+      },
+      "get_minute_kline": {
+        "by_code": {
+          "600010": [
+            {
+              "timestamp": 1789056600000,
+              "volume": 10000.0,
+              "open": 10.4,
+              "high": 10.5,
+              "low": 10.35,
+              "close": 10.45,
+              "chg": 0.05,
+              "pct": 0.48,
+              "turnover": 0.1,
+              "amount": 104500.0
+            },
+            {
+              "timestamp": 1789056660000,
+              "volume": 12000.0,
+              "open": 10.45,
+              "high": 10.6,
+              "low": 10.44,
+              "close": 10.58,
+              "chg": 0.13,
+              "pct": 1.24,
+              "turnover": 0.12,
+              "amount": 126960.0
+            },
+            {
+              "timestamp": 1789056720000,
+              "volume": 9000.0,
+              "open": 10.58,
+              "high": 10.62,
+              "low": 10.55,
+              "close": 10.6,
+              "chg": 0.02,
+              "pct": 0.19,
+              "turnover": 0.09,
+              "amount": 95400.0
+            }
+          ]
+        }
+      }
+    },
+    "tencent": {
+      "get_5min_kline": {
+        "by_code": {
+          "600012": [
+            {
+              "timestamp": 1789056600000,
+              "volume": 50000.0,
+              "open": 8.0,
+              "high": 8.1,
+              "low": 7.95,
+              "close": 8.05,
+              "chg": 0.05,
+              "pct": 0.63,
+              "turnover": 0.5,
+              "amount": 402500.0
+            },
+            {
+              "timestamp": 1789056900000,
+              "volume": 60000.0,
+              "open": 8.05,
+              "high": 8.2,
+              "low": 8.02,
+              "close": 8.18,
+              "chg": 0.13,
+              "pct": 1.61,
+              "turnover": 0.6,
+              "amount": 490800.0
+            }
+          ]
+        }
+      },
+      "get_quote": {
+        "by_code": {
+          "600010": {
+            "code": "600010",
+            "name": "甲公司",
+            "price": 10.8,
+            "prev_close": 10.4,
+            "open_px": 10.4,
+            "high": 10.9,
+            "low": 10.3,
+            "pct": 3.85,
+            "chg": 0.4,
+            "turnover_rate": 2.5,
+            "amplitude": 5.77,
+            "volume": 2234567.0,
+            "amount": 22345678.0,
+            "market_cap": 1000000000.0,
+            "float_market_cap": 800000000.0,
+            "volume_ratio": 1.2,
+            "pe": 15.5,
+            "limit_up": 11.44,
+            "limit_down": 9.36,
+            "avg_price": 10.6,
+            "bid1_price": 10.79,
+            "bid1_volume": 100.0,
+            "ask1_volume": 200.0,
+            "timestamp": 1789086400,
+            "main_net_amount": null
+          },
+          "600002": null
+        }
+      },
+      "batch_get_quotes": [
+        {
+          "code": "600010",
+          "name": "甲公司",
+          "price": 10.8,
+          "prev_close": 10.4,
+          "open_px": 10.4,
+          "high": 10.9,
+          "low": 10.3,
+          "pct": 3.85,
+          "chg": 0.4,
+          "turnover_rate": 2.5,
+          "amplitude": 5.77,
+          "volume": 2234567.0,
+          "amount": 22345678.0,
+          "market_cap": 1000000000.0,
+          "float_market_cap": 800000000.0,
+          "volume_ratio": 1.2,
+          "pe": 15.5,
+          "limit_up": 11.44,
+          "limit_down": 9.36,
+          "avg_price": 10.6,
+          "bid1_price": 10.79,
+          "bid1_volume": 100.0,
+          "ask1_volume": 200.0,
+          "timestamp": 1789086400,
+          "main_net_amount": null
+        },
+        {
+          "code": "600002",
+          "name": "乙公司",
+          "price": 9.5,
+          "prev_close": 9.6,
+          "open_px": 9.6,
+          "high": 9.7,
+          "low": 9.4,
+          "pct": -1.04,
+          "chg": -0.1,
+          "turnover_rate": 1.5,
+          "amplitude": 3.13,
+          "volume": 1000000.0,
+          "amount": 9500000.0,
+          "market_cap": 500000000.0,
+          "float_market_cap": 400000000.0,
+          "volume_ratio": 0.8,
+          "pe": 20.0,
+          "limit_up": 10.56,
+          "limit_down": 8.64,
+          "avg_price": 9.5,
+          "bid1_price": 9.49,
+          "bid1_volume": 50.0,
+          "ask1_volume": 60.0,
+          "timestamp": 1789086400,
+          "main_net_amount": -1200000.0
+        }
+      ]
+    }
+  }
+}

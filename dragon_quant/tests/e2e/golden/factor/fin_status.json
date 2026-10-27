@@ -1,0 +1,167 @@
+{
+  "calibrations": [
+    {
+      "calibrated_at": "<CALIBRATED_AT>",
+      "confidence": {
+        "jing_lirun": {
+          "best_err": 0.0,
+          "evidence": "hierarchy_inequality",
+          "hierarchy_checks": 4,
+          "lens": 1.0,
+          "note": "priority_net_profit_over_tax",
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.031754
+        },
+        "jing_zichan": {
+          "best_err": 0.0,
+          "evidence": "identity_bps_times_shares",
+          "identity_checks": 4,
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.495513
+        },
+        "meigujing_zichan": {
+          "best_err": 0.0,
+          "evidence": "identity_bps_times_shares",
+          "identity_checks": 4,
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.602564
+        },
+        "shuihou_lirun": {
+          "best_err": 0.0,
+          "evidence": "numeric_match",
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.032796
+        },
+        "yingye_lirun": {
+          "best_err": 0.0,
+          "evidence": "hierarchy_inequality",
+          "hierarchy_checks": 4,
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.137012
+        },
+        "zhuying_lirun": {
+          "best_err": 0.0,
+          "evidence": "hierarchy_inequality",
+          "hierarchy_checks": 4,
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.120499
+        },
+        "zhuying_shouru": {
+          "best_err": 0.0,
+          "evidence": "numeric_match",
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.68246
+        },
+        "zong_guben": {
+          "best_err": 0.0,
+          "evidence": "identity_bps_times_shares",
+          "identity_checks": 4,
+          "lens": 1.0,
+          "sample_n": 4,
+          "scale": "1",
+          "second_err": 0.375
+        }
+      },
+      "json_error": null,
+      "layout_key": "gpcw_10",
+      "mapping": {
+        "jing_lirun": {
+          "index": 4,
+          "scale": 1.0
+        },
+        "jing_zichan": {
+          "index": 2,
+          "scale": 1.0
+        },
+        "meigujing_zichan": {
+          "index": 1,
+          "scale": 1.0
+        },
+        "shuihou_lirun": {
+          "index": 7,
+          "scale": 1.0
+        },
+        "yingye_lirun": {
+          "index": 5,
+          "scale": 1.0
+        },
+        "zhuying_lirun": {
+          "index": 6,
+          "scale": 1.0
+        },
+        "zhuying_shouru": {
+          "index": 3,
+          "scale": 1.0
+        },
+        "zong_guben": {
+          "index": 0,
+          "scale": 1.0
+        }
+      },
+      "num_fields": 10,
+      "sample_n": 4,
+      "status": "verified"
+    }
+  ],
+  "dependencies": {
+    "note": "项目代码零 import pandas；DataFrame 仅经 df.to_dict('records') 适配",
+    "pandas": "transitive(tmdx)"
+  },
+  "latest_period": "2026-06-30",
+  "next_deadline": "2026-10-31T23:59:59",
+  "observed": {
+    "dates": 0,
+    "last_date": null,
+    "rows": 0
+  },
+  "ok": true,
+  "overdue": false,
+  "periods": [
+    "2026-06-30"
+  ],
+  "pit_basis_mix": {
+    "counts": {
+      "revised": 1,
+      "statutory_backfilled": 4
+    },
+    "observed_ratio": 0.0,
+    "restatement_unverifiable": 4
+  },
+  "report_files": {
+    "by_status": {
+      "ok": 2
+    },
+    "periods": 1,
+    "rows": 2
+  },
+  "report_records": {
+    "by_basis": {
+      "revised": 1,
+      "statutory_backfilled": 4
+    },
+    "codes": 4,
+    "periods": 1,
+    "retracted": 0,
+    "rows": 5
+  },
+  "schedule": "每日收盘后 factor fin sync --snapshot（或 factor build 内置补齐）",
+  "verified_layouts": [
+    "gpcw_10"
+  ],
+  "xdxr": {
+    "rows": 0
+  }
+}

@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["dragon_quant", "dragon_quant.*", "web_ui", "web_ui.*"]
+exclude = ["dragon_quant.tests", "dragon_quant.tests.*"]
 
 [tool.setuptools.package-data]
 web_ui = ["dist/**/*"]
@@ -11,7 +12,7 @@ web_ui = ["dist/**/*"]
 [project]
 name = "dragon-quant"
 version = "0.7.2"
-description = "龙头战法四维量化筛选系统 — A股涨停板龙头识别工具"
+description = "龙头战法五维量化筛选系统 — A股涨停板龙头识别工具"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -51,6 +52,6 @@ select = ["E", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 # 重导出模块（公共 API 兼容层），F401 是有意为之
-"dragon_quant/storage/db.py" = ["F401"]
+"dragon_quant/infra/storage/main.py" = ["F401"]
 "dragon_quant/__init__.py" = ["F401"]
-"dragon_quant/logging/__init__.py" = ["F401"]
+"dragon_quant/scan/logger/main.py" = ["F401"]

@@ -1,0 +1,139 @@
+{
+  "now": "2026-10-21T18:30:00+08:00",
+  "trade_date": "2026-10-21",
+  "report_period": "2026-06-30",
+  "legacy_period": "2026-03-31",
+  "secrets": {
+    "default_profile": "e2e",
+    "profiles": {
+      "e2e": {
+        "endpoint": "https://e2e.invalid",
+        "region": "auto",
+        "bucket": "e2e-bucket",
+        "access_key_id": "e2e-ak",
+        "secret_access_key": "e2e-secret-should-not-leak"
+      }
+    }
+  },
+  "expected": {
+    "physical_tables": [
+      "prep_assets",
+      "auction_assets",
+      "prep_snapshots",
+      "auction_snapshots",
+      "dragons",
+      "factor_values",
+      "factor_build_runs",
+      "factor_sector_snapshots",
+      "factor_registry",
+      "factor_model_snapshots",
+      "fin_observed_snapshots",
+      "fin_report_files",
+      "fin_report_records",
+      "fin_field_calibrations",
+      "fin_xdxr_records"
+    ],
+    "sync_units": [
+      "prepsnap:snapshots",
+      "auctionsnap:snapshots",
+      "dragons:mirror",
+      "factor:values",
+      "factor:build_runs",
+      "factor:sector",
+      "factor:registry",
+      "factor:model",
+      "fin:observed",
+      "fin:report_files",
+      "fin:report_raw",
+      "fin:records",
+      "fin:calibrations",
+      "fin:xdxr",
+      "prep:*",
+      "auction:*"
+    ],
+    "partitions": [
+      "2026-10-21",
+      "fin-2026-06-30",
+      "finraw-2026-06-30",
+      "static-factor",
+      "static-fin"
+    ],
+    "row_counts": {
+      "prep_assets": 2,
+      "auction_assets": 1,
+      "prep_snapshots": 1,
+      "auction_snapshots": 2,
+      "dragons": 1,
+      "factor_values": 2,
+      "factor_build_runs": 1,
+      "factor_sector_snapshots": 1,
+      "factor_registry": 1,
+      "factor_model_snapshots": 1,
+      "fin_observed_snapshots": 1,
+      "fin_report_files": 1,
+      "fin_report_records": 2,
+      "fin_field_calibrations": 1,
+      "fin_xdxr_records": 1
+    },
+    "shards_by_partition": {
+      "2026-10-21": [
+        "auction:assets",
+        "auctionsnap:snapshots",
+        "dragons:mirror",
+        "factor:build_runs",
+        "factor:sector",
+        "factor:values",
+        "fin:observed",
+        "fin:xdxr",
+        "prep:collection_report",
+        "prep:dragons",
+        "prepsnap:snapshots"
+      ],
+      "fin-2026-06-30": [
+        "fin:records",
+        "fin:report_files"
+      ],
+      "finraw-2026-06-30": [
+        "fin:report_raw"
+      ],
+      "static-factor": [
+        "factor:model",
+        "factor:registry"
+      ],
+      "static-fin": [
+        "fin:calibrations"
+      ]
+    },
+    "push": {
+      "pushed": 5,
+      "skipped": 0,
+      "blobs_uploaded": 17,
+      "manifests_uploaded": 5
+    },
+    "pull_dry_run": {
+      "download": 17,
+      "merge_pending": 14,
+      "partitions": 5
+    },
+    "pull_apply": {
+      "restored": 19,
+      "rows_inserted": 16,
+      "rows_filled": 1,
+      "merge_pending": 14,
+      "partitions": 5
+    },
+    "backfill": {
+      "dates": [
+        "2026-10-20",
+        "2026-10-21"
+      ],
+      "rows_source": 3,
+      "inserted": 2,
+      "updated": 0,
+      "unchanged": 1,
+      "missing_rows": 2,
+      "orphan_rows": 1,
+      "pruned": 0
+    }
+  }
+}

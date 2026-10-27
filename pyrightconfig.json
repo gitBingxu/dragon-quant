@@ -1,6 +1,6 @@
 {
   "include": ["dragon_quant"],
-  "exclude": ["**/__pycache__", "web_ui"],
+  "exclude": ["**/__pycache__", "web_ui", "dragon_quant/tests"],
   "pythonVersion": "3.10",
   "typeCheckingMode": "basic",
   "reportUnknownMemberType": false,

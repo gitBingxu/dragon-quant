@@ -51,11 +51,19 @@ _BUILD_HINT = (
 
 
 def _get_db():
-    """延迟导入 db 模块，避免启动时初始化数据库"""
+    """延迟导入 scan 领域仓储，避免启动时初始化数据库"""
     sys.path.insert(0, str(_PROJECT_ROOT))
-    from dragon_quant.storage import db
-    db.init_db()
-    return db
+    from dragon_quant.infra.storage.connection import init_db
+    init_db()
+    from dragon_quant.scan.storage import dragons
+    return dragons
+
+
+def _get_account_store():
+    """延迟导入 review_account 仓储（Task 12 canonical 路径）。"""
+    sys.path.insert(0, str(_PROJECT_ROOT))
+    from dragon_quant.review_account import storage
+    return storage
 
 
 def _resolve_static(path: str) -> Optional[Path]:
@@ -213,9 +221,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
         - name: 名称（模糊匹配）
         - date_from / date_to: 入选日期范围
         - score_min / score_max: 综合分范围
-        - return_min / return_max: 最大收益率范围
-        - status: review_status 过滤（pending/completed/no_entry/error，逗号分隔）
-        - sort_by: 排序字段（默认 composite_score）
+        - return_min / return_max: 最大收益率范围（v2=严格口径，v1=旧口径）
+        - drawdown_min / drawdown_max: 最大回撤范围（v2=严格口径，v1=旧口径）
+        - status: 派生状态过滤（v2: completed/pending/pending_recompute/cannot_evaluate/error；
+          v1: completed/pending/no_entry/error，逗号分隔）
+        - sort_by: 排序字段（默认 composite_score；v2 支持 strict_* 严格键）
         - sort_dir: asc / desc（默认 desc）
         """
         db = _get_db()
@@ -224,7 +234,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
         sort_dir = _first(params, "sort_dir") or "desc"
         source = _parse_source(params, getattr(self.server, "default_source", "v2"))
         rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir, source=source)
-        self._send_json({"data": rows, "count": len(rows)})
+        # summary 必须基于筛选后的**完整** rows 计算（分页在客户端进行）。
+        # 若未来在此做服务端分页，务必先汇总再切片，否则卡片会只统计当前页。
+        summary = db.summarize_review_rows(
+            rows, source=source, include_derived_counts=True)
+        self._send_json({"data": rows, "count": len(rows), "summary": summary})
 
     def _serve_api_summary(self, params: dict):
         """GET /api/summary — 汇总统计"""
@@ -235,13 +249,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def _serve_api_account_runs(self, params: dict):
         """GET /api/account/runs?source=v2"""
-        db = _get_db()
+        account_store = _get_account_store()
         source = _parse_source(params, getattr(self.server, "default_source", "v2"))
         try:
             limit = int(_first(params, "limit") or "20")
         except ValueError:
             limit = 20
-        rows = db.query_review_account_runs(limit=limit, source=source)
+        rows = account_store.query_review_account_runs(limit=limit, source=source)
         self._send_json({"data": rows, "count": len(rows)})
 
     def _serve_api_account_run_create(self):
@@ -275,7 +289,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if initial_cash <= 0:
             raise ValueError("initial_cash must be greater than 0")
 
-        from dragon_quant.review_account import run_review_account
+        from dragon_quant.review_account.main import run_review_account
 
         result = run_review_account(
             date_from=date_from,
@@ -288,15 +302,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             strategy_params=payload.get("strategy_params"),
         )
 
-        db = _get_db()
-        run = db.get_review_account_run(int(result["run_id"]))
+        account_store = _get_account_store()
+        run = account_store.get_review_account_run(int(result["run_id"]))
         self._send_json({"data": run, "run_id": result["run_id"]}, 201)
 
     def _serve_api_account_run_delete(self, params: dict):
         """DELETE /api/account/runs?run_id=1 — 删除账户级回测记录及级联数据。"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        deleted = db.delete_review_account_run(run_id)
+        deleted = account_store.delete_review_account_run(run_id)
         if not deleted:
             self._send_json({"error": "run not found"}, 404)
             return
@@ -304,20 +318,20 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def _serve_api_account_snapshots(self, params: dict):
         """GET /api/account/snapshots?run_id=1"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_snapshots(run_id)})
+        self._send_json({"data": account_store.query_review_account_snapshots(run_id)})
 
     def _serve_api_account_benchmark(self, params: dict):
         """GET /api/account/benchmark?run_id=1&code=SH000001"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
         code = (_first(params, "code") or "SH000001").upper()
-        run = db.get_review_account_run(run_id)
+        run = account_store.get_review_account_run(run_id)
         if not run:
             self._send_json({"error": "run not found"}, 404)
             return
-        snapshots = db.query_review_account_snapshots(run_id)
+        snapshots = account_store.query_review_account_snapshots(run_id)
         rows = _build_benchmark_series(
             code=code,
             dates=[s["trade_date"] for s in snapshots],
@@ -327,25 +341,25 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
     def _serve_api_account_trades(self, params: dict):
         """GET /api/account/trades?run_id=1"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_trades(run_id)})
+        self._send_json({"data": account_store.query_review_account_trades(run_id)})
 
     def _serve_api_account_positions(self, params: dict):
         """GET /api/account/positions?run_id=1 — 已平仓持仓 + 买点统计"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        rows = db.query_review_account_positions(run_id)
-        run = db.get_review_account_run(run_id)
+        rows = account_store.query_review_account_positions(run_id)
+        run = account_store.get_review_account_run(run_id)
         from dragon_quant.review_account.evaluation import entry_reason_stats
         stats = entry_reason_stats(rows, (run or {}).get("initial_cash") or 0.0)
         self._send_json({"data": rows, "stats": stats})
 
     def _serve_api_account_events(self, params: dict):
         """GET /api/account/events?run_id=1"""
-        db = _get_db()
+        account_store = _get_account_store()
         run_id = _parse_run_id(params)
-        self._send_json({"data": db.query_review_account_events(run_id)})
+        self._send_json({"data": account_store.query_review_account_events(run_id)})
 
     # ---------- 日志静默 ----------
 
@@ -479,7 +493,7 @@ def _build_benchmark_series(code: str, dates: list[str], initial_cash: float) ->
     if not dates or initial_cash <= 0:
         return []
     from datetime import datetime
-    from dragon_quant.providers.xueqiu import XueqiuProvider
+    from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 
     days = max(60, len(dates) + 30)
     provider = XueqiuProvider()
@@ -509,18 +523,30 @@ def _build_benchmark_series(code: str, dates: list[str], initial_cash: float) ->
 
 
 def start_server(port: int = 8765, open_browser: bool = True,
-                 default_source: str = "v2", default_page: str = "review"):
+                 default_source: str = "v2", default_page: str = "review",
+                 *, block: bool = True) -> HTTPServer:
     """启动 HTTP 服务器。
 
     Args:
-        port: 监听端口
-        open_browser: 是否自动打开浏览器
+        port: 监听端口；``0`` 表示由 OS 分配，实际端口从
+            ``server.server_address`` 读取，日志/URL 永不为 0。
+        open_browser: 是否自动打开浏览器（只在真实 URL 确定后打开）。
+        default_source: 默认 dragons 数据源（``v1``/``v2``）。
+        default_page: 默认面板（``review``/``account``）。
+        block: ``True``（默认）阻塞运行 ``serve_forever``，保持既有 CLI
+            行为；``False`` 立即返回已绑定的 server，由调用方自行
+            ``serve_forever`` / ``shutdown`` / ``server_close``。
+
+    Returns:
+        已绑定的 ``HTTPServer`` 实例。无论阻塞模式以何种方式结束（键盘
+        中断或 serve 循环异常），server 都会被关闭并释放端口。
     """
     default_source = default_source if default_source in {"v1", "v2"} else "v2"
     server = HTTPServer(("127.0.0.1", port), ReviewHandler)
     server.default_source = default_source
+    actual_port = server.server_address[1]
     path = "/account" if default_page == "account" else "/"
-    url = f"http://localhost:{port}{path}?source={default_source}"
+    url = f"http://localhost:{actual_port}{path}?source={default_source}"
 
     print(f"🐉 Review Web UI 已启动 → {url}")
     print("   按 Ctrl+C 停止服务")
@@ -531,11 +557,16 @@ def start_server(port: int = 8765, open_browser: bool = True,
         except Exception:
             pass
 
+    if not block:
+        return server
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n👋 服务器已停止")
+    finally:
         server.server_close()
+    return server
 
 
 if __name__ == "__main__":

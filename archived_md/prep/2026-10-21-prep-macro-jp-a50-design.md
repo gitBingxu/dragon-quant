@@ -1,4 +1,8 @@
 # prep 宏观资产改为日经225期指 + 富时A50期指 — 技术方案
+> **当前状态（2026-10-25 整仓结构重构 M0–M12）**：本文中的 `dragon_quant/cli_commands.py` / `dragon_quant/review_account/prep.py` 等实现位置已迁移：命令入口在 `dragon_quant/commands/<command>.py`（经 `commands.dispatch`），prep 在 `dragon_quant/review_account/prep/` 包（service/collectors/compute/rebuild），auction 编排在 `dragon_quant/auction/service.py`，assets CLI 装配在 `dragon_quant/assets_sync/cli_service.py`。历史设计正文保留原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+> **窗口/快照口径后续演进**：复盘窗口已从本文的近三日扩为含 T 的最近 5 个交易日，快照 `version=0.6`；详见 `AGENTS.md` 的 `prep` 段。
+
+
 
 日期：2026-10-21 · 分支：feat/reviewa-account-op · 状态：solution-reviewer 2 轮，按第 2 轮关闭条件落实（方案门禁通过）
 上游实盘取证（本机 2026-10-21 实测，见任务包 §2）：

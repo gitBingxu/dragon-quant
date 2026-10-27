@@ -1,0 +1,172 @@
+{
+  "sector_desc": [
+    "881001     半导体             +5.00%",
+    "881002     银行              -2.00%"
+  ],
+  "sector_asc": [
+    "881002     银行              -2.00%",
+    "881001     半导体             +5.00%"
+  ],
+  "components": [
+    "600010   甲公司         +9.90%",
+    "600011   乙公司         +1.00%"
+  ],
+  "kline": [
+    {
+      "time": null,
+      "open": 10.0,
+      "close": 10.4,
+      "high": 10.5,
+      "low": 9.9,
+      "volume": 1234567.0,
+      "pct": 4.0
+    },
+    {
+      "time": null,
+      "open": 10.4,
+      "close": 10.8,
+      "high": 10.9,
+      "low": 10.3,
+      "volume": 2234567.0,
+      "pct": 3.85
+    }
+  ],
+  "minute": [
+    {
+      "time": null,
+      "open": 10.4,
+      "close": 10.45,
+      "high": 10.5,
+      "low": 10.35,
+      "volume": 10000.0,
+      "pct": 0.48
+    },
+    {
+      "time": null,
+      "open": 10.45,
+      "close": 10.58,
+      "high": 10.6,
+      "low": 10.44,
+      "volume": 12000.0,
+      "pct": 1.24
+    },
+    {
+      "time": null,
+      "open": 10.58,
+      "close": 10.6,
+      "high": 10.62,
+      "low": 10.55,
+      "volume": 9000.0,
+      "pct": 0.19
+    }
+  ],
+  "five_min": [
+    {
+      "time": null,
+      "open": 8.0,
+      "close": 8.05,
+      "high": 8.1,
+      "low": 7.95,
+      "volume": 50000.0,
+      "pct": 0.63
+    },
+    {
+      "time": null,
+      "open": 8.05,
+      "close": 8.18,
+      "high": 8.2,
+      "low": 8.02,
+      "volume": 60000.0,
+      "pct": 1.61
+    }
+  ],
+  "quote": {
+    "code": "600010",
+    "name": "甲公司",
+    "price": 10.8,
+    "prev_close": 10.4,
+    "open_px": 10.4,
+    "high": 10.9,
+    "low": 10.3,
+    "pct": 3.85,
+    "chg": 0.4,
+    "turnover_rate": 2.5,
+    "amplitude": 5.77,
+    "volume": 2234567.0,
+    "amount": 22345678.0,
+    "market_cap": 1000000000.0,
+    "float_market_cap": 800000000.0,
+    "volume_ratio": 1.2,
+    "pe": 15.5,
+    "limit_up": 11.44,
+    "limit_down": 9.36,
+    "avg_price": 10.6,
+    "bid1_price": 10.79,
+    "bid1_volume": 100.0,
+    "ask1_volume": 200.0,
+    "timestamp": 1789086400,
+    "main_net_amount": null
+  },
+  "batch_quotes": [
+    {
+      "code": "600010",
+      "name": "甲公司",
+      "price": 10.8,
+      "prev_close": 10.4,
+      "open_px": 10.4,
+      "high": 10.9,
+      "low": 10.3,
+      "pct": 3.85,
+      "chg": 0.4,
+      "turnover_rate": 2.5,
+      "amplitude": 5.77,
+      "volume": 2234567.0,
+      "amount": 22345678.0,
+      "market_cap": 1000000000.0,
+      "float_market_cap": 800000000.0,
+      "volume_ratio": 1.2,
+      "pe": 15.5,
+      "limit_up": 11.44,
+      "limit_down": 9.36,
+      "avg_price": 10.6,
+      "bid1_price": 10.79,
+      "bid1_volume": 100.0,
+      "ask1_volume": 200.0,
+      "timestamp": 1789086400,
+      "main_net_amount": null
+    },
+    {
+      "code": "600002",
+      "name": "乙公司",
+      "price": 9.5,
+      "prev_close": 9.6,
+      "open_px": 9.6,
+      "high": 9.7,
+      "low": 9.4,
+      "pct": -1.04,
+      "chg": -0.1,
+      "turnover_rate": 1.5,
+      "amplitude": 3.13,
+      "volume": 1000000.0,
+      "amount": 9500000.0,
+      "market_cap": 500000000.0,
+      "float_market_cap": 400000000.0,
+      "volume_ratio": 0.8,
+      "pe": 20.0,
+      "limit_up": 10.56,
+      "limit_down": 8.64,
+      "avg_price": 9.5,
+      "bid1_price": 9.49,
+      "bid1_volume": 50.0,
+      "ask1_volume": 60.0,
+      "timestamp": 1789086400,
+      "main_net_amount": -1200000.0
+    }
+  ],
+  "cookie_status_empty": {
+    "xueqiu": {
+      "ok": false,
+      "length": 0
+    }
+  }
+}

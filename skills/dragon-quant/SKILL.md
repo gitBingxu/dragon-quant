@@ -14,8 +14,8 @@ metadata:
 
 ## 权威顺序
 
-1. `AGENTS.md`：项目规则、命令语义、运维契约的权威。
-2. `dragon_quant/review_account/STRATEGY.md`：策略与买卖规则的权威。
+1. `AGENTS.md`（硬约束/项目路由）+ 父级 `AGENTS.md` §4（工作流）+ 其索引的 `docs/agent/*.md`（模块细节）：项目规则、命令语义、运维契约的权威。
+2. `dragon_quant/review_account/strategy/STRATEGY.md`：策略与买卖规则的权威。
 3. 本 skill：只做路由、预检、输出翻译、异常分流、写操作门禁。
 4. 三者冲突时以更高权威为准；skill 不复制权重/参数/表结构。
 5. 本 skill 不提供投资建议，不承诺收益；不用于非 dragon-quant 仓库的通用选股。
@@ -138,12 +138,12 @@ metadata:
 
 ## 禁止事项
 
-- 不要要求用户先读完整 `AGENTS.md` 才能完成 `scan`；本 skill 已覆盖路由、预检与解读。
+- 不要要求用户先读完整 `AGENTS.md` 或全部模块文档才能完成 `scan`；本 skill 已覆盖路由、预检与解读。
 - 不要伪装执行：没有运行命令就不要输出“已扫描/已复盘/已卖出”。
 - 不要自动执行写操作；`scan`/`prep`/`auction`/`buy`/`sell`/`storage clear`/`assets push`/`assets pull --apply` 必须先确认。
 - 不要手工用 SQL 删改业务表（包括信号表）；CLI 没有提供清理接口时，明确告知并停止。
 - 不要回显 Cookie、token 或 `assets_sync` 凭据。
 - 不要把 `unverified`、`daily_fallback`、`degraded` 的结果说成确定结论。
-- 不要复制或推断评分权重、策略参数、表结构；需要时引用 `AGENTS.md` 或 `STRATEGY.md`。
+- 不要复制或推断评分权重、策略参数、表结构；需要时引用 `AGENTS.md`、对应 `docs/agent/*.md` 或 `STRATEGY.md`。
 - 不要自动安装/升级 Python 包，也不要执行 `npm publish`、`git commit`、`git push` 或 PR；这些由用户控制。
 - 不要提供投资建议或收益承诺。

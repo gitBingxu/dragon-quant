@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from dragon_quant.cache.data_cache import DataCache
-from dragon_quant.providers.xueqiu import XueqiuProvider
+from dragon_quant.infra.storage.cache import DataCache
+from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+from dragon_quant.infra import clock
 from dragon_quant.review_account.market import (
     SHANGHAI, DataCoverageError, at, build_daily_row, build_row, daily_bar, event_date,
     is_tradable_daily_bar, last_close, validate_bars,
@@ -22,8 +23,8 @@ class MarketData:
         self._bars = {}
 
     def daily(self, code: str, start: str, refresh=False) -> list:
-        days = max(260, (datetime.now(SHANGHAI).date() - datetime.fromisoformat(start).date()).days + 90)
-        today = datetime.now(SHANGHAI).strftime("%Y-%m-%d")
+        days = max(260, (clock.now(SHANGHAI).date() - datetime.fromisoformat(start).date()).days + 90)
+        today = clock.now(SHANGHAI).strftime("%Y-%m-%d")
         key = (code, days)
         if key not in self._daily or refresh:
             cache_key = f"kline:day:{code}:normal:{days}"
@@ -38,7 +39,7 @@ class MarketData:
         return self._daily[key]
 
     def calendar(self, start: str, end: str, include_today=False) -> list[str]:
-        now = datetime.now(SHANGHAI)
+        now = clock.now(SHANGHAI)
         today = now.strftime("%Y-%m-%d")
         dates = {event_date(b.timestamp) for b in self.daily("SH000001", start)}
         if include_today and end == today and today not in dates and not self.offline:
@@ -56,7 +57,7 @@ class MarketData:
     def intraday(self, code: str, day: str, until: int | None = None) -> list:
         cache_key = f"kline:5min:{code}:normal"
         key = (code, day)
-        now = datetime.now(SHANGHAI)
+        now = clock.now(SHANGHAI)
         closed = (day < now.strftime("%Y-%m-%d")
                   or (day == now.strftime("%Y-%m-%d") and now.strftime("%H:%M") >= "15:05"))
         if key not in self._bars or not closed:
@@ -91,7 +92,7 @@ def historical_day(day: str, now: datetime | None = None) -> bool:
     按写入当日命名空间存放、不校验新鲜度，同日盘中写入的缓存会缺少当日行；此时
     「日K缺行」不能等价为停牌。当日一律沿用旧契约（缺当日日K仍硬报错）。
     """
-    now = now or datetime.now(SHANGHAI)
+    now = now or clock.now(SHANGHAI)
     return day < now.strftime("%Y-%m-%d")
 
 
@@ -111,25 +112,25 @@ def historical_events(day: str, candidates: list[dict], codes: set[str], data: M
     `until` 用于盘中（实时今日）只取到最新已完成的5分钟K。买卖决策始终复用同一
     evaluate_buy/evaluate_sell，本函数只决定数据可用性与成交口径。
     """
-    codes = sorted(codes)
-    if not codes:
+    ordered_codes = sorted(codes)
+    if not ordered_codes:
         yield from _daily_events(day, candidates, [], {}, {})
         return
     # 无日K历史仍抛错（数据源故障，不是停牌）；有历史但当日缺行由可用性判定处理。
-    histories = {code: data.daily(code, day) for code in codes}
-    intraday = {code: data.try_intraday(code, day, until) for code in codes}
+    histories = {code: data.daily(code, day) for code in ordered_codes}
+    intraday = {code: data.try_intraday(code, day, until) for code in ordered_codes}
 
     if not historical_day(day):
-        if all(intraday[code] is not None for code in codes):
-            yield from _intraday_events(day, candidates, codes, histories, intraday, {})
+        if all(intraday[code] is not None for code in ordered_codes):
+            yield from _intraday_events(day, candidates, ordered_codes, histories, intraday, {})
         else:
-            yield from _daily_events(day, candidates, codes, histories, {})
+            yield from _daily_events(day, candidates, ordered_codes, histories, {})
         return
 
-    has_daily = {code: is_tradable_daily_bar(daily_bar(histories[code], day)) for code in codes}
-    unavailable = {code: UNAVAILABLE_SUSPENDED for code in codes
+    has_daily = {code: is_tradable_daily_bar(daily_bar(histories[code], day)) for code in ordered_codes}
+    unavailable = {code: UNAVAILABLE_SUSPENDED for code in ordered_codes
                    if intraday[code] is None and not has_daily[code]}
-    active = [code for code in codes if code not in unavailable]
+    active = [code for code in ordered_codes if code not in unavailable]
 
     if not active:  # 全部停牌：一条空白占位事件，净值不变、推进引擎换日
         yield MarketEvent(at(day, "15:00"), "late", {}, candidates,

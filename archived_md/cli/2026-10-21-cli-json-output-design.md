@@ -1,4 +1,7 @@
 # auction / prep 输出开关统一（`--json`）— 技术方案
+> **当前状态（2026-10-25 整仓结构重构 M0–M12）**：本文中的 `dragon_quant/cli_commands.py` / `dragon_quant/review_account/prep.py` 等实现位置已迁移：命令入口在 `dragon_quant/commands/<command>.py`（经 `commands.dispatch`），prep 在 `dragon_quant/review_account/prep/` 包（service/collectors/compute/rebuild），auction 编排在 `dragon_quant/auction/service.py`，assets CLI 装配在 `dragon_quant/assets_sync/cli_service.py`。历史设计正文保留原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+
+
 
 日期：2026-10-21 · 分支：feat/reviewa-account-op · 状态：v3（第 2 轮复审 1 MAJOR 已修，见 §13；方案审查已用满 2 轮，按门禁上报 main 决定是否放行实现）
 范围：`auction` / `prep` 两个命令的**展示层**；不改评分、候选池、排名、落库与退出码语义。

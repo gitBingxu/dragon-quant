@@ -1,0 +1,122 @@
+{
+  "anchors": {
+    "hierarchy": true,
+    "identity": true
+  },
+  "confidence": {
+    "jing_lirun": {
+      "best_err": 0.0,
+      "evidence": "hierarchy_inequality",
+      "hierarchy_checks": 4,
+      "lens": 1.0,
+      "note": "priority_net_profit_over_tax",
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.031754
+    },
+    "jing_zichan": {
+      "best_err": 0.0,
+      "evidence": "identity_bps_times_shares",
+      "identity_checks": 4,
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.495513
+    },
+    "meigujing_zichan": {
+      "best_err": 0.0,
+      "evidence": "identity_bps_times_shares",
+      "identity_checks": 4,
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.602564
+    },
+    "shuihou_lirun": {
+      "best_err": 0.0,
+      "evidence": "numeric_match",
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.032796
+    },
+    "yingye_lirun": {
+      "best_err": 0.0,
+      "evidence": "hierarchy_inequality",
+      "hierarchy_checks": 4,
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.137012
+    },
+    "zhuying_lirun": {
+      "best_err": 0.0,
+      "evidence": "hierarchy_inequality",
+      "hierarchy_checks": 4,
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.120499
+    },
+    "zhuying_shouru": {
+      "best_err": 0.0,
+      "evidence": "numeric_match",
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.68246
+    },
+    "zong_guben": {
+      "best_err": 0.0,
+      "evidence": "identity_bps_times_shares",
+      "identity_checks": 4,
+      "lens": 1.0,
+      "sample_n": 4,
+      "scale": "1",
+      "second_err": 0.375
+    }
+  },
+  "errors": [],
+  "filename": "tdxfin/gpcw20260630.zip",
+  "layout_key": "gpcw_10",
+  "mapping": {
+    "jing_lirun": {
+      "index": 4,
+      "scale": 1.0
+    },
+    "jing_zichan": {
+      "index": 2,
+      "scale": 1.0
+    },
+    "meigujing_zichan": {
+      "index": 1,
+      "scale": 1.0
+    },
+    "shuihou_lirun": {
+      "index": 7,
+      "scale": 1.0
+    },
+    "yingye_lirun": {
+      "index": 5,
+      "scale": 1.0
+    },
+    "zhuying_lirun": {
+      "index": 6,
+      "scale": 1.0
+    },
+    "zhuying_shouru": {
+      "index": 3,
+      "scale": 1.0
+    },
+    "zong_guben": {
+      "index": 0,
+      "scale": 1.0
+    }
+  },
+  "mode": "calibrate",
+  "num_fields": 10,
+  "ok": true,
+  "report_period": "2026-06-30",
+  "sample_n": 4,
+  "status": "verified"
+}

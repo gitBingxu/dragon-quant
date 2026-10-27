@@ -1,0 +1,36 @@
+{
+  "schema": 2,
+  "codec": 2,
+  "pushed_at": "2026-10-21T18:30:00+08:00",
+  "last_success_trade_date": "2026-10-21",
+  "partition_kinds": {
+    "2026-10-21": "date",
+    "fin-2026-06-30": "period",
+    "finraw-2026-06-30": "period_raw",
+    "static-factor": "static",
+    "static-fin": "static"
+  },
+  "sources": {
+    "2026-10-21": {
+      "prep": ["prep:collection_report", "prep:dragons"],
+      "auction": ["auction:assets"],
+      "prepsnap": ["prepsnap:snapshots"],
+      "auctionsnap": ["auctionsnap:snapshots"],
+      "dragons": ["dragons:mirror"],
+      "factor": ["factor:build_runs", "factor:sector", "factor:values"],
+      "fin": ["fin:observed", "fin:xdxr"]
+    },
+    "fin-2026-06-30": {
+      "fin": ["fin:records", "fin:report_files"]
+    },
+    "finraw-2026-06-30": {
+      "fin": ["fin:report_raw"]
+    },
+    "static-factor": {
+      "factor": ["factor:model", "factor:registry"]
+    },
+    "static-fin": {
+      "fin": ["fin:calibrations"]
+    }
+  }
+}

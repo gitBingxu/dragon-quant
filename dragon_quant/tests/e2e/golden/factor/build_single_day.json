@@ -1,0 +1,332 @@
+{
+  "build_ids": [
+    1
+  ],
+  "dates": [
+    "2026-09-11"
+  ],
+  "mode": "date",
+  "ok": true,
+  "reports": [
+    {
+      "build_id": 1,
+      "factors": {
+        "five_dim_absorption": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 0.8333,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "资金承接",
+          "meta": {
+            "missing": 1,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_absorption",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "five_dim_anti_drop": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "抗跌性",
+          "meta": {
+            "missing": 0,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_anti_drop",
+          "reason": null,
+          "rows": 6,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "five_dim_composite": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "五维综合分",
+          "meta": {
+            "missing": 0,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_composite",
+          "reason": null,
+          "rows": 6,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "five_dim_drive": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "带动性",
+          "meta": {
+            "missing": 0,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_drive",
+          "reason": null,
+          "rows": 6,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "five_dim_is_true_dragon": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 0.8333,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "真龙旗标",
+          "meta": {
+            "missing": 1,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_is_true_dragon",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "five_dim_leadership": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "领涨性",
+          "meta": {
+            "missing": 0,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_leadership",
+          "reason": null,
+          "rows": 6,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "five_dim_liquidity": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 6,
+          "coverage": 0.8333,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "流动性",
+          "meta": {
+            "missing": 1,
+            "scan_id": "v2_20260911_5"
+          },
+          "name": "five_dim_liquidity",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "scan",
+          "source_scan_id": "v2_20260911_5",
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "vpa_breakout": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 4,
+          "coverage": 0.75,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "量价-突破",
+          "meta": {
+            "duplicate_name": 0,
+            "factors_error": 0,
+            "malformed": 0,
+            "missing": 1,
+            "skipped_backfilled": 1,
+            "skipped_backfilled_samples": [
+              "600005"
+            ]
+          },
+          "name": "vpa_breakout",
+          "reason": null,
+          "rows": 3,
+          "skipped_backfilled": 1,
+          "source": "vpa",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "vpa_divergence": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 4,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "量价-背离",
+          "meta": {
+            "duplicate_name": 0,
+            "factors_error": 0,
+            "malformed": 0,
+            "missing": 0,
+            "skipped_backfilled": 1,
+            "skipped_backfilled_samples": [
+              "600005"
+            ]
+          },
+          "name": "vpa_divergence",
+          "reason": null,
+          "rows": 4,
+          "skipped_backfilled": 1,
+          "source": "vpa",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "vpa_health_score": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 4,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "量价健康度",
+          "meta": {
+            "missing": 0,
+            "skipped_backfilled": 1,
+            "skipped_backfilled_samples": [
+              "600005"
+            ]
+          },
+          "name": "vpa_health_score",
+          "reason": null,
+          "rows": 4,
+          "skipped_backfilled": 1,
+          "source": "vpa",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "vpa_trend_verify": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 4,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "量价-趋势验证",
+          "meta": {
+            "duplicate_name": 0,
+            "factors_error": 0,
+            "malformed": 0,
+            "missing": 0,
+            "skipped_backfilled": 1,
+            "skipped_backfilled_samples": [
+              "600005"
+            ]
+          },
+          "name": "vpa_trend_verify",
+          "reason": null,
+          "rows": 4,
+          "skipped_backfilled": 1,
+          "source": "vpa",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "vpa_vol_amount": {
+          "available_at": "2026-09-11T15:30:00",
+          "codes": 4,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "量价-量能",
+          "meta": {
+            "duplicate_name": 0,
+            "factors_error": 0,
+            "malformed": 0,
+            "missing": 0,
+            "skipped_backfilled": 1,
+            "skipped_backfilled_samples": [
+              "600005"
+            ]
+          },
+          "name": "vpa_vol_amount",
+          "reason": null,
+          "rows": 4,
+          "skipped_backfilled": 1,
+          "source": "vpa",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        }
+      },
+      "finished_at": "2026-09-11T15:30:00",
+      "ok": true,
+      "registry_inserted": 12,
+      "scan": {
+        "candidates": 6,
+        "created_at": "2026-09-11 15:30:00",
+        "scan_id": "v2_20260911_5",
+        "top_n": 5
+      },
+      "schema_version": "1",
+      "sector_snapshot": {
+        "by_category": {
+          "hy": 6
+        },
+        "rows": 6,
+        "scan_id": "v2_20260911_5",
+        "skipped": 0,
+        "status": "ok"
+      },
+      "started_at": "2026-09-11T15:30:00",
+      "timezone_warning": null,
+      "trade_date": "2026-09-11",
+      "warnings": []
+    }
+  ],
+  "warnings": []
+}

@@ -1,4 +1,7 @@
 # assets.db 全表云端同步技术方案（M6）
+> **当前状态（2026-10-25 整仓结构重构 M0–M12）**：本文中的 `dragon_quant/cli_commands.py` / `dragon_quant/review_account/prep.py` 等实现位置已迁移：命令入口在 `dragon_quant/commands/<command>.py`（经 `commands.dispatch`），prep 在 `dragon_quant/review_account/prep/` 包（service/collectors/compute/rebuild），auction 编排在 `dragon_quant/auction/service.py`，assets CLI 装配在 `dragon_quant/assets_sync/cli_service.py`。历史设计正文保留原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+
+
 
 > 状态：已归档（M6 已落地，2026-10-23）
 > 前置方案：[`2026-10-18-assets-cloud-sync-design.md`](../../docs/solutions/2026-10-18-assets-cloud-sync-design.md)（M1-M4 已落地，M5 调度未开始）

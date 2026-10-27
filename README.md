@@ -358,6 +358,8 @@ dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 
 `--recompute-all` 仅 v2，按最老记录优先，默认跳过已有严格行（`--force` 覆盖），`--dry-run` / `--limit` 只可与其组合（非法组合 exit 2）；dry-run 计数是未过滤成熟度的**上界**，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。普通 `review` 仍为每只个股补一段**量价分析**写入 `vpa_analysis`；全量重算刻意跳过 VPA，避免历史污染。Web UI 的收益 / 回撤 / 状态筛选与表格指标固定使用严格口径，并同时展示宽松 / 严格胜率与待重算、失败、无法评估计数；v1 明确标注为旧口径。
 
+顶部 7 张指标卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表**同源**：`GET /api/dragons` 在成功响应中同时返回 `summary`，由筛选后的**完整 rows** 计算（客户端分页不影响统计），`data` / `count` 契约不变；`GET /api/summary` 保留为无筛选参数的 legacy 端点。修改筛选条件不自动请求，点击「查询」或回车才同时刷新卡片与列表；「重置」保留当前体系（source）并清空其余 12 项筛选、立即恢复全量。空集或无可评测样本的均值 / 胜率 / 最佳显示 `—`，真实无赢家显示 `0.0%`；两胜率沿用既有分母与 cannot 规则。
+
 Web UI 入口为 `web_ui.start_server(...) -> HTTPServer`：CLI（`--ui` / `--ui-only`）默认 `block=True` 阻塞运行；`--port 0` 由操作系统分配端口并打印真实 URL；测试或嵌入场景可传 `block=False`，拿到 server 后自行 `shutdown()` / `server_close()`。
 
 `review` 的 `--port` 未显式指定时默认 `8765`：若该端口已被占用，stderr 警告一次后仅重试一次 `port=0`（系统分配），日志与浏览器 URL 取实际端口。显式 `--port N` 被占用时不会自动换端口，而是打印可操作的错误并以非零码退出（无 traceback）；其他绑定错误（如权限不足）原样抛出。`review-account` 的端口行为不变。

@@ -36,6 +36,9 @@ export interface Dragon {
   strict_review_status: string | null;
   strict_review_reason: string | null;
   strict_reviewed: boolean;
+  // 服务端统一派生状态（completed / pending / pending_recompute /
+  // cannot_evaluate / error）；v1 等于旧 review_status。
+  derived_status?: string | null;
 }
 
 export interface Summary {
@@ -61,6 +64,10 @@ export interface Summary {
   best_stock_code_strict: string | null;
   best_stock_name_strict: string | null;
   best_return_strict: number | null;
+  // 派生状态计数：仅 /api/dragons 的筛选后 summary 返回；legacy
+  // /api/summary 没有这两个键。
+  derived_completed?: number;
+  derived_pending?: number;
 }
 
 export interface DragonFilters {
@@ -82,16 +89,9 @@ export interface DragonFilters {
   sort_dir: string;
 }
 
-export async function fetchSummary(source: "v1" | "v2" = "v2"): Promise<Summary> {
-  const params = new URLSearchParams({ source });
-  const res = await fetch("/api/summary?" + params.toString());
-  if (!res.ok) throw new Error(`summary ${res.status}`);
-  return res.json();
-}
-
 export async function fetchDragons(
   filters: DragonFilters
-): Promise<{ data: Dragon[]; count: number }> {
+): Promise<{ data: Dragon[]; count: number; summary: Summary }> {
   const params = new URLSearchParams();
   const keys: (keyof DragonFilters)[] = [
     "source",

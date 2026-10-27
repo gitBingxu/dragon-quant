@@ -234,7 +234,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
         sort_dir = _first(params, "sort_dir") or "desc"
         source = _parse_source(params, getattr(self.server, "default_source", "v2"))
         rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir, source=source)
-        self._send_json({"data": rows, "count": len(rows)})
+        # summary 必须基于筛选后的**完整** rows 计算（分页在客户端进行）。
+        # 若未来在此做服务端分页，务必先汇总再切片，否则卡片会只统计当前页。
+        summary = db.summarize_review_rows(
+            rows, source=source, include_derived_counts=True)
+        self._send_json({"data": rows, "count": len(rows), "summary": summary})
 
     def _serve_api_summary(self, params: dict):
         """GET /api/summary — 汇总统计"""

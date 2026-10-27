@@ -12,12 +12,17 @@ CLI 入口 — dragon-quant 命令行工具
 """
 
 import argparse
-import json
 import sys
-from typing import Any, Optional
 
-from dragon_quant.orchestrator import scan as orchestrate_scan  # noqa: F401 — 经 cli 模块转发
-from dragon_quant.providers.tdx import warn_if_unavailable
+from dragon_quant import commands
+# 既有调用方与测试仍从 cli 取这些 helper：单一实现在 _shared，此处仅重导出。
+from dragon_quant.commands._shared import (  # noqa: F401
+    kbar_to_dict as _kbar_to_dict,
+    normalize_cli_date as _normalize_cli_date,
+    resolve_trade_date as _resolve_trade_date,
+    to_dict as _to_dict,
+)
+from dragon_quant.infra.provider.tdx import warn_if_unavailable
 
 
 
@@ -55,59 +60,6 @@ class DragonArgumentParser(argparse.ArgumentParser):
 
 def _parser(*args, **kwargs):
     return DragonArgumentParser(*args, **kwargs)
-
-
-def _normalize_cli_date(d: str) -> str:
-    """CLI 日期支持 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD，统一转为 YYYY-MM-DD。"""
-    d = d.strip()
-    if len(d) == 8 and d.isdigit():
-        return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
-    if len(d) == 10 and d[4] == "/" and d[7] == "/":
-        return f"{d[:4]}-{d[5:7]}-{d[8:10]}"
-    return d
-
-
-def _resolve_trade_date(raw: Optional[str]) -> str:
-    """解析交易日：显式 --date 优先，否则取 Asia/Shanghai 当前日期。"""
-    if raw:
-        return _normalize_cli_date(raw)
-    from datetime import datetime, timezone, timedelta
-    tz = timezone(timedelta(hours=8))
-    return datetime.now(tz).strftime("%Y-%m-%d")
-
-
-def _strategy_params(path):
-    from dragon_quant.review_account.models import StrategyConfig
-    if not path:
-        return None
-    with open(path, encoding="utf-8") as handle:
-        values = json.load(handle)
-    if not isinstance(values, dict):
-        raise ValueError("策略配置必须是 JSON 对象")
-    StrategyConfig.from_dict(values)
-    return values
-
-
-def _kbar_to_dict(kbar) -> dict:
-    """KBar → dict"""
-    d = {}
-    for f in ("time", "open", "close", "high", "low", "volume", "pct"):
-        v = getattr(kbar, f, None)
-        if isinstance(v, float):
-            v = round(v, 4)
-        d[f] = v
-    return d
-
-
-def _to_dict(obj) -> Any:
-    """dataclass → dict"""
-    if hasattr(obj, '__dataclass_fields__'):
-        return {f.name: _to_dict(getattr(obj, f.name)) for f in obj.__dataclass_fields__.values()}
-    if isinstance(obj, list):
-        return [_to_dict(i) for i in obj]
-    if isinstance(obj, dict):
-        return {k: _to_dict(v) for k, v in obj.items()}
-    return obj
 
 
 def main():
@@ -286,11 +238,18 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     rev_p.add_argument("--date", default=None, help="只回测指定日期 (YYYYMMDD)")
     rev_p.add_argument("--top", type=int, default=None, help="只回测 top N")
     rev_p.add_argument("--force", action="store_true", help="无视 review_status 全部重算")
+    rev_p.add_argument("--recompute-all", dest="recompute_all", action="store_true",
+                       help="全量重算所有状态（v2，最老优先；默认跳过已有严格结果）")
+    rev_p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                       help="配合 --recompute-all：只统计，不写库、不拉个股 K 线")
+    rev_p.add_argument("--limit", type=int, default=None,
+                       help="配合 --recompute-all：只处理最老 N 条（canary）")
     rev_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                        help="回测数据来源体系：v2=dragons_v2 (默认 v2；v1 仅用于历史记录查询)")
     rev_p.add_argument("--ui", action="store_true", help="回测后启动 Web UI")
     rev_p.add_argument("--ui-only", action="store_true", help="仅启动 Web UI（不执行回测）")
-    rev_p.add_argument("--port", type=int, default=8765, help="Web UI 端口 (默认 8765)")
+    rev_p.add_argument("--port", type=int, default=None,
+                       help="Web UI 端口 (默认 8765；被占用时自动改用随机端口)")
     rev_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     # review-account 子命令
@@ -825,62 +784,10 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     # tmdx 缺失时提示补装（-h/--help/-v/--version 在 parse_args 内已 exit，不会到达这里）
     warn_if_unavailable()
 
-    if args.command == "scan":
-        _cmd_scan(args)
-    elif args.command == "logs":
-        _cmd_logs(args)
-    elif args.command == "data":
-        _cmd_data(args)
-    elif args.command == "storage":
-        _cmd_storage(args)
-    elif args.command == "review":
-        _cmd_review(args)
-    elif args.command == "review-account":
-        _cmd_review_account(args)
-    elif args.command == "dragons":
-        _cmd_dragons(args)
-    elif args.command == "prep":
-        _cmd_prep(args)
-    elif args.command == "auction":
-        _cmd_auction(args)
-    elif args.command == "assets":
-        _cmd_assets(args)
-    elif args.command == "factor":
-        _cmd_factor(args)
-    elif args.command == "buy":
-        _cmd_buy(args)
-    elif args.command == "sell":
-        _cmd_sell(args)
-    elif args.command == "vpa":
-        _cmd_vpa(args)
-    elif args.command == "blacklist":
-        _cmd_blacklist(args)
-
-    else:
+    # 惰性命令注册表分发：所有命令按需加载 `handle(args, services)`；
+    # 无法识别的命令（含无参数）打印帮助。
+    if not commands.dispatch(args.command, args):
         parser.print_help()
-
-
-# 门面：从 cli_commands 导入子命令处理函数，供 main() dispatch 使用。
-# 放在文件底部：此时本模块 helper 已定义完毕；cli_commands 经 `from dragon_quant
-# import cli as _cli` 引用到的是已部分初始化的本模块，转发包装在调用时才解析，
-# 因此对 `cli.orchestrate_scan` / `cli._strategy_params` 的 patch 依然生效。
-from dragon_quant.cli_commands import (  # noqa: E402 — 底部导入规避循环引用
-    _cmd_scan,
-    _cmd_logs,
-    _cmd_data,
-    _cmd_storage,
-    _cmd_review,
-    _cmd_review_account,
-    _cmd_dragons,
-    _cmd_prep,
-    _cmd_auction,
-    _cmd_assets,
-    _cmd_factor,
-    _cmd_buy,
-    _cmd_sell,
-    _cmd_vpa,
-    _cmd_blacklist,
-)
 
 
 if __name__ == "__main__":

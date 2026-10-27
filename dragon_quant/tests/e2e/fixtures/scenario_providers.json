@@ -1,0 +1,230 @@
+{
+  "case": "providers",
+  "now": "2026-09-11T15:30:00+08:00",
+  "trade_date": "2026-09-11",
+  "note": "M1A synthetic provider contract fixture. Every payload is hand-pinned; unknown provider/method pairs fail closed.",
+  "providers": {
+    "tdx": {
+      "get_sector_ranking": [
+        {"code": "881167", "name": "测试行业", "pct": 3.2, "amplitude": 5.1, "turnover_rate": 1.4, "category": "hy", "source": "tdx"}
+      ],
+      "get_sector_components": [
+        {"code": "600172", "name": "测试股份", "exchange": "SH", "sector_code": "881167", "sector_name": "测试行业", "pct": 10.0, "price": 10.8, "five_day_return": 22.0}
+      ],
+      "get_sector_5min_kline": [
+        {"timestamp": 1789111800000, "volume": 100.0, "open": 10.0, "high": 10.2, "low": 9.9, "close": 10.1, "chg": 0.1, "pct": 1.0, "turnover": 0.5, "amount": 1010.0}
+      ],
+      "get_sector_1min_kline": [
+        {"timestamp": 1789111800000, "volume": 20.0, "open": 10.0, "high": 10.05, "low": 9.98, "close": 10.02, "chg": 0.02, "pct": 0.2, "turnover": 0.1, "amount": 200.4}
+      ],
+      "get_sector_5min_kline_history": [
+        {"timestamp": 1789025400000, "volume": 80.0, "open": 9.8, "high": 10.0, "low": 9.7, "close": 9.95, "chg": 0.15, "pct": 1.5, "turnover": 0.4, "amount": 796.0}
+      ],
+      "get_kline": [
+        {"timestamp": 1789111800000, "volume": 1000.0, "open": 10.0, "high": 11.0, "low": 9.8, "close": 10.8, "chg": 0.8, "pct": 8.0, "turnover": 2.5, "amount": 10800.0}
+      ],
+      "get_5min_kline": [
+        {"timestamp": 1789111800000, "volume": 300.0, "open": 10.3, "high": 10.9, "low": 10.2, "close": 10.8, "chg": 0.5, "pct": 0.48, "turnover": 0.8, "amount": 3240.0}
+      ],
+      "get_quote": {
+        "code": "600172",
+        "name": "测试股份",
+        "price": 10.8,
+        "prev_close": 10.0,
+        "open_px": 10.1,
+        "high": 11.0,
+        "low": 9.8,
+        "pct": 8.0,
+        "chg": 0.8,
+        "turnover_rate": 2.5,
+        "amplitude": 12.0,
+        "volume": 1000.0,
+        "amount": 10800.0,
+        "market_cap": 100000000.0,
+        "float_market_cap": 80000000.0,
+        "volume_ratio": 1.5,
+        "pe": 20.0,
+        "limit_up": 11.0,
+        "limit_down": 9.0,
+        "avg_price": 10.5,
+        "timestamp": 1789111800000,
+        "main_net_amount": 1234.0
+      },
+      "get_minute_kline": [
+        {"timestamp": 1789111800000, "volume": 12.0, "open": 10.0, "high": 10.04, "low": 9.99, "close": 10.03, "chg": 0.03, "pct": 0.3, "turnover": 0.05, "amount": 120.36}
+      ],
+      "batch_get_quotes": [
+        {
+          "code": "600172",
+          "name": "测试股份",
+          "price": 10.8,
+          "prev_close": 10.0,
+          "open_px": 10.1,
+          "high": 11.0,
+          "low": 9.8,
+          "pct": 8.0,
+          "chg": 0.8,
+          "turnover_rate": 2.5,
+          "amplitude": 12.0,
+          "volume": 1000.0,
+          "amount": 10800.0,
+          "market_cap": 100000000.0,
+          "float_market_cap": 80000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 10.5
+        }
+      ],
+      "get_market_breadth_rows": [
+        {"code": "600172", "name": "测试股份", "close": 10.8, "pre_close": 10.0, "high": 11.0, "low": 9.8, "vol": 1000.0, "amount": 10800.0, "buy_price_limit": 11.0, "sell_price_limit": 9.0}
+      ],
+      "get_fg_boards": {
+        "测试风格": {"rows": [{"code": "600172", "name": "测试股份"}], "status": "ok"}
+      },
+      "get_announcements": [
+        {"title": "测试公告", "type": "normal", "date": "2026-09-11", "url": "https://example.invalid/ann/1"}
+      ],
+      "get_macro_quotes": {
+        "jp_nikkei": {"key": "jp_nikkei", "price": 41000.0, "prev_close": 40800.0, "caliber": "same_day_daily_bar", "session_date": "2026-09-11"},
+        "cn_a50": {"key": "cn_a50", "price": 12500.0, "prev_close": 12400.0, "caliber": "same_day_daily_bar", "session_date": "2026-09-11"},
+        "ust10y": {"key": "ust10y", "price": 4.12, "prev_close": 4.1, "caliber": "previous_daily_bar", "session_date": "2026-09-10"},
+        "gold": {"key": "gold", "price": 2650.0, "prev_close": 2640.0, "caliber": "previous_daily_bar", "session_date": "2026-09-10"}
+      },
+      "get_auction": [
+        {"time": "09:25:00", "price": 10.8, "matched": 100, "unmatched": 20}
+      ],
+      "get_financial_files": [
+        {"filename": "gpcw20260630.zip", "md5": "0123456789abcdef0123456789abcdef", "size": 7}
+      ],
+      "get_financial_records": [
+        {"code": "600172", "market": "SH", "report_date": "2026-06-30", "fields": {"eps": 0.5}}
+      ],
+      "get_financial_file": {"text": "ZIPDATA"},
+      "get_finance_info": {"code": "600172", "updated_date": "2026-06-30", "eps": 0.5},
+      "get_xdxr_info": [
+        {"date": "2026-06-01", "category": "分红", "cash": 0.1}
+      ],
+      "get_fg_board_members": [
+        {"code": "600172", "name": "测试股份"}
+      ]
+    },
+    "ths": {
+      "get_sector_ranking": [
+        {"code": "881167", "name": "测试行业", "pct": 3.2, "amplitude": 5.1, "turnover_rate": 1.4, "category": "hy", "source": "ths"}
+      ],
+      "get_sector_components": [
+        {"code": "600172", "name": "测试股份", "exchange": "SH", "sector_code": "881167", "sector_name": "测试行业", "pct": 10.0, "price": 10.8, "five_day_return": 22.0}
+      ],
+      "get_sector_5min_kline": [
+        {"timestamp": 1789111800000, "volume": 100.0, "open": 10.0, "high": 10.2, "low": 9.9, "close": 10.1, "chg": 0.1, "pct": 1.0, "turnover": 0.5, "amount": 1010.0}
+      ],
+      "get_sector_1min_kline": [
+        {"timestamp": 1789111800000, "volume": 20.0, "open": 10.0, "high": 10.05, "low": 9.98, "close": 10.02, "chg": 0.02, "pct": 0.2, "turnover": 0.1, "amount": 200.4}
+      ],
+      "get_sector_5min_kline_history": [
+        {"timestamp": 1789025400000, "volume": 80.0, "open": 9.8, "high": 10.0, "low": 9.7, "close": 9.95, "chg": 0.15, "pct": 1.5, "turnover": 0.4, "amount": 796.0}
+      ],
+      "get_limit_up_pool": {
+        "total": 1,
+        "rows": [{"code": "600172", "name": "测试股份", "reason": "测试题材", "board_type": "换手板", "open_num": 0, "high_days": "3天2板"}]
+      },
+      "get_block_top": {
+        "rows": [{"name": "测试主线", "pct": 3.2, "code": "881167"}]
+      }
+    },
+    "xueqiu": {
+      "get_kline": [
+        {"timestamp": 1789111800000, "volume": 1000.0, "open": 10.0, "high": 11.0, "low": 9.8, "close": 10.8, "chg": 0.8, "pct": 8.0, "turnover": 2.5, "amount": 10800.0}
+      ],
+      "get_5min_kline": [
+        {"timestamp": 1789111800000, "volume": 300.0, "open": 10.3, "high": 10.9, "low": 10.2, "close": 10.8, "chg": 0.5, "pct": 0.48, "turnover": 0.8, "amount": 3240.0}
+      ],
+      "get_5min_kline_for": [
+        {"timestamp": 1789111800000, "volume": 300.0, "open": 10.3, "high": 10.9, "low": 10.2, "close": 10.8, "chg": 0.5, "pct": 0.48, "turnover": 0.8, "amount": 3240.0}
+      ],
+      "get_minute_kline": [
+        {"timestamp": 1789111800000, "volume": 12.0, "open": 10.0, "high": 10.04, "low": 9.99, "close": 10.03, "chg": 0.03, "pct": 0.3, "turnover": 0.05, "amount": 120.36}
+      ],
+      "get_quote": {
+        "code": "600172",
+        "name": "测试股份",
+        "price": 10.8,
+        "prev_close": 10.0,
+        "open_px": 10.1,
+        "high": 11.0,
+        "low": 9.8,
+        "pct": 8.0,
+        "chg": 0.8,
+        "turnover_rate": 2.5,
+        "amplitude": 12.0,
+        "volume": 1000.0,
+        "amount": 10800.0,
+        "market_cap": 100000000.0,
+        "float_market_cap": 80000000.0,
+        "volume_ratio": 1.5,
+        "pe": 20.0,
+        "limit_up": 11.0,
+        "limit_down": 9.0,
+        "avg_price": 10.5
+      },
+      "get_macro_quotes": {}
+    },
+    "tencent": {
+      "get_quote": {
+        "code": "600172",
+        "name": "测试股份",
+        "price": 10.8,
+        "prev_close": 10.0,
+        "open_px": 10.1,
+        "high": 11.0,
+        "low": 9.8,
+        "pct": 8.0,
+        "chg": 0.8,
+        "turnover_rate": 2.5,
+        "amplitude": 12.0,
+        "volume": 1000.0,
+        "amount": 10800.0,
+        "market_cap": 100000000.0,
+        "float_market_cap": 80000000.0,
+        "volume_ratio": 1.5,
+        "pe": 20.0,
+        "limit_up": 11.0,
+        "limit_down": 9.0,
+        "avg_price": 10.5
+      },
+      "batch_get_quotes": [
+        {
+          "code": "600172",
+          "name": "测试股份",
+          "price": 10.8,
+          "prev_close": 10.0,
+          "open_px": 10.1,
+          "high": 11.0,
+          "low": 9.8,
+          "pct": 8.0,
+          "chg": 0.8,
+          "turnover_rate": 2.5,
+          "amplitude": 12.0,
+          "volume": 1000.0,
+          "amount": 10800.0,
+          "market_cap": 100000000.0,
+          "float_market_cap": 80000000.0,
+          "volume_ratio": 1.5,
+          "pe": 20.0,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "avg_price": 10.5
+        }
+      ],
+      "get_kline": [
+        {"timestamp": 1789111800000, "volume": 1000.0, "open": 10.0, "high": 11.0, "low": 9.8, "close": 10.8, "chg": 0.8, "pct": 8.0, "turnover": 2.5, "amount": 10800.0}
+      ],
+      "get_5min_kline": [
+        {"timestamp": 1789111800000, "volume": 300.0, "open": 10.3, "high": 10.9, "low": 10.2, "close": 10.8, "chg": 0.5, "pct": 0.48, "turnover": 0.8, "amount": 3240.0}
+      ],
+      "get_macro_quotes": {}
+    }
+  }
+}

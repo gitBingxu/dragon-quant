@@ -1,0 +1,9 @@
+{
+  "signal": {
+    "code": "600001", "name": "样本", "source": "v2",
+    "entry_date": "2026-09-07", "entry_price": 10.02, "qty": 9900,
+    "entry_reason_code": "buy_open_ma5_pullback",
+    "highest_return": 0.29940119760480943, "highest_price": 10.05,
+    "took_profit_half": 0, "status": "open"
+  }
+}

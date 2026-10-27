@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 
 
 def ensure_asc(klines: list[KBar]) -> list[KBar]:

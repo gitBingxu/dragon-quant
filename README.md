@@ -72,7 +72,7 @@ cd dragon-quant && pip install -e .
 
 ### Agent Skill（npx 安装）
 
-仓库内置一个单主 Agent Skill，把常见中文/英文意图路由到 `dragon-quant` 命令，并提供前置自检、输出解读、异常分流与写操作确认门禁。**`AGENTS.md` 与 `review_account/STRATEGY.md` 仍是规则权威**，skill 只是薄路由层，不复制评分权重、策略参数或表结构。
+仓库内置一个单主 Agent Skill，把常见中文/英文意图路由到 `dragon-quant` 命令，并提供前置自检、输出解读、异常分流与写操作确认门禁。**`AGENTS.md`（硬约束与项目路由）+ 父级 `AGENTS.md` §4（需求落地工作流，本项目不复制）+ 其索引的 `docs/agent/*.md`（模块细节）与 `review_account/strategy/STRATEGY.md`（策略规则）仍是规则权威**，skill 只是薄路由层，不复制评分权重、策略参数或表结构。
 
 前置条件分开：**Python ≥3.10** 是 CLI 的运行要求；**Node ≥22.20** 只在安装 skill 时需要，运行 CLI 不需要 Node。
 
@@ -102,9 +102,13 @@ npx dragon-quant-skills uninstall
 # 查看 Linux 风格帮助提示
 dragon-quant -h
 dragon-quant scan -h
+# 不带子命令同样只打印帮助（exit 0），不会执行扫描
+dragon-quant
 
 # 五维「识别真龙」扫榜 — 找 top5 龙头
 dragon-quant scan --top 5
+# 读取历史扫描记录（不触网）
+dragon-quant scan --date 20260519 --top 5
 
 # 龙头回测 + Web UI
 dragon-quant review --ui
@@ -121,6 +125,7 @@ dragon-quant review-account --ui-only
 
 ```bash
 dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cache]
+dragon-quant scan --date 20260519 [--top 5]   # 读取历史扫描记录，不执行实时扫描
 ```
 
 | 参数 | 默认 | 说明 |
@@ -130,6 +135,7 @@ dragon-quant scan [--top 25] [--candidates 5] [--workers 2] [--force] [--no-cach
 | `--workers` | 2 | 并发线程数 |
 | `--force` | - | 跳过交易时段拦截与 DB 缓存 |
 | `--no-cache` | - | 刷新 Provider 缓存；重新评分时与 `--force` 一起使用 |
+| `--date` | - | 指定 `YYYYMMDD` 时读取历史扫描记录并输出 JSON，不触网、不重新评分 |
 
 `scan` 走五维「识别真龙」体系。输出包含：板块排行（领涨/领跌明细）、候选股列表、评分表格、自然语言详细报告，并自动持久化到数据目录的 `*_v2` 表（macOS `~/Library/Application Support/dragon-quant/`，Windows `%APPDATA%\dragon-quant\`，可用 `DQ_DATA_DIR` 覆盖）。`scan_v2` 仍可用于旧脚本兼容，但帮助文档不再展示。
 
@@ -179,7 +185,7 @@ dragon-quant prep --json                      # 输出完整复盘 JSON（默认
    - 候选池 = 窗口内真龙并集，同 code 去重保留综合分更优者，每只保留**真实入选日**（`trade_date`，下游 `candidate_trade_date` 血缘）。
    - 每只候选新增 `facts` 块（今日是否在池、今日涨幅/换手/成交额、炸板/连板/封板率、资金/公告可用性、风险公告）与 `verdict`（强烈建议/轻仓博弈/忽略/未评级）+ 2-3 行维度明细 + 忽略原因；`in_pool_today` 与入选日解耦，T-2 入选、T 日再涨停的龙回头也能进买入组。默认 `prep_verdict_filter_enabled=True`：`ignore` 出池，`strong/light/unrated` 保留（unrated 仅 P=False 排序垫底）；推荐集为空时回退 legacy 且不再应用 ignore 过滤。
    - THS 入选日归因字段（涨停原因/板型/炸板次数等）保持既有契约：跨日候选为 `null`；今日封板事实在 `facts` 内按 T 日池口径提供。
-   - 快照 `version=0.5`，顶层 `macro`（日经/A50期指 + 美债/黄金；`available`/`session`/`instruments`/`degraded`/`sources`，口径血缘在逐品种 `caliber`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
+   - 快照 `version=0.6`，顶层 `macro`（日经/A50期指 + 美债/黄金；`available`/`session`/`instruments`/`degraded`/`sources`，口径血缘在逐品种 `caliber`）；`dragon_source` 含 `window_days` / `dates`（逐日 scan_id/version/count/status）/ `version_mixed`；只增 key，旧快照继续可读。
 
 **默认输出**：4 行市场摘要（是否建议买入 / 建议仓位 / 建议等级 / 买入理由，理由内含外围/美债/黄金片段）+ 空行 + 逐只标的清单：
 
@@ -260,7 +266,7 @@ dragon-quant assets backfill-dragons --prune     # 就地 pull 后收敛
 
 - 同步范围：`assets.db` 全部 15 张表（`prep_assets` / `auction_assets` + 快照 / 因子 / 财务表 + `dragons` 镜像），行级身份 + 规范化 JSON，不做整库文件直传；`dragon.db` 不同步。
 - dragons 镜像回填与收敛：`dragon-quant assets backfill-dragons [--from D] [--to D] [--dry-run|--prune] [--json]`（本地幂等，退出码 0/1/2）；就地 `pull` 后用 `--prune` 收敛（只删源库不存在的镜像行），`--dry-run` 区分 `missing_rows` / `orphan_rows`。
-- 同步单元：`assets_sync/tables.py` 的 `TableSpec` 注册表驱动 13 张新表（含 `dragons:mirror`；`fin_report_files` 拆成元数据 `fin_report_files` + 原始 blob `fin_report_raw` 两个单元）；prep/auction 两个既有适配器行为不变。
+- 同步单元：`infra/assets/sync/tables.py` 的 `TableSpec` 注册表驱动 13 张新表（含 `dragons:mirror`；`fin_report_files` 拆成元数据 `fin_report_files` + 原始 blob `fin_report_raw` 两个单元）；prep/auction 两个既有适配器行为不变。
 - 分区模型：`YYYY-MM-DD`（date）/ `fin-YYYY-MM-DD`（period）/ `finraw-YYYY-MM-DD`（period_raw）/ `static-<domain>`（static）。date 分区 manifest 继续写 schema 1（旧客户端可读），其余 schema 2。
 - 云端布局：`blobs/<partition>/<source>_<type>.<sha256>.json.gz` + `manifests/<partition>.json`（每分区覆盖写）。
 - 幂等：`state.json`（schema 2）按 **(分区, 来源)** 记录水位与条目集合；watermark + 远端条目集合 ⊇ 上次集合 → 复用（0 本地读）。volatile 单元（快照 / fin 全部）每次强制重读，用内容哈希精确判定。仅采集时间变化时只重写 manifest（0 blob PUT）。
@@ -317,30 +323,46 @@ dragon-quant factor fin status                            # 账本/校准/观测
 - **`factor build --all`**：构建**全部注册因子**（含默认关的 `prep_*` / `auction_*` / `fin_*`），展开为显式全量名单传给 `resolve_specs`；与 `--only` **互斥**（校验失败 → exit 2）。**触网边界**：只有本地已存在财务原始数据（`storage.finance.has_any_fin_data()` 预检 `fin_observed_snapshots` / `fin_report_records`）时才加载 TDX 交易日历做 stale 判定；无财务数据时 fin 因子 fail-closed（`missing_source`）且**不触网**（该预检同样收敛 `--only fin_*` 的行为，不再出现 `stale_calendar_missing`）。区间 `--all --from/--to` 逐日展开。
 - **prep / auction 因子族（P1.5）**：`prep` 7 个（评级档位 / 综合分 / T 日连板高度 / 涨幅 / 换手 / 封板成功率 0-1 比率 / 涨停池成员）+ `auction` 8 个（强度 / 否决旗标 / 方向 -1/0/1 / 池内排名 + 四维子分），全部默认关、`pit_rule=derived`，`available_at` 分别为 T@16:40 / T@09:25；因子行 `trade_date` = 观测日（不按候选入选日拆行），快照版本/时间进 `source_meta_json` 血缘。`unrated` 不写行（ignore 写 0）；auction 公共门槛排除 JSON 损坏行、`unverified` 与「竞价明细缺失」哨兵；真实否决只写强度 0 / 旗标 1，方向、四维、排名不写行。`SEMANTICS_VERIFIED=False` 期间 auction 族零产出（报告按 `unverified_rows` 计数），需 `auction --recompute DATE` 后再 build 补历史。**重复计数警告**：`auction_*` 与 A 维/竞价否决同源、`prep_verdict` 与 P 维同源、`prep_composite` 与 `five_dim_composite` 同源，同一信号只进模型一次；`auction_*` 结构性零覆盖，仅供研究，不入生产快照。
 - **缺失 = 无行**：`is_true_dragon IS NULL`、维度分 NULL、vpa 因子缺失、财务分母非正/缺期都不写行，绝不写 0 / 50 / 中性分；`factor query` 看不到某只标的的某因子即为「当日无值」。
-- **PIT 时点**：每行带 `available_at`（Asia/Shanghai）。`recorded` 源取 `max(phase, created_at)`；`created_at.date() != trade_date` 的 vpa 行（`review.py` 跨日回填污染）整行跳过并计入 `skipped_backfilled`；`asof` 源（财务）按账本可用时刻硬门禁。
+- **PIT 时点**：每行带 `available_at`（Asia/Shanghai）。`recorded` 源取 `max(phase, created_at)`；`created_at.date() != trade_date` 的 vpa 行（`review/main.py` 跨日回填污染）整行跳过并计入 `skipped_backfilled`；`asof` 源（财务）按账本可用时刻硬门禁。
 - **写入语义**：整日整因子原子替换；同日重 build 幂等；候选集合变小时旧 code 被 prune；源整体不可用（无扫描/读取失败）**不删旧行**，源可用但当日无值则删除该因子当日行。版本缺省时按注册表解析并由 SQL 过滤，输出始终带 `resolved_versions`。
 - **主板块快照**：`factor_sector_snapshots` 从 `scans.raw_output.ranking` 派生，`category` 如实记录 `hy`/`gn`/`dq`（只有 `hy` 是真实行业），字段缺失不猜。
 - **财务链路**：`assets.db` 的 `fin_observed_snapshots` / `fin_report_files` / `fin_report_records` / `fin_field_calibrations` / `fin_xdxr_records`。观测仅当日可采；回填默认最近 12 期（`--from-period` 扩大），按 `(报告期, md5)` 幂等、修订追加 vintage（不回溯、不覆盖，值未变的 code 不产新行也不撤销）；法定截止日按 23:59:59；`observed` / `statutory_backfilled` / `revised` 三桶可审计。字段映射未校准 → 财务因子整体禁用（`layout_unverified` 计数进报告）；stale 逾期判定用真实交易日历，缺失时告警 `stale_calendar_missing`。
 - **矩阵导出（P1）**：`factor export` 是派生视图（不写因子表），CSV/JSON + `<out>.meta.json`（`dates` / `codes` / `resolved_versions` / `clean` / `missing_rate_by_factor` / `coverage_by_date` / `build_ids` / `generated_at` / `pipeline_version`）。默认导出原始值；`--clean` 启用当日截面内的 MAD/quantile 缩尾与 rank/zscore 归一（`MAD=0` 跳过并记 `winsorize_skipped="mad_zero"`，绝不除零、绝不回退全样本分位）。
 - **因子评估（P1）**：`factor eval` 主指标 Spearman RankIC（Pearson 附加）、ICIR、`nw_lag=max(horizon-1,0)` 的 Newey-West t、2/3 分组（5 直接拒绝；某日某组 <3 只跳过）、换手、覆盖率与 `effective_independent_days`；样本不足返回 `insufficient_data`（**这是有效结论，进程 exit 0**；参数错误 exit 2、运行时失败 exit 1）。标签从 `available_at` 之后第一个可成交日开盘起算（开盘→开盘），停牌剔除；行情以参数注入，不 import `review_account`。`--pit-policy strict`（默认）只统计 `observed`/`revised`，`research` 纳入 `statutory_backfilled` 并标 `restatement_unverifiable`（结论禁止写入模型快照）；`1q` 额外输出 `effective_independent_observations`、报告期 block bootstrap t、IC 一阶自相关，日频 naive t 标 `pseudo_independent`。所有统计量纯 Python 实现（零 numpy/scipy/pandas）。
-- **决策接入（P2，默认关）**：`StrategyConfig.factor_ranking_enabled=True` 时，`review-account` / `buy` 在 tier(A,P) 内插入因子分量（`factor_rank` → `-factor_score` → `-composite` → `-priority` → code）；关闭时零读取，排序与旧实现逐位等价。`factors/decision.py` 的 `EqualWeightRankModel` 按**每只候选自己的 `trade_date`** 读因子值、组内 rank 归一；模型快照存 `factor_model_snapshots`（`factor_model_version=""` 取最新，无快照 → 整日 `degraded(model_snapshot_missing)`，不隐式兜底）。任一必需因子缺值 → 该候选进 `factor_rank=1` 桶排在所有有分者之后；覆盖率低于 `factor_min_coverage`（默认 0.6）/ 读取失败 → 整日排序回退，绝不中断回测或 buy。`metrics` 新增 `sharpe`（只增键）；`industry_exposure` 只统计 `category="hy"` 并输出 `unattributed_ratio` / `unattributed_reasons`（归属日用 `entry_date` 快照）。
+- **决策接入（P2，默认关）**：`StrategyConfig.factor_ranking_enabled=True` 时，`review-account` / `buy` 在 tier(A,P) 内插入因子分量（`factor_rank` → `-factor_score` → `-composite` → `-priority` → code）；关闭时零读取，排序与旧实现逐位等价。`infra/factor/decision.py` 的 `EqualWeightRankModel` 按**每只候选自己的 `trade_date`** 读因子值、组内 rank 归一；模型快照存 `factor_model_snapshots`（`factor_model_version=""` 取最新，无快照 → 整日 `degraded(model_snapshot_missing)`，不隐式兜底）。任一必需因子缺值 → 该候选进 `factor_rank=1` 桶排在所有有分者之后；覆盖率低于 `factor_min_coverage`（默认 0.6）/ 读取失败 → 整日排序回退，绝不中断回测或 buy。`metrics` 新增 `sharpe`（只增键）；`industry_exposure` 只统计 `category="hy"` 并输出 `unattributed_ratio` / `unattributed_reasons`（归属日用 `entry_date` 快照）。
 - **A/B**：`compare_strategies` 的 `variant_grid` 可跑 `factor_ranking_enabled=True/False`，但区间内因子 build 完成率必须 ≥ 95%，否则结论标 `insufficient_data`；`trial_count` 计入所有 variant。
 - **默认零影响**：因子层不进入 `scan` / `prep` 候选池；决策层只有 `rank_key` 单一注入点，`factor_ranking_enabled` 默认关。
-- **存储**：落 `assets.db` 的 `factor_*` 与 `fin_*` 表；M6 起**全部纳入 `assets_sync`**（`factor` / `fin` 两个 domain source，行级合并），`assets status` 的 `not_synced` 恒为 `{}`，覆盖图见 `summary.tables`。真正不可再生的财务原始资产（`fin_report_files.raw_blob`、`fin_observed_snapshots`、vintage 时刻）随全表同步一并备份。
+- **存储**：落 `assets.db` 的 `factor_*` 与 `fin_*` 表；M6 起**全部纳入 `infra/assets/sync`**（`factor` / `fin` 两个 domain source，行级合并），`assets status` 的 `not_synced` 恒为 `{}`，覆盖图见 `summary.tables`。真正不可再生的财务原始资产（`fin_report_files.raw_blob`、`fin_observed_snapshots`、vintage 时刻）随全表同步一并备份。
 - 当前进度：P0 + P0.5 + P1 + P1.5（prep/auction 因子化）+ P2（决策接入 / Sharpe / 行业暴露）已完成；P3（替换五维、行业中性化、ML）不在本期。
 
 ### `review` — 龙头回测
 
 ```bash
-dragon-quant review                       # 自动筛 5~20 交易日内 pending 票全回测
+dragon-quant review                       # 自动回测所有距当日 >=5 交易日的 pending 票（无 20 日上限）
 dragon-quant review --date 20260519 --top 5
 dragon-quant review --date 20260519
 dragon-quant review --force --date 20260519
+dragon-quant review --recompute-all --dry-run          # 全量重算预检（上界统计；不写库、不拉 K 线）
+dragon-quant review --recompute-all --limit 20         # 最老 20 条 canary
+dragon-quant review --recompute-all                    # 全量双口径回填（默认跳过已有严格结果）
 dragon-quant review --ui                  # 回测后启动 Web UI（默认展示 dragons_v2）
 dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 ```
 
-`review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表。回测流程：从对应 `dragons_*` 表读 pending 龙头 → 找入选后第一个非一字板日（`high != low`）以最低价买入 → 算 `max_return_5d` / `max_return_hold_days` → 按买入日至峰值窗口算 `max_drawdown_5d` → 写回对应 DB 表。回测时对每只 pending 个股追加一段**量价分析**，结论写入独立的 `vpa_analysis` 表。
+`review` 默认读取/写回 `dragons_v2`；`--source v1` 仅用于查询和回测历史旧表（保持旧 5~20 交易日窗口与旧口径，不写严格结果）。
+
+**双口径**（两种口径共享同一收益 / 回撤窗口与公式，胜利条件均为 `max_return_5d > 0 且 max_drawdown_5d > -5`，0 与 -5 都不算赢）：
+
+- **宽松口径**（历史行为，写 `dragons_v2` 现有 review 字段）：入选后首个 `high != low` 日按**最低价**买入。
+- **严格口径**（写入侧表 `dragon_review_strict`，唯一键 `(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停也按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位记 `cannot_evaluate`（原因措辞「停牌或数据缺失无法区分」）；传输失败不写、不覆盖严格结果；收益窗口为空同样 `cannot_evaluate`，部分窗口沿用公式并标 `partial_window`。
+
+`--recompute-all` 仅 v2，按最老记录优先，默认跳过已有严格行（`--force` 覆盖），`--dry-run` / `--limit` 只可与其组合（非法组合 exit 2）；dry-run 计数是未过滤成熟度的**上界**，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。普通 `review` 仍为每只个股补一段**量价分析**写入 `vpa_analysis`；全量重算刻意跳过 VPA，避免历史污染。Web UI 的收益 / 回撤 / 状态筛选与表格指标固定使用严格口径，并同时展示宽松 / 严格胜率与待重算、失败、无法评估计数；v1 明确标注为旧口径。
+
+顶部 7 张指标卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表**同源**：`GET /api/dragons` 在成功响应中同时返回 `summary`，由筛选后的**完整 rows** 计算（客户端分页不影响统计），`data` / `count` 契约不变；`GET /api/summary` 保留为无筛选参数的 legacy 端点。修改筛选条件不自动请求，点击「查询」或回车才同时刷新卡片与列表；「重置」保留当前体系（source）并清空其余 12 项筛选、立即恢复全量。空集或无可评测样本的均值 / 胜率 / 最佳显示 `—`，真实无赢家显示 `0.0%`；两胜率沿用既有分母与 cannot 规则。
+
+Web UI 入口为 `web_ui.start_server(...) -> HTTPServer`：CLI（`--ui` / `--ui-only`）默认 `block=True` 阻塞运行；`--port 0` 由操作系统分配端口并打印真实 URL；测试或嵌入场景可传 `block=False`，拿到 server 后自行 `shutdown()` / `server_close()`。
+
+`review` 的 `--port` 未显式指定时默认 `8765`：若该端口已被占用，stderr 警告一次后仅重试一次 `port=0`（系统分配），日志与浏览器 URL 取实际端口。显式 `--port N` 被占用时不会自动换端口，而是打印可操作的错误并以非零码退出（无 traceback）；其他绑定错误（如权限不足）原样抛出。`review-account` 的端口行为不变。
 
 ### `review-account` — 账户级模拟交易
 
@@ -357,10 +379,10 @@ dragon-quant review-account --ui-only
 - 信号与成交分离：历史信号在下一可交易事件撮合，实时信号等待更晚的有效报价；跳空不补填成本线或止损价，封死涨跌停不假定能买卖。
 - T+1、当天卖出后不再买入；按事件顺序先卖后买，不用下午卖出结果阻止早上买入。止损、移动止盈、保本、高开窗口和尾盘规则共用一处实现；尾盘以 14:55 已知行情判断，15:00 只估值和更新峰值。
 - 默认仍保留原仓位基线；`--config params.json` 可统一设置风险预算、单票仓位上限、MA5 距离/趋势过滤、ATR 移动止盈。最低佣金默认每笔 5 元，双边滑点 0.2%，佣金 0.03%，卖出印花税 0.05%。
-- 择时与仓位改造（除龙回头默认开启外，其余 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、首日止损减半 `first_day_stop`（默认关；开启后 T+1 必须至少运行一次 `sell`）、时间止损、分级移动止盈、龙回头买点（**默认开启**，显式 false 可复现旧基线），及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](https://github.com/gitBingxu/dragon-quant/blob/main/dragon_quant/review_account/STRATEGY.md)。
+- 择时与仓位改造（除龙回头默认开启外，其余 default-off）：情绪→仓位→禁买（消费盘后复盘快照 `sentiment.position_pct`）、组合风控（日级熔断/净值回撤降仓/连续亏损降仓）、`entry_veto`（无调用方的通用前置否决钩子；竞价否决在 `evaluate_buy` 信号后置闸门，`reason_code=auction_veto`）、首日止损减半 `first_day_stop`（默认关；开启后 T+1 必须至少运行一次 `sell`）、时间止损、分级移动止盈、龙回头买点（**默认开启**，显式 false 可复现旧基线），及验证基建（高原扫描/消融/回撤分解/试验账本）。分叉声明与规则链顺序见 [STRATEGY.md](https://github.com/gitBingxu/dragon-quant/blob/main/dragon_quant/review_account/strategy/STRATEGY.md)。
 - 数据分级成交：当日所有相关个股都有完整 5 分钟 K 时走严格盘中撮合；任一缺失则整日**日K兜底**（开盘价买入、当日 OHLC 判止损止盈，分歧买龙/高开窗口等分时规则自动跳过；分时可用但当日日K缺行的标的记为 `daily_unavailable`，当日不建行）。雪球 5 分钟历史约仅保留 14 天，故多月回测多为兜底模式，成交价为保守近似，结果标注 `data_quality`（strict_5min/mixed/daily_fallback）与 `fallback_days`。**停牌标的按 code 跳过并标记**：历史交易日「当日日K缺行」或「日K `volume`/`amount` 双零」且无分时 → 判停牌，不进当日 `rows`、不评估买卖、按最近可得收盘价估值（净值沿用上一交易日收盘），剔除停牌 code 后再判断是否整日兜底；结果新增 `suspended_days` / `suspended_codes` / `suspended_days_count` / `unavailable_days` / `data_degraded`，停牌候选仍保留在 `details` 并以 `reason_code=suspended` 说明。当日（盘中与收盘后）不做停牌分类（日K缓存按写入日命名、不校验新鲜度），沿用旧契约硬报错。日K完全无历史或预热不足仍报错、不保存部分回测；除权口径缺口仍待解决。
 
-`/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](https://github.com/gitBingxu/dragon-quant/blob/main/dragon_quant/review_account/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
+`/account` 继续支持生成/删除记录，`POST /api/account/runs` 可传 `strategy_params` JSON；快照附带完整 `positions`，旧记录仍可读取。完整规则见 [STRATEGY.md](https://github.com/gitBingxu/dragon-quant/blob/main/dragon_quant/review_account/strategy/STRATEGY.md)。`review_account.evaluation.compare_strategies` 使用时间顺序训练/验证/独立测试和双倍滑点压力测试；数据不足时返回原因，不自动推广参数，不保证收益改善。
 
 - **买点统计**：`/account` 新增「买点统计」卡片，按四类买点（开盘回踩MA5 / 弱转强 / 分歧买龙 / 龙回头）+ 未知 code + 合计，展示笔数、盈利笔数、胜率、平均每笔收益、累计贡献收益；胜率与顶部 KPI 同源。基于已落库的 `entry_reason_code` / `realized_return` 实时聚合，旧 run 也可用；累计贡献按 `Σ已实现盈亏 / 初始资金` 估算（忽略买入佣金）。
 - **清仓后窗口指标**：「单票收益汇总」新增「清仓5日内最高盈利」「清仓5日内最大回撤」两列。窗口为卖出日之后的 5 根有效日K（停牌不计入、不足按实际、无 bar 显示 `—`），可越出回测区间（事后评估，不影响交易）；旧 run 不回溯，显示 `—`。最高盈利 =（窗口最高−卖出）/卖出×100，最大回撤 = min(0,（窗口最低−卖出）/卖出×100)。`GET /api/account/positions` 同时返回 `stats` 买点聚合（只增键）。
@@ -378,10 +400,10 @@ dragon-quant buy --force                      # 午休/收盘后强制跑当日�
 `buy`/`sell` 底层与 `review-account` 完全复用同一 `review_account` 策略与成交函数，只做信号记账、**不维护真实账户**：只要候选池标的触发买点就记一条买入（buy-all，不再择优取第一只）；`sell` 从信号表筛出「买入日之前且 as-of 未平仓」的信号，回放当日行情判定卖出。策略调参只需改 `review_account` + 回测，`buy/sell` 自动跟随。
 
 - 与 `review-account` 共用 P/A 三值排序与否决；`buy` 输出 `ranking_mode`（`auction` / `auction_unverified` / `prep_only` / `legacy`）与 `fallback_reason`，被否决但本可买入的标的在 `details` 中带 `vetoed_signal`（含买点类型），便于影子对照。
-- **四类买点诊断**：`buy` 对每个候选（买入与未买入）逐条输出 ① 开盘回踩MA5 / ② 弱转强 / ③ 分歧买龙 / ④ 龙回头 的状态与带数值原因；同一 code 只输出一次，取最后一条带 `checks` 的 detail。状态：`passed`（通过）、`failed`（未通过）、`pending`（待确认，09:30 的 ②③）、`window_closed`（窗口已过未通过）、`unavailable`（日K兜底/数据缺失）、`skipped`（情绪禁买/综合分不足/非真龙等前置闸门，不伪造失败）。决策与诊断共用 `review_account/strategy.py` 的 `_rule_*`，阈值只有一份。`buy --json` 的 `details[].checks` 每项含 `rule`/`label`/`window`/`status`/`selected`/`reason`，detail 另带 `observed_at`/`phase`；`checks` 只进 JSON，不写 `buy_sell_signals`。
+- **四类买点诊断**：`buy` 对每个候选（买入与未买入）逐条输出 ① 开盘回踩MA5 / ② 弱转强 / ③ 分歧买龙 / ④ 龙回头 的状态与带数值原因；同一 code 只输出一次，取最后一条带 `checks` 的 detail。状态：`passed`（通过）、`failed`（未通过）、`pending`（待确认，09:30 的 ②③）、`window_closed`（窗口已过未通过）、`unavailable`（日K兜底/数据缺失）、`skipped`（情绪禁买/综合分不足/非真龙等前置闸门，不伪造失败）。决策与诊断共用 `review_account/strategy/buy.py` 的 `_rule_*`，阈值只有一份。`buy --json` 的 `details[].checks` 每项含 `rule`/`label`/`window`/`status`/`selected`/`reason`，detail 另带 `observed_at`/`phase`；`checks` 只进 JSON，不写 `buy_sell_signals`。
 - **龙回头默认开启**：`StrategyConfig.dragon_comeback_enabled=True`（`buy` / `review-account` 共享策略同时生效）；显式 `--config '{"dragon_comeback_enabled": false}'` 可复现旧基线。默认开启后历史回测结果不可直接与旧基线比较，历史快照不重算。
 - `SignalEngine` 复刻 `TradingEngine.step` 的「决策 → 下一可执行事件成交」两段式与峰值跟踪，去掉资金/仓位/次数限制；卖出数量用 `notional_quantity`（`initial_cash × max_position_pct`，与回测首仓同口径）落库冻结，保证 `break_even_price` 与回测精确一致；半仓规则只减半不平仓，`half_close_signal` 冻结半仓腿后剩余半仓继续跟踪。
-- 组合风控经 `live_trade/shadow.py` 从信号表按回放时点重建影子状态，逐事件调用同一个 `risk_governor`：日级熔断、连亏熔断与 `equity<=0` 破产闸跟随；delevel 降仓在无 sizing 场景不适用（详见 `review_account/STRATEGY.md` §5）。
+- 组合风控经 `review_account/live_trade/shadow.py` 从信号表按回放时点重建影子状态，逐事件调用同一个 `risk_governor`：日级熔断、连亏熔断与 `equity<=0` 破产闸跟随；delevel 降仓在无 sizing 场景不适用（详见 `review_account/strategy/STRATEGY.md` §5）。
 - 数据分级：`buy`/`sell` 的行情完整性判定都覆盖「候选 ∪ 持仓」，任一分时缺失即整日走日K兜底，输出带 `data_quality` 提示。
 - 历史回放必须显式指定 `--date YYYYMMDD --at HH:MM`，仅用历史数据；实时运行不指定 `--at`，回放截至当前已完成的5分钟K。
 - `--force`（`buy`/`sell` 均支持）：放行午间休市（11:30–13:00）与已收盘（≥15:06）的时段闸门，**09:30 前仍拒绝**；15:00–15:06 属既有收盘宽限窗口（本来就不拦截），`--force` 在该窗口不生效、日K兜底仍按收盘价成交。不解除任何数据/日期校验（非交易日、历史缺 `--at`、无完整5分钟K 照常报错），与 `--at` 同给时 `--at` 优先。强制模式仍用最后一个已完成5分钟K回放（午休=11:30、收盘=15:00），不伪造收盘价成交；信号照常落库并在 `signal_json` 中带 `"forced": true`，人读输出打印一行强制模式提示。
@@ -408,11 +430,14 @@ dragon-quant data minute --code 600172                 # 个股 1 分 K（分时
 dragon-quant data quote --code 600172                  # 实时行情
 dragon-quant data batch-quote --codes 600172,000001    # 批量行情
 dragon-quant data cookie-status                        # Cookie 状态
+dragon-quant data cookie-fetch                         # 自动获取雪球 Cookie（需 playwright）
+dragon-quant data cookie-set --cookie "xq_a_token=...; xq_is_login=1; u=..."  # 手动设置
 ```
 
 ### `logs` / `storage` — 日志与数据管理
 
 ```bash
+dragon-quant logs list
 dragon-quant logs tail [-n 20]
 dragon-quant logs --source v2 query [--date 20260513] [--category scorer:drive] [--level error] [--code 600172]
 dragon-quant logs --source v2 summary
@@ -420,7 +445,10 @@ dragon-quant logs clear --days 7
 
 dragon-quant storage status      # 存储状态
 dragon-quant storage size        # 磁盘占用
-dragon-quant storage clear --all # 清理全部
+dragon-quant storage clear --all # 清理 cache+results+logs（数据库文件不清理）
+dragon-quant storage clear --cache             # 只清理缓存
+dragon-quant storage clear --results           # 只清理结果
+dragon-quant storage clear --logs --days 7     # 只清理 N 天前日志
 ```
 
 ## Programmatic API
@@ -448,7 +476,7 @@ result = dragon_quant.scan(top_n=5, candidates_n=5, workers=2)
 原子数据查询：
 
 ```python
-from dragon_quant.data import (
+from dragon_quant.infra.provider.data import (
     get_sector_ranking, get_sector_components,
     get_kline, get_minute_kline, get_quote, batch_get_quotes,
     cookie_status, fetch_cookies,
@@ -474,7 +502,7 @@ quote = get_quote("600172")
 
 聚合：四大特征任一低于门槛或执行异常即否决；资金承接不否决，无数据、无信号或异常均降级为 50 分。全部候选保留诊断综合分，但只有通过者按综合分降序、同分代码升序获得真龙排名（否决者 `rank=null`）。`raw_output.ranking` 和 `scan_stocks_v2` 保存全部明细；报告及 `dragons_v2` 只使用 Top N 真龙，不用否决票补位。无真龙仍保存扫描和原因，五日去重后保留原排名。
 
-关键口径：稳定封板取最后一次开板后持续封至最后有效分钟的起点；带动与跟风按动作先后互斥判定，同步启动不判方向，相关性奖励只看首次触板前；抗跌性使用 **SH000001 上证指数**，反弹需基准和个股均实际回升，横盘不获反弹分；非涨停买一量不算封单，从未触板的完整分时稳定性为 0；资金承接以扫描日领跌 Top20 行业为对手盘，六根五分钟线不跨午休或隔夜，逐板块验证先跌后拉且间隔不超十分钟。阈值与降级分集中于 `scorers/registry.py`。
+关键口径：稳定封板取最后一次开板后持续封至最后有效分钟的起点；带动与跟风按动作先后互斥判定，同步启动不判方向，相关性奖励只看首次触板前；抗跌性使用 **SH000001 上证指数**，反弹需基准和个股均实际回升，横盘不获反弹分；非涨停买一量不算封单，从未触板的完整分时稳定性为 0；资金承接以扫描日领跌 Top20 行业为对手盘，六根五分钟线不跨午休或隔夜，逐板块验证先跌后拉且间隔不超十分钟。阈值与降级分集中于 `scan/scores/registry.py`。
 
 资金承接单事件按强度/广度/持续性 **60%/20%/20%** 评分，拉升满分参考为 **3%**、出逃规模（绝对均跌百分比×有效板块数）满分参考为 **10**。同交易时段的重叠窗口合并为独立事件，取消次数加分；事件分按三交易日半衰期向中性 50 衰减，再取衰减后最强的最多三个独立事件均值。报告展示原始窗口数、独立事件数、代表事件原始分和衰减结果；不调整维度总权重 10%，不新增否决条件。
 
@@ -498,26 +526,95 @@ quote = get_quote("600172")
 
 ```
 dragon_quant/
-├── cli.py                # CLI 门面（解析树 + main() + 共享 helper）
-├── cli_commands.py       # 各子命令 _cmd_* 处理函数
-├── orchestrator.py       # 编排器（Phase A→F，固定五维评分）
-├── data.py               # 原子数据查询 API
-├── rate_limit.py         # 并发限流器
-├── providers/            # 数据源适配（tdx/ths/xueqiu/tencent/macro/cookie）
-├── scorers/           # 五维评分器 + registry + aggregator
-├── factors/              # 因子层（registry/engine/storage/decision/builtin/service；只读迁移 + 决策注解，不 import scorers）
-├── vpa/                  # 量价分析（插件式因子）
-├── cache/                # 内存+本地双缓存
-├── logging/              # ScanLogger + ReportBuilder + query
-├── storage/              # paths / db（SQLite 门面 + 领域模块）/ manager
-├── utils/trading.py     # 交易日历工具
-├── review.py             # 龙头回测
-├── review_account/       # 账户级模拟交易回测（strategy/simulator/models/indicators/service）
-├── live_trade/           # 实盘辅助交易 buy/sell（signal_engine/shadow/trader/service，复用 review_account 策略）
-├── assets_sync/          # 数据资产云端同步（codec/models/tables/sources/manifest/state/service/backends）
-├── web_ui/               # 回测 Web UI（Vite+React+TS / stdlib HTTPServer）
-└── models/types.py      # 数据模型
+├── __init__.py / __main__.py / _version.py / cli.py / app.py   # 入口 + Composition Root
+├── commands/                    # 每个顶层命令一个薄 handler（COMMANDS + dispatch；buy/sell 共用 buy_sell.py）
+│   ├── __init__.py              # lazy 注册表 + dispatch(name, args) 唯一分发入口
+│   ├── _shared.py               # CLI 纯 helper（策略 JSON / 日期 / 序列化）
+│   ├── scan.py / logs.py / data.py / blacklist.py / review.py / review_account.py
+│   └── dragons.py / prep.py / auction.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py
+├── scan/                        # 扫描 feature（可调用包）
+│   ├── __init__.py              # 可调用包：scan(...) → scan.orchestrator.main.scan
+│   ├── sectors.py               # 板块身份 + cache 键构造
+│   ├── scores/                  # 五维「识别真龙」评分器
+│   │   ├── __init__.py / main.py / aggregator.py / base.py / registry.py
+│   │   └── drive.py / leadership.py / anti_drop.py / liquidity.py / absorption.py
+│   ├── orchestrator/            # Phase A→F 编排
+│   │   ├── __init__.py
+│   │   └── main.py
+│   ├── storage/                 # 扫描持久化仓储 + Phase F 收口
+│   │   ├── __init__.py / main.py / scans.py / dragons.py / logs.py
+│   │   └── blacklist.py / results.py
+│   ├── cache/                   # ScanCache（通用 DataCache 在 infra.storage）
+│   │   ├── __init__.py
+│   │   └── main.py
+│   └── logger/                  # 结构化日志 + 报告 + 查询
+│       ├── __init__.py / main.py / events.py / report.py
+│       └── query.py
+├── review/                      # 龙头回测
+│   ├── __init__.py
+│   └── main.py                  # run_review / review_dragon
+├── review_account/              # 账户级回测 + 策略 + 盘后复盘 + 竞价 + 实盘辅助
+│   ├── __init__.py / main.py / service.py / simulator.py / engine.py / data.py
+│   ├── market.py / indicators.py / evaluation.py / models.py / advice.py / verdicts.py
+│   ├── storage.py
+│   ├── prep/                    # 盘后复盘
+│   │   ├── __init__.py / main.py / service.py / collectors.py / compute.py
+│   │   └── rebuild.py
+│   ├── auction/                 # 集合竞价
+│   │   ├── __init__.py / main.py / collect.py / recompute.py / scoring.py / dates.py
+│   │   └── registry.py / strength.py / serialize.py / report.py / types.py
+│   ├── strategy/                # 策略纯拆分
+│   │   ├── __init__.py / main.py / common.py / buy.py / checks.py / sell.py
+│   │   ├── execution.py / priority.py / risk.py
+│   │   └── STRATEGY.md
+│   └── live_trade/              # 实盘辅助 buy/sell
+│       ├── __init__.py / main.py / service.py / trader.py / signal_engine.py / shadow.py
+│       └── storage.py
+├── vpa/                         # 量价分析
+│   ├── __init__.py / main.py / engine.py / types.py / report.py / storage.py
+│   └── factors/                 # vol_amount / trend_verify / breakout / divergence
+│       ├── __init__.py / base.py / vol_amount.py / trend_verify.py
+│       └── breakout.py / divergence.py
+├── infra/                       # 叶子层：唯一连接/schema/路径/缓存/provider/资产/因子
+│   ├── __init__.py / clock.py / models.py / market_calendar.py / module_proxy.py
+│   ├── provider/                # 数据源适配
+│   │   ├── __init__.py / main.py / base.py / bundle.py / data.py / rate_limit.py
+│   │   ├── tdx.py / ths.py / xueqiu.py / tencent.py / macro.py
+│   │   └── cookie.py
+│   ├── storage/                 # dragon.db 唯一连接 + 通用设施
+│   │   ├── __init__.py / main.py / paths.py / identifiers.py / connection.py / schema.py
+│   │   └── _base.py / dragons_rows.py / cache.py / manager.py
+│   ├── factor/                  # 因子层（13 批准出口 + builtin）
+│   │   ├── __init__.py / main.py / types.py / registry.py / engine.py / storage.py
+│   │   ├── decision.py / evaluation.py / matrix.py / stats.py / service.py
+│   │   ├── finance.py / sql.py / finance_store.py
+│   │   └── builtin/             # five_dim / vpa / financial / prep / auction
+│   │       ├── __init__.py / five_dim.py / vpa.py / financial.py
+│   │       └── prep.py / auction.py
+│   └── assets/                  # assets.db 独立库 + 云端同步
+│       ├── __init__.py / main.py / db.py / schema.py / dragons_mirror.py
+│       ├── ASSETS_ARCHITECTURE.md
+│       └── sync/
+│           ├── __init__.py / cli_service.py / service.py / sources.py / tables.py
+│           ├── manifest.py / state.py / codec.py / models.py / credentials.py
+│           ├── doctor.py / errors.py
+│           └── backends/
+│               ├── __init__.py / base.py / local.py / s3.py / signer.py
+├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
+
+# 同级仓库包（不是 dragon_quant 的子包）
+web_ui/                          # 回测 Web UI（Vite+React+TS / stdlib HTTPServer；web_ui.start_server）
 ```
+
+> `cli.py` 只负责 argparse 解析，随后调用 `commands.dispatch(name, args)`；各顶层命令实现在
+> `commands/<name>.py`。`app.py` 只是 commands 按需调用的装配支路，不在导航链上多一跳。
+> **模块公共入口**：`review_account.main`（`run_review_account` + `StrategyConfig` / `MarketData`）、
+> `review_account.prep.main`（`run_prep` + `format_advice_lines` / `format_candidate_lines`）、
+> `review_account.live_trade.main`、`review_account.auction.main`、`vpa.main`（`analyze` + `render` /
+> `upsert_vpa`）、`infra.factor.main`（13 批准出口）、`infra.assets.main.run`、`scan.storage.main`、
+> `scan.logger.main`。新代码只经这些 `main` 门面，不直接深引 feature 实现模块。
+> 刻意保留的兼容例外（factor lazy 旧名、`infra/storage/_base`、`infra/module_proxy`（仅 stdlib
+> 属性转发）、prep `legacy()`、trader.datetime、scan provider 例外）见 `docs/agent/architecture.md`「刻意保留的兼容例外」。
 
 ## 设计原则
 
@@ -527,11 +624,31 @@ dragon_quant/
 4. **结构化日志**：`ScanLogger` 全链路打点，支持按类别/级别/代码查询。
 5. **历史兼容**：主流程固定写 `*_v2` 表；旧 `*_v1` 表保留显式查询能力，不参与新扫描。
 
+## 测试
+
+```bash
+# M0 harness 自检（不跑业务用例）
+python dragon_quant/tests/e2e/harness/runner.py --self-check
+
+# 全量离线 E2E（真实 CLI 子进程 + golden；51 个 parser 节点 / 15 个顶层命令）
+python -m pytest dragon_quant/tests/e2e -q
+
+# 单元 / 集成测试（排除 e2e 与需要真实网络的 smoke）
+python -m pytest dragon_quant/tests -q --ignore=dragon_quant/tests/e2e --ignore=dragon_quant/tests/smoke
+
+# Node 安装器测试（隔离 HOME/TMPDIR/npm cache，不访问 registry）
+npm test
+```
+
+E2E 的安全边界：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟并拦截 socket/DNS，禁止真实网络、Cookie、R2/B2。`dragon_quant/tests/e2e/coverage-map.json` 强制每个 parser 节点映射到真实测试，新增命令必须同步更新。
+
 ## 持久化
+
+存储采用**惰性初始化**：`import dragon_quant`、`python -m dragon_quant -h`、`-v` 以及纯查询类导入都不创建任何数据目录或数据库文件；首次真实存储访问（扫描/回测/日志/黑名单等命令真正读写数据库、`assets.db` 写入、扫描报告落盘）才按 `DQ_DATA_DIR`（或平台默认目录）幂等创建目录与 schema。`db.init_db()` 仍保留为公开的幂等初始化 API。
 
 SQLite 表分为三类：
 
-- 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2`
+- 当前主流程：`scans_v2` / `scan_stocks_v2` / `scan_logs_v2` / `dragons_v2` / `dragon_review_strict`（严格口径 review 侧表，唯一键 `(trade_date, code, source)`；无行 = 尚未重算）
 - 历史旧表：`scans_v1` / `scan_stocks_v1` / `scan_logs_v1` / `dragons_v1`（仅显式 `--source v1` 查询）
 - 共享表：`vpa_analysis` / `sector_blacklist`
 - 账户级 review 表：`review_account_runs` / `review_account_snapshots` / `review_account_trades` / `review_account_positions` / `review_account_events`

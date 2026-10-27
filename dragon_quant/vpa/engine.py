@@ -33,7 +33,7 @@ DEFAULT_CTX = {
 
 
 def analyze(code: str, source: str = "xueqiu", days: int = 60,
-            ctx: dict | None = None) -> VPAReport:
+            ctx: dict | None = None, services=None) -> VPAReport:
     """对单只个股做量价分析。
 
     Args:
@@ -41,18 +41,25 @@ def analyze(code: str, source: str = "xueqiu", days: int = 60,
         source: 数据源 xueqiu / tencent
         days:   拉取日K线根数
         ctx:    覆盖 DEFAULT_CTX 的参数
+        services: 可选 M2 装配注入；有 providers 时 K 线经 ``data.get_kline``
+            使用其对应 provider。不传时保持既有 lazy 构造与 monkeypatch 行为。
 
     Returns:
         VPAReport
     """
-    from dragon_quant.data import get_kline
+    from dragon_quant.infra.provider.data import get_kline
 
     run_ctx = dict(DEFAULT_CTX)
     if ctx:
         run_ctx.update(ctx)
 
     try:
-        klines = get_kline(code, source=source, days=days)
+        # 仅在注入时传参：旧的 ``data.get_kline`` monkeypatch 回调只接受
+        # (code, source, days)，无条件传 services 会破坏既有测试与调用方。
+        if services is None:
+            klines = get_kline(code, source=source, days=days)
+        else:
+            klines = get_kline(code, source=source, days=days, services=services)
     except Exception as e:
         return VPAReport(
             code=code, source=source, health_score=50.0, signal=SIGNAL_NEUTRAL,

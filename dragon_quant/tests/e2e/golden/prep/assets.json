@@ -1,0 +1,635 @@
+{
+  "cninfo_announcements": {
+    "as_of": "2026-09-11",
+    "items": {
+      "600001": {
+        "announcements": [],
+        "max_announcement_date": "2026-08-01",
+        "truncated": false
+      },
+      "600002": {
+        "announcements": [
+          {
+            "date": "2026-09-10",
+            "title": "关于股东减持计划的公告",
+            "type": "减持",
+            "url": "u"
+          }
+        ],
+        "max_announcement_date": "2026-09-10",
+        "truncated": false
+      },
+      "600003": {
+        "announcements": [],
+        "max_announcement_date": "2026-08-01",
+        "truncated": false
+      },
+      "600004": {
+        "announcements": [
+          {
+            "date": "2026-09-10",
+            "title": "立案调查公告",
+            "type": "立案",
+            "url": "u"
+          }
+        ],
+        "max_announcement_date": "2026-09-10",
+        "truncated": false
+      },
+      "600005": {
+        "announcements": [],
+        "max_announcement_date": "2026-08-01",
+        "truncated": false
+      }
+    },
+    "truncated_codes": [],
+    "window_days": 7,
+    "window_start": "2026-09-04"
+  },
+  "collection_report": {
+    "cninfo_announcements": {
+      "status": "ok"
+    },
+    "dragons": {
+      "status": "ok"
+    },
+    "fg_boards": {
+      "status": "ok"
+    },
+    "fund_flow": {
+      "status": "ok"
+    },
+    "macro_global": {
+      "status": "ok"
+    },
+    "market_breadth": {
+      "status": "ok"
+    },
+    "ths_block_top": {
+      "status": "ok"
+    },
+    "ths_limit_up_pool": {
+      "status": "ok"
+    }
+  },
+  "dragons": {
+    "count": 7,
+    "days": [
+      {
+        "count": 1,
+        "scan_id": "v2_20260907_5",
+        "status": "ok",
+        "trade_date": "2026-09-07",
+        "version": "0.7.2"
+      },
+      {
+        "count": 2,
+        "scan_id": "v2_20260908_5",
+        "status": "ok",
+        "trade_date": "2026-09-08",
+        "version": "0.7.2"
+      },
+      {
+        "count": 1,
+        "scan_id": "v2_20260909_5",
+        "status": "ok",
+        "trade_date": "2026-09-09",
+        "version": "0.7.2"
+      },
+      {
+        "count": 1,
+        "scan_id": "v2_20260910_5",
+        "status": "ok",
+        "trade_date": "2026-09-10",
+        "version": "0.7.2"
+      },
+      {
+        "count": 2,
+        "scan_id": "v2_20260911_5",
+        "status": "ok",
+        "trade_date": "2026-09-11",
+        "version": "0.7.2"
+      }
+    ],
+    "rows": [
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600001",
+        "composite_score": 88.0,
+        "concepts": [
+          "AI算力"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "龙头A",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 1,
+        "report_text": "龙头A report",
+        "review_status": "pending",
+        "scan_id": "v2_20260907_5",
+        "source": "v2",
+        "trade_date": "2026-09-07",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      },
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600001",
+        "composite_score": 86.0,
+        "concepts": [
+          "AI算力"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "龙头A",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 1,
+        "report_text": "龙头A report",
+        "review_status": "pending",
+        "scan_id": "v2_20260908_5",
+        "source": "v2",
+        "trade_date": "2026-09-08",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      },
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600002",
+        "composite_score": 62.0,
+        "concepts": [
+          "机器人"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "跟风B",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 2,
+        "report_text": "跟风B report",
+        "review_status": "pending",
+        "scan_id": "v2_20260908_5",
+        "source": "v2",
+        "trade_date": "2026-09-08",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      },
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600003",
+        "composite_score": 90.0,
+        "concepts": [
+          "机器人"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "补涨C",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 1,
+        "report_text": "补涨C report",
+        "review_status": "pending",
+        "scan_id": "v2_20260909_5",
+        "source": "v2",
+        "trade_date": "2026-09-09",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      },
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600002",
+        "composite_score": 62.0,
+        "concepts": [
+          "机器人"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "跟风B",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 2,
+        "report_text": "跟风B report",
+        "review_status": "pending",
+        "scan_id": "v2_20260910_5",
+        "source": "v2",
+        "trade_date": "2026-09-10",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      },
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600005",
+        "composite_score": 82.0,
+        "concepts": [
+          "机器人"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "龙头E",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 1,
+        "report_text": "龙头E report",
+        "review_status": "pending",
+        "scan_id": "v2_20260911_5",
+        "source": "v2",
+        "trade_date": "2026-09-11",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      },
+      {
+        "amount": 100000000.0,
+        "board_count": 2,
+        "buy_date": null,
+        "buy_price": null,
+        "close_px": 11.0,
+        "code": "600004",
+        "composite_score": 40.0,
+        "concepts": [
+          "银行科技"
+        ],
+        "high_px": 11.0,
+        "is_true_dragon": true,
+        "low_px": 10.0,
+        "market_cap": 1000000000.0,
+        "max_drawdown_5d": null,
+        "max_return_5d": null,
+        "max_return_hold_days": null,
+        "name": "银行D",
+        "open_px": 10.0,
+        "pct": 10.0,
+        "rank": 2,
+        "report_text": "银行D report",
+        "review_status": "pending",
+        "scan_id": "v2_20260911_5",
+        "source": "v2",
+        "trade_date": "2026-09-11",
+        "turnover_rate": 8.0,
+        "version": "0.7.2"
+      }
+    ],
+    "scan_id": null,
+    "trade_date": "2026-09-11",
+    "version": null,
+    "window_days": 5,
+    "window_source": "calendar",
+    "window_trade_dates": [
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11"
+    ]
+  },
+  "fg_boards": {
+    "as_of": "2026-09-11",
+    "boards": {
+      "昨日上榜": {
+        "rows": [
+          {
+            "code": "600001"
+          },
+          {
+            "code": "600003"
+          }
+        ],
+        "status": "ok"
+      },
+      "昨日断板": {
+        "rows": [],
+        "status": "ok"
+      },
+      "昨日涨停": {
+        "rows": [
+          {
+            "close": 11.0,
+            "code": "600001",
+            "pre_close": 10.0
+          },
+          {
+            "close": 10.5,
+            "code": "600002",
+            "pre_close": 10.0
+          },
+          {
+            "close": 10.2,
+            "code": "600003",
+            "pre_close": 10.0
+          }
+        ],
+        "status": "ok"
+      },
+      "昨日跌停": {
+        "rows": [
+          {
+            "close": 9.0,
+            "code": "600010",
+            "pre_close": 10.0
+          },
+          {
+            "close": 9.0,
+            "code": "600011",
+            "pre_close": 10.0
+          }
+        ],
+        "status": "ok"
+      },
+      "昨日连板": {
+        "rows": [
+          {
+            "code": "600001"
+          }
+        ],
+        "status": "ok"
+      },
+      "昨日首板": {
+        "rows": [
+          {
+            "code": "600002"
+          }
+        ],
+        "status": "ok"
+      }
+    },
+    "note": "FG 板块为 T-1 语义（昨日X=上一交易日集合）"
+  },
+  "fund_flow": {
+    "as_of": "2026-09-11",
+    "quotes": {
+      "600001": {
+        "amount": 100000000.0,
+        "main_net_amount": 12345600.0,
+        "pct": 5.0,
+        "turnover_rate": 8.0
+      },
+      "600002": {
+        "amount": 80000000.0,
+        "main_net_amount": -5000000.0,
+        "pct": -2.2,
+        "turnover_rate": 5.0
+      },
+      "600003": {
+        "amount": 50000000.0,
+        "main_net_amount": 2000000.0,
+        "pct": -10.0,
+        "turnover_rate": 6.0
+      },
+      "600004": {
+        "amount": 20000000.0,
+        "main_net_amount": -1000000.0,
+        "pct": -1.0,
+        "turnover_rate": 4.0
+      },
+      "600005": {
+        "amount": 500000000.0,
+        "main_net_amount": 30000000.0,
+        "pct": 10.0,
+        "turnover_rate": 12.0
+      }
+    }
+  },
+  "macro_global": {
+    "as_of": "2026-09-11",
+    "degraded": [],
+    "instruments": {
+      "cn_a50": {
+        "chg": -115.0,
+        "chg_bp": null,
+        "chg_bp_approx": null,
+        "chg_unit": "pct",
+        "code": "CNY0",
+        "key": "cn_a50",
+        "kind": "index",
+        "label": "富时A50期指",
+        "market": "INTL_INDEX",
+        "pct": -0.87,
+        "precision_note": null,
+        "prev_close": 13279.0,
+        "price": 13164.0,
+        "price_unit": "points",
+        "raw_date": "20260911",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-11",
+        "source": "tdx"
+      },
+      "gold": {
+        "chg": -26.4,
+        "chg_bp": null,
+        "chg_bp_approx": null,
+        "chg_unit": "pct",
+        "code": "GC00W",
+        "key": "gold",
+        "kind": "commodity",
+        "label": "COMEX金",
+        "market": "COMEX_FUTURES",
+        "pct": -0.63,
+        "precision_note": null,
+        "prev_close": 4186.7,
+        "price": 4160.3,
+        "price_unit": "usd_per_oz",
+        "raw_date": "20260910",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-10",
+        "source": "tdx"
+      },
+      "jp_nikkei": {
+        "chg": 390.0,
+        "chg_bp": null,
+        "chg_bp_approx": null,
+        "chg_unit": "pct",
+        "code": "NK0Y",
+        "key": "jp_nikkei",
+        "kind": "index",
+        "label": "日经225期指",
+        "market": "INTL_INDEX",
+        "pct": 0.61,
+        "precision_note": null,
+        "prev_close": 64360.0,
+        "price": 64750.0,
+        "price_unit": "points",
+        "raw_date": "20260911",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-11",
+        "source": "tdx"
+      },
+      "ust10y": {
+        "chg": 0.06,
+        "chg_bp": 6.0,
+        "chg_bp_approx": true,
+        "chg_unit": "bp",
+        "code": "8_ATY",
+        "key": "ust10y",
+        "kind": "yield",
+        "label": "美债10Y",
+        "market": "MACRO_INDICATOR",
+        "pct": null,
+        "precision_note": "TDX 两位小数日频快照，bp 为近似值",
+        "prev_close": 5.09,
+        "price": 5.15,
+        "price_unit": "pct",
+        "raw_date": "20260910",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-10",
+        "source": "tdx"
+      }
+    },
+    "source_errors": {},
+    "sources": {
+      "cn_a50": "tdx",
+      "gold": "tdx",
+      "jp_nikkei": "tdx",
+      "ust10y": "tdx"
+    },
+    "trade_date": "2026-09-11"
+  },
+  "market_breadth": {
+    "as_of": "2026-09-11",
+    "broken": [
+      "900002"
+    ],
+    "caliber": "active: close>0 & pre_close>0 & (vol>0 | amount>0); limit tolerance 0.1%; total_amount over valid rows",
+    "down_cnt": 953,
+    "flat_cnt": 50,
+    "limit_down": [
+      "900003",
+      "900004",
+      "900005"
+    ],
+    "limit_up": [
+      "900001"
+    ],
+    "raw_n": 3105,
+    "sample_n": 3105,
+    "total_amount": 31048500,
+    "up_cnt": 2102
+  },
+  "ths_block_top": {
+    "api_date": "20260911",
+    "rows": [
+      {
+        "high": "4天2板",
+        "high_num": 4,
+        "limit_up_num": 23,
+        "name": "机器人",
+        "stock_list": [
+          {
+            "code": "600005"
+          },
+          {
+            "code": "600003"
+          }
+        ]
+      },
+      {
+        "high": "2天2板",
+        "high_num": 2,
+        "limit_up_num": 12,
+        "name": "AI算力",
+        "stock_list": [
+          {
+            "code": "600001"
+          }
+        ]
+      },
+      {
+        "high": "1天1板",
+        "high_num": 1,
+        "limit_up_num": 5,
+        "name": "银行科技",
+        "stock_list": [
+          {
+            "code": "600004"
+          }
+        ]
+      }
+    ],
+    "trade_date": "2026-09-11"
+  },
+  "ths_limit_up_pool": {
+    "api_date": "20260911",
+    "rows": [
+      {
+        "change_rate": 10.0,
+        "code": "600005",
+        "first_limit_up_time": 1789092300,
+        "high_days": "3天3板",
+        "is_again_limit": 1,
+        "limit_up_suc_rate": 1.0,
+        "limit_up_type": "换手板",
+        "open_num": 0,
+        "reason_type": "机器人",
+        "turnover_rate": 12.0
+      },
+      {
+        "change_rate": 10.0,
+        "code": "600004",
+        "first_limit_up_time": 1789090200,
+        "high_days": "2天2板",
+        "is_again_limit": 0,
+        "limit_up_suc_rate": 0.8,
+        "limit_up_type": "T字板",
+        "open_num": 5,
+        "reason_type": "银行科技",
+        "turnover_rate": 4.0
+      }
+    ],
+    "total": 62,
+    "trade_date": "2026-09-11",
+    "truncated": false
+  }
+}

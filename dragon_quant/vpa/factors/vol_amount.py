@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from dragon_quant.models.types import KBar
+from dragon_quant.infra.models import KBar
 from dragon_quant.vpa.types import (
     FactorResult, SIGNAL_BULLISH, SIGNAL_BEARISH, SIGNAL_NEUTRAL,
 )

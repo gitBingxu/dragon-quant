@@ -27,10 +27,14 @@ export function statusMeta(status: string | null | undefined): StatusMeta {
       return { label: "已完成", color: "teal" };
     case "pending":
       return { label: "待回测", color: "yellow" };
+    case "pending_recompute":
+      return { label: "待重算", color: "orange" };
+    case "cannot_evaluate":
+      return { label: "无法评估", color: "gray" };
     case "no_entry":
       return { label: "无介入", color: "gray" };
     case "error":
-      return { label: "错误", color: "red" };
+      return { label: "失败", color: "red" };
     default:
       return { label: status ?? "—", color: "gray" };
   }

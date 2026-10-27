@@ -7,7 +7,7 @@ from typing import Optional
 from dragon_quant.review_account.market import DataCoverageError
 from dragon_quant.review_account.models import BUY_SIGNAL_CODES, StrategyConfig
 from dragon_quant.review_account.simulator import AccountSimulator
-from dragon_quant.review_account.strategy import BUY_CHECK_LABELS
+from dragon_quant.review_account.strategy.main import BUY_CHECK_LABELS
 
 TOTAL_ROW_CODE = "__total__"
 
@@ -113,22 +113,28 @@ def sharpe_ratio(equities, *, periods_per_year: int = 252,
     return value if math.isfinite(value) else None
 
 
-def _position_field(position, name: str):
+def _position_field(position, name: str) -> float | int | str | None:
     if isinstance(position, dict):
         return position.get(name)
     return getattr(position, name, None)
 
 
 def _position_weight(position, weight: str) -> float:
+    raw = _position_field(position, weight)
     try:
-        value = float(_position_field(position, weight))
+        if raw is None:      # None 原本就走 float(None) 的 TypeError 兜底
+            raise ValueError("missing weight")
+        value = float(raw)
         if math.isfinite(value) and value >= 0:
             return value
     except (TypeError, ValueError):
         pass
+    entry_raw = _position_field(position, "entry_price")
+    qty_raw = _position_field(position, "qty")
     try:
-        return max(0.0, float(_position_field(position, "entry_price"))
-                   * float(_position_field(position, "qty")))
+        if entry_raw is None or qty_raw is None:
+            raise ValueError("missing entry")
+        return max(0.0, float(entry_raw) * float(qty_raw))
     except (TypeError, ValueError):
         return 0.0
 
@@ -147,9 +153,11 @@ def industry_exposure(positions, sector_map: Optional[dict] = None, *,
       空池返回 ``coverage/unattributed_ratio/hhi = None``（不伪造 0 覆盖率）。
     """
     if sector_loader is None and sector_map is None:
-        def sector_loader(entry_date: str) -> dict:   # 函数内惰性 import（分层约束）
-            from dragon_quant.factors import storage as fstore
+        def _lazy_sector_loader(entry_date: str) -> dict:   # 函数内惰性 import（分层约束）
+            from dragon_quant.infra.factor import storage as fstore
             return fstore.get_sector_map(entry_date)
+
+        sector_loader = _lazy_sector_loader
 
     fallback_map = sector_map or {}
     cache: dict[str, dict] = {}
@@ -248,7 +256,7 @@ def compare_strategies(date_from: str, date_to: str, data, cfg=None, variant_gri
     factor_variants = [name for name, variant in variants.items()
                        if getattr(variant, "factor_ranking_enabled", False)]
     if factor_variants:
-        from dragon_quant.factors.decision import build_completion_rate   # 分层：函数内惰性 import
+        from dragon_quant.infra.factor.decision import build_completion_rate   # 分层：函数内惰性 import
         completion = build_completion_rate(days)
         report["factor_build_completion"] = completion
         if completion is None or completion < FACTOR_BUILD_COMPLETION_MIN:
@@ -312,7 +320,7 @@ def drawdown_decomposition(result: dict) -> dict:
     return buckets
 
 
-def _run_metric(date_from, date_to, data, cfg, metric):
+def _run_metric(date_from, date_to, data, cfg, metric) -> Optional[float]:
     try:
         result = AccountSimulator(cfg, data=data).run(date_from, date_to)
     except DataCoverageError:
@@ -373,8 +381,9 @@ def walk_forward(date_from, date_to, data, cfg, n_windows=4, metric="total_retur
     per_window = [_run_metric(a, b, data, cfg, metric) for a, b in segs]
     ratios = []
     for i in range(1, len(per_window)):
-        if per_window[i - 1] not in (None, 0) and per_window[i] is not None:
-            ratios.append(per_window[i] / per_window[i - 1])
+        previous, current = per_window[i - 1], per_window[i]
+        if previous is not None and previous != 0 and current is not None:
+            ratios.append(current / previous)
     oos_is = sum(ratios) / len(ratios) if ratios else None
     red_flag = (oos_is is not None and oos_is < 0.5) or any(
         w is not None and w < 0 for w in per_window)

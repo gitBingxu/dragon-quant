@@ -1,0 +1,20 @@
+{
+  "restored": 20,
+  "skipped": 0,
+  "rows_inserted": 17,
+  "rows_skipped": 0,
+  "rows_filled": 1,
+  "merge_pending": 0,
+  "conflicts": 0,
+  "deferred": 0,
+  "failed": 0,
+  "manifest_source": "remote",
+  "degraded": false,
+  "applied": {
+    "2026-10-21": 11,
+    "fin-2026-06-30": 2,
+    "finraw-2026-06-30": 1,
+    "static-factor": 2,
+    "static-fin": 1
+  }
+}

@@ -24,24 +24,38 @@ interface Col {
 }
 
 const COLUMNS: Col[] = [
-  { key: "source", label: "体系", sortable: true },
   { key: "code", label: "代码", sortable: true },
   { key: "name", label: "名称", sortable: true },
   { key: "trade_date", label: "入选日", sortable: true },
-  { key: "buy_date", label: "买入日", sortable: true },
+  { key: "strict_buy_date", label: "买入日", sortable: true },
   { key: "rank", label: "排名", sortable: true },
   { key: "composite_score", label: "综合分", sortable: true },
   { key: "is_true_dragon", label: "真龙" },
   { key: "board_count", label: "连板", sortable: true },
   { key: "concepts", label: "概念" },
-  { key: "buy_price", label: "买入价", sortable: true },
-  { key: "max_return_5d", label: "最大收益%", sortable: true },
-  { key: "max_drawdown_5d", label: "最大回撤%", sortable: true },
-  { key: "max_return_hold_days", label: "持有天", sortable: true },
-  { key: "review_status", label: "状态", sortable: true },
+  { key: "strict_buy_price", label: "买入价", sortable: true },
+  { key: "strict_max_return_5d", label: "最大收益%", sortable: true },
+  { key: "strict_max_drawdown_5d", label: "最大回撤%", sortable: true },
+  { key: "strict_max_return_hold_days", label: "持有天", sortable: true },
+  { key: "strict_review_status", label: "状态", sortable: true },
 ];
 
 const PAGE_SIZES = ["10", "25", "50", "100"];
+
+/** v2 展示严格口径；v1 没有严格结果，回落旧字段。 */
+function displayStatus(r: Dragon): string | null {
+  // 服务端已给出统一派生状态，优先使用；缺失时保留旧前端推导作为兜底。
+  if (r.derived_status != null) return r.derived_status;
+  if (r.source === "v1") return r.review_status;
+  if (r.strict_review_status) return r.strict_review_status;
+  if (r.review_status === "pending") return "pending";
+  if (r.review_status === "error") return "error";
+  return "pending_recompute";
+}
+
+function strictValue<T>(r: Dragon, strict: T | null, loose: T | null): T | null {
+  return r.source === "v1" ? loose : strict;
+}
 
 export function DragonTable({
   data,
@@ -86,18 +100,21 @@ export function DragonTable({
   };
 
   const renderRow = (r: Dragon) => {
-    const st = statusMeta(r.review_status);
+    const st = statusMeta(displayStatus(r));
+    const buyDate = strictValue(r, r.strict_buy_date, r.buy_date);
+    const buyPrice = strictValue(r, r.strict_buy_price, r.buy_price);
+    const maxReturn = strictValue(
+      r, r.strict_max_return_5d, r.max_return_5d);
+    const maxDrawdown = strictValue(
+      r, r.strict_max_drawdown_5d, r.max_drawdown_5d);
+    const holdDays = strictValue(
+      r, r.strict_max_return_hold_days, r.max_return_hold_days);
     return (
       <Table.Tr key={`${r.source}-${r.trade_date}-${r.code}`}>
-        <Table.Td>
-          <Badge color={r.source === "v2" ? "grape" : "blue"} variant="light" radius="sm">
-            {r.source === "v2" ? "五维识别" : "v1 历史"}
-          </Badge>
-        </Table.Td>
         <Table.Td>{r.code}</Table.Td>
         <Table.Td>{r.name}</Table.Td>
         <Table.Td>{r.trade_date}</Table.Td>
-        <Table.Td>{r.buy_date || "—"}</Table.Td>
+        <Table.Td>{buyDate || "—"}</Table.Td>
         <Table.Td>{r.rank ?? "—"}</Table.Td>
         <Table.Td fw={600}>{fmtNum(r.composite_score, 1)}</Table.Td>
         <Table.Td>
@@ -115,10 +132,10 @@ export function DragonTable({
         </Table.Td>
         <Table.Td>{r.board_count ?? "—"}</Table.Td>
         <Table.Td>{(r.concepts || []).slice(0, 3).join(" · ")}</Table.Td>
-        <Table.Td>{fmtNum(r.buy_price)}</Table.Td>
-        <Table.Td c={pnlColor(r.max_return_5d)}>{fmtPct(r.max_return_5d)}</Table.Td>
-        <Table.Td c={pnlColor(r.max_drawdown_5d)}>{fmtPct(r.max_drawdown_5d)}</Table.Td>
-        <Table.Td>{r.max_return_hold_days ?? "—"}</Table.Td>
+        <Table.Td>{fmtNum(buyPrice)}</Table.Td>
+        <Table.Td c={pnlColor(maxReturn)}>{fmtPct(maxReturn)}</Table.Td>
+        <Table.Td c={pnlColor(maxDrawdown)}>{fmtPct(maxDrawdown)}</Table.Td>
+        <Table.Td>{holdDays ?? "—"}</Table.Td>
         <Table.Td>
           <Badge color={st.color} variant="light" radius="sm">
             {st.label}

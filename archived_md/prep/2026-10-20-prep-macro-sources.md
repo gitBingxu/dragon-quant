@@ -2,7 +2,7 @@
 
 日期：2026-10-20 · 分支：feat/reviewa-account-op · 状态：待 research-reviewer 复审
 v2 修订：吸收首轮 findings（1 CRITICAL / 4 MAJOR / 4 MINOR），逐条处理见 §12。
-采样环境：本机 tmdx 3.0.0（editable，`/Users/bing/Repo/cus-tdx-server`），实际采样时间
+采样环境：本机 tmdx 3.0.0（editable，`$HOME/Repo/cus-tdx-server`），实际采样时间
 北京时间 2026-10-21 00:04–00:20（纽约 2026-10-20 12:04–12:20 EDT，美股盘中）。
 
 ## 1. 调研目标与约束

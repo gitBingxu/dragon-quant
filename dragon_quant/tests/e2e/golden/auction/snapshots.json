@@ -1,0 +1,114 @@
+[
+  {
+    "code": "600001",
+    "dims": {
+      "direction": {
+        "details": {
+          "open_pct": 7.0,
+          "open_score": 80.0,
+          "slope_score": 100.0
+        },
+        "dim": "direction",
+        "score": 90.0,
+        "weight": 0.25
+      },
+      "supply": {
+        "details": {
+          "imb": 0.042,
+          "tail_med": 225.0,
+          "weak_to_strong": false
+        },
+        "dim": "supply",
+        "score": 67.1,
+        "weight": 0.3
+      },
+      "tail_grab": {
+        "details": {
+          "event": "无"
+        },
+        "dim": "tail_grab",
+        "score": 50.0,
+        "weight": 0.2
+      },
+      "vol_price": {
+        "details": {
+          "agree_ratio": 1.0,
+          "turnover_pct": 0.067
+        },
+        "dim": "vol_price",
+        "score": 60.89,
+        "weight": 0.25
+      }
+    },
+    "direction": "bull",
+    "is_weak": false,
+    "level": "中",
+    "rank": null,
+    "reject_reason": null,
+    "strength": 67.85,
+    "unverified": true,
+    "version": "1"
+  },
+  {
+    "code": "600002",
+    "dims": {
+      "direction": {
+        "details": {
+          "open_pct": -2.2,
+          "open_score": 20.0,
+          "slope_score": 0.0
+        },
+        "dim": "direction",
+        "score": 10.0,
+        "weight": 0.25
+      },
+      "supply": {
+        "details": {
+          "imb": -0.1167,
+          "tail_med": -225.0,
+          "weak_to_strong": false
+        },
+        "dim": "supply",
+        "score": 29.17,
+        "weight": 0.3
+      },
+      "tail_grab": {
+        "details": {
+          "event": "无"
+        },
+        "dim": "tail_grab",
+        "score": 50.0,
+        "weight": 0.2
+      },
+      "vol_price": {
+        "details": {
+          "agree_ratio": 0.0,
+          "turnover_pct": 0.022
+        },
+        "dim": "vol_price",
+        "score": 0.29,
+        "weight": 0.25
+      }
+    },
+    "direction": "bear",
+    "is_weak": false,
+    "level": "弱",
+    "rank": null,
+    "reject_reason": null,
+    "strength": 21.32,
+    "unverified": true,
+    "version": "1"
+  },
+  {
+    "code": "600003",
+    "dims": {},
+    "direction": "neutral",
+    "is_weak": true,
+    "level": "弱",
+    "rank": null,
+    "reject_reason": "0.4 跌停价排队卖",
+    "strength": 0.0,
+    "unverified": true,
+    "version": "1"
+  }
+]

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Container, Group, Text, Title } from "@mantine/core";
 import {
   fetchDragons,
-  fetchSummary,
   type Dragon,
   type DragonFilters,
   type Summary,
@@ -33,16 +32,22 @@ export function App() {
     dir: "desc",
   });
 
-  const debounceRef = useRef<number | undefined>(undefined);
+  // 单调递增的请求序号：只接受最后一次查询的响应，防止慢的旧请求覆盖新结果。
+  const requestSeq = useRef(0);
 
   const load = useCallback(async (f: DragonFilters) => {
+    const seq = ++requestSeq.current;
     try {
       const resp = await fetchDragons(f);
+      if (seq !== requestSeq.current) return;
       setRawData(resp.data || []);
-      fetchSummary(f.source ?? "v2").then(setSummary).catch(() => setSummary(null));
+      // 卡片统计与列表来自同一响应（服务端基于完整筛选结果计算）。
+      setSummary(resp.summary);
       setSort({ by: f.sort_by as keyof Dragon, dir: f.sort_dir as "asc" | "desc" });
     } catch {
+      if (seq !== requestSeq.current) return;
       setRawData([]);
+      setSummary(null);
     }
   }, []);
 
@@ -51,23 +56,25 @@ export function App() {
     load(filters);
   }, [load]);
 
-  // 筛选变更 → debounce 300ms 触发查询
-  const onChange = useCallback(
-    (patch: Partial<DragonFilters>) => {
-      setFilters((prev) => {
-        const next = { ...prev, ...patch };
-        window.clearTimeout(debounceRef.current);
-        debounceRef.current = window.setTimeout(() => load(next), 300);
-        return next;
-      });
-    },
-    [load]
-  );
+  // 修改筛选条件只更新表单状态；点击「查询」/ 回车才真正请求。
+  const onChange = useCallback((patch: Partial<DragonFilters>) => {
+    setFilters((prev) => ({ ...prev, ...patch }));
+  }, []);
 
   const onSearch = useCallback(() => {
-    window.clearTimeout(debounceRef.current);
     load(filters);
   }, [filters, load]);
+
+  // 重置：保留当前体系（source），清空其余 12 项筛选并立即恢复全量。
+  const onReset = useCallback(() => {
+    const next: DragonFilters = {
+      ...DEFAULT_FILTERS,
+      source: filters.source ?? "v2",
+      status: "",
+    };
+    setFilters(next);
+    load(next);
+  }, [filters.source, load]);
 
   // 表头点击 → 客户端排序（对齐旧版行为）
   const onSort = useCallback((by: keyof Dragon) => {
@@ -111,6 +118,7 @@ export function App() {
         count={sortedData.length}
         onChange={onChange}
         onSearch={onSearch}
+        onReset={onReset}
       />
       <DragonTable data={sortedData} sort={sort} onSort={onSort} />
     </Container>

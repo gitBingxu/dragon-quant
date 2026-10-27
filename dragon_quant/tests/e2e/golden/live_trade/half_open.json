@@ -1,0 +1,7 @@
+{
+  "signal": {
+    "code": "600001", "status": "open", "took_profit_half": 1,
+    "half_exit_date": "2026-09-08", "half_exit_price": 9.98,
+    "half_exit_qty": 4900, "half_exit_reason_code": "first_day_stop_half"
+  }
+}

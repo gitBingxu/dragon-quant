@@ -1,4 +1,8 @@
 # prep 增量重跑与 collection_report 状态语义 — 技术方案（v2）
+> **当前状态（2026-10-25 整仓结构重构 M0–M12）**：本文中的 `dragon_quant/cli_commands.py` / `dragon_quant/review_account/prep.py` 等实现位置已迁移：命令入口在 `dragon_quant/commands/<command>.py`（经 `commands.dispatch`），prep 在 `dragon_quant/review_account/prep/` 包（service/collectors/compute/rebuild），auction 编排在 `dragon_quant/auction/service.py`，assets CLI 装配在 `dragon_quant/assets_sync/cli_service.py`。历史设计正文保留原样；当前结构与命令以 `AGENTS.md`「架构总览」为准。
+> **窗口/快照口径后续演进**：复盘窗口已从本文的近三日扩为含 T 的最近 5 个交易日，快照 `version=0.6`；详见 `AGENTS.md` 的 `prep` 段。
+
+
 
 > **口径变更（2026-10-21）**：本文中的「15:30 当日门禁」与「快照 version=0.4」已被
 > [2026-10-21-prep-macro-jp-a50-design.md](2026-10-21-prep-macro-jp-a50-design.md) 替代为

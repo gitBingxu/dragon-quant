@@ -1,0 +1,6 @@
+{
+  "case": "minimal",
+  "now": "2026-09-11T15:30:00+08:00",
+  "trade_date": "2026-09-11",
+  "note": "M0 canary anchor only; full scenario catalog lands in M1."
+}

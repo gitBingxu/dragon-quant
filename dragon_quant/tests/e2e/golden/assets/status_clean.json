@@ -1,0 +1,18 @@
+{
+  "prepsnap:snapshots": {"table": "prep_snapshots", "partition_kind": "date", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "auctionsnap:snapshots": {"table": "auction_snapshots", "partition_kind": "date", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "dragons:mirror": {"table": "dragons", "partition_kind": "date", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "factor:values": {"table": "factor_values", "partition_kind": "date", "merge": "row", "volatile": false, "local_entries": 1, "remote_entries": 1},
+  "factor:build_runs": {"table": "factor_build_runs", "partition_kind": "date", "merge": "row", "volatile": false, "local_entries": 1, "remote_entries": 1},
+  "factor:sector": {"table": "factor_sector_snapshots", "partition_kind": "date", "merge": "row", "volatile": false, "local_entries": 1, "remote_entries": 1},
+  "factor:registry": {"table": "factor_registry", "partition_kind": "static", "merge": "row", "volatile": false, "local_entries": 1, "remote_entries": 1},
+  "factor:model": {"table": "factor_model_snapshots", "partition_kind": "static", "merge": "row", "volatile": false, "local_entries": 1, "remote_entries": 1},
+  "fin:observed": {"table": "fin_observed_snapshots", "partition_kind": "date", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "fin:report_files": {"table": "fin_report_files", "partition_kind": "period", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "fin:report_raw": {"table": "fin_report_files", "partition_kind": "period_raw", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "fin:records": {"table": "fin_report_records", "partition_kind": "period", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "fin:calibrations": {"table": "fin_field_calibrations", "partition_kind": "static", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "fin:xdxr": {"table": "fin_xdxr_records", "partition_kind": "date", "merge": "row", "volatile": true, "local_entries": 1, "remote_entries": 1},
+  "prep:*": {"table": "prep_assets", "partition_kind": "date", "merge": "shard", "volatile": false, "local_entries": 2, "remote_entries": 2},
+  "auction:*": {"table": "auction_assets", "partition_kind": "date", "merge": "shard", "volatile": false, "local_entries": 1, "remote_entries": 1}
+}

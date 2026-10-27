@@ -1,0 +1,83 @@
+{
+  "ok": true,
+  "mode": "collect",
+  "trade_date": "2026-09-11",
+  "source": "v2",
+  "pool_source": "prep",
+  "fallback_reason": null,
+  "prep_snapshot_date": "2026-09-10",
+  "prep_unavailable_reason": null,
+  "recommended_count": 3,
+  "days_ignored": false,
+  "lookback_dates": [],
+  "candidate_codes": 3,
+  "saved_count": 3,
+  "saved": [
+    {
+      "code": "600001",
+      "name": "龙头A",
+      "n": 10
+    },
+    {
+      "code": "600002",
+      "name": "跟风B",
+      "n": 10
+    },
+    {
+      "code": "600003",
+      "name": "补涨C",
+      "n": 10
+    }
+  ],
+  "empty": [],
+  "failed": [],
+  "quote": {
+    "source": "tdx",
+    "fallback_used": false,
+    "requested": 3,
+    "matched": 3,
+    "missing": [],
+    "degraded": false,
+    "reason": null,
+    "error": null
+  },
+  "quote_missing": [],
+  "asset_read_error": null,
+  "scored_count": 3,
+  "snapshot_saved_count": 3,
+  "snapshot_ok": true,
+  "snapshot_skipped": null,
+  "snapshot_error": null,
+  "snapshots": [
+    {
+      "code": "600001",
+      "is_weak": false,
+      "strength": 67.85,
+      "direction": "bull",
+      "level": "中",
+      "unverified": true,
+      "rank": null,
+      "reject_reason": null
+    },
+    {
+      "code": "600002",
+      "is_weak": false,
+      "strength": 21.32,
+      "direction": "bear",
+      "level": "弱",
+      "unverified": true,
+      "rank": null,
+      "reject_reason": null
+    },
+    {
+      "code": "600003",
+      "is_weak": true,
+      "strength": 0.0,
+      "direction": "neutral",
+      "level": "弱",
+      "unverified": true,
+      "rank": null,
+      "reject_reason": "0.4 跌停价排队卖"
+    }
+  ]
+}

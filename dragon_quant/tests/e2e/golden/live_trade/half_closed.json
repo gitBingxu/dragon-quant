@@ -1,0 +1,7 @@
+{
+  "signal": {
+    "code": "600001", "status": "closed", "took_profit_half": 1,
+    "exit_date": "2026-09-09", "exit_reason_code": "hard_stop_loss",
+    "hold_days": 2, "half_exit_qty": 4900
+  }
+}

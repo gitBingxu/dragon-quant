@@ -2,7 +2,7 @@
 
 > 触发：改动 `assets push/pull/status/verify`、分区模型与水位、manifest、行级合并、恢复/回填、`dragons` 镜像、退出码或凭据时读本文。
 > 本文权威：同步单元与分区、manifest 与哈希口径、push 幂等水位、pull 行级恢复、恢复与收敛契约、退出码与凭据、`dragons` 镜像表契约。
-> 上游权威：AGENTS.md（硬约束与工作流）；组件图与双向同步流程图见 [资产架构](../../dragon_quant/infra/assets/ASSETS_ARCHITECTURE.md) §1/§4（本文不复制图）。
+> 上游权威：AGENTS.md（硬约束与项目路由）；组件图与双向同步流程图见 [资产架构](../../dragon_quant/infra/assets/ASSETS_ARCHITECTURE.md) §1/§4（本文不复制图）。
 
 ## 数据资产云端同步（`assets`）
 

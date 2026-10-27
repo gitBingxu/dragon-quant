@@ -7,6 +7,8 @@
 - 关联任务包：根 `AGENTS.md` 瘦身为「常驻硬规则 + 按需模块文档索引」，降低每会话自动注入上下文
 - 验收标准：AC1–AC7（见 §1.2）
 
+> **2026-10-27 决策变更（supersede）**：本文 D1（"仓库根必须常驻完整 §4、拒绝指针"）已被用户新决策取代：工作流正文唯一 owner 为父级 `AGENTS.md` §4，本仓库 `AGENTS.md` 不再保存正文，只保留一行指针。因此 §1.3、§3 矩阵、§5.1、§5.5、§7.4、§8、§10.12、§11 步骤 4、§14 中与 D1 相关的表述**均以新方案 `archived_md/agents/2026-10-27-workflow-single-owner-design.md` 为准**；本文其余记录（模块拆分、路由、门禁、实施步骤）保持历史原样。
+
 ---
 
 ## 1. 意图、目标与非目标
@@ -33,8 +35,8 @@
 
 ### 1.3 非目标
 
-- 不修改 `~/.claude/CLAUDE.md`、`/Users/bing/AGENTS.md`（父目录）及任何全局治理配置。
-- 不修改 `§4 需求落地标准工作流` 正文（D1 要求三份逐字一致，见 §2 证据 E5）。
+- 不修改 `~/.claude/CLAUDE.md`、`$HOME/AGENTS.md`（父目录）及任何全局治理配置。
+- 不修改 `§4 需求落地标准工作流` 正文（D1 要求三份逐字一致，见 §2 证据 E5；D1 已于 2026-10-27 被取代，见文首说明）。
 - 不修改产品代码、E2E golden、`coverage-map.json`、Web UI 源码/dists。
 - 不为拆分引入运行时加载器、构建生成器、新依赖或 CI 服务。
 - 不批量重写 `docs/solutions/`、`archived_md/` 的历史设计记录正文；**唯一例外**是 `archived_md/README.md:6` 的「当前状态」一行指针（阶段 0 附录/本轮 main 验收明确纳入必做，见 §7.6）。
@@ -51,7 +53,7 @@
 | E2 | README 708 行 / 73819 字节；`SKILL.md` 149 行 / 12055 字节 | `wc -l -c README.md skills/dragon-quant/SKILL.md` |
 | E3 | 根章节体量高度不均：架构总览 8.6 KB、因子层 14.9 KB、prep 11.5 KB、账户模拟 9.5 KB、§4 8.0 KB、SQLite 表 6.1 KB、当前状态 6.4 KB | 逐段字节统计（§5.1 表） |
 | E4 | 文档一致性测试直接读取 AGENTS.md 的树、`version=0.6`、五日回退句、无参数行为、canonical 入口、已删模块 | `dragon_quant/tests/test_docs_consistency.py:82,101,113,122,189,217,233,261` |
-| E5 | D1 要求项目 AGENTS.md 保留完整 §4，「拒绝仓库仅留指针」；三份 §4 正文逐字一致 | `docs/solutions/2026-10-24-self-review-workflow-design.md:86,88`；`/Users/bing/AGENTS.md:25`、`/Users/bing/.claude/CLAUDE.md:25` 均为 138 行 / 约 10.9 KB |
+| E5 | D1 要求项目 AGENTS.md 保留完整 §4，「拒绝仓库仅留指针」；三份 §4 正文逐字一致 | `docs/solutions/2026-10-24-self-review-workflow-design.md:86,88`；`$HOME/AGENTS.md:25`、`~/.claude/CLAUDE.md:25` 均为 138 行 / 约 10.9 KB |
 | E6 | 工作树唯一 AGENTS.md 未提交 delta 是「Web UI 指标联动」两行（含 `GET /api/dragons` `{data,count,summary}`、`summarize_review_rows`、`derived_completed/derived_pending`、请求序号） | `git diff -- AGENTS.md` |
 | E7 | README 另有独立的未提交 delta：第 361 行起「Web UI 指标卡片同源」段（与 AGENTS delta 内容相近但更简） | `git diff -U0 README.md` 仅 `@@ -360,0 +361,2 @@` |
 | E8 | `docs/agent/` 尚不存在 | `ls docs/agent` → absent |
@@ -78,7 +80,7 @@
 | 内容域 | 唯一 owner（拆分后） | 支撑/引用文档（不复制正文） | 冲突裁决 |
 |--------|---------------------|---------------------------|----------|
 | 跨模块硬约束（v1 废弃、存储惰性初始化、依赖方向、零 pandas、provider 接口兼容、线程/跨平台） | `AGENTS.md` | — | 根优先 |
-| 需求落地工作流 §4、AI 协作规范、测试/E2E 门禁、Git 与文档同步 | `AGENTS.md` | self-review skill 文件（执行细则） | 根优先 |
+| 需求落地工作流 §4、AI 协作规范、测试/E2E 门禁、Git 与文档同步 | `AGENTS.md` | self-review skill 文件（执行细则） | 根优先（D1 已于 2026-10-27 被取代，见文首说明） |
 | 目录树、命令导航、公共入口、兼容例外、并发/RateLimiter、SQLite 表清单 | `docs/agent/architecture.md` | `pyproject.toml`、`coverage-map.json` | architecture.md 优先 |
 | 扫描 Phase A–F、数据模型、评分器契约、cache 键、板块口径、数据源回退 | `docs/agent/scan.md` | 评分规范 `archived_md/score/评分器Refactor.md`（评分细则数值）；`scan/scores/registry.py`（阈值实现） | 细则数值以评分规范/registry 为准；流程以 scan.md 为准 |
 | review 回测双口径、严格侧表、Web UI API/指标联动 | `docs/agent/review.md` | `review/main.py`、`web_ui/server.py` | review.md 优先 |
@@ -255,7 +257,7 @@ flowchart LR
 | 评分器接口约定（513–529） | 3294 B | `scan.md` | 整段搬迁；权重数值指向评分规范/registry |
 | 因子层（530–583） | 14944 B | `factor.md` | 整段搬迁；「未实现 P3」一行保留 |
 | 必须遵守的约束（584–592） | 2322 B | 根 | **原样保留**（全局硬约束） |
-| 需求落地标准工作流 §4（593–694） | 8004 B | 根 | **原样保留**（D1；不得懒加载/指针化） |
+| 需求落地标准工作流 §4（593–694） | 8004 B | 根 | **原样保留**（D1；不得懒加载/指针化；D1 已于 2026-10-27 被取代，见文首说明） |
 | AI Agent 协作规范（695–698） | 528 B | 根 | 原样保留 |
 | Cookie 失效处理（699–701） | 173 B | 根 1 行 + `scan.md` | 根保留一句「返回空/403 先查雪球 Cookie」 |
 | 测试与 E2E 门禁（702–720） | 1453 B | 根（命令 + 摘要）+ `development.md`（细则） | 根保留 4 条命令与「E2E 不碰真实 DB / golden 只随批准变更 / 覆盖图 51 节点」一句话摘要；安全边界、覆盖映射、golden 纪律细则进 `development.md` |
@@ -327,7 +329,7 @@ flowchart LR
 | 全局硬约束（9 条原样） | 12–17 | 2400 |
 | 模块文档索引 + 已有权威指针 | 15–17 | 2100 |
 | 阅读与路由协议 | 8–10 | 900 |
-| §4 工作流（原样） | 102 | 8004 |
+| §4 工作流（原样；D1 已于 2026-10-27 被取代，见文首说明） | 102 | 8004 |
 | AI Agent 协作规范 | 5–6 | 550 |
 | 测试 / E2E 门禁（命令 + 摘要） | 7–8 | 800 |
 | Git + 文档同步（新口径） | 6–7 | 700 |
@@ -336,7 +338,7 @@ flowchart LR
 | 空行与分隔线 | ≤25 | 25 |
 | **合计** | **约 211–224** | **约 17.5–18.2 KB** |
 
-余量：约 16–30 行 / 1.8–2.8 KB（§4 占 102 行是硬占用）。若新增跨模块硬约束导致超限，**优先合并同类条目**；不得删 §4；确实无法容纳时以 `NEED_DECISION` 上报，不静默抬高门限。
+余量：约 16–30 行 / 1.8–2.8 KB（§4 占 102 行是硬占用）。若新增跨模块硬约束导致超限，**优先合并同类条目**；不得删 §4；确实无法容纳时以 `NEED_DECISION` 上报，不静默抬高门限。（D1 已于 2026-10-27 被取代，见文首说明）
 
 ---
 
@@ -463,7 +465,7 @@ CRITICAL_TOKEN_OWNERS = {
 
 ### 7.4 §4 逐字一致的实施期校验（不新增环境耦合测试）
 
-D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `/Users/bing`）。因此：
+D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `$HOME/AGENTS.md`）。（D1 已于 2026-10-27 被取代，见文首说明：以下命令仅作历史记录，不再执行。）因此：
 
 - 实施时一次性校验（写入交付报告证据）。**注意**：两份文件的 §4 标题不同（`### 需求落地标准工作流（§4）` vs `### 4. 需求落地标准工作流`），D1 允许标题差异，因此比较前必须去掉标题行并归一化空行，否则会恒报 DIFF：
   ```bash
@@ -475,9 +477,9 @@ D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `/Use
       assert m, f"section not found in {p}"
       lines = m.group(0).splitlines()[1:]          # 去掉标题行，兼容 D1 的标题差异
       return "\n".join(line.rstrip() for line in lines).strip()
-  a = body('/Users/bing/Repo/dragon-quant/AGENTS.md',
+  a = body(pathlib.Path.cwd() / 'AGENTS.md',        # 在 dragon-quant 仓库根执行
            r'### 需求落地标准工作流.*?(?=\n### |\n## |\Z)')
-  b = body('/Users/bing/AGENTS.md',
+  b = body(pathlib.Path.home() / 'AGENTS.md',       # 父级 canonical
            r'### 4\. 需求落地标准工作流.*?(?=\n### |\n## |\Z)')
   print('same' if a == b else 'DIFF')
   if a != b:
@@ -512,7 +514,7 @@ D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `/Use
 | 断链（索引/文档内链接目标缺失） | `test_local_markdown_links_resolve` + `test_agents_index_covers_all_module_docs` | 同一 commit 修复；若目标被合法删除，先改链接再删文件 |
 | 漏读（agent 没读模块文档就改） | main 阶段 3.5 抽查「读过的文档 vs 改动范围」；`test_critical_tokens_have_single_owner` 只能证明内容存在，不能证明被读 | 任务包显式列文档；漏读导致错误按普通返工；文档头「触发」字段降低歧义 |
 | 规则冲突（两份说法） | 所有权 token 测试 + 人工 review | 以 owner 为准，删除另一处正文改为指针；不允许保留两份 |
-| 根再膨胀 | 20 KB / 240 行门禁；`test_agents_has_no_deferred_content` | 新内容先落模块文档；超限优先合并同类条目；不得删 §4 |
+| 根再膨胀 | 20 KB / 240 行门禁；`test_agents_has_no_deferred_content` | 新内容先落模块文档；超限优先合并同类条目；不得删 §4（D1 已于 2026-10-27 被取代，见文首说明） |
 | 部分迁移（根已瘦身但文档缺失） | 索引链接存在性测试；`test_agents_root_size_gate` 只保证根，链接测试保证目标 | 单个 commit 原子完成；中断时不得提交 |
 | 迁移丢内容 | 逐段迁移表 + 一次性 token 审计（§9 步骤 7）+ Web UI token 断言 | 发现缺失立即从 `/tmp/agents-before.md` 回填 |
 | Mermaid/树块误判 | `_tree_block` 收紧为「首行以 `dragon_quant/` 开头」；architecture.md 中树必须是第一个 fenced block | 测试失败即调整文档顺序 |
@@ -580,7 +582,7 @@ D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `/Use
 ## 10. 阶段 0 未考虑的边界 / 隐含假设 / 系统冲突
 
 1. **README 也有树**：E9 表明测试同时校验 README 与 AGENTS 的树。拆分后树在 `architecture.md` 与 README 各一份：**agent 的结构权威是 `architecture.md`**，README 树是面向人的同构视图（不自动注入），允许措辞不同但不得出现不存在路径（测试保障）。不能只改 AGENTS 侧。
-2. **父目录与全局文件仍注入**：`/Users/bing/AGENTS.md`（138 行 / 10.9 KB）与 `~/.claude/CLAUDE.md` 也会进入会话。本任务的收益上限被这两份文件限制；它们不在范围内，需作为残留风险记录，后续单独治理。
+2. **父目录与全局文件仍注入**：`$HOME/AGENTS.md`（138 行 / 10.9 KB）与 `~/.claude/CLAUDE.md` 也会进入会话。本任务的收益上限被这两份文件限制；它们不在范围内，需作为残留风险记录，后续单独治理。
 3. **execute/main 不会自动读 `docs/`**：只有根 AGENTS.md 自动注入（E19）。「渐进式披露」不是机制而是行为契约；必须把触发规则写进根，并让任务包声明需读文档，否则规则会静默失效。
 4. **未提交 delta 有两个文件**：E6/E7 表明 AGENTS.md 与 README.md 各有未提交 Web UI 段。实施必须以**工作树**为源，不能 `git show HEAD:AGENTS.md` 或 `git checkout`，否则丢失用户改动；README 只改 75/617 两行。
 5. **文档同步规则本身会反噬**：若仍写「同 commit 更新 AGENTS.md」，新规则会继续塞回根，拆分一年内失效。必须同步改写为「owner 文档优先」（§7.5），并用体量门禁兜底。
@@ -590,7 +592,7 @@ D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `/Use
 9. **中文锚点不可靠**：GitHub 的中文标题 slug 与编辑器预览可能不一致。方案只做文件级链接校验，章节引用用文本描述。
 10. **反爬知识删除是可接受损失**：URL/DOM/UA/字段名删除后，bug 知识（如 THS 必须用涨跌幅字段）留在代码与 Git 历史。需在 scan.md 留一行「THS 排行字段口径见 provider 实现，403 需退避」的最小提示，避免未来重写时重犯。
 11. **`archived_md/README.md:6` 是活指针**：不属于历史正文，拆分后会指向不存在的章节；**阶段 3 必须做一行修正**（§7.6），除此之外不批量改写 archive 正文。
-12. **体量预算与 §4 的张力**：§4 占 102 行 / 8 KB，剩余预算约 100 行；未来硬约束增长空间有限。方案要求「合并同类项、不删 §4、超限上报」，避免用删规则换门禁通过。
+12. **体量预算与 §4 的张力**：§4 占 102 行 / 8 KB，剩余预算约 100 行；未来硬约束增长空间有限。方案要求「合并同类项、不删 §4、超限上报」（D1 已于 2026-10-27 被取代，见文首说明），避免用删规则换门禁通过。
 13. **docs/solutions 的归档惯例**：本文件是设计记录，按项目惯例留在 `docs/solutions/`；若用户要求归档，按全局 §6 在合入意图明确后处理。本阶段不移动。
 14. **打包边界**：npm 安装器的白名单明确禁止 `docs/`（`test/packaging.test.mjs`），Python wheel 的 `packages.find` 也只含 `dragon_quant` / `web_ui`。新增 `docs/agent/` **不会**进入任何发布物，`npm test` 与打包 E2E 不受影响；这也是把 agent 文档放在 `docs/` 而非包内的理由之一。
 
@@ -604,7 +606,7 @@ D1 要求三份 §4 一致，但测试不应依赖仓库外路径（CI 无 `/Use
 | 1 | 创建 `docs/agent/architecture.md`：目录树（第一个 fenced block）、导航/入口事实、公共入口、兼容例外、并发、表清单 | `wc -c`；树首行=`dragon_quant/` |
 | 2 | 创建 `scan.md` / `review.md` / `trading.md` / `prep-auction.md` / `assets.md` / `factor.md` / `development.md`，按 §5.1 搬迁 + §5.3 去重 | 每份含路由头；指针指向现有权威文件 |
 | 3 | 逐字迁移 Web UI delta 到 `review.md`，执行 §5.4 token 断言 | 6 个 token 全部命中 |
-| 4 | 改写根 `AGENTS.md`：分块 `Edit` 删除/压缩，保留硬约束与 §4 原文，插入索引/阅读协议/维护规则 | `wc -l -c` ≤240 行 / ≤20 KB |
+| 4 | 改写根 `AGENTS.md`：分块 `Edit` 删除/压缩，保留硬约束与 §4 原文（D1 已于 2026-10-27 被取代，见文首说明），插入索引/阅读协议/维护规则 | `wc -l -c` ≤240 行 / ≤20 KB |
 | 5 | README 两处、`SKILL.md` 三处小范围 `Edit`；**必做** `archived_md/README.md:6` 一行指针修正（只改该行，不动其余正文） | `git diff` 仅预期 hunk；`grep -n "docs/agent/architecture.md" archived_md/README.md` |
 | 6 | 改造 `test_docs_consistency.py`（§7.3） | 新门禁全部落地 |
 | 7 | 一次性内容审计：从 `/tmp/agents-before.md` 提取所有反引号 token 与 `- **` 条目，确认每个 token 在 doc set 或**显式已删除白名单**中（白名单：反爬 URL/DOM/UA/字段名如 `10jqka.com.cn`、`gtimg`、`f[10]`、`tradezdf`、`pankou.json`；历史状态条目如 `cli_commands.py`、里程碑标题；`version=0.5` 旧口径；仅代码可见的列名） | 输出 missing 列表为空；白名单外无遗漏 |
@@ -680,7 +682,7 @@ E2E 与 golden 不需要跑（不涉及产品行为）；如改动了 `coverage-
 | AC4 无反爬/逐表/命令手册/历史 | 删除清单 §5.1；`architecture.md` 仅表清单 | `test_agents_has_no_deferred_content`；人工核对 |
 | AC5 链接有效、README/Skill 一致 | README 75/617；`SKILL.md` 17/141/147；模块文档链接；`archived_md/README.md:6` | `test_local_markdown_links_resolve`；skill 测试三件套；`grep -n "docs/agent/architecture.md" archived_md/README.md` |
 | AC6 文档测试通过、不改产品行为 | 仅 `AGENTS.md` + `docs/agent/*` + README/Skill 文案 + `archived_md/README.md` 一行 + 测试 | `.venv/bin/python -m pytest ...` 全绿；`git diff --stat` |
-| AC7 不改机制/全局/业务、不 commit | 根 §4 原样；未触碰 `~/.claude`、父目录、业务代码 | §4 diff 脚本；`git status`；无 commit |
+| AC7 不改机制/全局/业务、不 commit | 根 §4 原样（D1 已于 2026-10-27 被取代，见文首说明）；未触碰 `~/.claude`、父目录、业务代码 | §4 diff 脚本；`git status`；无 commit |
 
 ---
 

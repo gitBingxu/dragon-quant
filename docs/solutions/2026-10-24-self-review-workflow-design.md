@@ -2,6 +2,8 @@
 
 > 状态：已实施。范围仅限 `~/.claude` 与全局 / 项目 `AGENTS.md` 的工作流治理配置，不改产品代码。
 
+> **2026-10-27 更新（supersede）**：D1「三份 §4 逐字一致、拒绝仓库仅留指针」已被用户决策取代——工作流正文唯一 owner 为父级 `AGENTS.md` §4，`~/.claude/CLAUDE.md` 与项目 `AGENTS.md` 不再复制正文。本文其余内容保持 2026-10-24 的历史记录；现行规则见 `archived_md/agents/2026-10-27-workflow-single-owner-design.md`。
+
 ## 1. 背景与问题
 
 原 §4 采用三层审查门禁：main 规划与终审、execute 执行、research / solution / code 三个 reviewer 只读把关。执行层每完成一个阶段都要派生一个 reviewer subagent，带来三类成本：
@@ -78,14 +80,14 @@ flowchart LR
 
 1. 新增三个 skill 目录与 `SKILL.md`（见上表）。
 2. `~/.claude/CLAUDE.md`：替换 §4，删除三层 reviewer 与 general-purpose 委派描述。
-3. `/Users/bing/AGENTS.md`：同 §4 替换（保留其 `.Codex` 同步入口差异）。
-4. `/Users/bing/Repo/dragon-quant/AGENTS.md`：原文件没有 §4，在「开发注意事项」下新增同一份 §4 正文。三份配置的 §4 正文逐字一致，仅标题按文件层级微调；**拒绝仓库仅留指针**——指针会让项目级会话失去自洽规则。
+3. `$HOME/AGENTS.md`：同 §4 替换（保留其 `.Codex` 同步入口差异）。
+4. `<repo>/AGENTS.md`：原文件没有 §4，在「开发注意事项」下新增同一份 §4 正文。三份配置的 §4 正文逐字一致，仅标题按文件层级微调；**拒绝仓库仅留指针**——指针会让项目级会话失去自洽规则（已于 2026-10-27 取代，见文首）。
 5. `~/.claude/agents/*.md` 全部保持字节级不变；`README.md` 无此工作流且不涉及产品功能，不修改。
 6. `~/claude-config/sync.sh` 已执行 `cp -R ~/.claude/skills`，新 skill 会随同步进入私有仓库；本次不执行同步、commit、push。
 
 关键决策：
 
-- **D1 三份 §4 逐字一致**：避免全局与项目规则分叉；标题层级差异是唯一允许的差异。
+- **D1 三份 §4 逐字一致**：避免全局与项目规则分叉；标题层级差异是唯一允许的差异（已于 2026-10-27 取代，见文首）。
 - **D2 节点报告精简**：只要求产物路径、verdict、高级别 findings、自测证据、`known_issues`、`deviations`、验收映射、`main_acceptance`；**不引入** artifact 哈希、reviewed / delivered sha256、sidecar 数量或体积门限。
 - **D3 §4 体积收敛**：常驻正文约 100 行（原约 150 行），详细检查表下沉到 skill；Mermaid 保留。
 - **D4 治理配置例外**：`~/.claude/**` 与全局工作流文件禁止快速通道，必须 execute + 自审 + main 验收。
@@ -120,7 +122,7 @@ flowchart LR
 ## 9. 实施清单与验收映射
 
 1. 新建 `~/.claude/skills/{research,solution,code}-self-review/SKILL.md`。
-2. 替换 `~/.claude/CLAUDE.md` 与 `/Users/bing/AGENTS.md` 的 §4；为项目 `AGENTS.md` 新增同正文 §4。
+2. 替换 `~/.claude/CLAUDE.md` 与 `$HOME/AGENTS.md` 的 §4；为项目 `AGENTS.md` 新增同正文 §4。
 3. 本方案文档与最终配置保持一致，不保留旧字段（指针式 §4、强制哈希 / sidecar、旧三层流程）。
 4. 自测与自审后向 main 提交 `READY_FOR_FINAL_REVIEW` 节点报告。
 
@@ -129,4 +131,4 @@ flowchart LR
 - 同会话自审的独立性弱于跨会话 reviewer，长期效果需用后续几个 feat 的漏检率观察。
 - 旧 reviewer agent 文件保留但不再是默认入口；若用户或外部配置仍显式调用，会与新流程并存，需在团队约定中说明。
 - 三份配置靠人工保持逐字一致，未来修改需同步三处；本次未引入自动校验脚本（避免为低频变更增加维护面）。
-- `/Users/bing/AGENTS.md` 是 Codex 侧配置，Skill 工具可能不可用；§4 已要求此时 Read `~/.claude/skills/<name>/SKILL.md` 降级执行，但跨工具的 skill 自动发现未实测。
+- `$HOME/AGENTS.md` 是 Codex 侧配置，Skill 工具可能不可用；§4 已要求此时 Read `~/.claude/skills/<name>/SKILL.md` 降级执行，但跨工具的 skill 自动发现未实测。

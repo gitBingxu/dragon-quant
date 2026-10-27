@@ -59,7 +59,7 @@
 - `AGENTS.md`（88 KB）是项目规则权威；`README.md` 是用户入口；策略细节在 `dragon_quant/review_account/STRATEGY.md`，复盘方法论在 `archived_md/review_account/复盘方法论.md`。
 - 输出契约测试分散在 `tests/test_cli.py`、`tests/test_prep.py`、`tests/test_auction_report.py`、`tests/test_buy_checks.py`、`tests/test_live_trade.py`、`tests/test_review_account.py`、`tests/test_priority.py` 等。skill 文档中的字段解释应优先引用这些测试与 CLI help，避免凭空写契约。
 - 仓库**当前没有根 `package.json`**，`.github/` 只有 `CODEOWNERS`，没有 CI workflow；测试是 pytest 风格。引入 npm 包不会改变 Python 运行时依赖。
-- **实测版本漂移**：`/Users/bing/.local/bin/dragon-quant -v` → `0.7.0`；`.venv/bin/python -m dragon_quant -v` → `0.7.1`。这证明 **skill/安装器必须做 CLI 存在性与版本预检**，不能假设 PATH 上的 `dragon-quant` 是最新版。
+- **实测版本漂移**：`$HOME/.local/bin/dragon-quant -v` → `0.7.0`；`.venv/bin/python -m dragon_quant -v` → `0.7.1`。这证明 **skill/安装器必须做 CLI 存在性与版本预检**，不能假设 PATH 上的 `dragon-quant` 是最新版。
 - `pyproject.toml` 的 `[project.scripts]` 是唯一官方入口；安装器不应硬编码某个虚拟环境路径，应支持 `--python` / `DQ_PYTHON` / PATH / `python -m dragon_quant` 逐级回退。
 
 ### 2.3 薄封装边界（验收标准映射）
@@ -485,7 +485,7 @@ $ npx --yes skills@1.7.4 add /tmp/pkg/tgz-skill-probe-0.0.0.tgz -a claude-code -
 CLI 版本漂移：
 
 ```text
-$ /Users/bing/.local/bin/dragon-quant -v
+$ $HOME/.local/bin/dragon-quant -v
 dragon-quant 0.7.0
 $ .venv/bin/python -m dragon_quant -v
 dragon-quant 0.7.1

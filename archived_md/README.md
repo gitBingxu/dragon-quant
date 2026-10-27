@@ -100,6 +100,7 @@
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
 | 2026-10-27 | AGENTS.md 渐进式披露拆分（根宪法 + 8 份模块文档 + 体量门禁） | [2026-10-27-agents-progressive-disclosure-design.md](agents/2026-10-27-agents-progressive-disclosure-design.md) | `docs/solutions/2026-10-27-agents-progressive-disclosure-design.md` |
+| 2026-10-27 | 需求落地工作流单一 owner（父级 AGENTS.md 唯一正文 + 两处指针） | [2026-10-27-workflow-single-owner-design.md](agents/2026-10-27-workflow-single-owner-design.md) | `docs/solutions/2026-10-27-workflow-single-owner-design.md` |
 
 ## 根目录
 

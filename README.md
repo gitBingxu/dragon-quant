@@ -72,7 +72,7 @@ cd dragon-quant && pip install -e .
 
 ### Agent Skill（npx 安装）
 
-仓库内置一个单主 Agent Skill，把常见中文/英文意图路由到 `dragon-quant` 命令，并提供前置自检、输出解读、异常分流与写操作确认门禁。**`AGENTS.md`（硬约束与工作流）+ 其索引的 `docs/agent/*.md`（模块细节）与 `review_account/strategy/STRATEGY.md`（策略规则）仍是规则权威**，skill 只是薄路由层，不复制评分权重、策略参数或表结构。
+仓库内置一个单主 Agent Skill，把常见中文/英文意图路由到 `dragon-quant` 命令，并提供前置自检、输出解读、异常分流与写操作确认门禁。**`AGENTS.md`（硬约束与项目路由）+ 父级 `AGENTS.md` §4（需求落地工作流，本项目不复制）+ 其索引的 `docs/agent/*.md`（模块细节）与 `review_account/strategy/STRATEGY.md`（策略规则）仍是规则权威**，skill 只是薄路由层，不复制评分权重、策略参数或表结构。
 
 前置条件分开：**Python ≥3.10** 是 CLI 的运行要求；**Node ≥22.20** 只在安装 skill 时需要，运行 CLI 不需要 Node。
 

@@ -14,7 +14,7 @@ metadata:
 
 ## 权威顺序
 
-1. `AGENTS.md`（硬约束/工作流）+ 其索引的 `docs/agent/*.md`（模块细节）：项目规则、命令语义、运维契约的权威。
+1. `AGENTS.md`（硬约束/项目路由）+ 父级 `AGENTS.md` §4（工作流）+ 其索引的 `docs/agent/*.md`（模块细节）：项目规则、命令语义、运维契约的权威。
 2. `dragon_quant/review_account/strategy/STRATEGY.md`：策略与买卖规则的权威。
 3. 本 skill：只做路由、预检、输出翻译、异常分流、写操作门禁。
 4. 三者冲突时以更高权威为准；skill 不复制权重/参数/表结构。

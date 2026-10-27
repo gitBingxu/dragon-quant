@@ -2,7 +2,7 @@
 
 > 触发：改动因子层（注册/构建/查询）、新增或修改因子、财务原始链路与 PIT、矩阵导出/评估、`rank_key` 排序注入、`factor_*` 表时读本文。
 > 本文权威：因子层边界与「缺失=无行」语义、PIT 时点、canonical scan、默认启用集与 `--all`、prep/auction 因子族、财务链路与 PIT 三桶、矩阵导出与因子评估口径、决策接入（P2）与排序注入点。
-> 上游权威：AGENTS.md（硬约束与工作流）；设计背景与准入条件见 `archived_md/factor_framework/2026-10-22-factor-framework-design.md`（历史记录）。
+> 上游权威：AGENTS.md（硬约束与项目路由）；设计背景与准入条件见 `archived_md/factor_framework/2026-10-22-factor-framework-design.md`（历史记录）。
 
 ## 因子层（P0 / P0.5 / P1 / P1.5 / P2：只读迁移 + 财务链路 + 矩阵导出/评估 + prep/auction 因子化 + 决策接入，默认零影响）
 

@@ -2,7 +2,7 @@
 
 > 触发：改动 `review` 回测流程、宽松/严格口径、`dragons_*` review 字段写回、`dragon_review_strict` 侧表，或回测 Web UI 的 API 与指标卡片时读本文。
 > 本文权威：回测双口径规则与成熟度、严格口径侧表契约、`GET /api/dragons` 汇总契约与前端取数行为。
-> 上游权威：AGENTS.md（硬约束与工作流）；实现见 `review/main.py`、`web_ui/server.py`、`scan/storage/dragons.py`。
+> 上游权威：AGENTS.md（硬约束与项目路由）；实现见 `review/main.py`、`web_ui/server.py`、`scan/storage/dragons.py`。
 
 ## 命令
 

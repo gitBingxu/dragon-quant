@@ -2,7 +2,7 @@
 
 > 触发：改动 `scan` 的阶段编排、五维评分器、cache 键、板块口径、数据源与回退、`scans_v2` 等扫描侧表时读本文。
 > 本文权威：Phase A–F 编排、数据模型、评分器接口与聚合语义、cache 键命名、v2 物理分表、扫描侧表契约、数据源最小提示。
-> 上游权威：AGENTS.md（硬约束与工作流）；五维评分细则与数值以 [评分规范](../../archived_md/score/评分器Refactor.md) 为准，阈值/权重实现在 `scan/scores/registry.py`。
+> 上游权威：AGENTS.md（硬约束与项目路由）；五维评分细则与数值以 [评分规范](../../archived_md/score/评分器Refactor.md) 为准，阈值/权重实现在 `scan/scores/registry.py`。
 
 ## 执行流程（Phase A–F）
 

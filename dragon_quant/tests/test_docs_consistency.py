@@ -6,10 +6,14 @@ database).  They pin the claims that ``AGENTS.md`` (the root constitution),
 the repository against the real repository, so documents cannot silently drift
 from code again.
 
-Layout contract (``docs/solutions/2026-10-27-agents-progressive-disclosure-design.md``):
+Layout contract (``archived_md/agents/2026-10-27-agents-progressive-disclosure-design.md``):
 
-* the root ``AGENTS.md`` is the constitution (hard constraints, the full §4
-  workflow, cross-module gates) and stays under 20 000 bytes / 240 lines;
+* the root ``AGENTS.md`` is the constitution (hard constraints, module routing,
+  cross-module gates) and stays under 20 000 bytes / 240 lines;
+* the §4 workflow body is single-owned by the parent ``AGENTS.md`` outside this
+  repository; the root may only keep a one-line pointer and must never copy the
+  body back in (the tests assert the non-duplication and never read paths
+  outside the repository);
 * every module detail lives in exactly one ``docs/agent/<module>.md`` owner and
   is reachable from the single root index;
 * the tests below were *moved* from "read AGENTS.md only" to "read the whole doc
@@ -83,18 +87,20 @@ ROOT_FORBIDDEN_TOKENS = (
     "| 表 | 用途",
 )
 
-# §4 workflow anchors: the root must keep the workflow body, not a pointer (D1).
-WORKFLOW_ANCHORS = (
-    "### 需求落地标准工作流（§4）",
+# §4 workflow body is single-owned by the parent AGENTS.md (2026-10-27 user
+# decision): the project root keeps a one-line pointer and never the body.
+WORKFLOW_BODY_ANCHORS = (
     "阶段 0：需求澄清与验收标准",
     "阶段 1：技术调研",
     "阶段 2：技术方案",
     "阶段 3：代码实现",
     "阶段 3.5：轻量终审",
+    "main 阶段验收规则",
     "自审与收敛规则",
     "禁止派生 subagent",
-    "快速通道",
+    "节点报告（精简）",
 )
+WORKFLOW_POINTER = "父级 `AGENTS.md` §4"
 
 
 def _read(path: Path) -> str:
@@ -476,12 +482,17 @@ def test_agents_has_no_deferred_content():
         assert token not in text, f"AGENTS.md must not reintroduce deferred content: {token!r}"
 
 
-def test_workflow_section_is_resident_in_root():
-    """D1: the project rules stay self-contained — §4 is resident, not a pointer."""
+def test_workflow_body_is_single_owned_outside_project_root():
+    """§4 正文由父级 AGENTS.md 拥有；项目根只保留指针，不复制正文。"""
     text = _read(AGENTS)
-    for anchor in WORKFLOW_ANCHORS:
-        assert anchor in text, f"AGENTS.md lost §4 anchor: {anchor!r}"
-    assert "```mermaid" in text, "AGENTS.md §4 must keep the workflow Mermaid diagram"
+    for anchor in WORKFLOW_BODY_ANCHORS:
+        assert anchor not in text, (
+            f"AGENTS.md must not duplicate the §4 workflow body (found {anchor!r}); "
+            "the body is owned by the parent AGENTS.md"
+        )
+    assert WORKFLOW_POINTER in text, (
+        "AGENTS.md must keep a one-line pointer to the parent AGENTS.md §4"
+    )
 
 
 def test_local_markdown_links_resolve():

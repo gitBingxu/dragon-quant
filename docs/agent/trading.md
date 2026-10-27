@@ -2,7 +2,7 @@
 
 > 触发：改动 `review-account` 回测、`buy` / `sell` 实盘辅助、候选池消费、数据分级、`buy_sell_signals` 信号表、`/account` API、费用与评估口径时读本文。
 > 本文权威：账户回测与实盘辅助的产品/CLI/运维契约（候选池消费、数据分级、信号表语义、`/account` API、费用与评估口径）。
-> 上游权威：AGENTS.md（硬约束与工作流）；策略规则、参数、卖出链、P/A、买点诊断的判定与数值以 [策略规则](../../dragon_quant/review_account/strategy/STRATEGY.md) 为准（本文只引用、不复制）。
+> 上游权威：AGENTS.md（硬约束与项目路由）；策略规则、参数、卖出链、P/A、买点诊断的判定与数值以 [策略规则](../../dragon_quant/review_account/strategy/STRATEGY.md) 为准（本文只引用、不复制）。
 
 ## 账户级模拟交易
 

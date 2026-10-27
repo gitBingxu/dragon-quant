@@ -14,6 +14,7 @@ import dayjs from "dayjs";
 import {
   IconChevronDown,
   IconChevronUp,
+  IconRefresh,
   IconSearch,
 } from "@tabler/icons-react";
 import type { DragonFilters } from "../api";
@@ -23,6 +24,7 @@ interface Props {
   count: number;
   onChange: (patch: Partial<DragonFilters>) => void;
   onSearch: () => void;
+  onReset: () => void;
 }
 
 const STATUS_OPTIONS = [
@@ -40,7 +42,7 @@ const SOURCE_OPTIONS = [
   { value: "v1", label: "v1 历史" },
 ];
 
-export function FilterBar({ filters, count, onChange, onSearch }: Props) {
+export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props) {
   const [advOpen, advHandlers] = useDisclosure(false);
 
   const onEnter = (e: React.KeyboardEvent) => {
@@ -133,6 +135,15 @@ export function FilterBar({ filters, count, onChange, onSearch }: Props) {
             onClick={onSearch}
           >
             查询
+          </Button>
+          <Button
+            size="xs"
+            variant="light"
+            color="gray"
+            leftSection={<IconRefresh size={14} />}
+            onClick={onReset}
+          >
+            重置
           </Button>
           <Button
             size="xs"

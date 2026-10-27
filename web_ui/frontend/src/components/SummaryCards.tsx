@@ -67,9 +67,9 @@ export function SummaryCards({ summary }: { summary: Summary | null }) {
           {s?.total ?? 0}
         </Text>
       </StatCard>
-      <StatCard label="已完成">{s?.completed ?? 0}</StatCard>
+      <StatCard label="已完成">{s?.derived_completed ?? s?.completed ?? 0}</StatCard>
       <StatCard label="待回测" sub={pendingSub}>
-        {s?.pending ?? 0}
+        {s?.derived_pending ?? s?.pending ?? 0}
       </StatCard>
       <StatCard label="平均收益" sub={isV1 ? "旧口径" : "严格口径"}>
         <Text span c={pnlClass(avgReturn)} inherit>

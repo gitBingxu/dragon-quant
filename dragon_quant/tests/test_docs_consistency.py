@@ -58,6 +58,7 @@ EXPECTED_MODULE_DOCS = {
 # Cross-module hard constraints (lazy storage init, zero ``import pandas``, ...)
 # stay in the root on purpose and therefore must never be listed here.
 CRITICAL_TOKEN_OWNERS = {
+    "summarize_review_rows": "review.md",
     "version=0.6": "prep-auction.md",
     "collection_report": "prep-auction.md",
     "factor_ranking_enabled": "factor.md",
@@ -495,6 +496,20 @@ def test_local_markdown_links_resolve():
                 continue
             broken.append(f"{document.relative_to(REPO_ROOT)} -> {target}")
     assert not broken, "broken local markdown links: " + ", ".join(broken)
+
+
+def test_web_ui_summary_contract_preserved():
+    review_doc = _read(DOCS_DIR / "review.md")
+    for token in (
+        "GET /api/dragons",
+        "summarize_review_rows",
+        "derived_completed",
+        "derived_pending",
+        "derived_status",
+    ):
+        assert token in review_doc, (
+            f"docs/agent/review.md lost the Web UI summary contract token {token!r}"
+        )
 
 
 def test_critical_tokens_have_single_owner():

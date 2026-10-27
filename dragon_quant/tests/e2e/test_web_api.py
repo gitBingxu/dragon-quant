@@ -244,6 +244,37 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
                 "best_return_strict": 9.0,
             }
 
+            # /api/dragons 的 summary 与同一响应 rows 同源：total == count == len(data)。
+            dragons_summary = payload["summary"]
+            assert dragons_summary["total"] == payload["count"] == len(
+                payload["data"])
+            assert dragons_summary["derived_completed"] == 1
+            assert dragons_summary["derived_pending"] == 2
+            legacy_summary = dict(dragons_summary)
+            legacy_summary.pop("derived_completed")
+            legacy_summary.pop("derived_pending")
+            # 未筛选时与 legacy /api/summary 逐键等值（旧键冻结）。
+            assert legacy_summary == summary
+
+            filtered_payload = filtered.json()
+            filtered_summary = filtered_payload["summary"]
+            assert filtered_summary["total"] == filtered_payload["count"] == 1
+            assert filtered_summary["derived_completed"] == 1
+            assert filtered_summary["derived_pending"] == 0
+
+            # 空集：计数为 0，均值 / 胜率 / 最佳全部为 null（不是伪造的 0）。
+            empty = server.request("GET", "/api/dragons?code=999999").json()
+            assert empty["count"] == 0 and empty["data"] == []
+            empty_summary = empty["summary"]
+            assert empty_summary["total"] == 0
+            assert empty_summary["derived_completed"] == 0
+            assert empty_summary["derived_pending"] == 0
+            for key in ("avg_return", "avg_return_strict", "win_rate",
+                        "win_rate_loose", "win_rate_strict", "best_return",
+                        "best_return_strict", "best_stock_code",
+                        "best_stock_code_strict"):
+                assert empty_summary[key] is None, key
+
             missing = server.request("GET", "/api/does-not-exist")
             assert missing.status == 404
             assert missing.json() == {"error": "not found"}

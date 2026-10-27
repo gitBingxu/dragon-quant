@@ -44,6 +44,8 @@ const PAGE_SIZES = ["10", "25", "50", "100"];
 
 /** v2 展示严格口径；v1 没有严格结果，回落旧字段。 */
 function displayStatus(r: Dragon): string | null {
+  // 服务端已给出统一派生状态，优先使用；缺失时保留旧前端推导作为兜底。
+  if (r.derived_status != null) return r.derived_status;
   if (r.source === "v1") return r.review_status;
   if (r.strict_review_status) return r.strict_review_status;
   if (r.review_status === "pending") return "pending";

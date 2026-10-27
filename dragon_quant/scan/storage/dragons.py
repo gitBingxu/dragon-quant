@@ -692,6 +692,9 @@ def query_dragons(filters: Optional[dict] = None,
                 "strict_review_status": r["strict_review_status"],
                 "strict_review_reason": r["strict_review_reason"],
                 "strict_reviewed": r["strict_review_status"] is not None,
+                # 派生状态：completed / pending / pending_recompute /
+                # cannot_evaluate / error（v1 等于旧 review_status）。
+                "derived_status": r["derived_status"],
             })
 
         # 版本号范围过滤（语义化比较，需在 Python 端处理）
@@ -796,168 +799,182 @@ def _query_base_sql(table: str, source: str) -> str:
     return f"SELECT {cols}, {strict_cols}{join}"
 
 
-def get_review_summary(source: str = "v2") -> dict:
-    """返回 dragons 表的汇总统计（供 Web UI /api/summary 使用）。
+def _row_derived_status(row: dict, source: str) -> Optional[str]:
+    """读取 rows 携带的派生状态，缺失时按同一 CASE 规则回算。"""
+    status = row.get("derived_status")
+    if status is not None:
+        return status
+    if source == "v1":
+        return row.get("review_status")
+    if row.get("strict_review_status"):
+        return row["strict_review_status"]
+    if row.get("review_status") == "pending":
+        return "pending"
+    if row.get("review_status") == "error":
+        return "error"
+    return "pending_recompute"
 
-    旧键（``avg_return`` / ``win_rate`` / ``best_*``）保持**宽松口径**兼容；
-    新增键提供严格口径与重算进度。胜利条件两种口径一致：
-    ``max_return_5d > 0 且 max_drawdown_5d > -5``（严格大于，0 / -5 都不算赢）。
 
-    宽松胜率分母 = 宽松 completed **且存在严格行且严格非 cannot_evaluate**
-    （保证两种口径在同一批样本上可比）；严格分母 = 严格 completed。
-    v1 没有严格表，新增口径键返回 ``None`` / ``0``。
+def _mean_or_none(values: list[float]) -> Optional[float]:
+    """均值并保留两位小数；空样本返回 ``None``（不伪造 0）。"""
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def _win(row: dict, ret_key: str, drawdown_key: str) -> bool:
+    """胜利条件（两种口径一致）：收益 > 0 且回撤 > -5（严格大于）。
+
+    NULL 参与比较时 SQL 结果为 NULL（不计入），因此这里也直接返回 False。
     """
-    conn = _connect()
-    try:
-        _ensure_schema(conn)
-        source = _normalize_source(source)
-        t = _tables(source)
-        dragons = t["dragons"]
-
-        def _count(sql: str, params: tuple = ()) -> int:
-            return conn.execute(sql, params).fetchone()[0]
-
-        total = _count(f"SELECT COUNT(*) FROM {dragons}")
-        completed = _count(
-            f"SELECT COUNT(*) FROM {dragons} WHERE review_status = 'completed'")
-        pending = _count(
-            f"SELECT COUNT(*) FROM {dragons} WHERE review_status = 'pending'")
-
-        avg_row = conn.execute(
-            f"SELECT AVG(max_return_5d) FROM {dragons} "
-            "WHERE review_status = 'completed' AND max_return_5d IS NOT NULL"
-        ).fetchone()
-
-        win_count = _count(
-            f"SELECT COUNT(*) FROM {dragons} "
-            "WHERE review_status = 'completed' "
-            "AND max_return_5d > 0 "
-            "AND max_drawdown_5d > -5.0"
-        )
-
-        best = conn.execute(
-            f"SELECT code, name, max_return_5d FROM {dragons} "
-            "WHERE review_status = 'completed' AND max_return_5d IS NOT NULL "
-            "ORDER BY max_return_5d DESC LIMIT 1"
-        ).fetchone()
-
-        avg_return = round(avg_row[0], 2) if avg_row and avg_row[0] is not None else None
-        completed_count = completed if completed else 0
-        win_rate = (round(win_count / completed_count * 100, 1)
-                    if completed_count > 0 else None)
-
-        summary = {
-            "total": total,
-            "completed": completed,
-            "pending": pending,
-            "avg_return": avg_return,
-            "win_rate": win_rate,
-            "best_stock_code": best[0] if best else None,
-            "best_stock_name": best[1] if best else None,
-            "best_return": round(best[2], 2) if best and best[2] is not None else None,
-            "source": source,
-        }
-
-        if source == "v2":
-            summary.update(_strict_summary(conn, dragons))
-        else:
-            summary.update({
-                "avg_return_strict": None,
-                "win_rate_loose": None,
-                "win_rate_strict": None,
-                "win_rate_loose_n": 0,
-                "win_rate_strict_n": 0,
-                "cannot_evaluate": 0,
-                "pending_recompute": 0,
-                "failed_recompute": 0,
-                "best_stock_code_strict": None,
-                "best_stock_name_strict": None,
-                "best_return_strict": None,
-            })
-        return summary
-    finally:
-        conn.close()
+    ret = row.get(ret_key)
+    drawdown = row.get(drawdown_key)
+    return (ret is not None and drawdown is not None
+            and ret > 0 and drawdown > -5.0)
 
 
-def _strict_summary(conn, dragons: str) -> dict:
-    """严格侧表汇总（仅 v2）。"""
-    def _count(sql: str) -> int:
-        return conn.execute(sql).fetchone()[0]
-
-    strict_completed = _count(
-        "SELECT COUNT(*) FROM dragon_review_strict "
-        "WHERE source = 'v2' AND review_status = 'completed'")
-    cannot_evaluate = _count(
-        "SELECT COUNT(*) FROM dragon_review_strict "
-        "WHERE source = 'v2' AND review_status = 'cannot_evaluate'")
-
-    avg_row = conn.execute(
-        "SELECT AVG(max_return_5d) FROM dragon_review_strict "
-        "WHERE source = 'v2' AND review_status = 'completed' "
-        "AND max_return_5d IS NOT NULL"
-    ).fetchone()
-    avg_return_strict = (round(avg_row[0], 2)
-                         if avg_row and avg_row[0] is not None else None)
-
-    strict_wins = _count(
-        "SELECT COUNT(*) FROM dragon_review_strict "
-        "WHERE source = 'v2' AND review_status = 'completed' "
-        "AND max_return_5d > 0 AND max_drawdown_5d > -5.0"
+def _best_row(rows: list[dict], ret_key: str) -> Optional[dict]:
+    """收益最高的一行；并列按 code / trade_date 升序，保证确定性。"""
+    candidates = [r for r in rows if r.get(ret_key) is not None]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda r: (-r[ret_key], r.get("code") or "",
+                       r.get("trade_date") or ""),
     )
 
-    # 宽松胜率只在「两种口径都有有效结果」的样本上统计。
-    loose_den = _count(
-        f"SELECT COUNT(*) FROM {dragons} d "
-        "JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
-        "AND s.code = d.code AND s.source = 'v2' "
-        "WHERE d.review_status = 'completed' "
-        "AND s.review_status != 'cannot_evaluate'"
-    )
-    loose_wins = _count(
-        f"SELECT COUNT(*) FROM {dragons} d "
-        "JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
-        "AND s.code = d.code AND s.source = 'v2' "
-        "WHERE d.review_status = 'completed' "
-        "AND s.review_status != 'cannot_evaluate' "
-        "AND d.max_return_5d > 0 AND d.max_drawdown_5d > -5.0"
-    )
 
-    pending_recompute = _count(
-        f"SELECT COUNT(*) FROM {dragons} d "
-        "LEFT JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
-        "AND s.code = d.code AND s.source = 'v2' "
-        "WHERE s.trade_date IS NULL "
-        "AND d.review_status IN ('completed', 'no_entry')"
-    )
-    failed_recompute = _count(
-        f"SELECT COUNT(*) FROM {dragons} d "
-        "LEFT JOIN dragon_review_strict s ON s.trade_date = d.trade_date "
-        "AND s.code = d.code AND s.source = 'v2' "
-        "WHERE s.trade_date IS NULL AND d.review_status = 'error'"
-    )
+def summarize_review_rows(rows: list[dict],
+                          source: str = "v2",
+                          *,
+                          include_derived_counts: bool = False) -> dict:
+    """从 ``query_dragons`` 的完整 rows 计算汇总统计（筛选后同源）。
 
-    best = conn.execute(
-        "SELECT d.code, d.name, s.max_return_5d FROM dragon_review_strict s "
-        f"JOIN {dragons} d ON d.trade_date = s.trade_date AND d.code = s.code "
-        "WHERE s.source = 'v2' AND s.review_status = 'completed' "
-        "AND s.max_return_5d IS NOT NULL "
-        "ORDER BY s.max_return_5d DESC LIMIT 1"
-    ).fetchone()
+    Web UI 的 7 张卡片必须与列表使用同一份筛选结果，因此汇总只消费同一批
+    rows，不再单独发 SQL 统计。口径与 ``get_review_summary`` 的历史实现逐键
+    等价（正常数据无孤儿严格行）：
 
-    return {
-        "avg_return_strict": avg_return_strict,
-        "win_rate_loose": (round(loose_wins / loose_den * 100, 1)
-                           if loose_den > 0 else None),
-        "win_rate_strict": (round(strict_wins / strict_completed * 100, 1)
-                            if strict_completed > 0 else None),
-        "win_rate_loose_n": loose_den,
-        "win_rate_strict_n": strict_completed,
-        "cannot_evaluate": cannot_evaluate,
-        "pending_recompute": pending_recompute,
-        "failed_recompute": failed_recompute,
-        "best_stock_code_strict": best[0] if best else None,
-        "best_stock_name_strict": best[1] if best else None,
-        "best_return_strict": (round(best[2], 2)
-                               if best and best[2] is not None else None),
+    - 旧键（``avg_return`` / ``win_rate`` / ``best_*``）为**宽松口径**；
+      平均收益只取非 NULL，胜率分母是全部宽松 completed；
+    - 严格键（``avg_return_strict`` / ``win_rate_strict``）取严格侧表列；
+    - 宽松胜率分母 = 宽松 completed **且存在严格行且严格非 cannot_evaluate**；
+    - ``pending_recompute`` / ``failed_recompute`` 只统计无严格行的记录；
+    - v1 没有严格侧表，严格键返回 ``None`` / ``0``。
+
+    空集或无可评测样本返回 ``None``（显示为 —），真实无赢家返回 ``0.0``。
+    ``include_derived_counts`` 为 True 时附加 ``derived_completed`` /
+    ``derived_pending``（``pending`` + ``pending_recompute``）——仅供 UI 卡片
+    在同一响应内展示派生状态计数，不属于 legacy ``/api/summary`` 契约。
+    """
+    source = _normalize_source(source)
+    total = len(rows)
+
+    loose_completed = [r for r in rows if r.get("review_status") == "completed"]
+    pending = sum(1 for r in rows if r.get("review_status") == "pending")
+    loose_wins = sum(1 for r in loose_completed
+                     if _win(r, "max_return_5d", "max_drawdown_5d"))
+    best = _best_row(loose_completed, "max_return_5d")
+
+    summary = {
+        "total": total,
+        "completed": len(loose_completed),
+        "pending": pending,
+        "avg_return": _mean_or_none([
+            r["max_return_5d"] for r in loose_completed
+            if r.get("max_return_5d") is not None
+        ]),
+        "win_rate": (round(loose_wins / len(loose_completed) * 100, 1)
+                     if loose_completed else None),
+        "best_stock_code": best.get("code") if best else None,
+        "best_stock_name": best.get("name") if best else None,
+        "best_return": (round(best["max_return_5d"], 2)
+                        if best and best.get("max_return_5d") is not None
+                        else None),
+        "source": source,
     }
 
+    if source == "v2":
+        strict_completed = [
+            r for r in rows
+            if r.get("strict_reviewed")
+            and r.get("strict_review_status") == "completed"
+        ]
+        strict_wins = sum(1 for r in strict_completed
+                          if _win(r, "strict_max_return_5d",
+                                  "strict_max_drawdown_5d"))
+        loose_den = [
+            r for r in loose_completed
+            if r.get("strict_reviewed")
+            and r.get("strict_review_status") != "cannot_evaluate"
+        ]
+        loose_den_wins = sum(1 for r in loose_den
+                             if _win(r, "max_return_5d", "max_drawdown_5d"))
+        best_strict = _best_row(strict_completed, "strict_max_return_5d")
+        summary.update({
+            "avg_return_strict": _mean_or_none([
+                r["strict_max_return_5d"] for r in strict_completed
+                if r.get("strict_max_return_5d") is not None
+            ]),
+            "win_rate_loose": (round(loose_den_wins / len(loose_den) * 100, 1)
+                               if loose_den else None),
+            "win_rate_strict": (round(strict_wins / len(strict_completed) * 100, 1)
+                                if strict_completed else None),
+            "win_rate_loose_n": len(loose_den),
+            "win_rate_strict_n": len(strict_completed),
+            "cannot_evaluate": sum(
+                1 for r in rows
+                if r.get("strict_review_status") == "cannot_evaluate"),
+            "pending_recompute": sum(
+                1 for r in rows
+                if not r.get("strict_reviewed")
+                and r.get("review_status") in ("completed", "no_entry")),
+            "failed_recompute": sum(
+                1 for r in rows
+                if not r.get("strict_reviewed")
+                and r.get("review_status") == "error"),
+            "best_stock_code_strict": (
+                best_strict.get("code") if best_strict else None),
+            "best_stock_name_strict": (
+                best_strict.get("name") if best_strict else None),
+            "best_return_strict": (
+                round(best_strict["strict_max_return_5d"], 2)
+                if best_strict
+                and best_strict.get("strict_max_return_5d") is not None
+                else None),
+        })
+    else:
+        summary.update({
+            "avg_return_strict": None,
+            "win_rate_loose": None,
+            "win_rate_strict": None,
+            "win_rate_loose_n": 0,
+            "win_rate_strict_n": 0,
+            "cannot_evaluate": 0,
+            "pending_recompute": 0,
+            "failed_recompute": 0,
+            "best_stock_code_strict": None,
+            "best_stock_name_strict": None,
+            "best_return_strict": None,
+        })
+
+    if include_derived_counts:
+        statuses = [_row_derived_status(r, source) for r in rows]
+        summary["derived_completed"] = sum(
+            1 for s in statuses if s == "completed")
+        summary["derived_pending"] = sum(
+            1 for s in statuses if s in ("pending", "pending_recompute"))
+
+    return summary
+
+
+def get_review_summary(source: str = "v2") -> dict:
+    """返回 dragons 表的全量汇总统计（供 Web UI legacy ``/api/summary``）。
+
+    兼容 wrapper：与列表使用同一 ``query_dragons`` 全量 rows，再由
+    :func:`summarize_review_rows` 计算，保证正常数据下旧键形状与值不变。
+    孤儿严格行不属于权威集合（严格侧只统计能 join 到 dragon 行的记录）。
+    """
+    source = _normalize_source(source)
+    rows = query_dragons({}, source=source)
+    return summarize_review_rows(rows, source=source)

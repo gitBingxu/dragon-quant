@@ -76,7 +76,8 @@ def _check_status_text(check: dict) -> str:
     status = check.get("status")
     if check.get("selected") and status == "passed":
         return "通过，命中买点"
-    return BUY_CHECK_STATUS_LABELS.get(status, status or "未知")
+    label = BUY_CHECK_STATUS_LABELS.get(status) if isinstance(status, str) else None
+    return label or (status if isinstance(status, str) else "") or "未知"
 
 
 def _print_checks(checks):

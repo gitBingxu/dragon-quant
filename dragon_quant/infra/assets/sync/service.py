@@ -27,7 +27,12 @@ from dragon_quant.infra.assets.sync.errors import (
     NotFoundError,
     StorageError,
 )
-from dragon_quant.infra.assets.sync.models import AssetShard, RestoreReport, SyncReport
+from dragon_quant.infra.assets.sync.models import (
+    AssetShard,
+    ManifestEntry,
+    RestoreReport,
+    SyncReport,
+)
 from dragon_quant.infra.assets.sync.sources import sources_by_name
 from dragon_quant.infra.assets.sync.state import (
     ProcessLock,
@@ -336,7 +341,7 @@ def _push_partition(backend, sources, *, state, watermarks, volatile,
                                      "action": "failed", "failed": batch.failed})
                 return False
             continue
-        if (not dry_run and not all_dates
+        if (not dry_run and not all_dates and remote is not None
                 and _source_fresh(state, source, partition, remote,
                                   watermarks, volatile)):
             prefix = source.name + ":"
@@ -978,7 +983,7 @@ def verify(backend, sources, *, date_from=None, date_to=None, samples=None,
     excluded = _excluded_periods(known, date_from, date_to)
 
     mismatched: list[dict] = []
-    entries: list[tuple[str, str, object]] = []
+    entries: list[tuple[str, str, ManifestEntry]] = []
     local_absent: list[str] = []
     checked_dates = 0
     metadata_supported = True

@@ -18,7 +18,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Mapping, Optional, Protocol, Sequence, runtime_checkable
+from typing import (
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    TypeAlias,
+    runtime_checkable,
+)
 
 from . import storage as fstore
 
@@ -58,6 +65,14 @@ class FactorModel(Protocol):
 
     name: str
     version: str
+
+    # 只读 property 形式：实现方可用 property（EqualWeightRankModel）或普通属性，
+    # 声明为可变属性反而会让 property 实现不满足协议。
+    @property
+    def required_factors(self) -> tuple[str, ...]: ...
+
+    @property
+    def factor_versions(self) -> Mapping[str, str]: ...
 
     def fit(self, panel) -> "FactorModel":  # 规则模型无状态，直接 return self
         ...
@@ -266,7 +281,12 @@ class EqualWeightRankModel:
                 continue
             factor_ranks: dict[str, dict[int, float]] = {}
             for name in required:
-                values = [_finite(items[index].values.get(name)) for index in ranked]
+                values: list[float] = []
+                for index in ranked:
+                    number = _finite(items[index].values.get(name))
+                    if number is None:   # 不可达：入选条件已保证全部有限
+                        continue
+                    values.append(number)
                 ranks = average_ranks(values)
                 denominator = len(ranked) - 1
                 mapping: dict[int, float] = {}
@@ -379,7 +399,14 @@ def _factor_block(*, mode: str, score: Optional[float], model: FactorLike,
 
 
 # 仅用于类型可读性（避免把 FactorModel 当值使用时的静态告警）。
-FactorLike = FactorModel
+FactorLike: TypeAlias = FactorModel
+
+
+@runtime_checkable
+class _MetaScoringModel(Protocol):
+    """可选能力：带元数据打分（等价于此前的 ``hasattr(model, "score_with_meta")``）。"""
+
+    def score_with_meta(self, pool: PoolInput) -> tuple[dict[str, float], dict]: ...
 
 
 def _annotate(candidates: Sequence[dict], *, mode: str, scores: dict[str, float],
@@ -525,7 +552,7 @@ def annotate_pool(candidates: Sequence[dict], *, decision_date: str,
                              values=values_by_code.get(candidate["code"], {}))
                     for candidate in pool))
     try:
-        if hasattr(model, "score_with_meta"):
+        if isinstance(model, _MetaScoringModel):
             scores, meta = model.score_with_meta(pool_input)
         else:
             scores, meta = model.score(pool_input), {}

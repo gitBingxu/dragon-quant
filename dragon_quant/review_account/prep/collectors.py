@@ -546,20 +546,33 @@ def _prepare_assets(assets: dict, trade_date: str) -> tuple[dict[str, dict], lis
         if asset_type in seen or asset_type == "collection_report":
             continue
         seen.add(asset_type)
-        payload = assets.get(asset_type)
-        if asset_health(asset_type, payload, _report_status(report, asset_type),
-                        trade_date) is not None:
+        checked = _usable_payload(asset_type, assets.get(asset_type),
+                                  _report_status(report, asset_type), trade_date)
+        if checked is None:
             degraded.append(asset_type)
             continue
-        usable[asset_type] = payload
+        usable[asset_type] = checked
         if asset_type == "dragons":
-            degraded.extend(_window_degradations(payload))
+            degraded.extend(_window_degradations(checked))
     # 窗口加宽后新入候选可能缺 fund_flow / cninfo 覆盖（历史日 same_day_only 无法补采）：
     # 只让降级原因可见，绝不伪造资金/公告数据（否则 verdict 静默降档会被误读为资金面变差）。
     dragon_codes = _asset_codes(usable.get("dragons"))
     if dragon_codes and _uncovered_assets(usable, dragon_codes, set()):
         degraded.append("dragons_window_widened_dependents_stale")
     return usable, sorted(set(degraded))
+
+
+def _usable_payload(asset_type: str, payload, status, trade_date: str) -> Optional[dict]:
+    """资产可用性窄化：非 dict 或 ``asset_health`` 判降级 → ``None``。
+
+    非 dict 时 ``asset_health`` 本身必返回 ``missing`` / ``malformed``（非 None），
+    因此这条窄化与「健康检查不通过」完全同构，只是把结论显式化给类型检查器。
+    """
+    if not isinstance(payload, dict):
+        return None
+    if asset_health(asset_type, payload, status, trade_date) is not None:
+        return None
+    return payload
 
 
 def _window_degradations(payload) -> list[str]:
@@ -648,8 +661,8 @@ def _stored_asset_healthy(stored: dict, asset_type: str, status,
     spec = _collectors().get(asset_type)
     if spec is None:
         return False
-    payload = stored.get(asset_type)
-    if asset_health(asset_type, payload, status, trade_date) is not None:
+    payload = _usable_payload(asset_type, stored.get(asset_type), status, trade_date)
+    if payload is None:
         return False
     # D1 允许「非必然非空资产」的合法 empty（dragons/cninfo/fund_flow 的空是确定事实）：
     # 补采失败时应保留该合法空状态，而不是写成 error。

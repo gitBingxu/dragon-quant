@@ -18,7 +18,8 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, Optional
+import sqlite3
+from typing import Iterable, Literal, Optional, overload
 
 from dragon_quant.infra.storage import connection, dragons_rows
 from dragon_quant.infra.assets import db as assets_db
@@ -65,7 +66,13 @@ def _require_v2(source: str) -> str:
 # ─── 连接门面 ──────────────────────────────────────────────────────────────
 
 
-def _mirror_conn(*, create: bool, path=None):
+@overload
+def _mirror_conn(*, create: Literal[True], path=None) -> sqlite3.Connection: ...
+@overload
+def _mirror_conn(*, create: Literal[False], path=None) -> Optional[sqlite3.Connection]: ...
+@overload
+def _mirror_conn(*, create: bool, path=None) -> Optional[sqlite3.Connection]: ...
+def _mirror_conn(*, create: bool, path=None) -> Optional[sqlite3.Connection]:
     """assets.db 连接；``create=False`` 且库不存在 → None（绝不建库）。"""
     conn = assets_db._connect(create=create, path=path)
     if conn is None:

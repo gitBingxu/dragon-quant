@@ -129,6 +129,9 @@ def _resolve(code: str) -> tuple[int, str]:
 # ─── 安全数值 / 时间戳 ─────────────────────────────────────────────────────
 
 
+_MISSING = object()   # "属性不存在" 哨兵（区别于属性值恰为 None）
+
+
 def _f(v, default: float = 0.0) -> float:
     """float 转换，NaN/None/异常 → default。"""
     try:
@@ -262,7 +265,8 @@ def _to_auction_items(records: list[dict]) -> list[dict]:
     items: list[dict] = []
     for r in records:
         t = r.get("time")
-        ts = t.strftime("%H:%M:%S") if hasattr(t, "strftime") else str(t or "")
+        fmt = getattr(t, "strftime", None)
+        ts = fmt("%H:%M:%S") if callable(fmt) else str(t or "")
         items.append({
             "time": ts,
             "price": _f(r.get("price")),
@@ -369,8 +373,9 @@ def _finance_record(row: dict) -> dict:
         if str(key).startswith("_"):
             continue
         normalized = _normalize_value(value)
-        if hasattr(normalized, "value"):      # Market 等 Enum
-            normalized = normalized.value
+        value_attr = getattr(normalized, "value", _MISSING)   # Market 等 Enum
+        if value_attr is not _MISSING:
+            normalized = value_attr
         out[key] = normalized
     return out
 
@@ -970,10 +975,11 @@ class TdxProvider(StockProvider):
         out: list[dict] = []
         for r in (df.to_dict("records") if df is not None and not df.empty else []):
             d = r.get("date")
+            fmt = getattr(d, "strftime", None)
             out.append({
                 "title": str(r.get("title", "")),
                 "type": str(r.get("type", "") or ""),
-                "date": d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or ""),
+                "date": fmt("%Y-%m-%d") if callable(fmt) else str(d or ""),
                 "url": str(r.get("url", "") or r.get("pdf_url", "") or ""),
             })
         elapsed = (time.time() - t0) * 1000

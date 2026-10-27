@@ -219,7 +219,8 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
         pool = _legacy_candidates(calendar, day, cfg, loader)
         ctx["pool_source"] = "legacy"
         for cand in pool:
-            snap_cand = verdict_map.get(cand.get("code"))
+            code = cand.get("code")
+            snap_cand = verdict_map.get(code) if isinstance(code, str) else None
             state = prep_state(snap_cand) if snap_cand is not None else None
             _annotate(cand, _prep_block(snap_cand, snapshot_date, state),
                       _auction_block(None, day))

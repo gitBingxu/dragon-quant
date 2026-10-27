@@ -9,7 +9,12 @@
 
 from __future__ import annotations
 
-from dragon_quant.infra.factor.types import FactorContext, FactorFrame, FactorSpec
+from dragon_quant.infra.factor.types import (
+    FactorContext,
+    FactorFrame,
+    FactorSpec,
+    SpecDefaults,
+)
 
 SOURCE = "scan"
 IMPL_PREFIX = "builtin.five_dim"
@@ -90,7 +95,7 @@ def compute_is_true_dragon(ctx: FactorContext) -> FactorFrame:
     )
 
 
-_SPEC_FIELDS = dict(
+_SPEC_FIELDS = SpecDefaults(
     frequency="1d",
     source=SOURCE,
     available_phase="close",

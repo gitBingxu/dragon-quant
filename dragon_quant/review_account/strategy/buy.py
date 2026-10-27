@@ -160,6 +160,8 @@ def _rule_ma5_pullback(ctx: BuyCheckContext) -> RuleResult:
     if reason:
         return RuleResult(False, reason, unavailable=unavailable)
     row, prev_row, cfg = ctx.row, ctx.prev_row, ctx.cfg
+    if prev_row is None:      # 不可达：_open_common_gate 已拦截缺基准
+        return RuleResult(False, "缺少上一交易日MA5/量能基准", unavailable=True)
     opening, ma5, gap = row["open"], prev_row["ma5"], row["open_gap_pct"]
     distance = (opening / ma5 - 1) * 100
     if cfg.require_rising_ma5 and ma5 <= (row.get("previous_ma5") or ma5):
@@ -182,6 +184,8 @@ def _turn_strong_preconditions(ctx: BuyCheckContext) -> tuple[Optional[str], boo
     if reason:
         return reason, unavailable
     row, prev_row, cfg = ctx.row, ctx.prev_row, ctx.cfg
+    if prev_row is None:      # 不可达：_open_common_gate 已拦截缺基准
+        return "缺少上一交易日MA5/量能基准", True
     ma5, gap, opening = prev_row["ma5"], row["open_gap_pct"], row["open"]
     amount, turnover = prev_row.get("amount") or 0, prev_row.get("turnover") or 0
     prev_high = prev_row.get("high")

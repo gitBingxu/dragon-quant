@@ -8,8 +8,28 @@
 from __future__ import annotations
 
 import importlib
+from typing import TYPE_CHECKING
 
 _MAIN = f"{__package__}.main"
+
+# 惰性代理的静态影子（仅类型检查器可见）：运行期仍由 ``__getattr__`` 解析
+# ``main`` 及其 owner 子模块，导入本包不加载任何应用子模块。
+if TYPE_CHECKING:  # pragma: no cover
+    from .main import (
+        CleanConfig,
+        FactorModel,
+        annotate_pool,
+        build,
+        evaluate_factor,
+        export_matrix,
+        fin_calibrate,
+        fin_status,
+        fin_sync,
+        list_factors,
+        parse_only,
+        query,
+        status,
+    )
 
 
 def __getattr__(name: str):

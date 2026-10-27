@@ -76,7 +76,7 @@ import json
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, overload
 
 from dragon_quant.infra.assets.schema import (
     BASE_SCHEMA,
@@ -97,6 +97,12 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
+@overload
+def _connect(create: Literal[True] = True, path=None) -> sqlite3.Connection: ...
+@overload
+def _connect(create: Literal[False], path=None) -> Optional[sqlite3.Connection]: ...
+@overload
+def _connect(create: bool = True, path=None) -> Optional[sqlite3.Connection]: ...
 def _connect(create: bool = True, path=None) -> Optional[sqlite3.Connection]:
     """打开 assets.db。
 
@@ -286,6 +292,12 @@ def save_prep_snapshot(trade_date: str, result: dict, source: str = "v2") -> Non
             conn.close()
 
 
+@overload
+def get_prep_snapshot(trade_date: str, source: str = "v2",
+                      with_meta: Literal[False] = False) -> Optional[dict]: ...
+@overload
+def get_prep_snapshot(trade_date: str, source: str = "v2",
+                      with_meta: Literal[True] = True) -> tuple[Optional[dict], dict]: ...
 def get_prep_snapshot(trade_date: str, source: str = "v2",
                       with_meta: bool = False):
     """读取某复盘日的快照，无记录返回 None。

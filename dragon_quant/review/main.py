@@ -18,7 +18,7 @@ Review 用例 — 龙头回测验证（双口径）。
 
 import sys
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, TypeGuard
 
 from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 from dragon_quant.infra import clock
@@ -77,27 +77,27 @@ def _cannot_evaluate() -> dict:
 # ─── 共享窗口 / 数据校验 ──────────────────────────────────────────────────
 
 
-def _is_invalid_bar(bar: Optional[dict]) -> bool:
-    """次日 K 线不可用于严格口径：缺 bar / 无效 OHLC / 零成交平盘占位。"""
-    if bar is None:
-        return True
+def _is_valid_bar(bar: object) -> TypeGuard[dict]:
+    """次日 K 线是否可用于严格口径（缺 bar / 无效 OHLC / 零成交平盘占位即不可用）。"""
+    if not isinstance(bar, dict):
+        return False
     open_px = bar.get("open")
     high = bar.get("high")
     low = bar.get("low")
     close = bar.get("close")
-    if None in (open_px, high, low, close):
-        return True
+    if open_px is None or high is None or low is None or close is None:
+        return False
     if min(open_px, high, low, close) <= 0:
-        return True
+        return False
     if high < low:
-        return True
+        return False
     if not (low <= open_px <= high and low <= close <= high):
-        return True
+        return False
     volume = bar.get("volume")
     if volume is not None and volume <= 0 and high == low:
         # 停牌占位行（平盘 + 零成交）；与真实一字板（有成交）区分开。
-        return True
-    return False
+        return False
+    return True
 
 
 def _window_metrics(klines: list[dict], calendar: set[str],
@@ -141,7 +141,7 @@ def _strict_review(klines: list[dict], calendar: set[str],
 
     buy_date = next_days[0]
     bar = next((k for k in klines if k["date"] == buy_date), None)
-    if _is_invalid_bar(bar):
+    if not _is_valid_bar(bar):
         return _cannot_evaluate()
 
     buy_price = bar["open"]

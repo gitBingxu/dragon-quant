@@ -36,6 +36,19 @@ class TestTableSpecRegistry(unittest.TestCase):
             self.assertFalse(set(spec.side_columns) & set(spec.columns))
             self.assertTrue(set(spec.json_columns) <= set(spec.columns))
 
+    def test_static_key_contract(self):
+        """§8.5-1：static 单元必须给出字面量分区键，缺失即注册错误。"""
+        for spec in tables.TABLE_SPECS:
+            if spec.partition_kind == "static":
+                self.assertEqual(spec.static_key, spec.static_partition)
+        broken = tables.TableSpec(
+            source="demo", asset_type="static", table="demo_static",
+            partition_kind="static", partition_column=None,
+            columns=("code",), identity=("code",),
+        )
+        with self.assertRaises(RuntimeError):
+            broken.static_key
+
     def test_covers_every_new_table(self):
         table_names = {spec.table for spec in tables.TABLE_SPECS}
         self.assertEqual(table_names, {

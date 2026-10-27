@@ -18,7 +18,12 @@ from __future__ import annotations
 import math
 import re
 
-from dragon_quant.infra.factor.types import FactorContext, FactorFrame, FactorSpec
+from dragon_quant.infra.factor.types import (
+    FactorContext,
+    FactorFrame,
+    FactorSpec,
+    SpecDefaults,
+)
 
 SOURCE = "prep"
 IMPL_PREFIX = "builtin.prep"
@@ -241,7 +246,7 @@ def compute_in_pool_today(ctx: FactorContext) -> FactorFrame:
     return _frame(ctx, values, counters, expected_empty=expected_empty)
 
 
-_SPEC_FIELDS = dict(
+_SPEC_FIELDS = SpecDefaults(
     frequency="1d",
     source=SOURCE,
     available_phase="prep",

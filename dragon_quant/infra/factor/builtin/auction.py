@@ -16,8 +16,14 @@
 from __future__ import annotations
 
 import math
+from typing import TypeGuard
 
-from dragon_quant.infra.factor.types import FactorContext, FactorFrame, FactorSpec
+from dragon_quant.infra.factor.types import (
+    FactorContext,
+    FactorFrame,
+    FactorSpec,
+    SpecDefaults,
+)
 
 SOURCE = "auction"
 IMPL_PREFIX = "builtin.auction"
@@ -32,7 +38,7 @@ def _rows(ctx: FactorContext) -> dict[str, dict]:
     return ctx.source_rows.get("rows_by_code") or {}
 
 
-def _usable_row(row) -> bool:
+def _usable_row(row: object) -> TypeGuard[dict]:
     """auction 族唯一的可用性判定（fail-closed）。"""
     if not isinstance(row, dict):
         return False
@@ -224,7 +230,7 @@ def compute_dim_tail_grab(ctx: FactorContext) -> FactorFrame:
     return _dim(ctx, "tail_grab")
 
 
-_SPEC_FIELDS = dict(
+_SPEC_FIELDS = SpecDefaults(
     frequency="1d",
     source=SOURCE,
     available_phase="auction",

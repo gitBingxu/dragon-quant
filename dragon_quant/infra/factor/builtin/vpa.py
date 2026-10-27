@@ -12,7 +12,12 @@
 
 from __future__ import annotations
 
-from dragon_quant.infra.factor.types import FactorContext, FactorFrame, FactorSpec
+from dragon_quant.infra.factor.types import (
+    FactorContext,
+    FactorFrame,
+    FactorSpec,
+    SpecDefaults,
+)
 
 SOURCE = "vpa"
 IMPL_PREFIX = "builtin.vpa"
@@ -106,7 +111,7 @@ def compute_divergence(ctx: FactorContext) -> FactorFrame:
     return _factor_frame(ctx, "divergence")
 
 
-_SPEC_FIELDS = dict(
+_SPEC_FIELDS = SpecDefaults(
     frequency="1d",
     source=SOURCE,
     available_phase="close",

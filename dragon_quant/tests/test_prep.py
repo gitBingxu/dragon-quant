@@ -155,6 +155,23 @@ class TestComputeSentiment(unittest.TestCase):
                          "ths_limit_up_pool(open_num>0)")
 
 
+class TestSentimentShapeInvariant(unittest.TestCase):
+    """§8.5-3：``prep/service`` 的异构写入依赖以下形态不变量。"""
+
+    def test_degraded_and_factor_errors_shapes(self):
+        from dragon_quant.review_account.prep import compute_sentiment
+        for assets in (_assets(), {}):
+            sentiment = compute_sentiment(assets)
+            degraded = sentiment["degraded"]
+            self.assertIsInstance(degraded, list)
+            self.assertTrue(all(isinstance(item, str) for item in degraded))
+            if "factor_errors" in sentiment:
+                errors = sentiment["factor_errors"]
+                self.assertIsInstance(errors, dict)
+                self.assertTrue(all(isinstance(key, str) and isinstance(value, str)
+                                    for key, value in errors.items()))
+
+
 class TestComputeMainBoards(unittest.TestCase):
     def test_block_top_primary_path(self):
         from dragon_quant.review_account.prep import compute_main_boards

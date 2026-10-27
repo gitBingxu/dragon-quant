@@ -19,6 +19,16 @@ from dragon_quant.review_account.verdicts import (
 # C0/C1 控制字符：外部板块名等文本进入人读终端前统一清洗
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
+
+def _parse_iso_date(value: Optional[str]):
+    """ISO 日期 → ``date``；``None`` / 非法值 → ``None``（原实现靠 except 兜底）。"""
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value).date()
+    except (TypeError, ValueError):
+        return None
+
 # 降级 code → 中文标签（未知 code 原样展示）
 DEGRADED_LABELS = {
     "dragons": "龙头数据缺失",
@@ -127,14 +137,15 @@ def build_macro_fragments(macro, trade_date: Optional[str] = None) -> list[str]:
     if indices:
         suffix = "" if session == "mixed" else _SESSION_SUFFIX.get(session or "", "")
         text = "外围：" + "、".join(indices) + suffix
+        reference = _parse_iso_date(trade_date)
         stale_days: list[int] = []
         for key in MACRO_INDEX_KEYS:
             rec = instruments.get(key)
-            if not isinstance(rec, dict) or not rec.get("stale"):
+            if not isinstance(rec, dict) or not rec.get("stale") or reference is None:
                 continue
             session_date = rec.get("session_date")
             try:
-                stale_days.append((datetime.fromisoformat(trade_date).date()
+                stale_days.append((reference
                                    - datetime.fromisoformat(str(session_date)[:10]).date()).days)
             except (TypeError, ValueError):
                 continue

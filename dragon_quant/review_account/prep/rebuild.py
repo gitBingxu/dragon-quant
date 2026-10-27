@@ -41,7 +41,7 @@ def legacy(name: str) -> Any:
     依旧改变运行时行为。门面缺失该名字时**抛错**：静默回退到静态全局会让 patch
     悄悄失效，那是拆分后最危险的退化。
     """
-    package = sys.modules.get(__package__)
+    package = sys.modules.get(__package__ or "")
     if package is not None:
         value = getattr(package, name, _MISSING)
         if value is not _MISSING:

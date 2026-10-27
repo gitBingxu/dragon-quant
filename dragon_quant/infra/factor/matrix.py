@@ -20,7 +20,7 @@ import csv
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TypedDict
 from zoneinfo import ZoneInfo
 
 from . import stats as fstats
@@ -83,8 +83,15 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+class _DaySkip(TypedDict, total=False):
+    """单日截面清洗的跳过原因（键集合由导出 sidecar 的 meta 契约锁定）。"""
+
+    winsorize_skipped: str
+    normalize_skipped: str
+
+
 def _clean_cross_section(values: list[tuple[str, float]], config: CleanConfig,
-                         skipped: dict) -> list[tuple[str, float]]:
+                         skipped: _DaySkip) -> list[tuple[str, float]]:
     """对单日单因子的截面值做缩尾 + 归一（保持输入顺序）。"""
     if not values:
         return values
@@ -93,15 +100,16 @@ def _clean_cross_section(values: list[tuple[str, float]], config: CleanConfig,
     if config.winsorize == "mad":
         sample = [value for _, value in working]
         centre = fstats.median(sample)
-        mad = fstats.median([abs(value - centre) for value in sample])
         if centre is None:
             pass
-        elif not mad:
-            skipped["winsorize_skipped"] = "mad_zero"
         else:
-            spread = MAD_K * MAD_SCALE * mad
-            working = [(code, _clamp(value, centre - spread, centre + spread))
-                       for code, value in working]
+            mad = fstats.median([abs(value - centre) for value in sample])
+            if not mad:
+                skipped["winsorize_skipped"] = "mad_zero"
+            else:
+                spread = MAD_K * MAD_SCALE * mad
+                working = [(code, _clamp(value, centre - spread, centre + spread))
+                           for code, value in working]
     elif config.winsorize == "quantile":
         ordered = sorted(value for _, value in working)
         low = fstats.quantile(ordered, config.limits[0])
@@ -245,32 +253,35 @@ def export_matrix(date_from: str, date_to: str, *, names: Iterable[str],
         for name in requested
     }
 
-    skipped: dict[str, object] = {
-        "winsorize_skipped": None,
-        "normalize_skipped": None,
-        "winsorize_skipped_dates": [],
-        "normalize_skipped_dates": [],
-        "dropped_rows": 0,
-        "dropped_codes": [],
-    }
+    winsorize_skipped: Optional[str] = None
+    normalize_skipped: Optional[str] = None
+    winsorize_skipped_dates: list[str] = []
+    normalize_skipped_dates: list[str] = []
+    dropped_rows = 0
+    dropped_codes: list[str] = []
     cleaned = config.winsorize != "none" or config.normalize != "none" \
         or config.missing == "drop"
     if cleaned:
         for trade_date in dates:
             for name in requested:
-                pairs_in_day = [
-                    (code, matrix[trade_date][code][name])
-                    for code in sorted(matrix.get(trade_date, {}))
-                    if matrix[trade_date][code].get(name) is not None
-                ]
-                day_skipped: dict[str, object] = {}
+                pairs_in_day: list[tuple[str, float]] = []
+                for code in sorted(matrix.get(trade_date, {})):
+                    value = matrix[trade_date][code].get(name)
+                    if value is None:
+                        continue
+                    pairs_in_day.append((code, value))
+                day_skipped: _DaySkip = {}
                 result = _clean_cross_section(pairs_in_day, config, day_skipped)
                 for code, value in result:
                     matrix[trade_date][code][name] = value
-                for key in ("winsorize_skipped", "normalize_skipped"):
-                    if day_skipped.get(key):
-                        skipped[key] = day_skipped[key]
-                        skipped[f"{key}_dates"].append(trade_date)
+                reason = day_skipped.get("winsorize_skipped")
+                if reason:
+                    winsorize_skipped = reason
+                    winsorize_skipped_dates.append(trade_date)
+                reason = day_skipped.get("normalize_skipped")
+                if reason:
+                    normalize_skipped = reason
+                    normalize_skipped_dates.append(trade_date)
         if config.missing == "drop":
             dropped: list[str] = []
             for trade_date in dates:
@@ -279,8 +290,8 @@ def export_matrix(date_from: str, date_to: str, *, names: Iterable[str],
                     if any(row.get(name) is None for name in requested):
                         matrix[trade_date].pop(code)
                         dropped.append(f"{trade_date}:{code}")
-            skipped["dropped_rows"] = len(dropped)
-            skipped["dropped_codes"] = dropped[:20]
+            dropped_rows = len(dropped)
+            dropped_codes = dropped[:20]
 
     generated_at = _now()
     build_ids = fstore.list_build_ids(start, end, db_path=db_path)
@@ -296,12 +307,12 @@ def export_matrix(date_from: str, date_to: str, *, names: Iterable[str],
         "build_ids": build_ids,
         "generated_at": generated_at,
         "pipeline_version": PIPELINE_VERSION,
-        "winsorize_skipped": skipped["winsorize_skipped"],
-        "normalize_skipped": skipped["normalize_skipped"],
-        "winsorize_skipped_dates": sorted(set(skipped["winsorize_skipped_dates"])),
-        "normalize_skipped_dates": sorted(set(skipped["normalize_skipped_dates"])),
-        "dropped_rows": skipped["dropped_rows"],
-        "dropped_codes": skipped["dropped_codes"],
+        "winsorize_skipped": winsorize_skipped,
+        "normalize_skipped": normalize_skipped,
+        "winsorize_skipped_dates": sorted(set(winsorize_skipped_dates)),
+        "normalize_skipped_dates": sorted(set(normalize_skipped_dates)),
+        "dropped_rows": dropped_rows,
+        "dropped_codes": dropped_codes,
     }
 
     warnings: list[str] = []

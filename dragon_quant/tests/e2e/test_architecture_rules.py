@@ -351,7 +351,7 @@ _CURRENT_TIME_INVENTORY = {
     "dragon_quant/infra/assets/sync/backends/s3.py": {"datetime.now": 1},
     "dragon_quant/infra/assets/sync/backends/signer.py": {"datetime.now": 1},
     "dragon_quant/infra/provider/tdx.py": {
-        "time.time": 49, "time.mktime": 1,
+        "time.time": 53, "time.mktime": 1,
         "time.strftime": 1, "time.localtime": 1},
     "dragon_quant/infra/provider/tencent.py": {"time.time": 3, "time.mktime": 1},
     "dragon_quant/infra/provider/ths.py": {
@@ -963,15 +963,38 @@ def test_prep_recompute_stays_offline_and_modules_have_no_layering_cycle():
     graph = {name: _relative_modules(_prep_file(name)) for name in _PREP_FILES}
 
     assert graph["service"] == {"compute", "rebuild", "collectors"}
-    assert graph["collectors"] == {"compute", "rebuild"}
+    # 技术方案 §6.2：唯一允许的两条 review 边——
+    # collectors → review.pool（采集/计算共用池解析）、compute → review（编排 re-export）。
+    assert graph["collectors"] == {"compute", "rebuild", "review.pool"}
     assert graph["rebuild"] == {"compute"}
-    assert graph["compute"] == set()
+    assert graph["compute"] == {"review"}
     assert graph["main"] == {"compute", "rebuild", "collectors", "service"}
     assert graph["__init__"] == {"main"}
 
     assert "service" not in graph["collectors"], "collectors 不得反向依赖 service"
     assert not graph["rebuild"] & {"collectors", "service"}
     assert "collectors" not in graph["compute"]
+    assert "review" not in graph["collectors"], "collectors 只允许 review.pool 叶子"
+
+    # review 子包不得 import prep 的用例/采集/计算模块（单向依赖）。
+    review_dir = _PREP_DIR / "review"
+    forbidden_review_imports = {
+        "dragon_quant.review_account.prep.service",
+        "dragon_quant.review_account.prep.collectors",
+        "dragon_quant.review_account.prep.compute",
+        "dragon_quant.review_account.prep.rebuild",
+        "dragon_quant.infra.provider",
+        "dragon_quant.infra.assets",
+        "sqlite3",
+        "requests",
+    }
+    for path in sorted(review_dir.glob("*.py")):
+        imports = _module_imports(path)
+        offenders = sorted(
+            item for item in imports
+            if any(item == name or item.startswith(name + ".")
+                   for name in forbidden_review_imports))
+        assert not offenders, f"{path.name} 违反 review 纯函数边界: {offenders}"
 
     for name in _PREP_FILES:
         imports = _module_imports(_prep_file(name))

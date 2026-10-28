@@ -346,3 +346,172 @@ def format_candidate_lines(result: dict) -> list[str]:
     while lines and lines[-1] == "":
         lines.pop()
     return lines or ["无参与复盘标的"]
+
+
+# ---------------------------------------------------------------------------
+# 复盘摘要（M4 新段；旧 4 行摘要与逐只清单不动）
+# ---------------------------------------------------------------------------
+
+_ROLE_LABELS = {
+    "leader": "龙头",
+    "vanguard": "先锋",
+    "mainstay": "中军",
+    "capacity": "容量",
+    "follower": "跟风",
+}
+
+_MAINLINE_STATE_LABELS = {
+    "new": "新生",
+    "strengthening": "强化",
+    "stable": "稳定",
+    "weakening": "衰减",
+    "unknown": "未知",
+}
+
+_REVIEW_DEGRADED_LABELS = {
+    "mainline_unavailable": "主线不可用",
+    "market_unknown": "市场状态未知",
+    "fund_flow_review_degraded": "资金数据降级",
+    "cninfo_announcements_review_degraded": "公告数据降级",
+    "stock_daily_review_degraded": "日K数据降级",
+    "compute_error": "复盘计算异常",
+}
+
+_GRADES = ("S", "A", "B", "C", "D")
+
+
+def _review_number(value, digits: int = 1) -> str:
+    number = _number(value)
+    return "—" if number is None else f"{number:.{digits}f}"
+
+
+def _position_text(value) -> str:
+    number = _number(value)
+    if number is None:
+        return "null"
+    if number <= 0:
+        return "0"
+    return f"{number:.1f}%"
+
+
+def _candidate_reason_suffix(candidate: dict) -> str:
+    # lazy import：advice 会被 prep.main 导入，模块级导入 review 子包会形成循环。
+    from dragon_quant.review_account.prep.review.gates import REASON_LABELS
+
+    parts: list[str] = []
+    reason = candidate.get("reason_code")
+    if isinstance(reason, str) and reason:
+        parts.append(REASON_LABELS.get(reason, reason))
+    if candidate.get("risk_level") == "soft":
+        parts.append("软风险 ×0.5")
+    warnings = candidate.get("warnings")
+    if isinstance(warnings, list) and "one_word_execution_risk" in warnings:
+        parts.append("一字板执行风险")
+    detail = "、".join(parts)
+    position = _number(candidate.get("position_pct"))
+    if position is not None and position <= 0:
+        # AC-P17：0 只表示「不建议新建仓」，持仓处置仍由 sell 规则决定。
+        return f"（不建议新建仓：{detail}）" if detail else "（不建议新建仓）"
+    return f"（{detail}）" if detail else ""
+
+
+def _role_text(candidate: dict) -> str:
+    role = candidate.get("role")
+    if isinstance(role, str) and role:
+        return _ROLE_LABELS.get(role, _clean(role))
+    return "非主线"
+
+
+def _market_headline(market: dict) -> str:
+    state = market.get("state") if isinstance(market.get("state"), str) else "unknown"
+    score = _review_number(market.get("score"))
+    coeff = _number(market.get("coeff"))
+    coeff_text = "—" if coeff is None else f"{coeff:.1f}"
+    return f"市场 {_clean(state)}（{score}，×{coeff_text}）"
+
+
+def _mainline_headline(mainlines: list) -> str:
+    names: list[str] = []
+    for item in mainlines if isinstance(mainlines, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("board_name")
+        if not isinstance(name, str) or not name:
+            continue
+        state = item.get("state")
+        label = _MAINLINE_STATE_LABELS.get(state, "未知")
+        names.append(f"{_clean(name)}（{label}）")
+    return "、".join(names) if names else "不可用"
+
+
+def format_review_lines(result: dict) -> list[str]:
+    """默认 CLI 的「复盘摘要」新段（纯展示，不改变旧 formatter）。
+
+    ``review`` 缺失 / ``enabled=false`` / 计算异常时只输出一行降级提示，
+    绝不抛异常影响旧 4 行摘要与逐只清单的逐字输出。
+    """
+
+    payload = result if isinstance(result, dict) else {}
+    review = payload.get("review")
+    if not isinstance(review, dict) or not review:
+        return ["复盘摘要不可用（missing）"]
+    if review.get("enabled") is False:
+        reason = review.get("reason")
+        return [f"复盘摘要不可用（{_clean(reason) if reason else 'disabled'}）"]
+    market = review.get("market")
+    if not isinstance(market, dict) or not market:
+        return ["复盘摘要不可用（compute_error）"]
+
+    candidates = [
+        item for item in (payload.get("review_candidates") or [])
+        if isinstance(item, dict)
+    ]
+    lines = [
+        "复盘摘要："
+        f"{_market_headline(market)}｜主线 {_mainline_headline(review.get('mainlines'))}"
+    ]
+
+    grade_counts = {grade: 0 for grade in _GRADES}
+    ungraded = 0
+    for item in candidates:
+        grade = item.get("review_grade")
+        if grade in grade_counts:
+            grade_counts[grade] += 1
+        else:
+            ungraded += 1
+    ready = sum(
+        1 for item in candidates
+        if (_number(item.get("position_pct")) or 0) > 0
+    )
+    counts = " / ".join(f"{grade} {grade_counts[grade]}" for grade in _GRADES)
+    if ungraded:
+        counts += f" / 未评级 {ungraded}"
+    lines.append(f"详细池 {len(candidates)} 只：{counts}；可准备建仓 {ready} 只")
+
+    for item in candidates:
+        code = _clean(item.get("code") or "—")
+        name = _clean(item.get("name") or item.get("code") or "—")
+        grade = item.get("review_grade")
+        grade_text = _clean(grade) if isinstance(grade, str) and grade else "—"
+        eligibility = item.get("eligibility")
+        eligibility_text = _clean(eligibility) if isinstance(eligibility, str) else "unknown"
+        lines.append(
+            f"{code} {name} {_role_text(item)} "
+            f"review_score {_review_number(item.get('review_score'))} {grade_text} "
+            f"eligibility={eligibility_text} "
+            f"单票建议仓位 {_position_text(item.get('position_pct'))}"
+            f"{_candidate_reason_suffix(item)}"
+        )
+
+    degraded = review.get("degraded")
+    degraded = degraded if isinstance(degraded, list) else []
+    if degraded:
+        labels = [
+            _REVIEW_DEGRADED_LABELS.get(label, _clean(label))
+            for label in degraded if isinstance(label, str) and label
+        ]
+        lines.append(
+            f"数据：{len(degraded)} 项降级（{'、'.join(labels)}），置信度下调")
+    else:
+        lines.append("数据：无降级")
+    return lines

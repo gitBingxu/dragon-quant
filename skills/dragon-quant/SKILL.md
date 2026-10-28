@@ -38,7 +38,8 @@ metadata:
 |---|---|---|
 | 今天有哪些真龙 / 扫一下 / 龙头扫榜 | `dragon-quant scan` | 写库且触网，先确认；结果优先用 `dragons` 读 |
 | 历史扫描结果 / 某天的候选 | `dragon-quant scan --date` 或 `dragon-quant dragons` | 只读；`dragons` 更稳 |
-| 盘后复盘 / 收盘总结 / 明天买什么 | `dragon-quant prep` | 当日 ≥16:40；写 `assets.db` |
+| 盘后复盘 / 收盘总结 | `dragon-quant prep` | 当日 ≥16:40；写 `assets.db` |
+| 明天买什么 / 明日操盘策略 / 复盘策略 | `dragon-quant prep --json` | 读 `strategy_context` 按固定六段输出；写库前确认 |
 | 竞价怎么样 / 集合竞价 | `dragon-quant auction` | 当日 ≥09:25；默认读 T-1 复盘快照 |
 | 能不能买 / 买入信号 / 持仓建议 | `dragon-quant buy` | 写信号表，必须确认 |
 | 要不要卖 / 卖出信号 | `dragon-quant sell` | 写信号表，必须确认；T+1 |
@@ -71,7 +72,7 @@ metadata:
 
 按命令的解读重点：
 
-- `prep`：默认是市场摘要 + 逐只标的清单；仓位/等级来自复盘快照，仅供人工参考，不参与下单。需要完整结构时用 `--json`。
+- `prep`：默认是市场摘要 + 逐只标的清单；仓位/等级来自复盘快照，仅供人工参考，不参与下单。需要完整结构时用 `--json`；问「明天买什么」时按「明日操盘策略」六段输出。
 - `auction`：逐只看强度、方向、等级、是否否决、是否未验证；`unverified` 为真时分数只能当诊断值，不能当决策依据；`pool_source`/`fallback_reason` 说明候选池是不是今天的盘前推荐。
 - `buy`：先看有没有买入信号，再看 `ranking_mode`、`fallback_reason`、`data_quality`；四类买点诊断在 `details[].checks`，状态分为通过/失败/待定/窗口已过/不可用/跳过，不要把“跳过”说成“失败”。
 - `sell`：按人读输出解释卖出、减半仓或继续持有；`partial` 表示减半不是清仓；当天买入的仓位不会出现在卖出建议里。
@@ -81,6 +82,27 @@ metadata:
 - `factor`：`query` 会带解析后的版本；`eval` 的样本不足是有效结论；缺失不等于 0 或中性。
 - `storage`：状态/占用只读；清理不删数据库文件，但会删缓存、结果与日志。
 
+
+## 明日操盘策略（prep 复盘上下文）
+
+用户问「明天买什么 / 明日操盘策略 / 复盘策略」时，先取 `prep --json` 的 `strategy_context`（本轮已有当日输出就直接用，不重复写库），再按固定六段输出：
+
+1. **复盘日与数据质量**：`trade_date`、`frozen_at`、`context_version`、`data_quality.{degraded,missing,confidence}`。
+2. **市场情绪锚与风险锚**：`market.state/score/coeff/evidence`，风险锚只取 `market.anchors`。
+3. **主线与角色**：`mainlines[]` 的板块、状态、分数、证据，`role_map` 的龙头/先锋/中军/容量/跟风。
+4. **全部详细标的**：逐只 `positions[]` 的 `review_score`、`eligibility`、单票建议仓位三态与 `reason_code`；`0` / `null` 都要写原因。
+5. **正/负反馈与动作**：逐只 `feedback_plans[]` 的冻结预期、四态条件与 `allowed_actions`；说明什么算正反馈、什么算负反馈、出现负反馈怎么做。
+6. **组合提示与声明**：`portfolio.sum_pct` / `warning` 只提示相互独立与不可相加，并原文引用 `disclaimer`。
+
+硬规则：
+
+- 只引用 `strategy_context` 已有数值与枚举，不新增阈值、不补行情、不按分数排「优先买哪只」。
+- `feedback_plans[].allowed_actions` 是唯一动作依据；`unknown` 只能 `observe_only`（不新建仓）。
+- 旧 `sentiment.position_pct` 是「市场参考仓位」，`positions[].position_pct` 才是「单票建议仓位」，必须写全称。
+- 单票 `position_pct=0` 是「不建议新建仓」，不是清仓；组合仓位不做归一、不排优先级。
+- `strategy_context` 缺失或版本不认识时，只输出旧摘要并说明无法给出条件化策略，不得拼凑新策略。
+
+字段细节、四态动作映射与措辞模板见 `references/outputs.md`。
 
 ## 写操作门禁
 

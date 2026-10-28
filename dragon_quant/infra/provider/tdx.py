@@ -27,10 +27,14 @@ import math
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from dragon_quant.infra.models import KBar, Quote, SectorPerformance, StockInfo
 from dragon_quant.infra.provider.base import StockProvider
+
+# A 股日 K 日期归属（固定 +08:00，中国无夏令时；不用本地时区，避免 CI 漂移）。
+_CST = timezone(timedelta(hours=8))
 
 # ─── 惰性依赖 ──────────────────────────────────────────────────────────────
 
@@ -182,6 +186,33 @@ def _to_kbars(records: list[dict]) -> list[KBar]:
             chg=chg, pct=pct, turnover=0.0, amount=amt,
         ))
         prev = c
+    return bars
+
+
+def _bar_date(bar: KBar) -> str:
+    """KBar 时间戳（毫秒）→ ``YYYY-MM-DD``（Asia/Shanghai）。"""
+
+    if not bar.timestamp:
+        return ""
+    try:
+        return datetime.fromtimestamp(bar.timestamp / 1000.0, _CST).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def _to_daily_kbars(records: list[dict]) -> list[KBar]:
+    """日 K records → KBar（额外把浮筹换手率还原为百分数）。
+
+    ``vol`` 单位=手、``float_shares`` 单位=万股：
+    ``turnover% = vol*100 / (float_shares*1e4) * 100 = vol / float_shares``。
+    缺失浮筹时保持 ``0.0``（未知，不猜）。
+    """
+
+    bars = _to_kbars(records)
+    for bar, record in zip(bars, records):
+        float_shares = _f(record.get("float_shares"))
+        if float_shares > 0 and bar.volume > 0:
+            bar.turnover = bar.volume / float_shares
     return bars
 
 
@@ -988,6 +1019,76 @@ class TdxProvider(StockProvider):
                              elapsed_ms=elapsed, note=f"{c} p{page} n={len(out)}")
         return out
 
+    # ─── 复盘分新增（日 K；错误契约：transport 失败抛异常，单 code 失败跳过）───
+
+    def batch_get_daily_klines(self, codes: list[str], days: int = 120,
+                               end_date: str | None = None) -> dict[str, list[KBar]]:
+        """批量日 K（前复权 QFQ），逐 code 串行 0.05s；单 code 失败进缺失，不伪造 K。
+
+        ``end_date`` 非空时丢弃晚于该日的 bar（PIT 防护）。连接层不可用直接
+        抛 RuntimeError；成功但某 code 无数据则不写入结果（由上层记 ``missing``）。
+        """
+        t0 = time.time()
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("tdx 连接不可用")
+        wanted = [str(code) for code in (codes or []) if code]
+        out: dict[str, list[KBar]] = {}
+        failures = 0
+        for code in wanted:
+            try:
+                market, c = _resolve(code)
+                with self._lock:
+                    df = client.get_stock_kline(
+                        market=market, code=c, period=et.Period.DAILY,
+                        count=max(int(days), 1), adjust=et.Adjust.QFQ,
+                    )
+                records = (df.to_dict("records")
+                           if df is not None and not df.empty else [])
+                bars = _to_daily_kbars(records) if records else []
+                if end_date:
+                    bars = [bar for bar in bars if _bar_date(bar) <= end_date]
+                if bars:
+                    out[code] = bars[-int(days):] if days else bars
+            except Exception:
+                failures += 1
+            time.sleep(0.05)   # TDX 日 K 限速（方案 §10.3）
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "batch_daily_klines", ok=bool(out),
+                             elapsed_ms=elapsed,
+                             note=f"{len(out)}/{len(wanted)} failed={failures}")
+        return out
+
+    def get_index_daily(self, code: str, days: int = 120) -> list[KBar]:
+        """指数日 K（不复权，points）；transport 失败抛异常，成功无数据返回 []。"""
+
+        t0 = time.time()
+        et = _import_easytdx()
+        if et is None:
+            raise RuntimeError("easy_tdx 不可用")
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("tdx 连接不可用")
+        market, c = _resolve(code)
+        try:
+            with self._lock:
+                df = client.get_stock_kline(
+                    market=market, code=c, period=et.Period.DAILY,
+                    count=max(int(days), 1), adjust=et.Adjust.NONE,
+                )
+        except Exception as e:
+            raise RuntimeError(f"指数日 K 拉取失败 {code}: {e}") from e
+        bars = _to_kbars(df.to_dict("records")) if df is not None and not df.empty else []
+        elapsed = (time.time() - t0) * 1000
+        if self._logger:
+            self._logger.api("tdx", "index_daily", ok=bool(bars),
+                             elapsed_ms=elapsed, note=f"{code} n={len(bars)}")
+        return bars[-int(days):] if days else bars
+
     # ─── 宏观扰动（扩展行情日 K；错误契约：失败抛异常）────────────────────────
 
     def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
@@ -1068,3 +1169,38 @@ class TdxProvider(StockProvider):
                 self._logger.api("tdx", "auction", ok=False,
                                  elapsed_ms=elapsed, error=str(e))
             return []
+
+    def get_auction_snapshot(self, code: str) -> dict | None:
+        """当日 09:25 竞价终态：取 ``get_auction`` 的最后一根。
+
+        TDX 竞价接口只返回当日数据（无历史回看），调用方只在
+        ``trade_date == today`` 的 T+1 反馈补采里使用。失败/无数据返回 None。
+        ``amount`` 为竞价成交额（元）= 匹配价 × 累计匹配量。
+        """
+        items = self.get_auction(code)
+        if not items:
+            return None
+        last = max(items, key=lambda item: str(item.get("time") or ""))
+        price = _f(last.get("price"))
+        matched = int(_f(last.get("matched")))
+        if price <= 0:
+            return None
+        return {
+            "price": price,
+            "amount": price * matched,
+            "matched": matched,
+            "unmatched": int(_f(last.get("unmatched"))),
+        }
+
+    def get_5min_kline_for_date(self, code: str, date: str) -> list[KBar]:
+        """指定交易日的 5 分钟 K 线（按 bar 日期过滤；不可用返回 ``[]``）。
+
+        取最近 96 根（两日）再过滤到目标日，覆盖盘后当日 48 根且容忍跨日缓存。
+        方法沿用 ``get_5min_kline`` 的旧契约：transport/解析失败返回空，不抛异常
+        （缺失由 ``t1_intraday`` 采集器降级为 ``close_only``）。
+        """
+        try:
+            bars = self.get_5min_kline(code, bars=96)
+        except Exception:
+            return []
+        return [bar for bar in bars if _bar_date(bar) == date]

@@ -18,6 +18,15 @@ from dragon_quant.infra.provider.macro import (
 )
 from dragon_quant.review_account.verdicts import find_risk_announcement
 
+# 复盘分编排是纯函数子包；compute 只做单向 re-export（service → compute → review，
+# 显式别名表示「故意导出」，供 service / main 消费）。
+from .review import (  # noqa: F401
+    REVIEW_VERSION as REVIEW_VERSION,
+    compute_feedback as compute_feedback,
+    compute_plan_review as compute_plan_review,
+    compute_review as compute_review,
+)
+
 # 快照/窗口/交易日统一时区（service / rebuild 也复用本常量，避免多处定义漂移）
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 

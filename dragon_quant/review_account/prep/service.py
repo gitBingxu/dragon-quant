@@ -16,7 +16,8 @@ monkeypatch 仍真实改变运行时行为。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -27,13 +28,16 @@ from dragon_quant.infra.assets import db as assets_db
 from dragon_quant.infra.market_calendar import tdx_trade_dates
 
 from .collectors import (
-    _DRAGON_DEPENDENTS, _asset_codes, _collectors, _prepare_assets,
-    _providers_from_services, _report_status, _uncovered_assets,
-    collection_health, is_collectable, merge_report_entries, plan_repairs,
+    _DRAGON_DEPENDENTS, _REVIEW_ONLY_ASSETS, _asset_codes, _collectors,
+    _mark_review_failure, _prepare_assets, _providers_from_services,
+    _report_status, _uncovered_assets, collection_health, is_collectable,
+    merge_report_entries, plan_repairs, plan_review_repairs,
+    review_assets_enabled,
 )
 from .compute import (
-    SHANGHAI, _dragon_source, _empty_macro, compute_candidates, compute_macro,
-    compute_main_boards, compute_sentiment,
+    SHANGHAI, _dragon_source, _empty_macro, compute_candidates,
+    compute_feedback, compute_macro, compute_main_boards, compute_plan_review,
+    compute_review, compute_sentiment,
 )
 from .rebuild import (
     WINDOW_TRADING_DAYS, _same_dragons_payload, legacy,
@@ -47,19 +51,32 @@ if TYPE_CHECKING:  # 仅注解用：运行期一律经 legacy 从包门面解析
 _AFTER_CLOSE = (16, 40)
 
 
+def _review_v2_enabled() -> bool:
+    """复盘分计算开关（默认开启；``DQ_REVIEW_V2_ENABLED=0/false`` 只写 disabled 状态键）。"""
+
+    raw = os.environ.get("DQ_REVIEW_V2_ENABLED", "")
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 class PrepError(ValueError):
     """prep 日期门禁/资产缺失等可预期错误（CLI 捕获后打印并退出）。"""
 
 
 @dataclass(frozen=True)
 class PrepPlan:
-    """增量采集计划：collect = 本次要跑的 collector；repairs = 只改 report 的修复项。"""
+    """增量采集计划。
+
+    ``collect`` = 本次要跑的 legacy collector；``repairs`` = 只改 report 的修复项；
+    ``review_collect`` = review 独立修复类型（与 legacy ``collect`` 完全分离，
+    只补详细池缺失代码、不写 ``collection_report``、不改旧 candidates）。
+    """
 
     collect: list[str]
     repairs: dict[str, dict]
+    review_collect: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not self.collect and not self.repairs
+        return not self.collect and not self.repairs and not self.review_collect
 
 
 # ─── 日期 / 时点门禁 ───────────────────────────────────────────────────────
@@ -119,13 +136,21 @@ def plan_prep(assets: dict, trade_date: str, today: str, *,
     - dragons 重采成功后的依赖级联由 ``run_prep`` 依据 code 集合变化处理。
     """
     repairs = plan_repairs(assets, trade_date, today)
+    review_plan = plan_review_repairs(assets, trade_date, today)
+    enabled = review_assets_enabled()
+
+    def _allowed(asset_type: str) -> bool:
+        return enabled or asset_type not in _REVIEW_ONLY_ASSETS
+
     if force:
         collect = [t for t in _collectors()
-                   if is_collectable(t, trade_date, today)]
-        return PrepPlan(collect, repairs)
+                   if is_collectable(t, trade_date, today) and _allowed(t)]
+        return PrepPlan(collect, repairs, list(review_plan.collect))
     report = assets.get("collection_report")
     selected: set[str] = set()
     for asset_type in _collectors():
+        if not _allowed(asset_type):
+            continue
         if collection_health(asset_type, assets.get(asset_type),
                              _report_status(report, asset_type), trade_date) is None:
             continue
@@ -136,9 +161,10 @@ def plan_prep(assets: dict, trade_date: str, today: str, *,
     if "dragons" not in selected:
         codes = _asset_codes(assets.get("dragons"))
         for asset_type in _uncovered_assets(assets, codes, selected):
-            if is_collectable(asset_type, trade_date, today):
+            if _allowed(asset_type) and is_collectable(asset_type, trade_date, today):
                 selected.add(asset_type)
-    return PrepPlan([t for t in _collectors() if t in selected], repairs)
+    return PrepPlan([t for t in _collectors() if t in selected], repairs,
+                    list(review_plan.collect))
 
 
 # ─── 计算编排 ──────────────────────────────────────────────────────────────
@@ -197,15 +223,73 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
     base_degraded = existing_degraded if isinstance(existing_degraded, list) else []
     sentiment["degraded"] = sorted(
         set(base_degraded) | set(degraded) | set(macro_marks))
-    return {
+
+    result: dict = {
         "trade_date": trade_date,
-        "version": "0.6",
+        "version": "0.7",
         "sentiment": sentiment,
         "main_boards": main_boards,
         "macro": macro,
         "candidates": candidates,
         "dragon_source": _dragon_source(usable),
     }
+
+    # 复盘分（M3）：旧键之后追加；整体异常只影响自身键，绝不中断旧链路。
+    review_market = None
+    review_mainlines = None
+    if not _review_v2_enabled():
+        result["review"] = {"enabled": False, "reason": "disabled"}
+    else:
+        review_assets = {**usable, "candidates": candidates}
+        review_payload = _guard(
+            "review", lambda: compute_review(review_assets, trade_date), None)
+        if not isinstance(review_payload, dict):
+            result["review"] = {"enabled": True,
+                                "compute_error": errors.get("review")}
+            result["review_candidates"] = []
+        else:
+            review_candidates = review_payload.get("review_candidates")
+            result["review"] = {
+                key: value for key, value in review_payload.items()
+                if key not in ("review_candidates", "strategy_context")
+            }
+            result["review_candidates"] = (
+                review_candidates if isinstance(review_candidates, list) else [])
+            strategy_context = review_payload.get("strategy_context")
+            if isinstance(strategy_context, dict):
+                result["strategy_context"] = strategy_context
+            market = review_payload.get("market")
+            review_market = market if isinstance(market, dict) else None
+            mainlines = review_payload.get("mainlines")
+            review_mainlines = mainlines if isinstance(mainlines, list) else None
+
+    # T+1 反馈（M5）：与 review 互不依赖；任一失败只影响自身键。
+    # 只在存在 T-1 计划（prev_plan.positions 非空）时产出，首日无计划 → 不写该键。
+    prev_plan = usable.get("prev_plan")
+    positions = prev_plan.get("positions") if isinstance(prev_plan, dict) else None
+    if isinstance(positions, list) and positions:
+        feedback = None
+        auction = usable.get("auction_feedback")
+        if isinstance(auction, dict):
+            feedback = _guard(
+                "feedback",
+                lambda: compute_feedback(
+                    prev_plan, auction, usable.get("t1_intraday"),
+                    usable.get("stock_daily", {}), trade_date,
+                    current_mainlines=review_mainlines),
+                None)
+            if isinstance(feedback, dict):
+                result["feedback"] = feedback
+        plan_review = _guard(
+            "plan_review",
+            lambda: compute_plan_review(
+                prev_plan, feedback or {}, usable.get("t1_intraday"),
+                usable.get("stock_daily", {}), trade_date,
+                holdings=usable.get("holdings"), current_market=review_market),
+            None)
+        if isinstance(plan_review, dict):
+            result["plan_review"] = plan_review
+    return result
 
 
 # ─── 入口 ──────────────────────────────────────────────────────────────────
@@ -258,6 +342,32 @@ def _run_collection(trade_date: str, tdx: TdxProvider, calendar: list,
         report.update(r)
     merged = merge_report_entries(stored, report, payloads, trade_date, now)
     merged.update(plan.repairs)          # 修复条目最后写入（与本次采集不重叠）
+    # review 独立修复：在 legacy 采集与 report 合并**之后**执行；只补缺失代码、
+    # 按键合并 payload，不写 collection_report、不改 plan.collect / candidates。
+    seed = {**stored, **payloads, "collection_report": merged}
+    review_plan = plan_review_repairs(seed, trade_date, today)
+    for asset_type in review_plan.collect:
+        missing = review_plan.missing.get(asset_type, [])
+        try:
+            repaired, repair_report = collect_all(
+                trade_date, window_trade_dates=window,
+                window_days=WINDOW_TRADING_DAYS, tdx=tdx,
+                asset_types=[asset_type], existing=seed, now=now,
+                services=services, review_only=True, review_codes=missing)
+        except Exception as e:
+            repaired = {}
+            repair_report = {
+                asset_type: {"status": "error", "error": f"{type(e).__name__}: {e}"}}
+        if asset_type in repaired:
+            payloads.update(repaired)
+            seed.update(repaired)
+            continue
+        base = seed.get(asset_type)
+        if isinstance(base, dict):
+            failed = _mark_review_failure(
+                base, repair_report.get(asset_type, {}), missing)
+            payloads[asset_type] = failed
+            seed[asset_type] = failed
     assets_db.save_prep_assets(trade_date, payloads, merged)
     return assets_db.get_prep_assets(trade_date)   # 读回：快照 = 资产的纯函数
 

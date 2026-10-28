@@ -274,3 +274,69 @@ class TestCategoryMapping(unittest.TestCase):
                 self.assertEqual(rows[0].category, cat)
                 self.assertEqual(rows[0].source, "tdx")
         self.assertEqual(seen, ["HY", "GN", "DQ"])
+
+
+class TestTdxAuctionSnapshotAndIntraday(unittest.TestCase):
+    """M5：get_auction_snapshot / get_5min_kline_for_date 的行为契约。"""
+
+    @staticmethod
+    def _bar(day: str, hour: int, minute: int, close: float):
+        from datetime import timedelta, timezone
+        from dragon_quant.infra.models import KBar
+
+        cst = timezone(timedelta(hours=8))
+        moment = datetime(2026, 9, int(day), hour, minute, tzinfo=cst)
+        return KBar(timestamp=int(moment.timestamp() * 1000), volume=100.0,
+                    open=close, high=close, low=close, close=close,
+                    chg=0.0, pct=0.0, turnover=0.0, amount=1e5)
+
+    def test_auction_snapshot_takes_the_0925_final_item(self):
+        p = TdxProvider()
+        with patch.object(p, "get_auction", return_value=[
+                {"time": "09:20:00", "price": 10.0, "matched": 100,
+                 "unmatched": 5},
+                {"time": "09:25:00", "price": 10.5, "matched": 200,
+                 "unmatched": -30}]):
+            snapshot = p.get_auction_snapshot("600000")
+        self.assertEqual(snapshot["price"], 10.5)
+        self.assertEqual(snapshot["matched"], 200)
+        self.assertEqual(snapshot["unmatched"], -30)
+        self.assertAlmostEqual(snapshot["amount"], 10.5 * 200)
+
+    def test_auction_snapshot_returns_none_without_valid_price(self):
+        p = TdxProvider()
+        with patch.object(p, "get_auction", return_value=[]):
+            self.assertIsNone(p.get_auction_snapshot("600000"))
+        with patch.object(p, "get_auction", return_value=[
+                {"time": "09:25:00", "price": 0.0, "matched": 0,
+                 "unmatched": 0}]):
+            self.assertIsNone(p.get_auction_snapshot("600000"))
+
+    def test_auction_snapshot_unavailable_transport_returns_none(self):
+        # 生产 get_auction 的旧契约是失败返回 []（easy_tdx 缺失/异常均降级）。
+        p = TdxProvider()
+        with patch("dragon_quant.infra.provider.tdx._import_easytdx",
+                   return_value=None):
+            self.assertIsNone(p.get_auction_snapshot("600000"))
+
+    def test_5min_for_date_filters_to_the_requested_day(self):
+        p = TdxProvider()
+        bars = [
+            self._bar("11", 9, 35, 10.1),
+            self._bar("11", 14, 55, 10.4),
+            self._bar("12", 9, 35, 10.9),      # 次日：必须被过滤
+        ]
+        with patch.object(p, "get_5min_kline", return_value=bars) as fetch:
+            out = p.get_5min_kline_for_date("600000", "2026-09-11")
+        fetch.assert_called_once_with("600000", bars=96)
+        self.assertEqual([bar.close for bar in out], [10.1, 10.4])
+
+    def test_5min_for_date_returns_empty_when_missing_or_raising(self):
+        p = TdxProvider()
+        with patch.object(p, "get_5min_kline", return_value=[]):
+            self.assertEqual(
+                p.get_5min_kline_for_date("600000", "2026-09-11"), [])
+        with patch.object(p, "get_5min_kline",
+                          side_effect=RuntimeError("transport down")):
+            self.assertEqual(
+                p.get_5min_kline_for_date("600000", "2026-09-11"), [])

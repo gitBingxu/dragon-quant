@@ -370,6 +370,13 @@ class _FakeProvider:
     def batch_get_quotes(self, codes: list[str]):  # type: ignore[no-untyped-def]
         raise NotImplementedError(f"{self.provider} 不提供批量行情")
 
+    def batch_get_daily_klines(self, codes: list[str], days: int = 120,
+                               end_date: str | None = None):
+        raise NotImplementedError(f"{self.provider} 不提供批量日 K")
+
+    def get_index_daily(self, code: str, days: int = 120):
+        raise NotImplementedError(f"{self.provider} 不提供指数日 K")
+
     def get_market_breadth_rows(self, count: int = 6000) -> list[dict]:
         raise NotImplementedError(f"{self.provider} 不提供全 A 市场宽度")
 
@@ -387,6 +394,12 @@ class _FakeProvider:
 
     def get_macro_quotes(self, specs: list, trade_date: str) -> dict[str, dict]:
         raise NotImplementedError(f"{self.provider} 不提供宏观报价")
+
+    def get_auction_snapshot(self, code: str) -> Optional[dict]:
+        raise NotImplementedError(f"{self.provider} 不提供竞价终态")
+
+    def get_5min_kline_for_date(self, code: str, date: str):
+        raise NotImplementedError(f"{self.provider} 不提供指定日 5 分钟 K")
 
 
 # Base-class methods must be instrumented once; subclasses override a few and
@@ -437,6 +450,18 @@ class TdxProvider(_FakeProvider):
             for item in _require_list(payload, "batch_get_quotes")
         ]
 
+    def batch_get_daily_klines(self, codes: list[str], days: int = 120,
+                               end_date: str | None = None):  # type: ignore[no-untyped-def]
+        payload = _respond(self.provider, "batch_get_daily_klines",
+                           codes=codes, days=days, end_date=end_date)
+        data = _require_dict(payload, "batch_get_daily_klines")
+        wanted = set(codes)
+        return {
+            code: [_build("KBar", item, _KBAR_DEFAULTS) for item in rows]
+            for code, rows in data.items()
+            if code in wanted
+        }
+
     def get_market_breadth_rows(self, count: int = 6000) -> list[dict]:
         payload = _respond(self.provider, "get_market_breadth_rows", count=count)
         return _dict_rows(payload, "get_market_breadth_rows")
@@ -460,6 +485,21 @@ class TdxProvider(_FakeProvider):
     def get_auction(self, code: str) -> list[dict]:
         payload = _respond(self.provider, "get_auction", code=code)
         return _dict_rows(payload, "get_auction")
+
+    def get_auction_snapshot(self, code: str) -> Optional[dict]:
+        payload = _respond(self.provider, "get_auction_snapshot", code=code)
+        if payload is None:
+            return None
+        return _require_dict(payload, "get_auction_snapshot")
+
+    def get_5min_kline_for_date(self, code: str, date: str):  # type: ignore[no-untyped-def]
+        payload = _respond(
+            self.provider, "get_5min_kline_for_date", code=code, date=date
+        )
+        return [
+            _build("KBar", item, _KBAR_DEFAULTS)
+            for item in _require_list(payload, "get_5min_kline_for_date")
+        ]
 
     def get_finance_info(self, code: str) -> dict:
         payload = _respond(self.provider, "get_finance_info", code=code)

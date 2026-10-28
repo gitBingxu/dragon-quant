@@ -95,7 +95,11 @@ class TestSkillContent(unittest.TestCase):
         text = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
         for token in ("ranking_mode", "fallback_reason", "data_quality", "strict_5min",
                       "daily_fallback", "unverified", "is_weak", "checks",
-                      "resolved_versions", "insufficient_data", "available_top_n"):
+                      "resolved_versions", "insufficient_data", "available_top_n",
+                      # M4/M5/M6 复盘契约
+                      "strategy_context", "review_candidates", "feedback",
+                      "plan_review", "checkpoint", "auction_backfill_failed",
+                      "prep_review_"):
             self.assertIn(token, text)
 
     def test_playbooks_cover_failure_modes(self):
@@ -134,3 +138,79 @@ class TestSkillContent(unittest.TestCase):
             self.assertLessEqual(len(lines), 300, name)
             total += len(lines)
         self.assertLessEqual(total, 1200)
+
+
+def _strategy_output_section() -> str:
+    """outputs.md 中「明日操盘策略」一节（到 auction 之前）。"""
+
+    text = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
+    return text.split("### 明日操盘策略", 1)[1].split("## auction", 1)[0]
+
+
+class TestSkillTomorrowStrategy(unittest.TestCase):
+    """明日操盘策略：只消费 strategy_context，固定六段与四态动作映射。"""
+
+    def test_skill_routes_tomorrow_strategy_to_prep_context(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for token in ("明天买什么", "明日操盘策略", "复盘策略", "strategy_context",
+                      "feedback_plans", "唯一动作依据", "observe_only",
+                      "references/outputs.md"):
+            self.assertIn(token, text)
+
+    def test_outputs_fixed_six_sections(self):
+        section = _strategy_output_section()
+        headings = (
+            "**1. 复盘日与数据质量**",
+            "**2. 市场情绪锚与风险锚**",
+            "**3. 主线板块、主线龙头与角色**",
+            "**4. 全部详细标的（`positions[]`）**",
+            "**5. 正反馈 / 负反馈与动作（`feedback_plans[]`）**",
+            "**6. 组合提示与声明**",
+        )
+        positions = [section.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions), "六段顺序被改变")
+        for token in ("复盘日与数据质量", "市场情绪锚", "风险锚", "主线板块",
+                      "全部详细标的", "正反馈", "负反馈", "组合提示", "待验证",
+                      "逐只覆盖全部", "下一交易日"):
+            self.assertIn(token, section)
+
+    def test_outputs_feedback_state_action_mapping(self):
+        section = _strategy_output_section()
+        for state, action in (
+            ("confirmed", "execute_plan"),
+            ("weakened", "downgrade_half"),
+            ("invalidated", "cancel_entry"),
+            ("unknown", "observe_only"),
+        ):
+            self.assertIn(state, section)
+            self.assertIn(action, section)
+        for token in ("allowed_actions", "expectations_unavailable", "不新建仓",
+                      "唯一动作依据", "gap_low", "ratio_low", "seal_by"):
+            self.assertIn(token, section)
+
+    def test_outputs_position_semantics(self):
+        section = _strategy_output_section()
+        for token in ("单票建议仓位", "市场参考仓位", "不建议新建仓", "不是清仓",
+                      "不可相加", "sum_exceeds_100", "不做归一",
+                      "优先买哪只", "reason_code", "eligibility"):
+            self.assertIn(token, section)
+
+    def test_outputs_strategy_does_not_copy_thresholds(self):
+        section = _strategy_output_section()
+        forbidden = [
+            r"gap_low\s*[=:：]\s*-?\d",
+            r"ratio_low\s*[=:：]\s*-?\d",
+            r"seal_by\s*[=:：]\s*\d",
+            r"\d+(\.\d+)?\s*%\s*(?:仓位|止损|止盈)",
+            r"权重\s*[=:：]\s*\d",
+            r"带动性\s*\d+\s*%",
+        ]
+        for pattern in forbidden:
+            self.assertIsNone(re.search(pattern, section), pattern)
+        self.assertIn("待验证基线", section)
+
+    def test_playbooks_strategy_context_fallback(self):
+        text = (ROOT / "references" / "playbooks.md").read_text(encoding="utf-8")
+        for token in ("strategy_context", "sc_v1", "旧摘要", "不拼凑",
+                      "expectations_unavailable"):
+            self.assertIn(token, text)

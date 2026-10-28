@@ -37,8 +37,29 @@ TRADE_DATE = sb.TRADE_DATE
 DATE_ARG = "20260911"
 HISTORICAL_NOW = "2026-09-16T16:45:00+08:00"
 
+# 旧 4 行摘要 + 逐只清单的批准前缀（M4 只在其后追加「复盘摘要」，逐字不变）。
+LEGACY_STDOUT_PREFIX = """是否建议买入：是
+建议仓位：50%
+建议等级：一般
+买入理由：复盘日 2026-09-11；外围：日经225期指 +0.61%、富时A50期指 -0.87%（同日收盘）；美债10Y 5.15%（较前值 +6bp，近似）；COMEX金 -0.63%；涨停 62 家；跌停 3 家；炸板率 1.6%；昨日涨停溢价 +5.67%；晋级率 66.7%；最高 4 板；主线：机器人、AI算力、银行科技。涨跌停家数处中性区间，建议仓位 50%。
+
+✅ 龙头E-强烈建议
+- 质量维度：五维综合 82.0（排名 1）；题材：机器人（今日主线第 1）
+- 涨停维度：换手板 3天3板，首封 10:05:00，炸板 0 次，封板成功率 100%
+- 资金维度：主力净流入 3000.00 万（占成交额 6.0%）
+
+✅ 龙头A-轻仓博弈
+- 质量维度：五维综合 88.0（排名 1）；题材：AI算力（今日主线第 2）
+- 今日维度：涨幅 +5.00%，未进入涨停池（入选日 2026-09-07）
+- 资金维度：主力净流入 1234.56 万（占成交额 12.3%）
+
+补涨C-忽略：今日涨幅 -10.00%，已退出涨停梯队（入选日 2026-09-09）
+跟风B-忽略：今日涨幅 -2.20%、主力净流出 500.00 万（占成交额 -6.2%），资金离场
+银行D-忽略：近 3 日公告「立案调查公告」，按公告风险规则忽略"""
+
 TOP_KEYS = ["trade_date", "version", "sentiment", "main_boards", "macro",
-            "candidates", "dragon_source"]
+            "candidates", "dragon_source", "review", "review_candidates",
+            "strategy_context"]
 SENTIMENT_KEYS = [
     "up_cnt", "down_cnt", "limit_up_cnt", "limit_down_cnt", "total_amount",
     "temperature_score", "position_advice", "position_pct", "limit_up_cnt_ths",
@@ -197,28 +218,40 @@ def test_p1_success_human_output_and_persisted_rows_match_reviewed_golden():
         result = run_prep(box, ["prep", "--date", DATE_ARG])
         assert_exit(result, 0)
         assert result.stdout == golden_text("stdout.txt")
+        legacy_prefix, separator, review_summary = \
+            result.stdout.partition("\n\n复盘摘要")
+        assert separator, "默认 CLI 必须在旧前缀后追加复盘摘要段"
+        assert legacy_prefix == LEGACY_STDOUT_PREFIX, "旧 4 行摘要与逐只清单必须逐字不变"
+        assert "review_score" in review_summary
+        assert "eligibility=" in review_summary
+        assert "单票建议仓位" in review_summary
         assert result.stderr == (
-            "复盘日期 2026-09-11：增量补采 8 项资产：dragons, "
+            "复盘日期 2026-09-11：增量补采 13 项资产：dragons, "
             "ths_limit_up_pool, ths_block_top, market_breadth, fg_boards, "
-            "fund_flow, cninfo_announcements, macro_global\n"
+            "holdings, fund_flow, cninfo_announcements, macro_global, "
+            "stock_daily, prev_plan, auction_feedback, t1_intraday\n"
         )
 
         assets = prep_assets(box)
         assert_json_equal(assets, golden_json("assets.json"))
         assert set(assets) == {
             "dragons", "ths_limit_up_pool", "ths_block_top", "market_breadth",
-            "fg_boards", "fund_flow", "cninfo_announcements", "macro_global",
-            "collection_report",
+            "fg_boards", "holdings", "fund_flow", "cninfo_announcements",
+            "macro_global", "stock_daily", "prev_plan", "auction_feedback",
+            "t1_intraday", "collection_report",
         }
         report = report_of(assets)
         assert {name: entry["status"] for name, entry in report.items()} == {
             "dragons": "ok", "ths_limit_up_pool": "ok", "ths_block_top": "ok",
-            "market_breadth": "ok", "fg_boards": "ok", "fund_flow": "ok",
-            "cninfo_announcements": "ok", "macro_global": "ok",
+            "market_breadth": "ok", "fg_boards": "ok", "holdings": "empty",
+            "fund_flow": "ok", "cninfo_announcements": "ok",
+            "macro_global": "ok", "stock_daily": "ok",
+            "prev_plan": "empty", "auction_feedback": "empty",
+            "t1_intraday": "empty",
         }
 
         snapshot = snapshot_result(box)
-        assert snapshot["version"] == "0.6"
+        assert snapshot["version"] == "0.7"
         assert snapshot["trade_date"] == TRADE_DATE
         assert snapshot["dragon_source"]["window_days"] == 5
         assert [day["status"] for day in snapshot["dragon_source"]["dates"]] == \
@@ -245,7 +278,7 @@ def test_p1_success_human_output_and_persisted_rows_match_reviewed_golden():
         assert candidates["600005"]["facts"]["flow_available"] is True
 
         assert sqlite_count(box.data_dir / "assets.db", "prep_snapshots") == 1
-        assert sqlite_count(box.data_dir / "assets.db", "prep_assets") == 9
+        assert sqlite_count(box.data_dir / "assets.db", "prep_assets") == 14
 
         # C18: the macro call requested exactly the four MACRO_SPECS keys and
         # never fell through to Yahoo/urllib (source_errors stays empty).
@@ -278,7 +311,7 @@ def test_p2_json_key_order_and_snapshot_equality():
         seed_full(box)
         result = run_prep(box, ["prep", "--date", DATE_ARG, "--json"])
         assert_exit(result, 0)
-        assert result.stderr.startswith("复盘日期 2026-09-11：增量补采 8 项资产")
+        assert result.stderr.startswith("复盘日期 2026-09-11：增量补采 13 项资产")
         payload = json.loads(result.stdout)
         assert list(payload) == TOP_KEYS
         assert list(payload["sentiment"]) == SENTIMENT_KEYS
@@ -304,7 +337,7 @@ def test_p2b_default_date_uses_latest_mirror_day_and_prints_hint():
         assert_exit(result, 0)
         payload = json.loads(result.stdout)
         assert payload["trade_date"] == TRADE_DATE
-        assert result.stderr.startswith("复盘日期 2026-09-11：增量补采 8 项资产")
+        assert result.stderr.startswith("复盘日期 2026-09-11：增量补采 13 项资产")
 
 
 # ─── P3: incremental zero-collection ───────────────────────────────────────
@@ -447,9 +480,10 @@ def test_p6_force_recollects_every_collectable_asset():
         result = run_prep(box, ["prep", "--date", DATE_ARG, "--force"])
         assert_exit(result, 0)
         assert result.stderr == (
-            "复盘日期 2026-09-11：增量补采 8 项资产：dragons, "
+            "复盘日期 2026-09-11：增量补采 13 项资产：dragons, "
             "ths_limit_up_pool, ths_block_top, market_breadth, fg_boards, "
-            "fund_flow, cninfo_announcements, macro_global\n")
+            "holdings, fund_flow, cninfo_announcements, macro_global, "
+            "stock_daily, prev_plan, auction_feedback, t1_intraday\n")
         methods = [method for _, method in transport_since(box, offset)]
         assert methods[:1] == ["get_kline"]
         assert methods.count("get_announcements") == 5
@@ -750,7 +784,7 @@ def test_p14_single_factor_failure_is_isolated_and_snapshot_still_written():
         assert_exit(result, 0)
         assert transport_since(box, offset) == []
         payload = json.loads(result.stdout)
-        assert payload["version"] == "0.6"
+        assert payload["version"] == "0.7"
         assert payload["main_boards"] == []
         assert "main_boards" in payload["sentiment"]["factor_errors"]
         assert "TypeError" in payload["sentiment"]["factor_errors"]["main_boards"]
@@ -787,7 +821,7 @@ def test_p16_runtime_clock_mode_full_prep_matches_reviewed_golden():
         assert result.stdout == golden_text("stdout.txt")
         assert_json_equal(prep_assets(box), golden_json("assets.json"))
         snapshot = snapshot_result(box)
-        assert snapshot["version"] == "0.6"
+        assert snapshot["version"] == "0.7"
         assert snapshot["trade_date"] == TRADE_DATE
         assert snapshot["sentiment"]["position_pct"] == 0.5
 

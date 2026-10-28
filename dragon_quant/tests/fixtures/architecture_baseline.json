@@ -751,8 +751,44 @@
       "vbf251c1547e8",
       "source"
     ],
+    "prep_chip_concentration": [
+      "v929fe1b2b290",
+      "source"
+    ],
     "prep_composite": [
       "vd6589a85b70f",
+      "source"
+    ],
+    "prep_dim_d1": [
+      "ve4491e6d46bf",
+      "source"
+    ],
+    "prep_dim_d2": [
+      "v387c4ee86f66",
+      "source"
+    ],
+    "prep_dim_d3": [
+      "vd0b82f51d4df",
+      "source"
+    ],
+    "prep_dim_d4": [
+      "v591a79acac51",
+      "source"
+    ],
+    "prep_dim_d5": [
+      "vb5235b62d19c",
+      "source"
+    ],
+    "prep_dim_d6": [
+      "vb5273ace5c46",
+      "source"
+    ],
+    "prep_distance_high60": [
+      "vf4cdc6e42784",
+      "source"
+    ],
+    "prep_feedback_state": [
+      "v306c67bb68d1",
       "source"
     ],
     "prep_high_days": [
@@ -767,12 +803,48 @@
       "vf57b0a8a795b",
       "source"
     ],
+    "prep_main_net_ratio": [
+      "v522f4bda4019",
+      "source"
+    ],
+    "prep_mainline_rank": [
+      "vc04b4e1effea",
+      "source"
+    ],
+    "prep_market_state": [
+      "v6cb7b42f9549",
+      "source"
+    ],
+    "prep_position_pct": [
+      "v33f226b883e3",
+      "source"
+    ],
+    "prep_review_grade": [
+      "vb54635e598ef",
+      "source"
+    ],
+    "prep_review_score": [
+      "va8136fe858e1",
+      "source"
+    ],
+    "prep_role": [
+      "v6d36f28c778c",
+      "source"
+    ],
+    "prep_seal_ratio": [
+      "v627f81a07301",
+      "source"
+    ],
     "prep_t_pct": [
       "v4a4e93391d89",
       "source"
     ],
     "prep_t_turnover": [
       "vf1ba7ea7befe",
+      "source"
+    ],
+    "prep_turnover_health": [
+      "v9d4741eca63d",
       "source"
     ],
     "prep_verdict": [
@@ -830,10 +902,10 @@
     "local/dragons.json": "1e9d0c5fee98d7265a994075da49140e583af9087242e60a5f95873bfeeeffb5",
     "local/logs.json": "0a865278c1880c8083b4858e0888e5c5898e439b7e324dd0c223cc253d69de85",
     "local/vpa.json": "4fa2979932c9e5ea88503ed1107998c94857b94e4fa54ab3a96a2f26ce44cbcf",
-    "prep/assets.json": "b0b12b3eb40d6b494dae6df894a13a13b8db69fffba5766a3cfc2dddd7073de8",
+    "prep/assets.json": "a008adac8d46b489e410f882d27a5294e3ceb5462d67f95f3da591331ad45281",
     "prep/calls.json": "5e6da0f4086a213c7692709be96205a251c3401b9cc6109afa78563d58f4a0b7",
-    "prep/snapshot.json": "13ac9d9bc258bee9d6afc5e8d904711308d1cdb63ce79552333091dc0b0976e1",
-    "prep/stdout.txt": "504aeae0c30162cf61e55c0fb874b934898a4d8e14789e4da6b15e956af59dfd",
+    "prep/snapshot.json": "585bb9188017fc66f1d83a0f60b3d33da478b40b161c9d707cc382348ee0c35b",
+    "prep/stdout.txt": "7b603765b987cb743ee38b3da57941bcf8a8a3ed3b0a4aabe028187a53ace06b",
     "review/db.json": "25a8fc2e83bc4b2d870992a6131982bb9b93cc2c2fbc9e2231b96ef1d3bd6f1d",
     "review/stdout_lines.json": "ef65201ffb463d2fff50f9d99e2e6e2dbe4a50466274d093bd9f19bde15b949e",
     "review_account/config_legal.json": "d25147d78680fdc8762eff750334158eae6ca15922d55c13a2cfdcf9d9ca26e0",

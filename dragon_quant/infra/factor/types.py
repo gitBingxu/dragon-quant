@@ -128,3 +128,11 @@ class BackfilledSource(Exception):
 
 class AsOfViolation(Exception):
     """``asof`` 源选中的账本记录晚于当日 phase 时点（硬门禁）。"""
+
+
+class SourceUnavailable(Exception):
+    """源可用但其**必需子块**缺失（如旧快照无 ``review``）。
+
+    与「当日无值」严格区分：engine 记 ``missing_source`` 并**不删旧行**，
+    绝不把「无法计算」当成「真实空」去 DELETE。
+    """

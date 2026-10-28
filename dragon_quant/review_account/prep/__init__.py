@@ -37,6 +37,6 @@ __all__ = list(_main.__all__)
 install_name_proxy(
     sys.modules[__name__],
     _MAPPING,
-    local_submodules={"service", "collectors", "compute", "rebuild", "main"},
+    local_submodules={"service", "collectors", "compute", "rebuild", "review", "main"},
 )
 sys.modules[__name__].__class__ = NameProxyModule

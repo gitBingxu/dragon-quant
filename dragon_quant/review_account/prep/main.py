@@ -35,7 +35,9 @@ from dragon_quant.infra.provider.xueqiu import XueqiuProvider  # noqa: F401
 from dragon_quant.infra.assets import db as assets_db, dragons_mirror  # noqa: F401
 from dragon_quant.infra.assets.dragons_mirror import DragonsMirrorStale
 
-from ..advice import format_advice_lines, format_candidate_lines
+from ..advice import (
+    format_advice_lines, format_candidate_lines, format_review_lines,
+)
 from .collectors import (
     ASSET_COLLECTORS, CollectorSpec, PrepContext, _breadth_suspicious,
     _collect_all, _collect_cninfo, _collect_dragons, _collect_fund_flow,
@@ -44,8 +46,9 @@ from .collectors import (
     merge_report_entries, plan_repairs,
 )
 from .compute import (
-    SHANGHAI, _lianban_count, compute_candidates, compute_macro,
-    compute_main_boards, compute_sentiment, position_advice,
+    REVIEW_VERSION, SHANGHAI, _lianban_count, compute_candidates,
+    compute_feedback, compute_macro, compute_main_boards, compute_plan_review,
+    compute_review, compute_sentiment, position_advice,
 )
 from .rebuild import (
     WINDOW_TRADING_DAYS, _read_dragon_day, _stale_dates, build_dragons_payload,
@@ -86,14 +89,19 @@ __all__ = [
     "_run_collection",
     "_validate_trade_date",
     # 纯计算
+    "REVIEW_VERSION",
     "compute_candidates",
     "compute_macro",
     "compute_main_boards",
+    "compute_feedback",
+    "compute_plan_review",
+    "compute_review",
     "compute_sentiment",
     "position_advice",
     # 盘后复盘展示（commands/prep.py 经公共门面消费）
     "format_advice_lines",
     "format_candidate_lines",
+    "format_review_lines",
     # dragons 窗口资产 / recompute
     "WINDOW_TRADING_DAYS",
     "build_dragons_payload",

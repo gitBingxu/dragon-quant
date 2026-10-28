@@ -13,21 +13,29 @@
 
 ## prep
 
-**看到什么**：默认输出四行市场摘要（是否建议买入、建议仓位、建议等级、理由）+ 空行 + 逐只标的清单。
+**看到什么**：默认输出四行市场摘要（是否建议买入、建议仓位、建议等级、理由）+ 空行 + 逐只标的清单 + 空行 + **复盘摘要**（市场状态与系数、当日主线、详细池档位分布、逐只 `review_score` / `eligibility` / 单票建议仓位与原因、数据降级）。
 
 **怎么解释**：
 
+- 前四行与逐只清单是既有口径，逐字不变；后追加的复盘摘要才是新的复盘分视图。
 - 仓位与等级来自盘后复盘快照，**仅供人工参考，不参与下单**；真正下单看 `buy`。
 - 清单里 `strong` 是强烈建议、`light` 是轻仓博弈、`ignore` 是忽略（后面通常跟一句原因）、`unrated` 是未评级；`verdict` 只用于展示，不自动过滤回测候选池。
-- “无参与复盘标的”不等于市场没有涨停，也可能是数据降级导致候选为空；要看理由中的降级信息。
-- 候选为空时，只有在龙头血缘健康、逐日状态正常的情况下才能说“确实没有候选”。
+- **语义防混**：旧 `sentiment.position_pct` 是「市场参考仓位」（0–1 小数）；`review_candidates[].position_pct` 是「单票建议仓位」（占总资产百分比）。二者同名不同义，解释时必须写全称，禁止简写成「仓位」。
+- 单票建议仓位是三态：`null` 表示数据或置信不足、`0` 表示明确不参与、`>0` 表示可准备建仓；`reason_code` 解释 `0` / `null` 的原因，`gate_trace` 是闸门顺序留痕。**0 只表示不建议新建仓，不表示应清仓**（持仓处置仍由 `sell` 规则决定）。
+- 单票仓位彼此独立，**不可相加为可执行组合**；`review.portfolio.warning="sum_exceeds_100"` 时要在报告首段提示，且不给出「优先买哪只」的结论。
+- 「无参与复盘标的」不等于市场没有涨停，也可能是数据降级导致候选为空；要看理由中的降级信息。
 
-**`--json` 顶层**：`trade_date`、`version`、`sentiment`、`main_boards`、`macro`、`candidates`、`dragon_source`。
+**`--json` 顶层**：`trade_date`、`version`、`sentiment`、`main_boards`、`macro`、`candidates`、`dragon_source`、`review`、`review_candidates`、`strategy_context`；存在 T-1 计划时另有 `feedback`、`plan_review`。
 
-- `sentiment`：情绪与仓位建议、涨停/跌停/炸板等计数、`degraded`、`factor_errors`。
+- `sentiment`：情绪与市场参考仓位建议、涨停/跌停/炸板等计数、`degraded`、`factor_errors`。
 - `main_boards`：当日主线板块。
 - `macro`：外围与美债/黄金；看 `available`、`session`、逐品种 `caliber` 与 `degraded`。
 - `candidates[]`：`code`、`name`、`composite_score`、`rank`、`verdict`、`verdict_label`、`dimensions`、`ignore_reason`、`facts`。
+- `review`：配置版本/哈希、市场状态与分项、主线、锚、组合告警与 `degraded`。
+- `review_candidates[]`：角色、六维 `dimensions` / `contributions` / `missing_dims`、`review_score` / `review_grade` / `confidence`、`eligibility`、三态 `position_pct`、`reason_code`、`gate_trace`、`legacy` 只读证据。
+- `strategy_context`：`context_version="sc_v1"` 的 Agent 只读视图；`positions[]` 收录**全部**详细池标的（含 `position=0/null` 与原因），`market` / `mainlines` / `portfolio` / `data_quality` / `enums` / `disclaimer` 均来自 `review` 投影，不产生新数值。
+- `feedback`：T+1 盘后反馈，仅在存在 T-1 计划时出现。`items[].state` 四态 `confirmed` / `weakened` / `invalidated` / `unknown`；`unknown` 必须带稳定 `unknown_reason`（`auction_backfill_failed` 表示竞价补采失败，不等于看空）；`checkpoint` 为 `auction+close` 或 `close_only`。反馈是评估证据，不是买卖指令。
+- `plan_review`：计划 vs 实际执行的复盘。`planned_action` / `planned_position` / `feedback_state` / `actual_entry_price` / `actual_position` / `outcome_pct`；`actual_*` 为 `null` 表示未成交或执行数据缺失（`execution_known=false`），**不得编造成交价/仓位**。`attribution` 只做归因计数，不据此改写策略。
 - `dragon_source`：五日窗口血缘；`window_days=0` 表示不可用、`1` 表示旧单日口径、`5` 表示当前窗口。
 
 ## auction
@@ -101,9 +109,10 @@
 **看到什么**：`query` 的表格或 JSON，`status` 的构建状态，`eval` 的指标报告。
 
 - `query` 输出会带 `resolved_versions`；同名多版本不会混成多行。
-- `eval` 的 `insufficient_data` 是有效结论（exit 0），不是失败。
+- `eval` 的 `insufficient_data` 是有效结论（exit 0），不是失败；**历史不足不得说成「因子有效」**。
 - 因子缺失表示“无行”，不等于 0 或中性分。
 - `build` 报告里的 `warnings`、`unverified_rows`、`missing_source` 要如实转述。
+- `prep_review_*`（复盘分因子族）默认关、不参与选股模型排序（因子排序开关仍只读五维/vpa）；`prep_feedback_state` 的 `available_at` 属 close 阶段，不要当成盘中实时信号。影子/评估结论只在跑满影子期后讨论，当前一律按 `insufficient_data` 处理。
 
 ## storage
 

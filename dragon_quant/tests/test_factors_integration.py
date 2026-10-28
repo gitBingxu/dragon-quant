@@ -377,7 +377,7 @@ class TestCliContract(FactorIntegrationBase):
         self.assertEqual(code, 0)
         payload = json.loads(out)
         self.assertEqual(payload["ok"], True)
-        self.assertEqual(len(payload["factors"]), 33)
+        self.assertEqual(len(payload["factors"]), 51)
 
     def test_build_json_contract(self):
         code, out, _ = self._run(

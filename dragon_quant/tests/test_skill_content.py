@@ -95,7 +95,11 @@ class TestSkillContent(unittest.TestCase):
         text = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
         for token in ("ranking_mode", "fallback_reason", "data_quality", "strict_5min",
                       "daily_fallback", "unverified", "is_weak", "checks",
-                      "resolved_versions", "insufficient_data", "available_top_n"):
+                      "resolved_versions", "insufficient_data", "available_top_n",
+                      # M4/M5/M6 复盘契约
+                      "strategy_context", "review_candidates", "feedback",
+                      "plan_review", "checkpoint", "auction_backfill_failed",
+                      "prep_review_"):
             self.assertIn(token, text)
 
     def test_playbooks_cover_failure_modes(self):

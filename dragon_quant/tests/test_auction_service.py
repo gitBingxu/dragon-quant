@@ -99,7 +99,7 @@ class _CollectHarness:
         dragons = opt.get("dragons", [])
         legacy_dates = opt.get("legacy_dates")
         if legacy_dates is None:
-            legacy_dates = [DAY] if dragons else []
+            legacy_dates = [PREV] if dragons else []
         calendar = opt.get("calendar", [PREV, DAY])
 
         if opt.get("patch_factory"):

@@ -20,7 +20,7 @@ class TestAuctionPool(unittest.TestCase):
 
         dragons = dragons or []
         legacy_dates = legacy_dates if legacy_dates is not None else (
-            [DAY] if dragons else [])
+            [PREV] if dragons else [])
         calendar = calendar if calendar is not None else [PREV, DAY]
 
         buf, err = io.StringIO(), io.StringIO()
@@ -245,6 +245,14 @@ class TestAuctionPool(unittest.TestCase):
             legacy_dates=dates)
         self.assertIsNone(code)
         self.assertEqual(out["lookback_dates"], dates[-5:])
+
+    def test_legacy_excludes_current_day_from_lookback(self):
+        dates = [f"2026-10-{d:02d}" for d in range(14, 21)]
+        out, _, code, _, _ = self._run(
+            pool="legacy", dragons=[{"code": "L", "name": "龙"}],
+            legacy_dates=dates)
+        self.assertIsNone(code)
+        self.assertEqual(out["lookback_dates"], dates[-6:-1])
 
     def test_prep_snapshot_date_matches_collect_candidates_ex(self):
         """N1：auction 与 buy 的池解析必须命中同一 T-1 快照。"""

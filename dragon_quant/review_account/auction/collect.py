@@ -181,7 +181,8 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
         # 读源 = assets.db.dragons 镜像（AC5）；枚举型读路径必须逐日对账，
         # 否则镜像整体缺行会让日期集合前移、池静默换日 + 变小。
         try:
-            dates = dragons_mirror.list_dragon_trade_dates(source=source)
+            dates = [d for d in dragons_mirror.list_dragon_trade_dates(source=source)
+                     if d < trade_date]
             if dates:
                 recent_dates = dates[-lookback:]
                 stale = dragons_mirror.stale_dates(recent_dates)

@@ -44,7 +44,33 @@ def _assets(trade_date: str = "2026-10-19", **overrides):
                                      {"title": "公告", "type": "t", "date": "2026-10-18",
                                       "url": "u"}], "max_announcement_date": "2026-10-18",
                                      "truncated": False}},
+                                 "legacy_codes": ["600001"], "review_codes": [],
+                                 "review_health": {"status": "ok"},
                                  "truncated_codes": []},
+        "holdings": {"as_of": trade_date, "codes": [],
+                     "sources": ["buy_sell_signals"], "degraded": []},
+        "stock_daily": {"as_of": trade_date, "trade_date": trade_date,
+                        "requested_codes": ["600001"],
+                        "returned_codes": ["600001"], "missing_codes": [],
+                        "rows": {"600001": [{"date": "2026-10-16", "open": 10.0,
+                                             "high": 10.5, "low": 9.9, "close": 10.4,
+                                             "volume": 1000, "amount": 1e7,
+                                             "turnover": 1.0}]},
+                        "coverage": {"requested": 1, "returned": 1,
+                                     "missing": [], "ratio": 1.0},
+                        "truncated": False, "review_codes": [],
+                        "review_health": {"status": "ok"}},
+        "prev_plan": {"as_of": trade_date, "source_trade_date": None,
+                      "context_version": None, "context_hash": None,
+                      "market_state": None, "positions": [],
+                      "feedback_plans": [], "degraded": []},
+        "auction_feedback": {"as_of": trade_date, "rows_by_code": {},
+                             "sources": [],
+                             "backfill": {"attempted": 0, "ok": 0, "failed": []},
+                             "unverified_count": 0, "degraded": []},
+        "t1_intraday": {"as_of": trade_date, "trade_date": trade_date,
+                        "rows": {}, "missing_codes": [],
+                        "checkpoint": ["09:25", "10:00"], "degraded": []},
         "macro_global": {
             "trade_date": trade_date, "as_of": trade_date,
             "instruments": {
@@ -229,7 +255,7 @@ class TestComputeErrorIsolation(unittest.TestCase):
     def test_output_contract_keys(self):
         from dragon_quant.review_account.prep import _compute_all
         out = _compute_all("2026-10-19", _assets())
-        self.assertEqual(out["version"], "0.6")
+        self.assertEqual(out["version"], "0.7")
         self.assertEqual(out["dragon_source"]["scan_id"], "v2_20261019_top25")
         for k in ("sentiment", "main_boards", "candidates"):
             self.assertIn(k, out)
@@ -495,7 +521,7 @@ class TestRunPrepIntegration(unittest.TestCase):
         # 快照已落库，且由资产计算而来
         self.assertEqual(snap["sentiment"]["limit_up_cnt"], 10)
         self.assertEqual(snap["candidates"][0]["code"], "600001")
-        self.assertEqual(out["version"], "0.6")
+        self.assertEqual(out["version"], "0.7")
         # run_prep → resolve_window_dates → PrepContext 的窗口透传不能断链
         self.assertEqual(captured["window"], ["2026-10-15", "2026-10-16"])
         self.assertEqual(captured["window_days"], 5)
@@ -921,7 +947,7 @@ class TestRunPrepRecompute(unittest.TestCase):
              patch("dragon_quant.review_account.prep.TdxProvider"), \
              patch("dragon_quant.review_account.prep.THSProvider"):
             out = run_prep(day, recompute=True)
-        self.assertEqual(out["version"], "0.6")
+        self.assertEqual(out["version"], "0.7")
         self.assertFalse(out["macro"]["available"])
         self.assertIn("macro_global", out["sentiment"]["degraded"])
         self.assertTrue(out["candidates"])
@@ -969,7 +995,7 @@ class TestRunPrepRecompute(unittest.TestCase):
         self.assertEqual(payload["rebuilt_from_window_days"], 3)
         self.assertNotIn("collection_report", written)   # 不伪造采集健康状态
         save_assets.assert_called_once()
-        self.assertEqual(out["version"], "0.6")
+        self.assertEqual(out["version"], "0.7")
 
     def test_recompute_keeps_single_day_asset(self):
         """旧单日资产（无 days[]）不重建，按单日口径重放（R1 既有语义）。"""
@@ -1859,10 +1885,13 @@ class TestCmdPrepOutput(unittest.TestCase):
              redirect_stdout(buf):
             commands.dispatch("prep", self._args())
         lines = buf.getvalue().strip().splitlines()
-        self.assertEqual(len(lines), 6)
+        # 旧 4 行 + 空行 + 旧清单 + 空行 + 复盘摘要降级行（无 review 时一行）
+        self.assertEqual(len(lines), 8)
         self.assertIn("是否建议买入：是", lines[0])
         self.assertEqual(lines[4], "")
         self.assertEqual(lines[5], "无参与复盘标的")
+        self.assertEqual(lines[6], "")
+        self.assertEqual(lines[7], "复盘摘要不可用（missing）")
 
     def test_default_prints_candidate_list_after_blank_line(self):
         import io
@@ -2014,7 +2043,8 @@ class TestCmdPrepOutput(unittest.TestCase):
              redirect_stdout(out), redirect_stderr(err):
             commands.dispatch("prep", self._args())
         self.assertIn("资产已就绪（无需采集）", err.getvalue())
-        self.assertEqual(len(out.getvalue().strip().splitlines()), 6)
+        # 旧 4 行 + 空行 + 旧清单 + 空行 + 复盘摘要降级行
+        self.assertEqual(len(out.getvalue().strip().splitlines()), 8)
 
     def test_plan_hint_repairs_only_full_sentence(self):
         import io
@@ -2036,11 +2066,17 @@ class TestCmdPrepOutput(unittest.TestCase):
 # ─── 增量采集 / report 语义 ────────────────────────────────────────────────
 
 _ASSET_NAMES = ["dragons", "ths_limit_up_pool", "ths_block_top", "market_breadth",
-                "fg_boards", "fund_flow", "cninfo_announcements", "macro_global"]
+                "fg_boards", "holdings", "fund_flow", "cninfo_announcements",
+                "macro_global", "stock_daily", "prev_plan", "auction_feedback",
+                "t1_intraday"]
+_EMPTY_ASSET_NAMES = ("prev_plan", "auction_feedback", "t1_intraday")
 
 
 def _ok_report():
-    return {name: {"status": "ok"} for name in _ASSET_NAMES}
+    report = {name: {"status": "ok"} for name in _ASSET_NAMES}
+    for name in _EMPTY_ASSET_NAMES:
+        report[name] = {"status": "empty"}
+    return report
 
 
 def _payloads_of(day):
@@ -2267,7 +2303,8 @@ class TestPlanCollection(unittest.TestCase):
             "market_breadth": {"status": "unavailable"}}
         plan = self._plan(assets, today="2026-10-20", force=True)
         self.assertEqual(plan.collect, ["dragons", "ths_limit_up_pool", "ths_block_top",
-                                        "cninfo_announcements", "macro_global"])
+                                        "holdings", "cninfo_announcements",
+                                        "macro_global", "stock_daily", "prev_plan"])
         self.assertIn("market_breadth", plan.repairs)
 
     def test_registry_order_preserved(self):
@@ -2376,7 +2413,7 @@ class TestRunPrepIncremental(unittest.TestCase):
             self.assertEqual(assets_db.get_prep_assets(self.day), before)
             self.assertEqual(snap1, snap2)          # 快照覆盖写且内容一致
             self.assertTrue(plans[0].is_empty())
-            self.assertEqual(out1["version"], "0.6")
+            self.assertEqual(out1["version"], "0.7")
             self.assertTrue(snap1 and snap2)        # 零采集 ≠ 零 compute
 
     def test_partial_unhealthy_collects_only_that_type(self):
@@ -2431,8 +2468,9 @@ class TestRunPrepIncremental(unittest.TestCase):
                             lambda name, ctx: payloads[name],
                             _sh_now("2026-10-20"), plans=plans)
             self.assertEqual(set(calls), {"dragons", "ths_limit_up_pool",
-                                          "ths_block_top", "cninfo_announcements",
-                                          "macro_global"})
+                                          "ths_block_top", "holdings",
+                                          "cninfo_announcements", "macro_global",
+                                          "stock_daily", "prev_plan"})
             self.assertEqual(len(calls), len(set(calls)))   # 级联不重复入列
             report = assets_db.get_prep_assets(self.day)["collection_report"]
             for name in ("market_breadth", "fg_boards", "fund_flow"):
@@ -2462,7 +2500,7 @@ class TestRunPrepIncremental(unittest.TestCase):
         save_snap.assert_called_once()
         tdx_cls.assert_not_called()
         ths_cls.assert_not_called()
-        self.assertEqual(out["version"], "0.6")
+        self.assertEqual(out["version"], "0.7")
 
     def test_force_recollects_all_collectable(self):
         import tempfile
@@ -2492,8 +2530,9 @@ class TestRunPrepIncremental(unittest.TestCase):
             self._run(self.day, calls, lambda name, ctx: payloads[name],
                       _sh_now("2026-10-20"), force=True, plans=plans)
             self.assertEqual(set(calls), {"dragons", "ths_limit_up_pool",
-                                          "ths_block_top", "cninfo_announcements",
-                                          "macro_global"})
+                                          "ths_block_top", "holdings",
+                                          "cninfo_announcements", "macro_global",
+                                          "stock_daily", "prev_plan"})
             stored = assets_db.get_prep_assets(self.day)["collection_report"]
             for name in ("market_breadth", "fg_boards", "fund_flow"):
                 self.assertEqual(stored[name]["status"], "ok")
@@ -2565,7 +2604,9 @@ class TestRunPrepIncremental(unittest.TestCase):
             self.assertEqual(calls[0], "dragons")
             self.assertIn("fund_flow", calls)
             self.assertIn("cninfo_announcements", calls)
-            self.assertEqual(len(calls), len(set(calls)))
+            # 前 4 项 = legacy 阶段（dragons + 3 个依赖级联），互不重复；
+            # 其后可能追加 review 独立修复（同一类型可再次出现，属批准行为）。
+            self.assertEqual(len(set(calls[:4])), 4)
 
 
 if __name__ == "__main__":

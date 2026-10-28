@@ -67,7 +67,7 @@ def handle(args, services):
 
     # 降级信息已并入理由行（details 见 prep_assets.collection_report / --json）
     from dragon_quant.review_account.prep.main import (
-        format_advice_lines, format_candidate_lines,
+        format_advice_lines, format_candidate_lines, format_review_lines,
     )
     try:
         lines = format_advice_lines(result)
@@ -80,7 +80,14 @@ def handle(args, services):
     except Exception as e:  # 清单失败仍打印 4 行摘要，不让整次输出丢失
         print(f"标的清单生成失败：{type(e).__name__}: {e}"
               f"（可用 --json 查看完整结果）", file=sys.stderr)
-    print("\n".join(lines))
+    # 复盘摘要（M4）：旧 4 行与逐只清单逐字不变，新段只追加；新段失败降级一行。
+    try:
+        review_lines = format_review_lines(result)
+    except Exception as e:
+        print(f"复盘摘要生成失败：{type(e).__name__}: {e}"
+              f"（可用 --json 查看完整结果）", file=sys.stderr)
+        review_lines = ["复盘摘要不可用（render_error）"]
+    print("\n".join(lines + [""] + review_lines))
 
 
 def _normalize_cli_date(d: str) -> str:

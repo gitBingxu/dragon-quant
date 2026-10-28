@@ -1133,6 +1133,8 @@ class TestPrepCommand(unittest.TestCase):
                       return_value=["ADVICE"]), \
                 patch("dragon_quant.review_account.prep.main.format_candidate_lines",
                       return_value=["CANDIDATE"]), \
+                patch("dragon_quant.review_account.prep.main.format_review_lines",
+                      return_value=["REVIEW"]), \
                 redirect_stdout(buf):
             command.handle(args, services)
 
@@ -1142,7 +1144,7 @@ class TestPrepCommand(unittest.TestCase):
         self.assertIs(run.call_args.kwargs["services"], services)
         self.assertEqual(run.call_args.kwargs["on_plan"].__class__.__name__,
                          "function")
-        self.assertEqual(buf.getvalue(), "ADVICE\n\nCANDIDATE\n")
+        self.assertEqual(buf.getvalue(), "ADVICE\n\nCANDIDATE\n\nREVIEW\n")
 
     def test_prep_error_keeps_json_on_stdout_and_human_on_stderr(self):
         from dragon_quant.commands import prep as command

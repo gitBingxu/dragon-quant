@@ -26,6 +26,7 @@ from .types import (
     FactorContext,
     FactorSpec,
     FactorValue,
+    SourceUnavailable,
 )
 from dragon_quant.infra import clock
 
@@ -367,6 +368,8 @@ def _load_prep_source(trade_date: str, cache: dict) -> dict:
             "snapshot_date": trade_date, "snapshot_version": None,
             "snapshot_created_at": None, "candidates": [],
             "candidates_by_code": {}, "codes": (), "as_of": None,
+            # M6：review 因子族的只读子块（缺失一律 None，由 compute fail-closed）。
+            "review": None, "review_candidates": None, "feedback": None,
         }
 
     try:
@@ -410,6 +413,10 @@ def _load_prep_source(trade_date: str, cache: dict) -> dict:
         "candidates_by_code": by_code,
         "codes": tuple(sorted(by_code)),
         "as_of": None,
+        # M6：只读透传新增块，不改既有键（旧 prep_* 因子行为不变）。
+        "review": snapshot.get("review"),
+        "review_candidates": snapshot.get("review_candidates"),
+        "feedback": snapshot.get("feedback"),
     }
     cache[key] = result
     return result
@@ -580,6 +587,12 @@ def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[di
         entry["reason"] = str(exc)
         entry["elapsed_ms"] = _elapsed_ms(started)
         return entry
+    except SourceUnavailable as exc:
+        # 源可用但必需子块缺失（旧快照无 review）：不计算、不删旧行。
+        entry["status"] = "missing_source"
+        entry["reason"] = str(exc)
+        entry["elapsed_ms"] = _elapsed_ms(started)
+        return entry
     except Exception as exc:
         entry["status"] = "error"
         entry["reason"] = f"计算失败: {type(exc).__name__}: {exc}"
@@ -659,7 +672,12 @@ def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[di
         entry["elapsed_ms"] = _elapsed_ms(started)
         return entry
 
-    coverage = (len(values) / len(codes)) if codes else None
+    # 分母：默认 = 源 codes；review 因子族用 len(review_candidates)（不同作用域）。
+    denominator = (frame.meta or {}).get("denominator")
+    if (not isinstance(denominator, int) or isinstance(denominator, bool)
+            or denominator < 0):
+        denominator = len(codes)
+    coverage = (len(values) / denominator) if denominator else None
     entry.update({
         "status": "ok" if rows else "empty",
         "rows": written,
@@ -675,8 +693,8 @@ def build_factor(spec: FactorSpec, trade_date: str, *, source_cache: Optional[di
         if text not in entry["warnings"]:
             entry["warnings"].append(text)
     if not rows:
-        if _absence_expected(frame.meta, len(codes)):
-            entry["warnings"].append(_absence_warning(frame.meta, len(codes)))
+        if _absence_expected(frame.meta, denominator):
+            entry["warnings"].append(_absence_warning(frame.meta, denominator))
         else:
             entry["warnings"].append("empty_unexpected")
     if entry["invalid_value"]:

@@ -1,0 +1,293 @@
+{
+  "summary": {
+    "total_inline_citations": 170,
+    "unique_citation_numbers": 42,
+    "reference_entries": 42,
+    "critical_issues": 0,
+    "issue_count": 0,
+    "warnings": 27,
+    "verdict": "PASS"
+  },
+  "issues": [],
+  "warnings": [
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 1,
+      "message": "[1] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 2,
+      "message": "[2] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 3,
+      "message": "[3] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 4,
+      "message": "[4] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 5,
+      "message": "[5] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 6,
+      "message": "[6] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 7,
+      "message": "[7] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 8,
+      "message": "[8] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 9,
+      "message": "[9] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 10,
+      "message": "[10] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 11,
+      "message": "[11] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 12,
+      "message": "[12] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 13,
+      "message": "[13] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 14,
+      "message": "[14] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 15,
+      "message": "[15] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 16,
+      "message": "[16] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 17,
+      "message": "[17] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 18,
+      "message": "[18] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 19,
+      "message": "[19] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 20,
+      "message": "[20] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 21,
+      "message": "[21] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 22,
+      "message": "[22] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 23,
+      "message": "[23] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 24,
+      "message": "[24] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 25,
+      "message": "[25] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 26,
+      "message": "[26] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    },
+    {
+      "type": "MISSING_URL",
+      "severity": "warning",
+      "citation": 27,
+      "message": "[27] reference has no URL",
+      "fix": "Add URL or note that source is offline/print"
+    }
+  ],
+  "citation_coverage": {
+    "inline_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42
+    ],
+    "reference_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42
+    ]
+  }
+}

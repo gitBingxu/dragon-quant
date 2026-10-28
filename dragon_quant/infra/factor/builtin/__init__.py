@@ -6,9 +6,16 @@
 
 from __future__ import annotations
 
-from dragon_quant.infra.factor.builtin import auction, financial, five_dim, prep, vpa
+from dragon_quant.infra.factor.builtin import (
+    auction,
+    financial,
+    five_dim,
+    prep,
+    prep_review,
+    vpa,
+)
 
-BUILTIN_MODULES = (five_dim, vpa, financial, prep, auction)
+BUILTIN_MODULES = (five_dim, vpa, financial, prep, auction, prep_review)
 
 
 def all_specs():
@@ -20,4 +27,4 @@ def all_specs():
 
 
 __all__ = ["BUILTIN_MODULES", "all_specs", "five_dim", "vpa", "financial",
-           "prep", "auction"]
+           "prep", "auction", "prep_review"]

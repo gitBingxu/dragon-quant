@@ -122,3 +122,17 @@ class TestSafetyTiers(unittest.TestCase):
     def test_routes_declare_a_single_write_class(self):
         for route in _routes():
             self.assertNotIn("/", route["write_class"], route["command"])
+
+
+class TestOutputsReviewContracts(unittest.TestCase):
+    """M4–M6：Skill outputs 必须覆盖复盘/反馈/因子影子契约，且不复制权重表。"""
+
+    def test_outputs_document_review_feedback_and_factor_contracts(self):
+        text = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
+        for token in ("strategy_context", "review_candidates", "feedback",
+                      "plan_review", "checkpoint", "auction_backfill_failed",
+                      "prep_review_", "insufficient_data"):
+            self.assertIn(token, text)
+        # 权重/阈值唯一真源在 STRATEGY.md / review config，Skill 不得复制。
+        for forbidden in ("带动性 30%", "领涨性 25%", "role_weights"):
+            self.assertNotIn(forbidden, text)

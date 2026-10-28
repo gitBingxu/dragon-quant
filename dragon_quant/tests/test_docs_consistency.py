@@ -63,7 +63,7 @@ EXPECTED_MODULE_DOCS = {
 # stay in the root on purpose and therefore must never be listed here.
 CRITICAL_TOKEN_OWNERS = {
     "summarize_review_rows": "review.md",
-    "version=0.6": "prep-auction.md",
+    "version=0.7": "prep-auction.md",
     "collection_report": "prep-auction.md",
     "factor_ranking_enabled": "factor.md",
     "idx_buy_sell_open": "trading.md",
@@ -230,12 +230,23 @@ def test_pyproject_description_is_five_dimension():
     assert "四维" not in description
 
 
+def test_prep_auction_documents_review_gates_and_context():
+    """M4: owner doc must describe gates/eligibility/position/context/CLI segment."""
+
+    prep_doc = _read(DOCS_DIR / "prep-auction.md")
+    for token in ("eligibility", "position_pct", "position_basis", "gate_trace",
+                  "strategy_context", "sum_exceeds_100", "frozen_at",
+                  "不建议新建仓"):
+        assert token in prep_doc, f"prep-auction.md 缺少 M4 契约: {token}"
+    assert "闸门/仓位/`strategy_context` 由后续切片接入" not in prep_doc
+
+
 def test_documented_snapshot_version_matches_production():
     production = _read(REPO_ROOT / "dragon_quant" / "review_account" / "prep" / "service.py")
     match = re.search(r'"version":\s*"([0-9.]+)"', production)
     assert match, "prep service must declare its snapshot version"
     version = match.group(1)
-    assert version == "0.6"
+    assert version == "0.7"
 
     # The owner moved from AGENTS.md to prep-auction.md, but neither owner is
     # allowed to lose its own assertion: no "somewhere in the doc set" shortcut.

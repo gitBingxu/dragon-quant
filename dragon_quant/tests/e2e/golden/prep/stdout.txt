@@ -16,3 +16,12 @@
 补涨C-忽略：今日涨幅 -10.00%，已退出涨停梯队（入选日 2026-09-09）
 跟风B-忽略：今日涨幅 -2.20%、主力净流出 500.00 万（占成交额 -6.2%），资金离场
 银行D-忽略：近 3 日公告「立案调查公告」，按公告风险规则忽略
+
+复盘摘要：市场 strong（79.2，×1.0）｜主线 机器人（未知）、AI算力（未知）、银行科技（未知）
+详细池 5 只：S 0 / A 0 / B 1 / C 1 / D 3；可准备建仓 1 只
+600005 龙头E 龙头 review_score 70.3 B eligibility=eligible 单票建议仓位 4.0%
+600004 银行D 龙头 review_score 54.4 C eligibility=not_qualified 单票建议仓位 0（不建议新建仓：硬风险）
+600001 龙头A 非主线 review_score 47.0 D eligibility=not_qualified 单票建议仓位 0（不建议新建仓：流动性不足）
+600003 补涨C 非主线 review_score 42.3 D eligibility=not_qualified 单票建议仓位 0（不建议新建仓：流动性不足）
+600002 跟风B 非主线 review_score 35.1 D eligibility=not_qualified 单票建议仓位 0（不建议新建仓：流动性不足、软风险 ×0.5）
+数据：无降级

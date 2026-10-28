@@ -115,9 +115,14 @@ EXPECTED_FACTOR_NAMES = (
     "fin_net_margin", "fin_net_profit_yoy", "fin_revenue_yoy", "fin_roe",
     "five_dim_absorption", "five_dim_anti_drop", "five_dim_composite",
     "five_dim_drive", "five_dim_is_true_dragon", "five_dim_leadership",
-    "five_dim_liquidity", "prep_composite", "prep_high_days",
-    "prep_in_pool_today", "prep_limit_up_suc_rate", "prep_t_pct",
-    "prep_t_turnover", "prep_verdict", "vpa_breakout", "vpa_divergence",
+    "five_dim_liquidity", "prep_chip_concentration", "prep_composite",
+    "prep_dim_d1", "prep_dim_d2", "prep_dim_d3", "prep_dim_d4", "prep_dim_d5",
+    "prep_dim_d6", "prep_distance_high60", "prep_feedback_state",
+    "prep_high_days", "prep_in_pool_today", "prep_limit_up_suc_rate",
+    "prep_main_net_ratio", "prep_mainline_rank", "prep_market_state",
+    "prep_position_pct", "prep_review_grade", "prep_review_score",
+    "prep_role", "prep_seal_ratio", "prep_t_pct", "prep_t_turnover",
+    "prep_turnover_health", "prep_verdict", "vpa_breakout", "vpa_divergence",
     "vpa_health_score", "vpa_trend_verify", "vpa_vol_amount",
 )
 

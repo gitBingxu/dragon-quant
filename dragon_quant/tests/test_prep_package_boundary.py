@@ -374,4 +374,4 @@ def test_recompute_is_offline_and_skips_planning_and_collection():
     plan_mock.assert_not_called()
     collect_mock.assert_not_called()
     save_snap.assert_called_once()
-    assert result["version"] == "0.6"
+    assert result["version"] == "0.7"

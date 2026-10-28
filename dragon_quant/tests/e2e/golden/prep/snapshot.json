@@ -1,164 +1,8 @@
 {
-  "trade_date": "2026-09-11",
-  "version": "0.6",
-  "sentiment": {
-    "up_cnt": 2102,
-    "down_cnt": 953,
-    "limit_up_cnt": 62,
-    "limit_down_cnt": 3,
-    "total_amount": 31048500,
-    "temperature_score": 95.4,
-    "position_advice": "正常",
-    "position_pct": 0.5,
-    "limit_up_cnt_ths": 62,
-    "limit_down_cnt_ths": null,
-    "limit_up_cnt_t1_fg": 3,
-    "limit_down_cnt_t1_fg": 2,
-    "position_input": {
-      "limit_up_cnt": "ths_t",
-      "limit_down_cnt": "breadth_t"
-    },
-    "broken_cnt": 1,
-    "broken_rate": 0.016,
-    "yesterday_premium_pct": 5.67,
-    "promotion_rate": 0.667,
-    "max_board_height": 4,
-    "lhb_cnt": 2,
-    "factor_sources": {
-      "limit_up_cnt_ths": "ths_limit_up_pool",
-      "promotion_rate": "ths_limit_up_pool(high_days) / fg(T-1)"
-    },
-    "degraded": []
-  },
-  "main_boards": [
-    {
-      "board_name": "机器人",
-      "limit_up_num": 23,
-      "high": "4天2板",
-      "dragon_count": 2
-    },
-    {
-      "board_name": "AI算力",
-      "limit_up_num": 12,
-      "high": "2天2板",
-      "dragon_count": 1
-    },
-    {
-      "board_name": "银行科技",
-      "limit_up_num": 5,
-      "high": "1天1板",
-      "dragon_count": 1
-    }
-  ],
-  "macro": {
-    "available": true,
-    "as_of": "2026-09-11",
-    "session": "same_day",
-    "instruments": {
-      "jp_nikkei": {
-        "key": "jp_nikkei",
-        "label": "日经225期指",
-        "kind": "index",
-        "price_unit": "points",
-        "chg_unit": "pct",
-        "caliber": "same_day_daily_bar",
-        "price": 64750.0,
-        "prev_close": 64360.0,
-        "chg": 390.0,
-        "pct": 0.61,
-        "chg_bp": null,
-        "chg_bp_approx": null,
-        "precision_note": null,
-        "source": "tdx",
-        "code": "NK0Y",
-        "market": "INTL_INDEX",
-        "session_date": "2026-09-11",
-        "session_kind": "same_day",
-        "raw_date": "20260911",
-        "raw_time": "15:00:00",
-        "stale": false
-      },
-      "cn_a50": {
-        "key": "cn_a50",
-        "label": "富时A50期指",
-        "kind": "index",
-        "price_unit": "points",
-        "chg_unit": "pct",
-        "caliber": "same_day_daily_bar",
-        "price": 13164.0,
-        "prev_close": 13279.0,
-        "chg": -115.0,
-        "pct": -0.87,
-        "chg_bp": null,
-        "chg_bp_approx": null,
-        "precision_note": null,
-        "source": "tdx",
-        "code": "CNY0",
-        "market": "INTL_INDEX",
-        "session_date": "2026-09-11",
-        "session_kind": "same_day",
-        "raw_date": "20260911",
-        "raw_time": "15:00:00",
-        "stale": false
-      },
-      "ust10y": {
-        "key": "ust10y",
-        "label": "美债10Y",
-        "kind": "yield",
-        "price_unit": "pct",
-        "chg_unit": "bp",
-        "caliber": "previous_daily_bar",
-        "price": 5.15,
-        "prev_close": 5.09,
-        "chg": 0.06,
-        "pct": null,
-        "chg_bp": 6.0,
-        "chg_bp_approx": true,
-        "precision_note": "TDX 两位小数日频快照，bp 为近似值",
-        "source": "tdx",
-        "code": "8_ATY",
-        "market": "MACRO_INDICATOR",
-        "session_date": "2026-09-10",
-        "session_kind": "previous_session",
-        "raw_date": "20260910",
-        "raw_time": "15:00:00",
-        "stale": false
-      },
-      "gold": {
-        "key": "gold",
-        "label": "COMEX金",
-        "kind": "commodity",
-        "price_unit": "usd_per_oz",
-        "chg_unit": "pct",
-        "caliber": "previous_daily_bar",
-        "price": 4160.3,
-        "prev_close": 4186.7,
-        "chg": -26.4,
-        "pct": -0.63,
-        "chg_bp": null,
-        "chg_bp_approx": null,
-        "precision_note": null,
-        "source": "tdx",
-        "code": "GC00W",
-        "market": "COMEX_FUTURES",
-        "session_date": "2026-09-10",
-        "session_kind": "previous_session",
-        "raw_date": "20260910",
-        "raw_time": "15:00:00",
-        "stale": false
-      }
-    },
-    "degraded": [],
-    "sources": {
-      "cn_a50": "tdx",
-      "gold": "tdx",
-      "jp_nikkei": "tdx",
-      "ust10y": "tdx"
-    }
-  },
   "candidates": [
     {
       "amount": 100000000.0,
+      "announcements": [],
       "board_count": 2,
       "buy_date": null,
       "buy_price": null,
@@ -168,60 +12,67 @@
       "concepts": [
         "AI算力"
       ],
+      "dimensions": [
+        "质量维度：五维综合 88.0（排名 1）；题材：AI算力（今日主线第 2）",
+        "今日维度：涨幅 +5.00%，未进入涨停池（入选日 2026-09-07）",
+        "资金维度：主力净流入 1234.56 万（占成交额 12.3%）"
+      ],
+      "facts": {
+        "announcement_count": 0,
+        "announcements_available": true,
+        "first_limit_up_time": null,
+        "flow_available": true,
+        "high_days": null,
+        "in_pool_today": false,
+        "limit_up_suc_rate": null,
+        "limit_up_type": null,
+        "main_net_amount": 12345600.0,
+        "open_num": null,
+        "pool_available": true,
+        "reason_type_today": null,
+        "risk_announcement": null,
+        "t_amount": 100000000.0,
+        "t_pct": 5.0,
+        "t_turnover": 8.0
+      },
+      "first_limit_up_time": null,
       "high_px": 11.0,
+      "ignore_reason": null,
+      "is_again_limit": null,
       "is_true_dragon": true,
+      "limit_up_type": null,
       "low_px": 10.0,
+      "main_net_amount": 12345600.0,
       "market_cap": 1000000000.0,
       "max_drawdown_5d": null,
       "max_return_5d": null,
       "max_return_hold_days": null,
       "name": "龙头A",
+      "open_num": null,
       "open_px": 10.0,
       "pct": 10.0,
       "rank": 1,
+      "reason_type": null,
       "report_text": "龙头A report",
       "review_status": "pending",
       "scan_id": "v2_20260907_5",
       "source": "v2",
       "trade_date": "2026-09-07",
       "turnover_rate": 8.0,
-      "version": "0.7.2",
-      "reason_type": null,
-      "limit_up_type": null,
-      "open_num": null,
-      "is_again_limit": null,
-      "first_limit_up_time": null,
-      "main_net_amount": 12345600.0,
-      "announcements": [],
-      "facts": {
-        "pool_available": true,
-        "in_pool_today": false,
-        "t_pct": 5.0,
-        "t_turnover": 8.0,
-        "t_amount": 100000000.0,
-        "open_num": null,
-        "high_days": null,
-        "reason_type_today": null,
-        "limit_up_type": null,
-        "first_limit_up_time": null,
-        "limit_up_suc_rate": null,
-        "main_net_amount": 12345600.0,
-        "flow_available": true,
-        "announcements_available": true,
-        "announcement_count": 0,
-        "risk_announcement": null
-      },
       "verdict": "light",
       "verdict_label": "轻仓博弈",
-      "dimensions": [
-        "质量维度：五维综合 88.0（排名 1）；题材：AI算力（今日主线第 2）",
-        "今日维度：涨幅 +5.00%，未进入涨停池（入选日 2026-09-07）",
-        "资金维度：主力净流入 1234.56 万（占成交额 12.3%）"
-      ],
-      "ignore_reason": null
+      "version": "0.7.2"
     },
     {
       "amount": 100000000.0,
+      "announcements": [
+        {
+          "date": "2026-09-10",
+          "title": "关于股东减持计划的公告",
+          "type": "减持",
+          "url": "u"
+        }
+      ],
       "board_count": 2,
       "buy_date": null,
       "buy_price": null,
@@ -231,67 +82,60 @@
       "concepts": [
         "机器人"
       ],
+      "dimensions": [],
+      "facts": {
+        "announcement_count": 1,
+        "announcements_available": true,
+        "first_limit_up_time": null,
+        "flow_available": true,
+        "high_days": null,
+        "in_pool_today": false,
+        "limit_up_suc_rate": null,
+        "limit_up_type": null,
+        "main_net_amount": -5000000.0,
+        "open_num": null,
+        "pool_available": true,
+        "reason_type_today": null,
+        "risk_announcement": {
+          "date": "2026-09-10",
+          "level": "soft",
+          "title": "关于股东减持计划的公告"
+        },
+        "t_amount": 80000000.0,
+        "t_pct": -2.2,
+        "t_turnover": 5.0
+      },
+      "first_limit_up_time": null,
       "high_px": 11.0,
+      "ignore_reason": "今日涨幅 -2.20%、主力净流出 500.00 万（占成交额 -6.2%），资金离场",
+      "is_again_limit": null,
       "is_true_dragon": true,
+      "limit_up_type": null,
       "low_px": 10.0,
+      "main_net_amount": -5000000.0,
       "market_cap": 1000000000.0,
       "max_drawdown_5d": null,
       "max_return_5d": null,
       "max_return_hold_days": null,
       "name": "跟风B",
+      "open_num": null,
       "open_px": 10.0,
       "pct": 10.0,
       "rank": 2,
+      "reason_type": null,
       "report_text": "跟风B report",
       "review_status": "pending",
       "scan_id": "v2_20260910_5",
       "source": "v2",
       "trade_date": "2026-09-10",
       "turnover_rate": 8.0,
-      "version": "0.7.2",
-      "reason_type": null,
-      "limit_up_type": null,
-      "open_num": null,
-      "is_again_limit": null,
-      "first_limit_up_time": null,
-      "main_net_amount": -5000000.0,
-      "announcements": [
-        {
-          "date": "2026-09-10",
-          "title": "关于股东减持计划的公告",
-          "type": "减持",
-          "url": "u"
-        }
-      ],
-      "facts": {
-        "pool_available": true,
-        "in_pool_today": false,
-        "t_pct": -2.2,
-        "t_turnover": 5.0,
-        "t_amount": 80000000.0,
-        "open_num": null,
-        "high_days": null,
-        "reason_type_today": null,
-        "limit_up_type": null,
-        "first_limit_up_time": null,
-        "limit_up_suc_rate": null,
-        "main_net_amount": -5000000.0,
-        "flow_available": true,
-        "announcements_available": true,
-        "announcement_count": 1,
-        "risk_announcement": {
-          "level": "soft",
-          "title": "关于股东减持计划的公告",
-          "date": "2026-09-10"
-        }
-      },
       "verdict": "ignore",
       "verdict_label": "忽略",
-      "dimensions": [],
-      "ignore_reason": "今日涨幅 -2.20%、主力净流出 500.00 万（占成交额 -6.2%），资金离场"
+      "version": "0.7.2"
     },
     {
       "amount": 100000000.0,
+      "announcements": [],
       "board_count": 2,
       "buy_date": null,
       "buy_price": null,
@@ -301,56 +145,56 @@
       "concepts": [
         "机器人"
       ],
+      "dimensions": [],
+      "facts": {
+        "announcement_count": 0,
+        "announcements_available": true,
+        "first_limit_up_time": null,
+        "flow_available": true,
+        "high_days": null,
+        "in_pool_today": false,
+        "limit_up_suc_rate": null,
+        "limit_up_type": null,
+        "main_net_amount": 2000000.0,
+        "open_num": null,
+        "pool_available": true,
+        "reason_type_today": null,
+        "risk_announcement": null,
+        "t_amount": 50000000.0,
+        "t_pct": -10.0,
+        "t_turnover": 6.0
+      },
+      "first_limit_up_time": null,
       "high_px": 11.0,
+      "ignore_reason": "今日涨幅 -10.00%，已退出涨停梯队（入选日 2026-09-09）",
+      "is_again_limit": null,
       "is_true_dragon": true,
+      "limit_up_type": null,
       "low_px": 10.0,
+      "main_net_amount": 2000000.0,
       "market_cap": 1000000000.0,
       "max_drawdown_5d": null,
       "max_return_5d": null,
       "max_return_hold_days": null,
       "name": "补涨C",
+      "open_num": null,
       "open_px": 10.0,
       "pct": 10.0,
       "rank": 1,
+      "reason_type": null,
       "report_text": "补涨C report",
       "review_status": "pending",
       "scan_id": "v2_20260909_5",
       "source": "v2",
       "trade_date": "2026-09-09",
       "turnover_rate": 8.0,
-      "version": "0.7.2",
-      "reason_type": null,
-      "limit_up_type": null,
-      "open_num": null,
-      "is_again_limit": null,
-      "first_limit_up_time": null,
-      "main_net_amount": 2000000.0,
-      "announcements": [],
-      "facts": {
-        "pool_available": true,
-        "in_pool_today": false,
-        "t_pct": -10.0,
-        "t_turnover": 6.0,
-        "t_amount": 50000000.0,
-        "open_num": null,
-        "high_days": null,
-        "reason_type_today": null,
-        "limit_up_type": null,
-        "first_limit_up_time": null,
-        "limit_up_suc_rate": null,
-        "main_net_amount": 2000000.0,
-        "flow_available": true,
-        "announcements_available": true,
-        "announcement_count": 0,
-        "risk_announcement": null
-      },
       "verdict": "ignore",
       "verdict_label": "忽略",
-      "dimensions": [],
-      "ignore_reason": "今日涨幅 -10.00%，已退出涨停梯队（入选日 2026-09-09）"
+      "version": "0.7.2"
     },
     {
       "amount": 100000000.0,
+      "announcements": [],
       "board_count": 2,
       "buy_date": null,
       "buy_price": null,
@@ -360,60 +204,67 @@
       "concepts": [
         "机器人"
       ],
+      "dimensions": [
+        "质量维度：五维综合 82.0（排名 1）；题材：机器人（今日主线第 1）",
+        "涨停维度：换手板 3天3板，首封 10:05:00，炸板 0 次，封板成功率 100%",
+        "资金维度：主力净流入 3000.00 万（占成交额 6.0%）"
+      ],
+      "facts": {
+        "announcement_count": 0,
+        "announcements_available": true,
+        "first_limit_up_time": "10:05:00",
+        "flow_available": true,
+        "high_days": "3天3板",
+        "in_pool_today": true,
+        "limit_up_suc_rate": 1.0,
+        "limit_up_type": "换手板",
+        "main_net_amount": 30000000.0,
+        "open_num": 0,
+        "pool_available": true,
+        "reason_type_today": "机器人",
+        "risk_announcement": null,
+        "t_amount": 500000000.0,
+        "t_pct": 10.0,
+        "t_turnover": 12.0
+      },
+      "first_limit_up_time": "10:05:00",
       "high_px": 11.0,
+      "ignore_reason": null,
+      "is_again_limit": true,
       "is_true_dragon": true,
+      "limit_up_type": "换手板",
       "low_px": 10.0,
+      "main_net_amount": 30000000.0,
       "market_cap": 1000000000.0,
       "max_drawdown_5d": null,
       "max_return_5d": null,
       "max_return_hold_days": null,
       "name": "龙头E",
+      "open_num": 0,
       "open_px": 10.0,
       "pct": 10.0,
       "rank": 1,
+      "reason_type": "机器人",
       "report_text": "龙头E report",
       "review_status": "pending",
       "scan_id": "v2_20260911_5",
       "source": "v2",
       "trade_date": "2026-09-11",
       "turnover_rate": 8.0,
-      "version": "0.7.2",
-      "reason_type": "机器人",
-      "limit_up_type": "换手板",
-      "open_num": 0,
-      "is_again_limit": true,
-      "first_limit_up_time": "10:05:00",
-      "main_net_amount": 30000000.0,
-      "announcements": [],
-      "facts": {
-        "pool_available": true,
-        "in_pool_today": true,
-        "t_pct": 10.0,
-        "t_turnover": 12.0,
-        "t_amount": 500000000.0,
-        "open_num": 0,
-        "high_days": "3天3板",
-        "reason_type_today": "机器人",
-        "limit_up_type": "换手板",
-        "first_limit_up_time": "10:05:00",
-        "limit_up_suc_rate": 1.0,
-        "main_net_amount": 30000000.0,
-        "flow_available": true,
-        "announcements_available": true,
-        "announcement_count": 0,
-        "risk_announcement": null
-      },
       "verdict": "strong",
       "verdict_label": "强烈建议",
-      "dimensions": [
-        "质量维度：五维综合 82.0（排名 1）；题材：机器人（今日主线第 1）",
-        "涨停维度：换手板 3天3板，首封 10:05:00，炸板 0 次，封板成功率 100%",
-        "资金维度：主力净流入 3000.00 万（占成交额 6.0%）"
-      ],
-      "ignore_reason": null
+      "version": "0.7.2"
     },
     {
       "amount": 100000000.0,
+      "announcements": [
+        {
+          "date": "2026-09-10",
+          "title": "立案调查公告",
+          "type": "立案",
+          "url": "u"
+        }
+      ],
       "board_count": 2,
       "buy_date": null,
       "buy_price": null,
@@ -423,109 +274,3620 @@
       "concepts": [
         "银行科技"
       ],
+      "dimensions": [],
+      "facts": {
+        "announcement_count": 1,
+        "announcements_available": true,
+        "first_limit_up_time": "09:30:00",
+        "flow_available": true,
+        "high_days": "2天2板",
+        "in_pool_today": true,
+        "limit_up_suc_rate": 0.8,
+        "limit_up_type": "T字板",
+        "main_net_amount": -1000000.0,
+        "open_num": 5,
+        "pool_available": true,
+        "reason_type_today": "银行科技",
+        "risk_announcement": {
+          "date": "2026-09-10",
+          "level": "hard",
+          "title": "立案调查公告"
+        },
+        "t_amount": 20000000.0,
+        "t_pct": 10.0,
+        "t_turnover": 4.0
+      },
+      "first_limit_up_time": "09:30:00",
       "high_px": 11.0,
+      "ignore_reason": "近 3 日公告「立案调查公告」，按公告风险规则忽略",
+      "is_again_limit": false,
       "is_true_dragon": true,
+      "limit_up_type": "T字板",
       "low_px": 10.0,
+      "main_net_amount": -1000000.0,
       "market_cap": 1000000000.0,
       "max_drawdown_5d": null,
       "max_return_5d": null,
       "max_return_hold_days": null,
       "name": "银行D",
+      "open_num": 5,
       "open_px": 10.0,
       "pct": 10.0,
       "rank": 2,
+      "reason_type": "银行科技",
       "report_text": "银行D report",
       "review_status": "pending",
       "scan_id": "v2_20260911_5",
       "source": "v2",
       "trade_date": "2026-09-11",
       "turnover_rate": 8.0,
-      "version": "0.7.2",
-      "reason_type": "银行科技",
-      "limit_up_type": "T字板",
-      "open_num": 5,
-      "is_again_limit": false,
-      "first_limit_up_time": "09:30:00",
-      "main_net_amount": -1000000.0,
-      "announcements": [
-        {
-          "date": "2026-09-10",
-          "title": "立案调查公告",
-          "type": "立案",
-          "url": "u"
-        }
-      ],
-      "facts": {
-        "pool_available": true,
-        "in_pool_today": true,
-        "t_pct": 10.0,
-        "t_turnover": 4.0,
-        "t_amount": 20000000.0,
-        "open_num": 5,
-        "high_days": "2天2板",
-        "reason_type_today": "银行科技",
-        "limit_up_type": "T字板",
-        "first_limit_up_time": "09:30:00",
-        "limit_up_suc_rate": 0.8,
-        "main_net_amount": -1000000.0,
-        "flow_available": true,
-        "announcements_available": true,
-        "announcement_count": 1,
-        "risk_announcement": {
-          "level": "hard",
-          "title": "立案调查公告",
-          "date": "2026-09-10"
-        }
-      },
       "verdict": "ignore",
       "verdict_label": "忽略",
-      "dimensions": [],
-      "ignore_reason": "近 3 日公告「立案调查公告」，按公告风险规则忽略"
+      "version": "0.7.2"
     }
   ],
   "dragon_source": {
-    "trade_date": "2026-09-11",
-    "scan_id": null,
-    "version": null,
     "count": 7,
-    "window_days": 5,
     "dates": [
       {
-        "trade_date": "2026-09-07",
+        "count": 1,
         "scan_id": "v2_20260907_5",
-        "version": "0.7.2",
-        "count": 1,
-        "status": "ok"
+        "status": "ok",
+        "trade_date": "2026-09-07",
+        "version": "0.7.2"
       },
       {
-        "trade_date": "2026-09-08",
+        "count": 2,
         "scan_id": "v2_20260908_5",
-        "version": "0.7.2",
-        "count": 2,
-        "status": "ok"
+        "status": "ok",
+        "trade_date": "2026-09-08",
+        "version": "0.7.2"
       },
       {
-        "trade_date": "2026-09-09",
+        "count": 1,
         "scan_id": "v2_20260909_5",
-        "version": "0.7.2",
-        "count": 1,
-        "status": "ok"
+        "status": "ok",
+        "trade_date": "2026-09-09",
+        "version": "0.7.2"
       },
       {
-        "trade_date": "2026-09-10",
+        "count": 1,
         "scan_id": "v2_20260910_5",
-        "version": "0.7.2",
-        "count": 1,
-        "status": "ok"
+        "status": "ok",
+        "trade_date": "2026-09-10",
+        "version": "0.7.2"
       },
       {
-        "trade_date": "2026-09-11",
-        "scan_id": "v2_20260911_5",
-        "version": "0.7.2",
         "count": 2,
-        "status": "ok"
+        "scan_id": "v2_20260911_5",
+        "status": "ok",
+        "trade_date": "2026-09-11",
+        "version": "0.7.2"
       }
     ],
-    "version_mixed": false
-  }
+    "scan_id": null,
+    "trade_date": "2026-09-11",
+    "version": null,
+    "version_mixed": false,
+    "window_days": 5
+  },
+  "macro": {
+    "as_of": "2026-09-11",
+    "available": true,
+    "degraded": [],
+    "instruments": {
+      "cn_a50": {
+        "caliber": "same_day_daily_bar",
+        "chg": -115.0,
+        "chg_bp": null,
+        "chg_bp_approx": null,
+        "chg_unit": "pct",
+        "code": "CNY0",
+        "key": "cn_a50",
+        "kind": "index",
+        "label": "富时A50期指",
+        "market": "INTL_INDEX",
+        "pct": -0.87,
+        "precision_note": null,
+        "prev_close": 13279.0,
+        "price": 13164.0,
+        "price_unit": "points",
+        "raw_date": "20260911",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-11",
+        "session_kind": "same_day",
+        "source": "tdx",
+        "stale": false
+      },
+      "gold": {
+        "caliber": "previous_daily_bar",
+        "chg": -26.4,
+        "chg_bp": null,
+        "chg_bp_approx": null,
+        "chg_unit": "pct",
+        "code": "GC00W",
+        "key": "gold",
+        "kind": "commodity",
+        "label": "COMEX金",
+        "market": "COMEX_FUTURES",
+        "pct": -0.63,
+        "precision_note": null,
+        "prev_close": 4186.7,
+        "price": 4160.3,
+        "price_unit": "usd_per_oz",
+        "raw_date": "20260910",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-10",
+        "session_kind": "previous_session",
+        "source": "tdx",
+        "stale": false
+      },
+      "jp_nikkei": {
+        "caliber": "same_day_daily_bar",
+        "chg": 390.0,
+        "chg_bp": null,
+        "chg_bp_approx": null,
+        "chg_unit": "pct",
+        "code": "NK0Y",
+        "key": "jp_nikkei",
+        "kind": "index",
+        "label": "日经225期指",
+        "market": "INTL_INDEX",
+        "pct": 0.61,
+        "precision_note": null,
+        "prev_close": 64360.0,
+        "price": 64750.0,
+        "price_unit": "points",
+        "raw_date": "20260911",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-11",
+        "session_kind": "same_day",
+        "source": "tdx",
+        "stale": false
+      },
+      "ust10y": {
+        "caliber": "previous_daily_bar",
+        "chg": 0.06,
+        "chg_bp": 6.0,
+        "chg_bp_approx": true,
+        "chg_unit": "bp",
+        "code": "8_ATY",
+        "key": "ust10y",
+        "kind": "yield",
+        "label": "美债10Y",
+        "market": "MACRO_INDICATOR",
+        "pct": null,
+        "precision_note": "TDX 两位小数日频快照，bp 为近似值",
+        "prev_close": 5.09,
+        "price": 5.15,
+        "price_unit": "pct",
+        "raw_date": "20260910",
+        "raw_time": "15:00:00",
+        "session_date": "2026-09-10",
+        "session_kind": "previous_session",
+        "source": "tdx",
+        "stale": false
+      }
+    },
+    "session": "same_day",
+    "sources": {
+      "cn_a50": "tdx",
+      "gold": "tdx",
+      "jp_nikkei": "tdx",
+      "ust10y": "tdx"
+    }
+  },
+  "main_boards": [
+    {
+      "board_name": "机器人",
+      "dragon_count": 2,
+      "high": "4天2板",
+      "limit_up_num": 23
+    },
+    {
+      "board_name": "AI算力",
+      "dragon_count": 1,
+      "high": "2天2板",
+      "limit_up_num": 12
+    },
+    {
+      "board_name": "银行科技",
+      "dragon_count": 1,
+      "high": "1天1板",
+      "limit_up_num": 5
+    }
+  ],
+  "review": {
+    "anchors": {
+      "negative": [],
+      "positive": [
+        {
+          "code": "600005",
+          "reason": "市场最高 3 板"
+        }
+      ],
+      "risk": {
+        "broken_rate": 0.0159,
+        "height_d3_change": null,
+        "limit_down_cnt": 3
+      }
+    },
+    "config_hash": "d464dae73323",
+    "config_version": "review_baseline_v1",
+    "degraded": [],
+    "enabled": true,
+    "mainlines": [
+      {
+        "board_name": "机器人",
+        "category": null,
+        "concentration": 0.3709677419354839,
+        "continuous_plate_num": null,
+        "evidence": [
+          "涨停 23 家",
+          "最高 4 板",
+          "集中度 37.1%"
+        ],
+        "high_num": 4,
+        "is_mainline": true,
+        "limit_up_num": 23,
+        "mainline_score": 89.6,
+        "members_sample": [
+          "600005",
+          "600003"
+        ],
+        "partial": true,
+        "rank": 1,
+        "role_map": {
+          "follower": "600005"
+        },
+        "state": "unknown",
+        "sub_scores": {
+          "C": null,
+          "H": 66.7,
+          "N": 100.0,
+          "S": 100.0
+        },
+        "unknown_reason": null,
+        "watchlist": false
+      },
+      {
+        "board_name": "AI算力",
+        "category": null,
+        "concentration": 0.1935483870967742,
+        "continuous_plate_num": null,
+        "evidence": [
+          "涨停 12 家",
+          "最高 2 板",
+          "集中度 19.4%"
+        ],
+        "high_num": 2,
+        "is_mainline": true,
+        "limit_up_num": 12,
+        "mainline_score": 79.2,
+        "members_sample": [
+          "600001"
+        ],
+        "partial": true,
+        "rank": 2,
+        "role_map": {},
+        "state": "unknown",
+        "sub_scores": {
+          "C": null,
+          "H": 33.3,
+          "N": 100.0,
+          "S": 100.0
+        },
+        "unknown_reason": null,
+        "watchlist": false
+      },
+      {
+        "board_name": "银行科技",
+        "category": null,
+        "concentration": 0.08064516129032258,
+        "continuous_plate_num": null,
+        "evidence": [
+          "涨停 5 家",
+          "最高 1 板",
+          "集中度 8.1%"
+        ],
+        "high_num": 1,
+        "is_mainline": true,
+        "limit_up_num": 5,
+        "mainline_score": 40.5,
+        "members_sample": [
+          "600004"
+        ],
+        "partial": true,
+        "rank": 3,
+        "role_map": {
+          "follower": "600004"
+        },
+        "state": "unknown",
+        "sub_scores": {
+          "C": null,
+          "H": 16.7,
+          "N": 50.0,
+          "S": 53.8
+        },
+        "unknown_reason": null,
+        "watchlist": false
+      }
+    ],
+    "market": {
+      "coeff": 1.0,
+      "evidence": [
+        "涨停 62 家 / 跌停 3 家",
+        "炸板率 1.6%",
+        "最高 4 板",
+        "昨日涨停溢价 +5.7%",
+        "晋级率 66.7%",
+        "成交额 0 亿"
+      ],
+      "inputs": {
+        "broken_rate": 0.0159,
+        "limit_down_cnt": 3,
+        "limit_up_cnt": 62,
+        "max_board_height": 4,
+        "promotion_rate": 0.667,
+        "total_amount": 31048500.0,
+        "yesterday_premium_pct": 5.67
+      },
+      "missing_inputs": [],
+      "partial": false,
+      "prev_score": null,
+      "prev_state": null,
+      "score": 79.2,
+      "score_change": null,
+      "state": "strong",
+      "sub_scores": {
+        "BRK": 100.0,
+        "HGT": 70.0,
+        "LD": 94.0,
+        "LIQ": 10.0,
+        "LU": 65.1,
+        "PRE": 100.0,
+        "PRO": 100.0
+      },
+      "unknown_reason": null
+    },
+    "pool": {
+      "count": 5,
+      "excluded": {
+        "bse": 0,
+        "new": 0,
+        "st": 0,
+        "suspended": 0
+      },
+      "truncated": false
+    },
+    "portfolio": {
+      "sum_pct": 4.0,
+      "warning": null
+    },
+    "review_version": "review_v1"
+  },
+  "review_candidates": [
+    {
+      "code": "600005",
+      "confidence": 1.0,
+      "contributions": [
+        {
+          "dim": "D1",
+          "dim_score": 58.1,
+          "points": 17.44,
+          "sub_factors": [
+            {
+              "key": "H",
+              "normalized": 50.0,
+              "points": 6.0,
+              "raw": 3.0
+            },
+            {
+              "key": "L",
+              "normalized": 100.0,
+              "points": 10.5,
+              "raw": 1.0
+            },
+            {
+              "key": "B",
+              "normalized": 12.5,
+              "points": 0.94,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.3
+        },
+        {
+          "dim": "D2",
+          "dim_score": 81.2,
+          "points": 16.25,
+          "sub_factors": [
+            {
+              "key": "M1",
+              "normalized": 100.0,
+              "points": 12.5,
+              "raw": 1.0
+            },
+            {
+              "key": "M2",
+              "normalized": 50.0,
+              "points": 3.75,
+              "raw": 1.0
+            },
+            {
+              "key": "M3",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.2
+        },
+        {
+          "dim": "D3",
+          "dim_score": 79.6,
+          "points": 15.92,
+          "sub_factors": [
+            {
+              "key": "T",
+              "normalized": 65.0,
+              "points": 7.58,
+              "raw": "10:05:00"
+            },
+            {
+              "key": "O",
+              "normalized": 100.0,
+              "points": 8.33,
+              "raw": 0.0
+            },
+            {
+              "key": "S",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            },
+            {
+              "key": "R",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.2
+        },
+        {
+          "dim": "D4",
+          "dim_score": 65.8,
+          "points": 13.15,
+          "sub_factors": [
+            {
+              "key": "F",
+              "normalized": 80.0,
+              "points": 6.4,
+              "raw": 0.06
+            },
+            {
+              "key": "V",
+              "normalized": 25.0,
+              "points": 1.75,
+              "raw": 500000000.0
+            },
+            {
+              "key": "Q",
+              "normalized": 100.0,
+              "points": 5.0,
+              "raw": 12.0
+            }
+          ],
+          "weight_norm": 0.2
+        },
+        {
+          "dim": "D5",
+          "dim_score": 100.0,
+          "points": 5.0,
+          "sub_factors": [
+            {
+              "key": "P",
+              "normalized": 100.0,
+              "points": 2.0,
+              "raw": 0.81
+            },
+            {
+              "key": "C",
+              "normalized": 100.0,
+              "points": 1.5,
+              "raw": 0.0165
+            },
+            {
+              "key": "X",
+              "normalized": 100.0,
+              "points": 1.5,
+              "raw": 0.0099
+            }
+          ],
+          "weight_norm": 0.05
+        },
+        {
+          "dim": "D6",
+          "dim_score": 50.0,
+          "points": 2.5,
+          "sub_factors": [
+            {
+              "key": "S1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "S2",
+              "normalized": 100.0,
+              "points": 2.5,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.05
+        }
+      ],
+      "coverage": 1.0,
+      "dimensions": {
+        "D1": {
+          "score": 58.1,
+          "sub": {
+            "B": 12.5,
+            "H": 50.0,
+            "L": 100.0
+          },
+          "weight": 0.3
+        },
+        "D2": {
+          "score": 81.2,
+          "sub": {
+            "M1": 100.0,
+            "M2": 50.0,
+            "M3": null
+          },
+          "weight": 0.2
+        },
+        "D3": {
+          "score": 79.6,
+          "sub": {
+            "O": 100.0,
+            "R": null,
+            "S": null,
+            "S_raw": null,
+            "T": 65.0
+          },
+          "weight": 0.2
+        },
+        "D4": {
+          "score": 65.8,
+          "sub": {
+            "F": 80.0,
+            "Q": 100.0,
+            "V": 25.0
+          },
+          "weight": 0.2
+        },
+        "D5": {
+          "score": 100.0,
+          "sub": {
+            "C": 100.0,
+            "P": 100.0,
+            "X": 100.0
+          },
+          "weight": 0.05
+        },
+        "D6": {
+          "score": 50.0,
+          "sub": {
+            "S1": 0.0,
+            "S2": 100.0
+          },
+          "weight": 0.05
+        }
+      },
+      "eligibility": "eligible",
+      "expectations": {
+        "gap_high": 7.0,
+        "gap_low": 3.0,
+        "ratio_low": 1.2,
+        "seal_by": "10:00"
+      },
+      "gate_trace": [
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G0_data",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "risk_level=none",
+          "evaluated": true,
+          "gate": "G1_hard_risk",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G2_suspended",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G3a_liquidity",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "liq_coef=1.0",
+          "evaluated": true,
+          "gate": "G3b_liquidity",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G4_mainline",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G5_score",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G6_grade",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G7_confidence",
+          "passed": true,
+          "reason_code": null
+        }
+      ],
+      "legacy": {
+        "composite_score": 82.0,
+        "in_candidates": true,
+        "verdict": "strong"
+      },
+      "mainline": {
+        "board_name": "机器人",
+        "rank": 1,
+        "state": "unknown"
+      },
+      "missing_dims": [],
+      "name": "龙头E",
+      "position_basis": [
+        {
+          "factor": "grade_base",
+          "value": 4.0
+        },
+        {
+          "factor": "market_coef",
+          "value": 1.0
+        },
+        {
+          "factor": "confidence_coef",
+          "value": 1.0
+        },
+        {
+          "factor": "risk_coef",
+          "value": 1.0
+        },
+        {
+          "factor": "liq_coef",
+          "value": 1.0
+        },
+        {
+          "factor": "one_word_coef",
+          "value": 1.0
+        },
+        {
+          "factor": "raw_pct",
+          "value": 4.0
+        },
+        {
+          "factor": "role_cap",
+          "value": 15.0
+        }
+      ],
+      "position_pct": 4.0,
+      "reason_code": null,
+      "review_grade": "B",
+      "review_score": 70.3,
+      "risk_level": "none",
+      "role": "leader",
+      "role_basis": "板块内高度最高 3 板",
+      "role_competitors": [
+        "vanguard"
+      ],
+      "role_confidence": "high",
+      "top_drags": [
+        {
+          "dim": "D6",
+          "points": 2.5,
+          "reason": "持续性/股性 50.0（贡献 2.50 分）"
+        },
+        {
+          "dim": "D5",
+          "points": 5.0,
+          "reason": "筹码/位置 100.0（贡献 5.00 分）"
+        }
+      ],
+      "top_drivers": [
+        {
+          "dim": "D1",
+          "points": 17.44,
+          "reason": "龙头质量 58.1（贡献 17.44 分）"
+        },
+        {
+          "dim": "D2",
+          "points": 16.25,
+          "reason": "主线地位 81.2（贡献 16.25 分）"
+        }
+      ],
+      "trade_date": "2026-09-11",
+      "warnings": [],
+      "weight_profile": "leader"
+    },
+    {
+      "code": "600004",
+      "confidence": 1.0,
+      "contributions": [
+        {
+          "dim": "D1",
+          "dim_score": 51.5,
+          "points": 15.44,
+          "sub_factors": [
+            {
+              "key": "H",
+              "normalized": 33.3,
+              "points": 4.0,
+              "raw": 2.0
+            },
+            {
+              "key": "L",
+              "normalized": 100.0,
+              "points": 10.5,
+              "raw": 1.0
+            },
+            {
+              "key": "B",
+              "normalized": 12.5,
+              "points": 0.94,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.3
+        },
+        {
+          "dim": "D2",
+          "dim_score": 59.4,
+          "points": 11.88,
+          "sub_factors": [
+            {
+              "key": "M1",
+              "normalized": 65.0,
+              "points": 8.12,
+              "raw": 3.0
+            },
+            {
+              "key": "M2",
+              "normalized": 50.0,
+              "points": 3.75,
+              "raw": 1.0
+            },
+            {
+              "key": "M3",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.2
+        },
+        {
+          "dim": "D3",
+          "dim_score": 66.7,
+          "points": 13.33,
+          "sub_factors": [
+            {
+              "key": "T",
+              "normalized": 100.0,
+              "points": 11.67,
+              "raw": "09:30:00"
+            },
+            {
+              "key": "O",
+              "normalized": 20.0,
+              "points": 1.67,
+              "raw": 5.0
+            },
+            {
+              "key": "S",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            },
+            {
+              "key": "R",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.2
+        },
+        {
+          "dim": "D4",
+          "dim_score": 31.2,
+          "points": 6.24,
+          "sub_factors": [
+            {
+              "key": "F",
+              "normalized": 25.0,
+              "points": 2.0,
+              "raw": -0.05
+            },
+            {
+              "key": "V",
+              "normalized": 1.0,
+              "points": 0.07,
+              "raw": 20000000.0
+            },
+            {
+              "key": "Q",
+              "normalized": 83.3,
+              "points": 4.17,
+              "raw": 4.0
+            }
+          ],
+          "weight_norm": 0.2
+        },
+        {
+          "dim": "D5",
+          "dim_score": 100.0,
+          "points": 5.0,
+          "sub_factors": [
+            {
+              "key": "P",
+              "normalized": 100.0,
+              "points": 2.0,
+              "raw": 0.84
+            },
+            {
+              "key": "C",
+              "normalized": 100.0,
+              "points": 1.5,
+              "raw": 0.0172
+            },
+            {
+              "key": "X",
+              "normalized": 100.0,
+              "points": 1.5,
+              "raw": 0.0103
+            }
+          ],
+          "weight_norm": 0.05
+        },
+        {
+          "dim": "D6",
+          "dim_score": 50.0,
+          "points": 2.5,
+          "sub_factors": [
+            {
+              "key": "S1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "S2",
+              "normalized": 100.0,
+              "points": 2.5,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.05
+        }
+      ],
+      "coverage": 1.0,
+      "dimensions": {
+        "D1": {
+          "score": 51.5,
+          "sub": {
+            "B": 12.5,
+            "H": 33.3,
+            "L": 100.0
+          },
+          "weight": 0.3
+        },
+        "D2": {
+          "score": 59.4,
+          "sub": {
+            "M1": 65.0,
+            "M2": 50.0,
+            "M3": null
+          },
+          "weight": 0.2
+        },
+        "D3": {
+          "score": 66.7,
+          "sub": {
+            "O": 20.0,
+            "R": null,
+            "S": null,
+            "S_raw": null,
+            "T": 100.0
+          },
+          "weight": 0.2
+        },
+        "D4": {
+          "score": 31.2,
+          "sub": {
+            "F": 25.0,
+            "Q": 83.3,
+            "V": 1.0
+          },
+          "weight": 0.2
+        },
+        "D5": {
+          "score": 100.0,
+          "sub": {
+            "C": 100.0,
+            "P": 100.0,
+            "X": 100.0
+          },
+          "weight": 0.05
+        },
+        "D6": {
+          "score": 50.0,
+          "sub": {
+            "S1": 0.0,
+            "S2": 100.0
+          },
+          "weight": 0.05
+        }
+      },
+      "eligibility": "not_qualified",
+      "expectations": {
+        "gap_high": 7.0,
+        "gap_low": 3.0,
+        "ratio_low": 1.2,
+        "seal_by": "10:00"
+      },
+      "gate_trace": [
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G0_data",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "hard_risk_announcement",
+          "evaluated": true,
+          "gate": "G1_hard_risk",
+          "passed": false,
+          "reason_code": "hard_risk"
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G2_suspended",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G3a_liquidity",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G3b_liquidity",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G4_mainline",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G5_score",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G6_grade",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G7_confidence",
+          "passed": null,
+          "reason_code": null
+        }
+      ],
+      "legacy": {
+        "composite_score": 40.0,
+        "in_candidates": true,
+        "verdict": "ignore"
+      },
+      "mainline": {
+        "board_name": "银行科技",
+        "rank": 3,
+        "state": "unknown"
+      },
+      "missing_dims": [],
+      "name": "银行D",
+      "position_basis": [],
+      "position_pct": 0.0,
+      "reason_code": "hard_risk",
+      "review_grade": "C",
+      "review_score": 54.4,
+      "risk_level": "hard",
+      "role": "leader",
+      "role_basis": "板块内高度最高 2 板",
+      "role_competitors": [
+        "vanguard"
+      ],
+      "role_confidence": "high",
+      "top_drags": [
+        {
+          "dim": "D6",
+          "points": 2.5,
+          "reason": "持续性/股性 50.0（贡献 2.50 分）"
+        },
+        {
+          "dim": "D5",
+          "points": 5.0,
+          "reason": "筹码/位置 100.0（贡献 5.00 分）"
+        }
+      ],
+      "top_drivers": [
+        {
+          "dim": "D1",
+          "points": 15.44,
+          "reason": "龙头质量 51.5（贡献 15.44 分）"
+        },
+        {
+          "dim": "D3",
+          "points": 13.33,
+          "reason": "封板质量 66.7（贡献 13.33 分）"
+        }
+      ],
+      "trade_date": "2026-09-11",
+      "warnings": [],
+      "weight_profile": "leader"
+    },
+    {
+      "code": "600001",
+      "confidence": 0.55,
+      "contributions": [
+        {
+          "dim": "D2",
+          "dim_score": 0.0,
+          "points": 0.0,
+          "sub_factors": [
+            {
+              "key": "M1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "M2",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "M3",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.3636
+        },
+        {
+          "dim": "D4",
+          "dim_score": 66.8,
+          "points": 24.27,
+          "sub_factors": [
+            {
+              "key": "F",
+              "normalized": 100.0,
+              "points": 14.55,
+              "raw": 0.123456
+            },
+            {
+              "key": "V",
+              "normalized": 5.0,
+              "points": 0.64,
+              "raw": 100000000.0
+            },
+            {
+              "key": "Q",
+              "normalized": 100.0,
+              "points": 9.09,
+              "raw": 8.0
+            }
+          ],
+          "weight_norm": 0.3636
+        },
+        {
+          "dim": "D5",
+          "dim_score": 100.0,
+          "points": 18.18,
+          "sub_factors": [
+            {
+              "key": "P",
+              "normalized": 100.0,
+              "points": 7.27,
+              "raw": 0.97
+            },
+            {
+              "key": "C",
+              "normalized": 100.0,
+              "points": 5.45,
+              "raw": 0.0198
+            },
+            {
+              "key": "X",
+              "normalized": 100.0,
+              "points": 5.45,
+              "raw": 0.0119
+            }
+          ],
+          "weight_norm": 0.1818
+        },
+        {
+          "dim": "D6",
+          "dim_score": 50.0,
+          "points": 4.55,
+          "sub_factors": [
+            {
+              "key": "S1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "S2",
+              "normalized": 100.0,
+              "points": 4.55,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.0909
+        }
+      ],
+      "coverage": 0.55,
+      "dimensions": {
+        "D1": {
+          "score": null,
+          "sub": {
+            "B": null,
+            "H": null,
+            "L": null
+          },
+          "weight": 0.2
+        },
+        "D2": {
+          "score": 0.0,
+          "sub": {
+            "M1": 0.0,
+            "M2": 0.0,
+            "M3": null
+          },
+          "weight": 0.2
+        },
+        "D3": {
+          "score": null,
+          "sub": {
+            "O": null,
+            "R": null,
+            "S": null,
+            "S_raw": null,
+            "T": null
+          },
+          "weight": 0.25
+        },
+        "D4": {
+          "score": 66.8,
+          "sub": {
+            "F": 100.0,
+            "Q": 100.0,
+            "V": 5.0
+          },
+          "weight": 0.2
+        },
+        "D5": {
+          "score": 100.0,
+          "sub": {
+            "C": 100.0,
+            "P": 100.0,
+            "X": 100.0
+          },
+          "weight": 0.1
+        },
+        "D6": {
+          "score": 50.0,
+          "sub": {
+            "S1": 0.0,
+            "S2": 100.0
+          },
+          "weight": 0.05
+        }
+      },
+      "eligibility": "not_qualified",
+      "expectations": null,
+      "gate_trace": [
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G0_data",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "risk_level=none",
+          "evaluated": true,
+          "gate": "G1_hard_risk",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G2_suspended",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "amount=100000000",
+          "evaluated": true,
+          "gate": "G3a_liquidity",
+          "passed": false,
+          "reason_code": "illiquid"
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G3b_liquidity",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G4_mainline",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G5_score",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G6_grade",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G7_confidence",
+          "passed": null,
+          "reason_code": null
+        }
+      ],
+      "legacy": {
+        "composite_score": 88.0,
+        "in_candidates": true,
+        "verdict": "light"
+      },
+      "mainline": null,
+      "missing_dims": [
+        "D1",
+        "D3"
+      ],
+      "name": "龙头A",
+      "position_basis": [],
+      "position_pct": 0.0,
+      "reason_code": "illiquid",
+      "review_grade": "D",
+      "review_score": 47.0,
+      "risk_level": "none",
+      "role": null,
+      "role_basis": "非涨停池标的，不参与角色竞争",
+      "role_competitors": [],
+      "role_confidence": "unknown",
+      "top_drags": [
+        {
+          "dim": "D2",
+          "points": 0.0,
+          "reason": "主线地位 0.0（贡献 0.00 分）"
+        },
+        {
+          "dim": "D6",
+          "points": 4.55,
+          "reason": "持续性/股性 50.0（贡献 4.55 分）"
+        }
+      ],
+      "top_drivers": [
+        {
+          "dim": "D4",
+          "points": 24.27,
+          "reason": "资金与流动性 66.8（贡献 24.27 分）"
+        },
+        {
+          "dim": "D5",
+          "points": 18.18,
+          "reason": "筹码/位置 100.0（贡献 18.18 分）"
+        }
+      ],
+      "trade_date": "2026-09-11",
+      "warnings": [],
+      "weight_profile": "diagnostic_non_mainline"
+    },
+    {
+      "code": "600003",
+      "confidence": 0.55,
+      "contributions": [
+        {
+          "dim": "D2",
+          "dim_score": 0.0,
+          "points": 0.0,
+          "sub_factors": [
+            {
+              "key": "M1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "M2",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "M3",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.3636
+        },
+        {
+          "dim": "D4",
+          "dim_score": 53.9,
+          "points": 19.59,
+          "sub_factors": [
+            {
+              "key": "F",
+              "normalized": 70.0,
+              "points": 10.18,
+              "raw": 0.04
+            },
+            {
+              "key": "V",
+              "normalized": 2.5,
+              "points": 0.32,
+              "raw": 50000000.0
+            },
+            {
+              "key": "Q",
+              "normalized": 100.0,
+              "points": 9.09,
+              "raw": 6.0
+            }
+          ],
+          "weight_norm": 0.3636
+        },
+        {
+          "dim": "D5",
+          "dim_score": 100.0,
+          "points": 18.18,
+          "sub_factors": [
+            {
+              "key": "P",
+              "normalized": 100.0,
+              "points": 7.27,
+              "raw": 0.88
+            },
+            {
+              "key": "C",
+              "normalized": 100.0,
+              "points": 5.45,
+              "raw": 0.018
+            },
+            {
+              "key": "X",
+              "normalized": 100.0,
+              "points": 5.45,
+              "raw": 0.0108
+            }
+          ],
+          "weight_norm": 0.1818
+        },
+        {
+          "dim": "D6",
+          "dim_score": 50.0,
+          "points": 4.55,
+          "sub_factors": [
+            {
+              "key": "S1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "S2",
+              "normalized": 100.0,
+              "points": 4.55,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.0909
+        }
+      ],
+      "coverage": 0.55,
+      "dimensions": {
+        "D1": {
+          "score": null,
+          "sub": {
+            "B": null,
+            "H": null,
+            "L": null
+          },
+          "weight": 0.2
+        },
+        "D2": {
+          "score": 0.0,
+          "sub": {
+            "M1": 0.0,
+            "M2": 0.0,
+            "M3": null
+          },
+          "weight": 0.2
+        },
+        "D3": {
+          "score": null,
+          "sub": {
+            "O": null,
+            "R": null,
+            "S": null,
+            "S_raw": null,
+            "T": null
+          },
+          "weight": 0.25
+        },
+        "D4": {
+          "score": 53.9,
+          "sub": {
+            "F": 70.0,
+            "Q": 100.0,
+            "V": 2.5
+          },
+          "weight": 0.2
+        },
+        "D5": {
+          "score": 100.0,
+          "sub": {
+            "C": 100.0,
+            "P": 100.0,
+            "X": 100.0
+          },
+          "weight": 0.1
+        },
+        "D6": {
+          "score": 50.0,
+          "sub": {
+            "S1": 0.0,
+            "S2": 100.0
+          },
+          "weight": 0.05
+        }
+      },
+      "eligibility": "not_qualified",
+      "expectations": null,
+      "gate_trace": [
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G0_data",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "risk_level=none",
+          "evaluated": true,
+          "gate": "G1_hard_risk",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G2_suspended",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "amount=50000000",
+          "evaluated": true,
+          "gate": "G3a_liquidity",
+          "passed": false,
+          "reason_code": "illiquid"
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G3b_liquidity",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G4_mainline",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G5_score",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G6_grade",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G7_confidence",
+          "passed": null,
+          "reason_code": null
+        }
+      ],
+      "legacy": {
+        "composite_score": 90.0,
+        "in_candidates": true,
+        "verdict": "ignore"
+      },
+      "mainline": null,
+      "missing_dims": [
+        "D1",
+        "D3"
+      ],
+      "name": "补涨C",
+      "position_basis": [],
+      "position_pct": 0.0,
+      "reason_code": "illiquid",
+      "review_grade": "D",
+      "review_score": 42.3,
+      "risk_level": "none",
+      "role": null,
+      "role_basis": "非涨停池标的，不参与角色竞争",
+      "role_competitors": [],
+      "role_confidence": "unknown",
+      "top_drags": [
+        {
+          "dim": "D2",
+          "points": 0.0,
+          "reason": "主线地位 0.0（贡献 0.00 分）"
+        },
+        {
+          "dim": "D6",
+          "points": 4.55,
+          "reason": "持续性/股性 50.0（贡献 4.55 分）"
+        }
+      ],
+      "top_drivers": [
+        {
+          "dim": "D4",
+          "points": 19.59,
+          "reason": "资金与流动性 53.9（贡献 19.59 分）"
+        },
+        {
+          "dim": "D5",
+          "points": 18.18,
+          "reason": "筹码/位置 100.0（贡献 18.18 分）"
+        }
+      ],
+      "trade_date": "2026-09-11",
+      "warnings": [],
+      "weight_profile": "diagnostic_non_mainline"
+    },
+    {
+      "code": "600002",
+      "confidence": 0.55,
+      "contributions": [
+        {
+          "dim": "D2",
+          "dim_score": 0.0,
+          "points": 0.0,
+          "sub_factors": [
+            {
+              "key": "M1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "M2",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "M3",
+              "normalized": null,
+              "points": null,
+              "raw": null
+            }
+          ],
+          "weight_norm": 0.3636
+        },
+        {
+          "dim": "D4",
+          "dim_score": 33.9,
+          "points": 12.33,
+          "sub_factors": [
+            {
+              "key": "F",
+              "normalized": 18.8,
+              "points": 2.73,
+              "raw": -0.0625
+            },
+            {
+              "key": "V",
+              "normalized": 4.0,
+              "points": 0.51,
+              "raw": 80000000.0
+            },
+            {
+              "key": "Q",
+              "normalized": 100.0,
+              "points": 9.09,
+              "raw": 5.0
+            }
+          ],
+          "weight_norm": 0.3636
+        },
+        {
+          "dim": "D5",
+          "dim_score": 100.0,
+          "points": 18.18,
+          "sub_factors": [
+            {
+              "key": "P",
+              "normalized": 100.0,
+              "points": 7.27,
+              "raw": 0.92
+            },
+            {
+              "key": "C",
+              "normalized": 100.0,
+              "points": 5.45,
+              "raw": 0.0188
+            },
+            {
+              "key": "X",
+              "normalized": 100.0,
+              "points": 5.45,
+              "raw": 0.0113
+            }
+          ],
+          "weight_norm": 0.1818
+        },
+        {
+          "dim": "D6",
+          "dim_score": 50.0,
+          "points": 4.55,
+          "sub_factors": [
+            {
+              "key": "S1",
+              "normalized": 0.0,
+              "points": 0.0,
+              "raw": 0.0
+            },
+            {
+              "key": "S2",
+              "normalized": 100.0,
+              "points": 4.55,
+              "raw": 1.0
+            }
+          ],
+          "weight_norm": 0.0909
+        }
+      ],
+      "coverage": 0.55,
+      "dimensions": {
+        "D1": {
+          "score": null,
+          "sub": {
+            "B": null,
+            "H": null,
+            "L": null
+          },
+          "weight": 0.2
+        },
+        "D2": {
+          "score": 0.0,
+          "sub": {
+            "M1": 0.0,
+            "M2": 0.0,
+            "M3": null
+          },
+          "weight": 0.2
+        },
+        "D3": {
+          "score": null,
+          "sub": {
+            "O": null,
+            "R": null,
+            "S": null,
+            "S_raw": null,
+            "T": null
+          },
+          "weight": 0.25
+        },
+        "D4": {
+          "score": 33.9,
+          "sub": {
+            "F": 18.8,
+            "Q": 100.0,
+            "V": 4.0
+          },
+          "weight": 0.2
+        },
+        "D5": {
+          "score": 100.0,
+          "sub": {
+            "C": 100.0,
+            "P": 100.0,
+            "X": 100.0
+          },
+          "weight": 0.1
+        },
+        "D6": {
+          "score": 50.0,
+          "sub": {
+            "S1": 0.0,
+            "S2": 100.0
+          },
+          "weight": 0.05
+        }
+      },
+      "eligibility": "not_qualified",
+      "expectations": null,
+      "gate_trace": [
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G0_data",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "risk_level=soft",
+          "evaluated": true,
+          "gate": "G1_hard_risk",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": true,
+          "gate": "G2_suspended",
+          "passed": true,
+          "reason_code": null
+        },
+        {
+          "detail": "amount=80000000",
+          "evaluated": true,
+          "gate": "G3a_liquidity",
+          "passed": false,
+          "reason_code": "illiquid"
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G3b_liquidity",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G4_mainline",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G5_score",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G6_grade",
+          "passed": null,
+          "reason_code": null
+        },
+        {
+          "detail": null,
+          "evaluated": false,
+          "gate": "G7_confidence",
+          "passed": null,
+          "reason_code": null
+        }
+      ],
+      "legacy": {
+        "composite_score": 62.0,
+        "in_candidates": true,
+        "verdict": "ignore"
+      },
+      "mainline": null,
+      "missing_dims": [
+        "D1",
+        "D3"
+      ],
+      "name": "跟风B",
+      "position_basis": [],
+      "position_pct": 0.0,
+      "reason_code": "illiquid",
+      "review_grade": "D",
+      "review_score": 35.1,
+      "risk_level": "soft",
+      "role": null,
+      "role_basis": "非涨停池标的，不参与角色竞争",
+      "role_competitors": [],
+      "role_confidence": "unknown",
+      "top_drags": [
+        {
+          "dim": "D2",
+          "points": 0.0,
+          "reason": "主线地位 0.0（贡献 0.00 分）"
+        },
+        {
+          "dim": "D6",
+          "points": 4.55,
+          "reason": "持续性/股性 50.0（贡献 4.55 分）"
+        }
+      ],
+      "top_drivers": [
+        {
+          "dim": "D5",
+          "points": 18.18,
+          "reason": "筹码/位置 100.0（贡献 18.18 分）"
+        },
+        {
+          "dim": "D4",
+          "points": 12.33,
+          "reason": "资金与流动性 33.9（贡献 12.33 分）"
+        }
+      ],
+      "trade_date": "2026-09-11",
+      "warnings": [],
+      "weight_profile": "diagnostic_non_mainline"
+    }
+  ],
+  "sentiment": {
+    "broken_cnt": 1,
+    "broken_rate": 0.016,
+    "degraded": [],
+    "down_cnt": 953,
+    "factor_sources": {
+      "limit_up_cnt_ths": "ths_limit_up_pool",
+      "promotion_rate": "ths_limit_up_pool(high_days) / fg(T-1)"
+    },
+    "lhb_cnt": 2,
+    "limit_down_cnt": 3,
+    "limit_down_cnt_t1_fg": 2,
+    "limit_down_cnt_ths": null,
+    "limit_up_cnt": 62,
+    "limit_up_cnt_t1_fg": 3,
+    "limit_up_cnt_ths": 62,
+    "max_board_height": 4,
+    "position_advice": "正常",
+    "position_input": {
+      "limit_down_cnt": "breadth_t",
+      "limit_up_cnt": "ths_t"
+    },
+    "position_pct": 0.5,
+    "promotion_rate": 0.667,
+    "temperature_score": 95.4,
+    "total_amount": 31048500,
+    "up_cnt": 2102,
+    "yesterday_premium_pct": 5.67
+  },
+  "strategy_context": {
+    "context_version": "sc_v1",
+    "data_quality": {
+      "confidence": {
+        "avg": 0.73,
+        "max": 1.0,
+        "min": 0.55
+      },
+      "degraded": [],
+      "missing": []
+    },
+    "disclaimer": "量化为复盘与条件化预案，不构成投资建议；阈值均为待验证基线。",
+    "enums": {
+      "action": [
+        "execute_plan",
+        "execute_partial",
+        "downgrade_half",
+        "wait_pullback",
+        "cancel_entry",
+        "exit_via_sell_rules",
+        "observe_only",
+        "wait"
+      ],
+      "reason_code": [
+        "data_insufficient",
+        "hard_risk",
+        "suspended",
+        "illiquid",
+        "not_mainline",
+        "score_below_floor",
+        "grade_no_position",
+        "confidence_insufficient",
+        "position_below_min_unit",
+        "compute_error"
+      ],
+      "role": [
+        "leader",
+        "vanguard",
+        "mainstay",
+        "capacity",
+        "follower"
+      ],
+      "state": [
+        "strong",
+        "neutral",
+        "weak",
+        "ice",
+        "unknown"
+      ]
+    },
+    "feedback_plans": [
+      {
+        "allowed_actions": [
+          "execute_plan",
+          "execute_partial"
+        ],
+        "code": "600005",
+        "conditions": [
+          {
+            "allowed_actions": [
+              "execute_plan",
+              "execute_partial"
+            ],
+            "requires": [
+              "gap>=gap_low",
+              "ratio>=ratio_low",
+              "sealed_by<=seal_by_or_close_is_strong"
+            ],
+            "state": "confirmed"
+          },
+          {
+            "allowed_actions": [
+              "downgrade_half",
+              "wait_pullback"
+            ],
+            "requires": [
+              "gap<gap_low_or_ratio<ratio_low",
+              "not_invalidated"
+            ],
+            "state": "weakened"
+          },
+          {
+            "allowed_actions": [
+              "cancel_entry",
+              "exit_via_sell_rules"
+            ],
+            "requires": [
+              "gap<gap_low-margin",
+              "or_close_pct_below_floor",
+              "or_close_below_prev_close",
+              "or_broken_count>=min",
+              "or_mainline_dropped_out_top3"
+            ],
+            "state": "invalidated"
+          },
+          {
+            "allowed_actions": [
+              "observe_only"
+            ],
+            "requires": [
+              "auction_or_t1_quote_missing",
+              "or_expectations_missing"
+            ],
+            "state": "unknown"
+          }
+        ],
+        "expected": {
+          "gap_high": 7.0,
+          "gap_low": 3.0,
+          "ratio_low": 1.2,
+          "seal_by": "10:00"
+        },
+        "position_pct": 4.0,
+        "role": "leader",
+        "unknown_reason": null
+      },
+      {
+        "allowed_actions": [
+          "execute_plan",
+          "execute_partial"
+        ],
+        "code": "600004",
+        "conditions": [
+          {
+            "allowed_actions": [
+              "execute_plan",
+              "execute_partial"
+            ],
+            "requires": [
+              "gap>=gap_low",
+              "ratio>=ratio_low",
+              "sealed_by<=seal_by_or_close_is_strong"
+            ],
+            "state": "confirmed"
+          },
+          {
+            "allowed_actions": [
+              "downgrade_half",
+              "wait_pullback"
+            ],
+            "requires": [
+              "gap<gap_low_or_ratio<ratio_low",
+              "not_invalidated"
+            ],
+            "state": "weakened"
+          },
+          {
+            "allowed_actions": [
+              "cancel_entry",
+              "exit_via_sell_rules"
+            ],
+            "requires": [
+              "gap<gap_low-margin",
+              "or_close_pct_below_floor",
+              "or_close_below_prev_close",
+              "or_broken_count>=min",
+              "or_mainline_dropped_out_top3"
+            ],
+            "state": "invalidated"
+          },
+          {
+            "allowed_actions": [
+              "observe_only"
+            ],
+            "requires": [
+              "auction_or_t1_quote_missing",
+              "or_expectations_missing"
+            ],
+            "state": "unknown"
+          }
+        ],
+        "expected": {
+          "gap_high": 7.0,
+          "gap_low": 3.0,
+          "ratio_low": 1.2,
+          "seal_by": "10:00"
+        },
+        "position_pct": 0.0,
+        "role": "leader",
+        "unknown_reason": null
+      },
+      {
+        "allowed_actions": [
+          "observe_only"
+        ],
+        "code": "600001",
+        "conditions": [],
+        "expected": null,
+        "position_pct": 0.0,
+        "role": null,
+        "unknown_reason": "expectations_unavailable"
+      },
+      {
+        "allowed_actions": [
+          "observe_only"
+        ],
+        "code": "600003",
+        "conditions": [],
+        "expected": null,
+        "position_pct": 0.0,
+        "role": null,
+        "unknown_reason": "expectations_unavailable"
+      },
+      {
+        "allowed_actions": [
+          "observe_only"
+        ],
+        "code": "600002",
+        "conditions": [],
+        "expected": null,
+        "position_pct": 0.0,
+        "role": null,
+        "unknown_reason": "expectations_unavailable"
+      }
+    ],
+    "frozen_at": "2026-09-11T16:40:00+08:00",
+    "mainlines": [
+      {
+        "board_name": "机器人",
+        "evidence": [
+          "涨停 23 家",
+          "最高 4 板",
+          "集中度 37.1%"
+        ],
+        "mainline_score": 89.6,
+        "role_map": {
+          "follower": "600005"
+        },
+        "state": "unknown",
+        "unknown_reason": null
+      },
+      {
+        "board_name": "AI算力",
+        "evidence": [
+          "涨停 12 家",
+          "最高 2 板",
+          "集中度 19.4%"
+        ],
+        "mainline_score": 79.2,
+        "role_map": {},
+        "state": "unknown",
+        "unknown_reason": null
+      },
+      {
+        "board_name": "银行科技",
+        "evidence": [
+          "涨停 5 家",
+          "最高 1 板",
+          "集中度 8.1%"
+        ],
+        "mainline_score": 40.5,
+        "role_map": {
+          "follower": "600004"
+        },
+        "state": "unknown",
+        "unknown_reason": null
+      }
+    ],
+    "market": {
+      "anchors": {
+        "broken_rate": 0.0159,
+        "height_d3_change": null,
+        "limit_down_cnt": 3
+      },
+      "coeff": 1.0,
+      "evidence": [
+        "涨停 62 家 / 跌停 3 家",
+        "炸板率 1.6%",
+        "最高 4 板",
+        "昨日涨停溢价 +5.7%",
+        "晋级率 66.7%",
+        "成交额 0 亿"
+      ],
+      "score": 79.2,
+      "state": "strong",
+      "unknown_reason": null
+    },
+    "portfolio": {
+      "sum_pct": 4.0,
+      "warning": null
+    },
+    "positions": [
+      {
+        "code": "600005",
+        "confidence": 1.0,
+        "contributions": [
+          {
+            "dim": "D1",
+            "dim_score": 58.1,
+            "points": 17.44,
+            "sub_factors": [
+              {
+                "key": "H",
+                "normalized": 50.0,
+                "points": 6.0,
+                "raw": 3.0
+              },
+              {
+                "key": "L",
+                "normalized": 100.0,
+                "points": 10.5,
+                "raw": 1.0
+              },
+              {
+                "key": "B",
+                "normalized": 12.5,
+                "points": 0.94,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.3
+          },
+          {
+            "dim": "D2",
+            "dim_score": 81.2,
+            "points": 16.25,
+            "sub_factors": [
+              {
+                "key": "M1",
+                "normalized": 100.0,
+                "points": 12.5,
+                "raw": 1.0
+              },
+              {
+                "key": "M2",
+                "normalized": 50.0,
+                "points": 3.75,
+                "raw": 1.0
+              },
+              {
+                "key": "M3",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.2
+          },
+          {
+            "dim": "D3",
+            "dim_score": 79.6,
+            "points": 15.92,
+            "sub_factors": [
+              {
+                "key": "T",
+                "normalized": 65.0,
+                "points": 7.58,
+                "raw": "10:05:00"
+              },
+              {
+                "key": "O",
+                "normalized": 100.0,
+                "points": 8.33,
+                "raw": 0.0
+              },
+              {
+                "key": "S",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              },
+              {
+                "key": "R",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.2
+          },
+          {
+            "dim": "D4",
+            "dim_score": 65.8,
+            "points": 13.15,
+            "sub_factors": [
+              {
+                "key": "F",
+                "normalized": 80.0,
+                "points": 6.4,
+                "raw": 0.06
+              },
+              {
+                "key": "V",
+                "normalized": 25.0,
+                "points": 1.75,
+                "raw": 500000000.0
+              },
+              {
+                "key": "Q",
+                "normalized": 100.0,
+                "points": 5.0,
+                "raw": 12.0
+              }
+            ],
+            "weight_norm": 0.2
+          },
+          {
+            "dim": "D5",
+            "dim_score": 100.0,
+            "points": 5.0,
+            "sub_factors": [
+              {
+                "key": "P",
+                "normalized": 100.0,
+                "points": 2.0,
+                "raw": 0.81
+              },
+              {
+                "key": "C",
+                "normalized": 100.0,
+                "points": 1.5,
+                "raw": 0.0165
+              },
+              {
+                "key": "X",
+                "normalized": 100.0,
+                "points": 1.5,
+                "raw": 0.0099
+              }
+            ],
+            "weight_norm": 0.05
+          },
+          {
+            "dim": "D6",
+            "dim_score": 50.0,
+            "points": 2.5,
+            "sub_factors": [
+              {
+                "key": "S1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "S2",
+                "normalized": 100.0,
+                "points": 2.5,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.05
+          }
+        ],
+        "dimensions": {
+          "D1": {
+            "score": 58.1,
+            "sub": {
+              "B": 12.5,
+              "H": 50.0,
+              "L": 100.0
+            },
+            "weight": 0.3
+          },
+          "D2": {
+            "score": 81.2,
+            "sub": {
+              "M1": 100.0,
+              "M2": 50.0,
+              "M3": null
+            },
+            "weight": 0.2
+          },
+          "D3": {
+            "score": 79.6,
+            "sub": {
+              "O": 100.0,
+              "R": null,
+              "S": null,
+              "S_raw": null,
+              "T": 65.0
+            },
+            "weight": 0.2
+          },
+          "D4": {
+            "score": 65.8,
+            "sub": {
+              "F": 80.0,
+              "Q": 100.0,
+              "V": 25.0
+            },
+            "weight": 0.2
+          },
+          "D5": {
+            "score": 100.0,
+            "sub": {
+              "C": 100.0,
+              "P": 100.0,
+              "X": 100.0
+            },
+            "weight": 0.05
+          },
+          "D6": {
+            "score": 50.0,
+            "sub": {
+              "S1": 0.0,
+              "S2": 100.0
+            },
+            "weight": 0.05
+          }
+        },
+        "eligibility": "eligible",
+        "gate_trace": [
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G0_data",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "risk_level=none",
+            "evaluated": true,
+            "gate": "G1_hard_risk",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G2_suspended",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G3a_liquidity",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "liq_coef=1.0",
+            "evaluated": true,
+            "gate": "G3b_liquidity",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G4_mainline",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G5_score",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G6_grade",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G7_confidence",
+            "passed": true,
+            "reason_code": null
+          }
+        ],
+        "mainline": {
+          "board_name": "机器人",
+          "rank": 1,
+          "state": "unknown"
+        },
+        "missing_dims": [],
+        "name": "龙头E",
+        "position_basis": [
+          {
+            "factor": "grade_base",
+            "value": 4.0
+          },
+          {
+            "factor": "market_coef",
+            "value": 1.0
+          },
+          {
+            "factor": "confidence_coef",
+            "value": 1.0
+          },
+          {
+            "factor": "risk_coef",
+            "value": 1.0
+          },
+          {
+            "factor": "liq_coef",
+            "value": 1.0
+          },
+          {
+            "factor": "one_word_coef",
+            "value": 1.0
+          },
+          {
+            "factor": "raw_pct",
+            "value": 4.0
+          },
+          {
+            "factor": "role_cap",
+            "value": 15.0
+          }
+        ],
+        "position_pct": 4.0,
+        "reason_code": null,
+        "review_grade": "B",
+        "review_score": 70.3,
+        "role": "leader",
+        "warnings": [],
+        "weight_profile": "leader"
+      },
+      {
+        "code": "600004",
+        "confidence": 1.0,
+        "contributions": [
+          {
+            "dim": "D1",
+            "dim_score": 51.5,
+            "points": 15.44,
+            "sub_factors": [
+              {
+                "key": "H",
+                "normalized": 33.3,
+                "points": 4.0,
+                "raw": 2.0
+              },
+              {
+                "key": "L",
+                "normalized": 100.0,
+                "points": 10.5,
+                "raw": 1.0
+              },
+              {
+                "key": "B",
+                "normalized": 12.5,
+                "points": 0.94,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.3
+          },
+          {
+            "dim": "D2",
+            "dim_score": 59.4,
+            "points": 11.88,
+            "sub_factors": [
+              {
+                "key": "M1",
+                "normalized": 65.0,
+                "points": 8.12,
+                "raw": 3.0
+              },
+              {
+                "key": "M2",
+                "normalized": 50.0,
+                "points": 3.75,
+                "raw": 1.0
+              },
+              {
+                "key": "M3",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.2
+          },
+          {
+            "dim": "D3",
+            "dim_score": 66.7,
+            "points": 13.33,
+            "sub_factors": [
+              {
+                "key": "T",
+                "normalized": 100.0,
+                "points": 11.67,
+                "raw": "09:30:00"
+              },
+              {
+                "key": "O",
+                "normalized": 20.0,
+                "points": 1.67,
+                "raw": 5.0
+              },
+              {
+                "key": "S",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              },
+              {
+                "key": "R",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.2
+          },
+          {
+            "dim": "D4",
+            "dim_score": 31.2,
+            "points": 6.24,
+            "sub_factors": [
+              {
+                "key": "F",
+                "normalized": 25.0,
+                "points": 2.0,
+                "raw": -0.05
+              },
+              {
+                "key": "V",
+                "normalized": 1.0,
+                "points": 0.07,
+                "raw": 20000000.0
+              },
+              {
+                "key": "Q",
+                "normalized": 83.3,
+                "points": 4.17,
+                "raw": 4.0
+              }
+            ],
+            "weight_norm": 0.2
+          },
+          {
+            "dim": "D5",
+            "dim_score": 100.0,
+            "points": 5.0,
+            "sub_factors": [
+              {
+                "key": "P",
+                "normalized": 100.0,
+                "points": 2.0,
+                "raw": 0.84
+              },
+              {
+                "key": "C",
+                "normalized": 100.0,
+                "points": 1.5,
+                "raw": 0.0172
+              },
+              {
+                "key": "X",
+                "normalized": 100.0,
+                "points": 1.5,
+                "raw": 0.0103
+              }
+            ],
+            "weight_norm": 0.05
+          },
+          {
+            "dim": "D6",
+            "dim_score": 50.0,
+            "points": 2.5,
+            "sub_factors": [
+              {
+                "key": "S1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "S2",
+                "normalized": 100.0,
+                "points": 2.5,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.05
+          }
+        ],
+        "dimensions": {
+          "D1": {
+            "score": 51.5,
+            "sub": {
+              "B": 12.5,
+              "H": 33.3,
+              "L": 100.0
+            },
+            "weight": 0.3
+          },
+          "D2": {
+            "score": 59.4,
+            "sub": {
+              "M1": 65.0,
+              "M2": 50.0,
+              "M3": null
+            },
+            "weight": 0.2
+          },
+          "D3": {
+            "score": 66.7,
+            "sub": {
+              "O": 20.0,
+              "R": null,
+              "S": null,
+              "S_raw": null,
+              "T": 100.0
+            },
+            "weight": 0.2
+          },
+          "D4": {
+            "score": 31.2,
+            "sub": {
+              "F": 25.0,
+              "Q": 83.3,
+              "V": 1.0
+            },
+            "weight": 0.2
+          },
+          "D5": {
+            "score": 100.0,
+            "sub": {
+              "C": 100.0,
+              "P": 100.0,
+              "X": 100.0
+            },
+            "weight": 0.05
+          },
+          "D6": {
+            "score": 50.0,
+            "sub": {
+              "S1": 0.0,
+              "S2": 100.0
+            },
+            "weight": 0.05
+          }
+        },
+        "eligibility": "not_qualified",
+        "gate_trace": [
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G0_data",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "hard_risk_announcement",
+            "evaluated": true,
+            "gate": "G1_hard_risk",
+            "passed": false,
+            "reason_code": "hard_risk"
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G2_suspended",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G3a_liquidity",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G3b_liquidity",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G4_mainline",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G5_score",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G6_grade",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G7_confidence",
+            "passed": null,
+            "reason_code": null
+          }
+        ],
+        "mainline": {
+          "board_name": "银行科技",
+          "rank": 3,
+          "state": "unknown"
+        },
+        "missing_dims": [],
+        "name": "银行D",
+        "position_basis": [],
+        "position_pct": 0.0,
+        "reason_code": "hard_risk",
+        "review_grade": "C",
+        "review_score": 54.4,
+        "role": "leader",
+        "warnings": [],
+        "weight_profile": "leader"
+      },
+      {
+        "code": "600001",
+        "confidence": 0.55,
+        "contributions": [
+          {
+            "dim": "D2",
+            "dim_score": 0.0,
+            "points": 0.0,
+            "sub_factors": [
+              {
+                "key": "M1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "M2",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "M3",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.3636
+          },
+          {
+            "dim": "D4",
+            "dim_score": 66.8,
+            "points": 24.27,
+            "sub_factors": [
+              {
+                "key": "F",
+                "normalized": 100.0,
+                "points": 14.55,
+                "raw": 0.123456
+              },
+              {
+                "key": "V",
+                "normalized": 5.0,
+                "points": 0.64,
+                "raw": 100000000.0
+              },
+              {
+                "key": "Q",
+                "normalized": 100.0,
+                "points": 9.09,
+                "raw": 8.0
+              }
+            ],
+            "weight_norm": 0.3636
+          },
+          {
+            "dim": "D5",
+            "dim_score": 100.0,
+            "points": 18.18,
+            "sub_factors": [
+              {
+                "key": "P",
+                "normalized": 100.0,
+                "points": 7.27,
+                "raw": 0.97
+              },
+              {
+                "key": "C",
+                "normalized": 100.0,
+                "points": 5.45,
+                "raw": 0.0198
+              },
+              {
+                "key": "X",
+                "normalized": 100.0,
+                "points": 5.45,
+                "raw": 0.0119
+              }
+            ],
+            "weight_norm": 0.1818
+          },
+          {
+            "dim": "D6",
+            "dim_score": 50.0,
+            "points": 4.55,
+            "sub_factors": [
+              {
+                "key": "S1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "S2",
+                "normalized": 100.0,
+                "points": 4.55,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.0909
+          }
+        ],
+        "dimensions": {
+          "D1": {
+            "score": null,
+            "sub": {
+              "B": null,
+              "H": null,
+              "L": null
+            },
+            "weight": 0.2
+          },
+          "D2": {
+            "score": 0.0,
+            "sub": {
+              "M1": 0.0,
+              "M2": 0.0,
+              "M3": null
+            },
+            "weight": 0.2
+          },
+          "D3": {
+            "score": null,
+            "sub": {
+              "O": null,
+              "R": null,
+              "S": null,
+              "S_raw": null,
+              "T": null
+            },
+            "weight": 0.25
+          },
+          "D4": {
+            "score": 66.8,
+            "sub": {
+              "F": 100.0,
+              "Q": 100.0,
+              "V": 5.0
+            },
+            "weight": 0.2
+          },
+          "D5": {
+            "score": 100.0,
+            "sub": {
+              "C": 100.0,
+              "P": 100.0,
+              "X": 100.0
+            },
+            "weight": 0.1
+          },
+          "D6": {
+            "score": 50.0,
+            "sub": {
+              "S1": 0.0,
+              "S2": 100.0
+            },
+            "weight": 0.05
+          }
+        },
+        "eligibility": "not_qualified",
+        "gate_trace": [
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G0_data",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "risk_level=none",
+            "evaluated": true,
+            "gate": "G1_hard_risk",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G2_suspended",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "amount=100000000",
+            "evaluated": true,
+            "gate": "G3a_liquidity",
+            "passed": false,
+            "reason_code": "illiquid"
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G3b_liquidity",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G4_mainline",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G5_score",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G6_grade",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G7_confidence",
+            "passed": null,
+            "reason_code": null
+          }
+        ],
+        "mainline": null,
+        "missing_dims": [
+          "D1",
+          "D3"
+        ],
+        "name": "龙头A",
+        "position_basis": [],
+        "position_pct": 0.0,
+        "reason_code": "illiquid",
+        "review_grade": "D",
+        "review_score": 47.0,
+        "role": null,
+        "warnings": [],
+        "weight_profile": "diagnostic_non_mainline"
+      },
+      {
+        "code": "600003",
+        "confidence": 0.55,
+        "contributions": [
+          {
+            "dim": "D2",
+            "dim_score": 0.0,
+            "points": 0.0,
+            "sub_factors": [
+              {
+                "key": "M1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "M2",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "M3",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.3636
+          },
+          {
+            "dim": "D4",
+            "dim_score": 53.9,
+            "points": 19.59,
+            "sub_factors": [
+              {
+                "key": "F",
+                "normalized": 70.0,
+                "points": 10.18,
+                "raw": 0.04
+              },
+              {
+                "key": "V",
+                "normalized": 2.5,
+                "points": 0.32,
+                "raw": 50000000.0
+              },
+              {
+                "key": "Q",
+                "normalized": 100.0,
+                "points": 9.09,
+                "raw": 6.0
+              }
+            ],
+            "weight_norm": 0.3636
+          },
+          {
+            "dim": "D5",
+            "dim_score": 100.0,
+            "points": 18.18,
+            "sub_factors": [
+              {
+                "key": "P",
+                "normalized": 100.0,
+                "points": 7.27,
+                "raw": 0.88
+              },
+              {
+                "key": "C",
+                "normalized": 100.0,
+                "points": 5.45,
+                "raw": 0.018
+              },
+              {
+                "key": "X",
+                "normalized": 100.0,
+                "points": 5.45,
+                "raw": 0.0108
+              }
+            ],
+            "weight_norm": 0.1818
+          },
+          {
+            "dim": "D6",
+            "dim_score": 50.0,
+            "points": 4.55,
+            "sub_factors": [
+              {
+                "key": "S1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "S2",
+                "normalized": 100.0,
+                "points": 4.55,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.0909
+          }
+        ],
+        "dimensions": {
+          "D1": {
+            "score": null,
+            "sub": {
+              "B": null,
+              "H": null,
+              "L": null
+            },
+            "weight": 0.2
+          },
+          "D2": {
+            "score": 0.0,
+            "sub": {
+              "M1": 0.0,
+              "M2": 0.0,
+              "M3": null
+            },
+            "weight": 0.2
+          },
+          "D3": {
+            "score": null,
+            "sub": {
+              "O": null,
+              "R": null,
+              "S": null,
+              "S_raw": null,
+              "T": null
+            },
+            "weight": 0.25
+          },
+          "D4": {
+            "score": 53.9,
+            "sub": {
+              "F": 70.0,
+              "Q": 100.0,
+              "V": 2.5
+            },
+            "weight": 0.2
+          },
+          "D5": {
+            "score": 100.0,
+            "sub": {
+              "C": 100.0,
+              "P": 100.0,
+              "X": 100.0
+            },
+            "weight": 0.1
+          },
+          "D6": {
+            "score": 50.0,
+            "sub": {
+              "S1": 0.0,
+              "S2": 100.0
+            },
+            "weight": 0.05
+          }
+        },
+        "eligibility": "not_qualified",
+        "gate_trace": [
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G0_data",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "risk_level=none",
+            "evaluated": true,
+            "gate": "G1_hard_risk",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G2_suspended",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "amount=50000000",
+            "evaluated": true,
+            "gate": "G3a_liquidity",
+            "passed": false,
+            "reason_code": "illiquid"
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G3b_liquidity",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G4_mainline",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G5_score",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G6_grade",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G7_confidence",
+            "passed": null,
+            "reason_code": null
+          }
+        ],
+        "mainline": null,
+        "missing_dims": [
+          "D1",
+          "D3"
+        ],
+        "name": "补涨C",
+        "position_basis": [],
+        "position_pct": 0.0,
+        "reason_code": "illiquid",
+        "review_grade": "D",
+        "review_score": 42.3,
+        "role": null,
+        "warnings": [],
+        "weight_profile": "diagnostic_non_mainline"
+      },
+      {
+        "code": "600002",
+        "confidence": 0.55,
+        "contributions": [
+          {
+            "dim": "D2",
+            "dim_score": 0.0,
+            "points": 0.0,
+            "sub_factors": [
+              {
+                "key": "M1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "M2",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "M3",
+                "normalized": null,
+                "points": null,
+                "raw": null
+              }
+            ],
+            "weight_norm": 0.3636
+          },
+          {
+            "dim": "D4",
+            "dim_score": 33.9,
+            "points": 12.33,
+            "sub_factors": [
+              {
+                "key": "F",
+                "normalized": 18.8,
+                "points": 2.73,
+                "raw": -0.0625
+              },
+              {
+                "key": "V",
+                "normalized": 4.0,
+                "points": 0.51,
+                "raw": 80000000.0
+              },
+              {
+                "key": "Q",
+                "normalized": 100.0,
+                "points": 9.09,
+                "raw": 5.0
+              }
+            ],
+            "weight_norm": 0.3636
+          },
+          {
+            "dim": "D5",
+            "dim_score": 100.0,
+            "points": 18.18,
+            "sub_factors": [
+              {
+                "key": "P",
+                "normalized": 100.0,
+                "points": 7.27,
+                "raw": 0.92
+              },
+              {
+                "key": "C",
+                "normalized": 100.0,
+                "points": 5.45,
+                "raw": 0.0188
+              },
+              {
+                "key": "X",
+                "normalized": 100.0,
+                "points": 5.45,
+                "raw": 0.0113
+              }
+            ],
+            "weight_norm": 0.1818
+          },
+          {
+            "dim": "D6",
+            "dim_score": 50.0,
+            "points": 4.55,
+            "sub_factors": [
+              {
+                "key": "S1",
+                "normalized": 0.0,
+                "points": 0.0,
+                "raw": 0.0
+              },
+              {
+                "key": "S2",
+                "normalized": 100.0,
+                "points": 4.55,
+                "raw": 1.0
+              }
+            ],
+            "weight_norm": 0.0909
+          }
+        ],
+        "dimensions": {
+          "D1": {
+            "score": null,
+            "sub": {
+              "B": null,
+              "H": null,
+              "L": null
+            },
+            "weight": 0.2
+          },
+          "D2": {
+            "score": 0.0,
+            "sub": {
+              "M1": 0.0,
+              "M2": 0.0,
+              "M3": null
+            },
+            "weight": 0.2
+          },
+          "D3": {
+            "score": null,
+            "sub": {
+              "O": null,
+              "R": null,
+              "S": null,
+              "S_raw": null,
+              "T": null
+            },
+            "weight": 0.25
+          },
+          "D4": {
+            "score": 33.9,
+            "sub": {
+              "F": 18.8,
+              "Q": 100.0,
+              "V": 4.0
+            },
+            "weight": 0.2
+          },
+          "D5": {
+            "score": 100.0,
+            "sub": {
+              "C": 100.0,
+              "P": 100.0,
+              "X": 100.0
+            },
+            "weight": 0.1
+          },
+          "D6": {
+            "score": 50.0,
+            "sub": {
+              "S1": 0.0,
+              "S2": 100.0
+            },
+            "weight": 0.05
+          }
+        },
+        "eligibility": "not_qualified",
+        "gate_trace": [
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G0_data",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "risk_level=soft",
+            "evaluated": true,
+            "gate": "G1_hard_risk",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": true,
+            "gate": "G2_suspended",
+            "passed": true,
+            "reason_code": null
+          },
+          {
+            "detail": "amount=80000000",
+            "evaluated": true,
+            "gate": "G3a_liquidity",
+            "passed": false,
+            "reason_code": "illiquid"
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G3b_liquidity",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G4_mainline",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G5_score",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G6_grade",
+            "passed": null,
+            "reason_code": null
+          },
+          {
+            "detail": null,
+            "evaluated": false,
+            "gate": "G7_confidence",
+            "passed": null,
+            "reason_code": null
+          }
+        ],
+        "mainline": null,
+        "missing_dims": [
+          "D1",
+          "D3"
+        ],
+        "name": "跟风B",
+        "position_basis": [],
+        "position_pct": 0.0,
+        "reason_code": "illiquid",
+        "review_grade": "D",
+        "review_score": 35.1,
+        "role": null,
+        "warnings": [],
+        "weight_profile": "diagnostic_non_mainline"
+      }
+    ],
+    "trade_date": "2026-09-11"
+  },
+  "trade_date": "2026-09-11",
+  "version": "0.7"
 }

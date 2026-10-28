@@ -125,6 +125,32 @@ class StockProvider(ABC):
         """cninfo 个股公告单页（title/type/date/url），最新在前；失败抛异常"""
         raise NotImplementedError(f"{self.name} 不提供公告")
 
+    # ─── prep 复盘分新增（普通方法，默认未实现；不得用 @abstractmethod）───
+    # 动机：``create_providers()`` 会一次实例化全部 provider，抽象方法会让旧
+    # provider 直接崩（AGENTS 硬约束）。错误契约：transport 失败抛异常，
+    # 成功但确无数据返回 {} / []。
+
+    def batch_get_daily_klines(self, codes: list[str], days: int = 120,
+                               end_date: str | None = None) -> dict[str, list[KBar]]:
+        """批量日 K（不复权/前复权由实现声明）；返回 ``{code: [KBar, ...]}``。"""
+        raise NotImplementedError(f"{self.name} 不提供批量日 K")
+
+    def get_index_daily(self, code: str, days: int = 120) -> list[KBar]:
+        """指数日 K（points）；transport 失败抛异常。"""
+        raise NotImplementedError(f"{self.name} 不提供指数日 K")
+
+    def get_auction_snapshot(self, code: str) -> dict | None:
+        """当前交易日的 09:25 竞价终态（价/量/未匹配量）；非当日或不可用返回 None。
+
+        返回 ``{"price","amount","matched","unmatched"}``；``amount`` = 成交额（元）。
+        T+1 反馈补采只走当日调用，历史不可回补。
+        """
+        raise NotImplementedError(f"{self.name} 不提供竞价终态")
+
+    def get_5min_kline_for_date(self, code: str, date: str) -> list[KBar]:
+        """指定交易日（``YYYY-MM-DD``）的 5 分钟 K 线；不可用返回 ``[]``。"""
+        raise NotImplementedError(f"{self.name} 不提供指定日 5 分钟 K")
+
     # ─── prep 宏观扰动（普通方法，默认未实现；仅部分 provider 覆写）───
     # 错误契约：transport/解析失败抛异常，由 providers.macro.collect_macro 逐源回退。
 

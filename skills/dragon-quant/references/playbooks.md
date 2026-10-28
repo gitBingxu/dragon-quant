@@ -81,3 +81,11 @@
 - **处理**：说明回放会写库；幂等命中时结果可能标注未落库；需要可复现时固定 `--date` 与 `--at`。
 - **停止条件**：状态不一致且无法解释时停止，先只读核对再重跑。
 - **禁止动作**：不要手工改业务表来“修正”结果；不要并发运行多个写库命令。
+
+## 11. 策略上下文缺失或版本不认识
+
+- **症状**：`prep --json` 没有 `strategy_context`；`context_version` 不是 `sc_v1`；`positions[]` 为空但 `review_candidates` 有内容；`feedback_plans[]` 全为 `expectations_unavailable`。
+- **诊断**：确认快照 `version` 与 CLI 版本是否匹配；确认是否用 `--date` 读到旧快照；确认 `data_quality.missing` 是否覆盖全部标的；确认是否在非盘后时段读数。
+- **处理**：版本不匹配时先说明，再由用户确认后用 `--recompute` 重算（T1，写快照）；旧快照只输出旧摘要（四行 + 逐只清单），并明确「没有结构化策略上下文，无法给出条件化明日策略」。
+- **停止条件**：`strategy_context` 缺失且无法重算时停止，不拼凑阈值、仓位或买卖动作。
+- **禁止动作**：不要把旧 `sentiment.position_pct`（市场参考仓位）当单票建议仓位；不要在缺上下文时假装有正负反馈条件；不要编造 `feedback_plans`、`expected` 或 `allowed_actions`。

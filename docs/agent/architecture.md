@@ -41,7 +41,11 @@ dragon_quant/
 │   ├── storage.py               # review_account_* 五表仓储
 │   ├── prep/                    # 盘后复盘
 │   │   ├── __init__.py / main.py / service.py / collectors.py / compute.py
-│   │   └── rebuild.py
+│   │   ├── rebuild.py
+│   │   └── review/              # 复盘分纯函数（配置/评分/市场/主线/角色/池/闸门/仓位/反馈/编排）
+│   │       ├── __init__.py / config.py / scoring.py / market.py / mainline.py
+│   │       ├── roles.py / pool.py / gates.py / sizing.py / context.py
+│   │       └── feedback.py / board_rank.py / orchestrator.py
 │   ├── auction/                 # 集合竞价
 │   │   ├── __init__.py / main.py / collect.py / recompute.py / scoring.py / dates.py
 │   │   └── registry.py / strength.py / serialize.py / report.py / types.py
@@ -69,10 +73,10 @@ dragon_quant/
 │   ├── factor/                  # 因子层（13 批准出口 + builtin）
 │   │   ├── __init__.py / main.py / types.py / registry.py / engine.py / storage.py
 │   │   ├── decision.py / evaluation.py / matrix.py / stats.py / service.py
-│   │   ├── finance.py / sql.py / finance_store.py
-│   │   └── builtin/             # five_dim / vpa / financial / prep / auction
+│   │   ├── review_shadow.py / finance.py / sql.py / finance_store.py
+│   │   └── builtin/             # five_dim / vpa / financial / prep / auction / prep_review
 │   │       ├── __init__.py / five_dim.py / vpa.py / financial.py
-│   │       └── prep.py / auction.py
+│   │       └── prep.py / auction.py / prep_review.py
 │   └── assets/                  # assets.db 独立库 + 云端同步
 │       ├── __init__.py / main.py / db.py / schema.py / dragons_mirror.py
 │       ├── ASSETS_ARCHITECTURE.md

@@ -46,7 +46,7 @@ python -m dragon_quant prep --json                        # 完整复盘 JSON（
 
 ### 集合竞价采集 `auction`
 - **候选池**：默认 `--pool prep`，读取**严格 T-1** 的 `prep_snapshots`，取 eligible（真龙 + `min_score`）中 `verdict != ignore` 的 code（strong/light/unrated/缺 verdict 保留；推荐集为空则回退）。与 `buy`/`review-account` 共用 `market.collect_candidates_ex`，保证 code 集合一致。
-- **回退**：T-1 快照缺失/读取异常/无资格/推荐集为空 → 回退最近 N 日 `dragons_v2` 并集，输出 `pool_source="legacy"` + `fallback_reason`（`no_snapshot`/`snapshot_read_error`/`empty_snapshot`/`no_eligible`/`all_ignored`/`calendar`）。回退池不再应用 `ignore` 出池；P 按快照 verdict 如实标注。
+- **回退**：T-1 快照缺失/读取异常/无资格/推荐集为空 → 回退从严格 T-1 起向前最近 N 日（**不含 T**）的 `dragons_v2` 并集，输出 `pool_source="legacy"` + `fallback_reason`（`no_snapshot`/`snapshot_read_error`/`empty_snapshot`/`no_eligible`/`all_ignored`/`calendar`）。回退池不再应用 `ignore` 出池；P 按快照 verdict 如实标注。
 - **空池**：仅当 legacy 也为空时正常结束（exit 0），不触发行情/盘口请求；输出 ignore 原文样本 + `prep_degraded` 提示。
 - **参数**：`--pool {prep,legacy}`（默认 prep）；`--days` 仅在 legacy/回退路径生效（默认 5，显式传入且 prep 成功时输出 `days_ignored`）；`--json` 输出完整 JSON。
 - **输出**：默认人读摘要——标题（日期/参与只数/池来源，含回退原因）+ 逐只「排名/代码/名称/等级/强度/方向」（未验证 `?`、否决 `-`，`｜否决：原因｜未验证` 可叠加）+ 汇总（强/中/弱/其他计数、未验证数、采集失败数）；空池/采集层全失败/评分层全失败/全空盘口分别单行提示。JSON 契约（collect 25 个顶层 key、空池 16 个、recompute 15 个）与字段顺序在 `--json` 下逐字段不变。默认模式错误写 stderr + 非零退出；`--json` 错误保持原 JSON 到 stdout，退出码语义不变。

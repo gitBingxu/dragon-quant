@@ -424,7 +424,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
             from dragon_quant.infra.assets import dragons_mirror
             stack.enter_context(
                 patch.object(dragons_mirror, "list_dragon_trade_dates",
-                             return_value=["2026-10-20"]))
+                             return_value=["2026-10-19"]))
             stack.enter_context(patch.object(dragons_mirror, "get_dragons",
                                              return_value=dragons))
             stack.enter_context(patch.object(dragons_mirror, "stale_dates",

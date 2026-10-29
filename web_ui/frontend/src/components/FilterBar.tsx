@@ -17,7 +17,8 @@ import {
   IconRefresh,
   IconSearch,
 } from "@tabler/icons-react";
-import type { DragonFilters } from "../api";
+import type { DragonFilters, ReviewCaliber } from "../api";
+import { effectiveCaliber } from "../caliber";
 
 interface Props {
   filters: DragonFilters;
@@ -27,14 +28,26 @@ interface Props {
   onReset: () => void;
 }
 
-const STATUS_OPTIONS = [
+// 完整状态集（严格口径可达全部）；宽松模式隐藏仅严格可达的两项。
+const STATUS_OPTIONS_STRICT = [
   { value: "completed", label: "已完成" },
   { value: "", label: "全部状态" },
   { value: "pending", label: "待回测" },
   { value: "pending_recompute", label: "待重算" },
   { value: "cannot_evaluate", label: "无法评估" },
-  { value: "no_entry", label: "无介入（v1）" },
+  { value: "no_entry", label: "无介入" },
   { value: "error", label: "失败" },
+];
+
+const STRICT_ONLY_STATUSES = new Set(["pending_recompute", "cannot_evaluate"]);
+
+const STATUS_OPTIONS_LOOSE = STATUS_OPTIONS_STRICT.filter(
+  (option) => !STRICT_ONLY_STATUSES.has(option.value)
+);
+
+const CALIBER_OPTIONS: { value: ReviewCaliber; label: string }[] = [
+  { value: "strict", label: "严格" },
+  { value: "loose", label: "宽松" },
 ];
 
 const SOURCE_OPTIONS = [
@@ -44,6 +57,41 @@ const SOURCE_OPTIONS = [
 
 export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props) {
   const [advOpen, advHandlers] = useDisclosure(false);
+
+  const source = filters.source ?? "v2";
+  // 生效口径：v1 恒宽松，v2 缺省严格（与服务端 resolve_caliber 同规则）。
+  const caliber = effectiveCaliber(source, filters.review_caliber);
+  const statusOptions =
+    caliber === "loose" ? STATUS_OPTIONS_LOOSE : STATUS_OPTIONS_STRICT;
+
+  // 切体系时同步口径；生效口径变为宽松时同 patch 清理严格专有状态。
+  const onSourceChange = (value: string | null) => {
+    const nextSource = value === "v1" ? "v1" : "v2";
+    const patch: Partial<DragonFilters> = {
+      source: nextSource,
+      review_caliber: nextSource === "v1" ? "loose" : "strict",
+    };
+    if (
+      nextSource === "v1" &&
+      STRICT_ONLY_STATUSES.has(filters.status ?? "")
+    ) {
+      patch.status = "";
+    }
+    onChange(patch);
+  };
+
+  const onCaliberChange = (value: string | null) => {
+    const nextCaliber: ReviewCaliber = value === "loose" ? "loose" : "strict";
+    const patch: Partial<DragonFilters> = { review_caliber: nextCaliber };
+    // 清空只改表单、不自动请求，保证状态 Select 的 value 始终在选项内。
+    if (
+      nextCaliber === "loose" &&
+      STRICT_ONLY_STATUSES.has(filters.status ?? "")
+    ) {
+      patch.status = "";
+    }
+    onChange(patch);
+  };
 
   const onEnter = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") onSearch();
@@ -118,8 +166,19 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
               w={120}
               size="xs"
               data={SOURCE_OPTIONS}
-              value={filters.source ?? "v2"}
-              onChange={(v) => onChange({ source: (v === "v1" ? "v1" : "v2") })}
+              value={source}
+              onChange={onSourceChange}
+              allowDeselect={false}
+            />
+          </Field>
+          <Field label="口径">
+            <Select
+              w={110}
+              size="xs"
+              data={CALIBER_OPTIONS}
+              value={caliber}
+              onChange={onCaliberChange}
+              disabled={source === "v1"}
               allowDeselect={false}
             />
           </Field>
@@ -171,7 +230,7 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
               <Select
                 w={120}
                 size="xs"
-                data={STATUS_OPTIONS}
+                data={statusOptions}
                 value={filters.status ?? "completed"}
                 onChange={(v) => onChange({ status: v ?? "" })}
                 allowDeselect={false}
@@ -185,9 +244,9 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
         </Collapse>
 
         {/* v1 历史口径提示 */}
-        {filters.source === "v1" && (
+        {source === "v1" && (
           <Text size="xs" c="dimmed">
-            v1 历史数据使用旧口径（首个非一字板日最低价买入），不提供严格口径。
+            v1 历史数据固定旧口径（首个非一字板日最低价买入），口径不可切换，不提供严格结果。
           </Text>
         )}
 

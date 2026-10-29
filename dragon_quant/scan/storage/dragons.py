@@ -579,26 +579,43 @@ def _version_in_range(version: str,
     return True
 
 
+def resolve_caliber(value: Optional[str], source: str = "v2") -> str:
+    """口径解析唯一入口（``"strict"`` / ``"loose"``）。
+
+    - ``source == "v1"`` → ``loose``（v1 无严格侧表，强制旧口径）；
+    - v2 + ``"loose"`` → ``loose``；
+    - v2 + 其它 / 缺省 / 非法 → ``strict``（保持既有默认）。
+    """
+    if _normalize_source(source) == "v1":
+        return "loose"
+    if value is not None and str(value).strip().lower() == "loose":
+        return "loose"
+    return "strict"
+
+
 def query_dragons(filters: Optional[dict] = None,
                   sort_by: str = "composite_score",
                   sort_dir: str = "desc",
-                  source: str = "v2") -> list[dict]:
+                  source: str = "v2",
+                  *,
+                  caliber: Optional[str] = None) -> list[dict]:
     """灵活查询 dragons 表（供 Web UI /api/dragons 使用）。
 
-    v2 额外 LEFT JOIN ``dragon_review_strict``：收益 / 回撤 / 状态筛选与排序
-    **固定使用严格口径**；v1 没有严格口径，继续使用 ``dragons_v1`` 旧字段。
-    旧的宽松字段原样保留，新增 ``strict_*`` 字段与 ``strict_reviewed``。
+    v2 额外 LEFT JOIN ``dragon_review_strict``；``caliber`` 决定收益 / 回撤
+    范围筛选、状态筛选与排序使用哪一套口径（缺省 ``strict``，与历史行为逐值
+    一致；v1 强制 ``loose``）。行内始终返回宽松字段与 ``strict_*`` 全套。
 
     Args:
         filters 支持的 key:
             code_like, name_like: LIKE 模糊匹配
             date_from, date_to: trade_date 范围
             score_min, score_max: composite_score 范围
-            return_min, return_max: v2=严格收益 / v1=宽松收益
-            drawdown_min, drawdown_max: v2=严格回撤 / v1=宽松回撤
+            return_min, return_max: 所选口径的收益列
+            drawdown_min, drawdown_max: 所选口径的回撤列
             status: list[str] 过滤派生状态
-        sort_by: 排序字段（v2 的严格键见 ``_SORT_MAP``）
+        sort_by: 排序字段（逻辑键经 ``_SORT_COLUMNS[caliber]`` 映射到物理列）
         sort_dir: asc / desc
+        caliber: ``strict`` / ``loose``；非法值由 :func:`resolve_caliber` 归一
     """
     if filters is None:
         filters = {}
@@ -607,9 +624,10 @@ def query_dragons(filters: Optional[dict] = None,
     try:
         _ensure_schema(conn)
         source = _normalize_source(source)
+        caliber = resolve_caliber(caliber, source)
         t = _tables(source)
 
-        base = _query_base_sql(t["dragons"], source)
+        base = _query_base_sql(t["dragons"], source, caliber)
         params: list = []
         conditions: list[str] = []
 
@@ -632,8 +650,8 @@ def query_dragons(filters: Optional[dict] = None,
             conditions.append("composite_score <= ?")
             params.append(filters["score_max"])
 
-        return_col = "strict_max_return_5d" if source == "v2" else "max_return_5d"
-        drawdown_col = "strict_max_drawdown_5d" if source == "v2" else "max_drawdown_5d"
+        return_col = _CALIBER_METRIC_COLUMNS[caliber]["return"]
+        drawdown_col = _CALIBER_METRIC_COLUMNS[caliber]["drawdown"]
         if "return_min" in filters:
             conditions.append(f"COALESCE({return_col}, -9999) >= ?")
             params.append(filters["return_min"])
@@ -655,7 +673,7 @@ def query_dragons(filters: Optional[dict] = None,
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
 
-        order_col = _SORT_MAP[source].get(sort_by, "composite_score")
+        order_col = _SORT_COLUMNS[caliber].get(sort_by, "composite_score")
         order_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
         sql += f" ORDER BY {order_col} {order_dir} NULLS LAST"
 
@@ -726,8 +744,23 @@ _STRICT_COLUMNS: tuple[str, ...] = (
 
 _RESULT_COLUMNS: tuple[str, ...] = _BASE_COLUMNS + _STRICT_COLUMNS
 
-_SORT_MAP: dict[str, dict[str, str]] = {
-    "v2": {
+# 逻辑指标键 → 物理列（口径策略映射的唯一服务端来源）。
+_CALIBER_METRIC_COLUMNS: dict[str, dict[str, str]] = {
+    "strict": {
+        "return": "strict_max_return_5d",
+        "drawdown": "strict_max_drawdown_5d",
+    },
+    "loose": {
+        "return": "max_return_5d",
+        "drawdown": "max_drawdown_5d",
+    },
+}
+
+# 逻辑排序键 → 物理列；strict 与 loose 各一份。
+# loose 同时服务 v2 宽松与 v1（v1 无严格侧表，行为与旧映射逐键一致）：
+# 旧客户端传 ``strict_*`` 键时语义降级为宽松列，不会报错。
+_SORT_COLUMNS: dict[str, dict[str, str]] = {
+    "strict": {
         "trade_date": "trade_date", "code": "code", "name": "name",
         "rank": "rank", "composite_score": "composite_score",
         "board_count": "board_count", "pct": "pct",
@@ -744,7 +777,7 @@ _SORT_MAP: dict[str, dict[str, str]] = {
         "strict_max_return_hold_days": "strict_max_return_hold_days",
         "strict_review_status": "derived_status",
     },
-    "v1": {
+    "loose": {
         "trade_date": "trade_date", "code": "code", "name": "name",
         "rank": "rank", "composite_score": "composite_score",
         "board_count": "board_count", "pct": "pct",
@@ -753,7 +786,6 @@ _SORT_MAP: dict[str, dict[str, str]] = {
         "max_drawdown_5d": "max_drawdown_5d",
         "max_return_hold_days": "max_return_hold_days",
         "review_status": "derived_status",
-        # 前端统一用严格列 key；v1 映射回旧字段（无严格口径）。
         "strict_buy_date": "buy_date",
         "strict_buy_price": "buy_price",
         "strict_max_return_5d": "max_return_5d",
@@ -764,9 +796,23 @@ _SORT_MAP: dict[str, dict[str, str]] = {
 }
 
 
-def _query_base_sql(table: str, source: str) -> str:
-    """构造统一结果集的子查询（v2 JOIN 严格侧表 / v1 全部 NULL）。"""
+def _query_base_sql(table: str, source: str, caliber: str = "strict") -> str:
+    """构造统一结果集的子查询（v2 JOIN 严格侧表 / v1 全部 NULL）。
+
+    ``derived_status`` 随口径变化：strict 走严格侧表 CASE，loose 直接取
+    ``dragons_*`` 的 ``review_status``；v1 恒为旧 ``review_status``。
+    """
     if source == "v2":
+        if caliber == "strict":
+            derived_status = (
+                "CASE "
+                "WHEN s.review_status IS NOT NULL THEN s.review_status "
+                "WHEN d.review_status = 'pending' THEN 'pending' "
+                "WHEN d.review_status = 'error' THEN 'error' "
+                "ELSE 'pending_recompute' END"
+            )
+        else:
+            derived_status = "d.review_status"
         strict_cols = (
             "s.buy_date AS strict_buy_date, "
             "s.buy_price AS strict_buy_price, "
@@ -775,11 +821,7 @@ def _query_base_sql(table: str, source: str) -> str:
             "s.max_return_hold_days AS strict_max_return_hold_days, "
             "s.review_status AS strict_review_status, "
             "s.reason AS strict_review_reason, "
-            "CASE "
-            "WHEN s.review_status IS NOT NULL THEN s.review_status "
-            "WHEN d.review_status = 'pending' THEN 'pending' "
-            "WHEN d.review_status = 'error' THEN 'error' "
-            "ELSE 'pending_recompute' END AS derived_status "
+            f"{derived_status} AS derived_status "
         )
         join = (
             " FROM {table} d LEFT JOIN dragon_review_strict s "
@@ -799,13 +841,16 @@ def _query_base_sql(table: str, source: str) -> str:
     return f"SELECT {cols}, {strict_cols}{join}"
 
 
-def _row_derived_status(row: dict, source: str) -> Optional[str]:
-    """读取 rows 携带的派生状态，缺失时按同一 CASE 规则回算。"""
+def _row_derived_status(row: dict, source: str, caliber: str = "strict") -> Optional[str]:
+    """按**显式口径**计算派生状态，缺失时按同一规则回算。
+
+    不能无条件读行内 ``derived_status``：严格行喂给宽松汇总时会误用严格状态。
+    """
+    if caliber == "loose" or source == "v1":
+        return row.get("review_status")
     status = row.get("derived_status")
     if status is not None:
         return status
-    if source == "v1":
-        return row.get("review_status")
     if row.get("strict_review_status"):
         return row["strict_review_status"]
     if row.get("review_status") == "pending":
@@ -848,7 +893,8 @@ def _best_row(rows: list[dict], ret_key: str) -> Optional[dict]:
 def summarize_review_rows(rows: list[dict],
                           source: str = "v2",
                           *,
-                          include_derived_counts: bool = False) -> dict:
+                          include_derived_counts: bool = False,
+                          caliber: Optional[str] = None) -> dict:
     """从 ``query_dragons`` 的完整 rows 计算汇总统计（筛选后同源）。
 
     Web UI 的 7 张卡片必须与列表使用同一份筛选结果，因此汇总只消费同一批
@@ -866,8 +912,11 @@ def summarize_review_rows(rows: list[dict],
     ``include_derived_counts`` 为 True 时附加 ``derived_completed`` /
     ``derived_pending``（``pending`` + ``pending_recompute``）——仅供 UI 卡片
     在同一响应内展示派生状态计数，不属于 legacy ``/api/summary`` 契约。
+    ``caliber`` 只影响这两个派生计数使用的状态口径（缺省 strict；宽松直接取
+    ``review_status``），旧键与 ``*_strict`` 键均不随口径变化，供前端按键选择。
     """
     source = _normalize_source(source)
+    caliber = resolve_caliber(caliber, source)
     total = len(rows)
 
     loose_completed = [r for r in rows if r.get("review_status") == "completed"]
@@ -959,7 +1008,7 @@ def summarize_review_rows(rows: list[dict],
         })
 
     if include_derived_counts:
-        statuses = [_row_derived_status(r, source) for r in rows]
+        statuses = [_row_derived_status(r, source, caliber) for r in rows]
         summary["derived_completed"] = sum(
             1 for s in statuses if s == "completed")
         summary["derived_pending"] = sum(

@@ -83,6 +83,12 @@
 |------|------|------|--------|
 | 2026-09-12 | 五维评分器 Refactor | [评分器Refactor.md](score/评分器Refactor.md) | `dragon_quant/scorers/评分器Refactor.md` |
 
+## review/
+
+| 日期 | 主题 | 文件 | 原路径 |
+|------|------|------|--------|
+| 2026-10-30 | review 双口径筛选与展示（严格 / 宽松查询上下文 + Web UI 联动） | [2026-10-30-review-dual-caliber-filter-design.md](review/2026-10-30-review-dual-caliber-filter-design.md) | `docs/solutions/2026-10-30-review-dual-caliber-filter-design.md` |
+
 ## review_account/
 
 | 日期 | 主题 | 文件 | 原路径 |

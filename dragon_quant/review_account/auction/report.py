@@ -212,6 +212,10 @@ def format_auction_report(
 
     if mode == "recompute":
         head = ["重算", f"参与 {len(snapshots)} 只"]
+    elif mode == "snapshot":
+        head = ["快照", "来自缓存", f"参与 {len(snapshots)} 只"]
+        if failed_count:
+            head.append(f"快照损坏 {failed_count} 行")
     else:
         head = [f"参与 {len(snapshots)} 只"]
         if pool_source:

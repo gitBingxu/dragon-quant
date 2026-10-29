@@ -54,6 +54,14 @@ RECOMPUTE_KEYS = [
     "snapshot_ok", "snapshot_skipped", "snapshot_error", "failed", "snapshots",
     "strategy_context",
 ]
+SNAPSHOT_KEYS = [
+    "ok", "mode", "trade_date", "source", "from_cache", "pool_source",
+    "fallback_reason", "prep_snapshot_date", "prep_unavailable_reason",
+    "recommended_count", "days_ignored", "lookback_dates", "candidate_codes",
+    "saved_count", "saved", "empty", "failed", "quote", "quote_missing",
+    "asset_read_error", "scored_count", "snapshot_saved_count", "snapshot_ok",
+    "snapshot_skipped", "snapshot_error", "snapshots", "strategy_context",
+]
 QUOTE_KEYS = [
     "code", "name", "price", "prev_close", "open_px", "high", "low", "pct",
     "chg", "turnover_rate", "amplitude", "volume", "amount", "market_cap",
@@ -189,6 +197,19 @@ def snapshot_summaries(rows: list[dict]) -> list[dict]:
 
 def seed_prep_pool(box: EnvSandbox, candidates: list[dict] | None = None) -> None:
     seed_db(box, sb.prep_snapshot_seed(candidates), db_name="assets.db")
+
+
+def seed_prep_and_snapshots(box: EnvSandbox,
+                            snapshots: list[dict]) -> None:
+    """Seed the T-1 prep pool and explicit ``auction_snapshots`` rows at once."""
+    spec = sb.prep_snapshot_seed()
+    spec["tables"].update(sb.auction_snapshots_seed(snapshots)["tables"])
+    seed_db(box, spec, db_name="assets.db")
+
+
+def snapshot_rows(box: EnvSandbox) -> list[dict]:
+    return sqlite_rows(box.data_dir / "assets.db", "auction_snapshots",
+                       order_by="code")
 
 
 # ─── A1 / A2: collect success, human output, JSON contract ─────────────────
@@ -601,3 +622,138 @@ def test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam():
         assert proof["time_is_replaced"] is False
         assert proof["datetime_isinstance_ok"] is True
         assert proof["runtime_clock_type"] == "FixedClock"
+
+
+# ─── A15–A20: snapshot-first + --force ─────────────────────────────────────
+
+
+def test_a15_repeated_auction_returns_the_stored_snapshot_with_zero_calls():
+    with sandbox("a15") as box:
+        seed_prep_pool(box)
+        first = run_auction(box, ["auction", "--json"])
+        assert_exit(first, 0)
+        first_payload = json.loads(first.stdout)
+        assets_before = sqlite_rows(box.data_dir / "assets.db", "auction_assets",
+                                    order_by="code")
+        snapshots_before = snapshot_rows(box)
+        offset = len(call_records(box))
+
+        human = run_auction(box, ["auction"])
+        assert_exit(human, 0)
+        assert human.stderr == ""
+        assert human.stdout == golden_text("stdout_snapshot.txt")
+
+        second = run_auction(box, ["auction", "--json"])
+        assert_exit(second, 0)
+        assert second.stderr == ""
+        payload = json.loads(second.stdout)
+        assert list(payload) == SNAPSHOT_KEYS
+        assert_json_equal(payload, golden_json("json_snapshot.json"))
+        assert payload["mode"] == "snapshot"
+        assert payload["from_cache"] is True
+        assert payload["pool_source"] == "snapshot"
+        assert payload["saved_count"] == 0
+        assert payload["scored_count"] == 3
+        assert payload["snapshot_saved_count"] == 0
+        assert payload["snapshot_skipped"] == "cache_hit"
+        assert payload["failed"] == []
+        assert_json_equal(payload["snapshots"], first_payload["snapshots"])
+        assert payload["strategy_context"]["pool"]["source"] == "snapshot"
+        assert payload["strategy_context"]["pool"]["coverage"] == "assets_only"
+
+        assert transport_since(box, offset) == []
+        assert sqlite_rows(box.data_dir / "assets.db", "auction_assets",
+                           order_by="code") == assets_before
+        assert snapshot_rows(box) == snapshots_before
+
+
+def test_a16_force_bypasses_the_snapshot_cache():
+    with sandbox("a16") as box:
+        seed_prep_pool(box)
+        assert_exit(run_auction(box, ["auction", "--json"]), 0)
+        offset = len(call_records(box))
+
+        result = run_auction(box, ["auction", "--force", "--json"])
+        assert_exit(result, 0)
+        assert result.stderr == ""
+        payload = json.loads(result.stdout)
+        assert list(payload) == COLLECT_KEYS
+        assert "from_cache" not in payload
+        assert payload["mode"] == "collect"
+        assert payload["saved_count"] == 3
+        assert payload["snapshot_saved_count"] == 3
+        assert transport_since(box, offset) == [
+            ("tdx", "get_kline"),
+            ("tdx", "batch_get_quotes"),
+            ("tdx", "get_auction"),
+            ("tdx", "get_auction"),
+            ("tdx", "get_auction"),
+        ]
+
+
+def test_a17_all_corrupt_snapshots_fall_back_to_full_collection():
+    with sandbox("a17") as box:
+        seed_prep_and_snapshots(box, [
+            {"trade_date": TRADE_DATE, "code": "600001", "source": "v2",
+             "analysis_json": "{", "created_at": f"{TRADE_DATE} 09:30:00"},
+        ])
+        result = run_auction(box, ["auction", "--json"])
+        assert_exit(result, 0)
+        payload = json.loads(result.stdout)
+        assert payload["mode"] == "collect"
+        assert payload["saved_count"] == 3
+        assert payload["snapshot_saved_count"] == 3
+        assert [row["code"] for row in auction_snapshots(box)] == [
+            "600001", "600002", "600003"]
+
+
+def test_a18_partially_corrupt_snapshots_return_valid_rows():
+    with sandbox("a18") as box:
+        seed_prep_pool(box)
+        assert_exit(run_auction(box, ["auction", "--json"]), 0)
+        exec_sql(box, "assets.db",
+                 "UPDATE auction_snapshots SET analysis_json = '{' "
+                 "WHERE trade_date = ? AND code = ?", (TRADE_DATE, "600002"))
+        offset = len(call_records(box))
+
+        result = run_auction(box, ["auction", "--json"])
+        assert_exit(result, 0)
+        payload = json.loads(result.stdout)
+        assert payload["mode"] == "snapshot"
+        assert payload["ok"] is False
+        assert [(item["code"], item["stage"]) for item in payload["failed"]] == [
+            ("600002", "snapshot")]
+        assert [item["code"] for item in payload["snapshots"]] == [
+            "600001", "600003"]
+        assert transport_since(box, offset) == []
+        rows = {row["code"]: row for row in snapshot_rows(box)}
+        assert rows["600002"]["analysis_json"] == "{"
+        assert [row["code"] for row in snapshot_rows(box)] == [
+            "600001", "600002", "600003"]
+
+
+def test_a19_force_and_recompute_conflict_exits_two():
+    with sandbox("a19") as box:
+        result = run_auction(
+            box, ["auction", "--force", "--recompute", DATE_ARG, "--json"])
+        assert_exit(result, 2)
+        assert transport(call_records(box)) == []
+        assert not (box.data_dir / "assets.db").exists()
+
+
+def test_a20_snapshot_hit_does_not_evaluate_pool_or_days():
+    with sandbox("a20") as box:
+        seed_prep_pool(box)
+        assert_exit(run_auction(box, ["auction", "--json"]), 0)
+        offset = len(call_records(box))
+
+        result = run_auction(box, ["auction", "--pool", "legacy",
+                                   "--days", "3", "--json"])
+        assert_exit(result, 0)
+        assert result.stderr == ""
+        payload = json.loads(result.stdout)
+        assert payload["mode"] == "snapshot"
+        assert payload["pool_source"] == "snapshot"
+        assert payload["days_ignored"] is False
+        assert payload["lookback_dates"] == []
+        assert transport_since(box, offset) == []

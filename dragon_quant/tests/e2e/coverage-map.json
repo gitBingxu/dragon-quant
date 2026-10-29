@@ -245,6 +245,7 @@
           "--help",
           "--pool",
           "--days",
+          "--force",
           "--recompute",
           "--json"
         ]
@@ -786,9 +787,15 @@
           "dragon_quant/tests/e2e/test_auction.py::test_a12b_all_corrupt_assets_fail_without_touching_snapshots",
           "dragon_quant/tests/e2e/test_auction.py::test_a12c_snapshot_reads_isolate_corrupt_rows",
           "dragon_quant/tests/e2e/test_auction.py::test_a13_runtime_clock_mode_recompute_future_gate_uses_the_runtime_clock",
-          "dragon_quant/tests/e2e/test_auction.py::test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam"
+          "dragon_quant/tests/e2e/test_auction.py::test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam",
+          "dragon_quant/tests/e2e/test_auction.py::test_a15_repeated_auction_returns_the_stored_snapshot_with_zero_calls",
+          "dragon_quant/tests/e2e/test_auction.py::test_a16_force_bypasses_the_snapshot_cache",
+          "dragon_quant/tests/e2e/test_auction.py::test_a17_all_corrupt_snapshots_fall_back_to_full_collection",
+          "dragon_quant/tests/e2e/test_auction.py::test_a18_partially_corrupt_snapshots_return_valid_rows",
+          "dragon_quant/tests/e2e/test_auction.py::test_a19_force_and_recompute_conflict_exits_two",
+          "dragon_quant/tests/e2e/test_auction.py::test_a20_snapshot_hit_does_not_evaluate_pool_or_days"
         ],
-        "notes": "A13 pins the runtime.clock recompute date gate."
+        "notes": "A13 pins the runtime.clock recompute date gate; A15-A20 pin snapshot-first caching, --force bypass, corruption isolation and the --force/--recompute conflict."
       },
       "assets": {
         "tests": [

@@ -118,5 +118,21 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual(_level_of(39.99), "弱")
 
 
+class TestSnapshotSummaryProjection(unittest.TestCase):
+    def test_payload_summary_matches_evaluate_batch(self):
+        assets = [{"code": "600001", "items": real_sample_shape(),
+                   "quote": quote()}]
+        payloads, failures, summaries, _ = scoring.evaluate_batch(assets)
+        self.assertEqual(failures, [])
+        self.assertEqual(summaries["600001"],
+                         scoring.snapshot_summary(payloads["600001"]))
+        self.assertEqual(list(summaries["600001"]), [
+            "code", "is_weak", "strength", "direction", "level", "unverified",
+            "rank", "reject_reason", "data_quality_status", "risk_event_codes",
+            "rank_reason", "validation_status", "config_version",
+            "evidence_summary",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

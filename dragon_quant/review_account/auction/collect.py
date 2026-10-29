@@ -9,9 +9,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from dragon_quant.review_account.auction.context import build_strategy_context
+from dragon_quant.review_account.auction.context import (
+    build_strategy_context, build_strategy_context_from_snapshots,
+)
 from dragon_quant.review_account.auction.dates import _today
-from dragon_quant.review_account.auction.scoring import evaluate_batch
+from dragon_quant.review_account.auction.scoring import (
+    evaluate_batch, snapshot_summary,
+)
 from dragon_quant.review_account.auction.types import AuctionOutcome
 
 
@@ -146,12 +150,110 @@ def _score_inputs(assets_db, trade_date, score_inputs, by_code,
     return evaluate_batch(score_inputs, history=history, names=names)
 
 
+# 已存快照中至少含一个键才算「可解析」；排除 ``{}`` / 仅 code 的空壳。
+_SNAPSHOT_USABLE_KEYS = ("version", "is_weak", "strength", "direction",
+                         "level", "dims", "reject_reason", "unverified",
+                         "rank", "data_quality")
+
+
+def _load_snapshot_rows(trade_date: str) -> list[dict]:
+    """只读当日竞价快照（既有接口，source=v2，不建库/不写行）。"""
+    from dragon_quant.infra.assets import db as assets_db
+
+    return assets_db.list_auction_snapshots(trade_date, source="v2")
+
+
+def _split_snapshot_rows(rows) -> tuple[dict[str, dict], list[dict]]:
+    """拆分为可用行与损坏/空壳行；逐行隔离，不中断整批。"""
+    usable: dict[str, dict] = {}
+    failures: list[dict] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            failures.append({"code": None, "stage": "snapshot",
+                             "error": "snapshot_incomplete: 行不是对象"})
+            continue
+        code = str(row.get("code") or "")
+        if not code:
+            failures.append({"code": None, "stage": "snapshot",
+                             "error": "snapshot_incomplete: 缺少 code"})
+            continue
+        if row.get("error"):
+            failures.append({"code": code, "stage": "snapshot",
+                             "error": str(row["error"])})
+            continue
+        if not any(key in row for key in _SNAPSHOT_USABLE_KEYS):
+            failures.append({"code": code, "stage": "snapshot",
+                             "error": "snapshot_incomplete: analysis_json 无可用字段"})
+            continue
+        usable[code] = row
+    return usable, failures
+
+
+def _snapshot_outcome(trade_date: str, usable: dict[str, dict],
+                      failures: list[dict]) -> AuctionOutcome | None:
+    """已存快照只读输出：不采集、不评分、不写库。
+
+    单行投影失败按损坏隔离；若全部投影失败则返回 ``None``，交回完整采集。
+    """
+    failed = list(failures or [])
+    payloads: dict[str, dict] = {}
+    snapshots: list[dict] = []
+    for code in sorted(usable):
+        try:
+            summary = snapshot_summary(usable[code])
+        except Exception as exc:      # 语义损坏（类型/结构异常）逐行隔离
+            failed.append({"code": code, "stage": "snapshot",
+                           "error": "snapshot_projection_failed: "
+                                    f"{type(exc).__name__}: {exc}"})
+            continue
+        payloads[code] = usable[code]
+        snapshots.append(summary)
+    if not payloads:
+        return None
+
+    payload = {
+        "ok": not failed,
+        "mode": "snapshot",
+        "trade_date": trade_date,
+        "source": "v2",
+        "from_cache": True,
+        "pool_source": "snapshot",
+        "fallback_reason": None,
+        "prep_snapshot_date": None,
+        "prep_unavailable_reason": None,
+        "recommended_count": 0,
+        "days_ignored": False,
+        "lookback_dates": [],
+        "candidate_codes": len(payloads),
+        "saved_count": 0,
+        "saved": [],
+        "empty": [],
+        "failed": failed,
+        "quote": {"source": "none", "fallback_used": False, "requested": 0,
+                  "matched": 0, "missing": [], "degraded": False,
+                  "reason": None, "error": None},
+        "quote_missing": [],
+        "asset_read_error": None,
+        "scored_count": len(payloads),
+        "snapshot_saved_count": 0,
+        "snapshot_ok": True,
+        "snapshot_skipped": "cache_hit",
+        "snapshot_error": None,
+        "snapshots": snapshots,
+        "strategy_context": build_strategy_context_from_snapshots(
+            trade_date, payloads, failed=failed),
+    }
+    return AuctionOutcome(payload=payload, exit_code=0, render_names={},
+                          mode="snapshot")
+
+
 def run_auction(*, pool: str = "prep", days=None, services=None,
-                today: str | None = None) -> AuctionOutcome:
+                today: str | None = None, force: bool = False) -> AuctionOutcome:
     """采集最近 N 日龙头的当日集合竞价盘口 + 行情，落原始资产并计算快照。
 
     ``pool`` 为 ``prep``（默认，严格 T-1 快照优先）或 ``legacy``；
     ``days`` 仅在 legacy/回退路径生效。``today`` 供命令层沿用既有日期 patch 点。
+    默认先只读当日已存快照（命中即零采集/零评分/零写入）；``force=True`` 绕过缓存。
     """
     from dragon_quant.infra.assets import db as assets_db, dragons_mirror
     from dragon_quant.infra.provider.data import get_auction
@@ -159,11 +261,28 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
 
     source = "v2"
     trade_date = today or _today()      # get_auction 仅返回当日竞价数据
+    warnings: list[str] = []
+
+    # 快照优先：早于 provider/日历/候选池/行情执行，命中即只读返回。
+    if not force:
+        try:
+            rows = _load_snapshot_rows(trade_date)
+        except Exception as exc:
+            rows = None
+            warnings.append("⚠️ 竞价快照读取失败，回退完整采集"
+                            f"（{type(exc).__name__}: {exc}）")
+        if rows is not None:
+            usable, cache_failures = _split_snapshot_rows(rows)
+            if usable:
+                outcome = _snapshot_outcome(
+                    trade_date, usable, cache_failures)
+                if outcome is not None:
+                    return outcome
+
     resolved_services = _resolve_collect_services(services)
     pool_mode = pool or "prep"
     days_arg = days
     lookback = days_arg or 5
-    warnings: list[str] = []
 
     ctx = {
         "pool_source": "legacy",

@@ -27,7 +27,7 @@
 | review-account | --ui-only | T0 | 只读启动 Web UI，长驻 |
 | dragons | --date --true-only | T0 | 只读 JSON |
 | prep | --date --recompute --force --json | T1 | 写 assets.db；当日需 16:40 后 |
-| auction | --pool --days --recompute --json | T1 | 写 assets.db；当日需 09:25 后 |
+| auction | --pool --days --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读，--force 才重采；当日需 09:25 后 |
 | assets | status/verify/pull | T0 | pull 默认 dry-run，不加 --apply 不写 |
 | assets | doctor | T1 | 向远端 _doctor 前缀写入并删除临时探针 |
 | assets | push | T2 | 上传数据到云端；先 dry-run |

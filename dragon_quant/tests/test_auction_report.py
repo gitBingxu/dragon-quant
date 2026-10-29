@@ -168,5 +168,15 @@ class TestReport(unittest.TestCase):
         self.assertNotIn("候选 1 只", lines[0])
 
 
+    def test_snapshot_header_marks_cache_and_corruption(self):
+        lines = format_auction_report(
+            [_v2_snapshot("600001")], trade_date="2026-10-29",
+            mode="snapshot", failed_count=2)
+        self.assertEqual(
+            lines[0],
+            "📊 2026-10-29 集合竞价强度（快照｜来自缓存｜参与 1 只｜快照损坏 2 行）")
+        self.assertIn("失败 2", lines[-2])
+
+
 if __name__ == "__main__":
     unittest.main()

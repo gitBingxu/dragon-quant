@@ -13,7 +13,7 @@
 | 查询历史扫描 | dragon-quant scan --date | --date --top | T0 | json | 仅 YYYYMMDD；格式错只写 stderr 但 exit 0；错误 JSON 含 available_top_n |
 | 导出龙头 | dragon-quant dragons | --date --true-only | T0 | json | 结构化结果优先；默认最新有数据交易日 |
 | 盘后复盘 | dragon-quant prep | --date --recompute --force --json | T1 | human/json | 当日 ≥16:40；重算不触网但仍写快照 |
-| 集合竞价 | dragon-quant auction | --pool --days --recompute --json | T1 | human/json | 当日 ≥09:25；无 --date；空池不等于弱 |
+| 集合竞价 | dragon-quant auction | --pool --days --force --recompute --json | T1 | human/json | 命中当日快照即只读；需重采加 --force；无 --date；空池不等于弱 |
 | 买入信号 | dragon-quant buy | --date --at --force --json | T1 | human/json | 写信号表；必须确认 |
 | 卖出信号 | dragon-quant sell | --date --at --force | T1 | human | 写信号表；无 JSON；T+1 |
 | 龙头回测 | dragon-quant review | --date --source | T1 | human | 回写 review 字段 |

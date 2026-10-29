@@ -31,6 +31,7 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-29 | auction 快照优先与 --force 强制重跑（缓存短路 / 只读投影 / 损坏回退） | [2026-10-29-auction-snapshot-short-circuit-design.md](auction/2026-10-29-auction-snapshot-short-circuit-design.md) | `docs/solutions/2026-10-29-auction-snapshot-short-circuit-design.md` |
 | 2026-10-29 | auction 证据化重建技术方案（五维评分 / 四轴 / strategy_context / 8+9 因子） | [2026-10-29-auction-strength-technical-design.md](auction/2026-10-29-auction-strength-technical-design.md) | `docs/solutions/2026-10-29-auction-strength-technical-design.md` |
 | 2026-10-29 | auction 字段语义与六篇参考资料调研（真实资产证据 / 因子映射） | [2026-10-29-auction-strength-research.md](auction/2026-10-29-auction-strength-research.md) | `docs/solutions/2026-10-29-auction-strength-research.md` |
 | 2026-10-21 | auction 候选池改 prep 推荐 + 买入 P/A 三值优先级与否决 | [2026-10-21-auction-prep-buy-priority-design.md](auction/2026-10-21-auction-prep-buy-priority-design.md) | `docs/solutions/2026-10-21-auction-prep-buy-priority-design.md` |

@@ -273,25 +273,35 @@ def rank_auctions(verdicts: list[AuctionVerdict]) -> list[AuctionVerdict]:
     return verdicts
 
 
-def _snapshot_summary(verdict: AuctionVerdict) -> dict:
-    from .context import evidence_summary
+def snapshot_summary(payload: dict) -> dict:
+    """已存 ``analysis_json`` → ``snapshots[]`` 14 键摘要（纯投影，不重评分）。
 
+    快照命中路径与 ``evaluate_batch`` 共用本函数，保证两条路径逐字段一致；
+    旧 schema 缺失 v2 键时按 ``None`` 原样带出，由展示层降级。
+    """
+    from .context import evidence_summary_from_payload
+
+    payload = payload if isinstance(payload, dict) else {}
+    quality = payload.get("data_quality")
+    if not isinstance(quality, dict):
+        quality = {}
     return {
-        "code": verdict.code,
-        "is_weak": verdict.is_weak,
-        "strength": verdict.strength,
-        "direction": verdict.direction,
-        "level": verdict.level,
-        "unverified": verdict.unverified,
-        "rank": verdict.rank,
-        "reject_reason": verdict.reject_reason,
-        "data_quality_status": verdict.data_quality.status,
-        "risk_event_codes": [event.event_id.split("@")[0]
-                             for event in verdict.risk_events],
-        "rank_reason": verdict.rank_reason,
-        "validation_status": verdict.validation_status,
-        "config_version": verdict.config_version,
-        "evidence_summary": evidence_summary(verdict),
+        "code": payload.get("code"),
+        "is_weak": payload.get("is_weak"),
+        "strength": payload.get("strength"),
+        "direction": payload.get("direction"),
+        "level": payload.get("level"),
+        "unverified": payload.get("unverified"),
+        "rank": payload.get("rank"),
+        "reject_reason": payload.get("reject_reason"),
+        "data_quality_status": quality.get("status"),
+        "risk_event_codes": [str(event.get("event_id") or "").split("@")[0]
+                             for event in (payload.get("risk_events") or [])
+                             if isinstance(event, dict)],
+        "rank_reason": payload.get("rank_reason"),
+        "validation_status": payload.get("validation_status"),
+        "config_version": payload.get("config_version"),
+        "evidence_summary": evidence_summary_from_payload(payload),
     }
 
 
@@ -323,8 +333,9 @@ def evaluate_batch(assets: list[dict], *, history=None, names=None) -> tuple:
     payloads = {}
     for verdict in verdicts:
         try:
-            payloads[verdict.code] = verdict_to_payload(verdict)
-            summaries[verdict.code] = _snapshot_summary(verdict)
+            payload = verdict_to_payload(verdict)
+            payloads[verdict.code] = payload
+            summaries[verdict.code] = snapshot_summary(payload)
         except Exception as exc:
             failures.append({"code": verdict.code, "stage": "serialize",
                              "error": f"{type(exc).__name__}: {exc}"})

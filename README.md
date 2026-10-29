@@ -376,9 +376,9 @@ dragon-quant review --ui-only --port 8765 # 仅看结果（默认 dragons_v2）
 - **宽松口径**（历史行为，写 `dragons_v2` 现有 review 字段）：入选后首个 `high != low` 日按**最低价**买入。
 - **严格口径**（写入侧表 `dragon_review_strict`，唯一键 `(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停也按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位记 `cannot_evaluate`（原因措辞「停牌或数据缺失无法区分」）；传输失败不写、不覆盖严格结果；收益窗口为空同样 `cannot_evaluate`，部分窗口沿用公式并标 `partial_window`。
 
-`--recompute-all` 仅 v2，按最老记录优先，默认跳过已有严格行（`--force` 覆盖），`--dry-run` / `--limit` 只可与其组合（非法组合 exit 2）；dry-run 计数是未过滤成熟度的**上界**，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。普通 `review` 仍为每只个股补一段**量价分析**写入 `vpa_analysis`；全量重算刻意跳过 VPA，避免历史污染。Web UI 的收益 / 回撤 / 状态筛选与表格指标固定使用严格口径，并同时展示宽松 / 严格胜率与待重算、失败、无法评估计数；v1 明确标注为旧口径。
+`--recompute-all` 仅 v2，按最老记录优先，默认跳过已有严格行（`--force` 覆盖），`--dry-run` / `--limit` 只可与其组合（非法组合 exit 2）；dry-run 计数是未过滤成熟度的**上界**，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。普通 `review` 仍为每只个股补一段**量价分析**写入 `vpa_analysis`；全量重算刻意跳过 VPA，避免历史污染。Web UI 默认严格口径，可在「口径」筛选切到宽松（`/api/dragons?review_caliber=strict|loose`）：收益 / 回撤 / 状态筛选、排序、表格列与卡片指标都跟随所选口径，一次回测的双口径结果可直接对比；面板同时展示宽松 / 严格胜率与待重算、失败、无法评估计数；v1 固定旧口径并明确标注。
 
-顶部 7 张指标卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表**同源**：`GET /api/dragons` 在成功响应中同时返回 `summary`，由筛选后的**完整 rows** 计算（客户端分页不影响统计），`data` / `count` 契约不变；`GET /api/summary` 保留为无筛选参数的 legacy 端点。修改筛选条件不自动请求，点击「查询」或回车才同时刷新卡片与列表；「重置」保留当前体系（source）并清空其余 12 项筛选、立即恢复全量。空集或无可评测样本的均值 / 胜率 / 最佳显示 `—`，真实无赢家显示 `0.0%`；两胜率沿用既有分母与 cannot 规则。
+顶部 7 张指标卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表**同源**：`GET /api/dragons` 在成功响应中同时返回 `summary`，由筛选后的**完整 rows** 计算（客户端分页不影响统计），`data` / `count` 契约不变；`GET /api/summary` 保留为无筛选参数的 legacy 端点（不接收口径参数）。修改筛选条件不自动请求，点击「查询」或回车才同时刷新卡片与列表；「重置」保留当前体系（source），口径回到该体系默认（v2 严格 / v1 宽松），清空其余筛选并立即恢复全量。空集或无可评测样本的均值 / 胜率 / 最佳显示 `—`，真实无赢家显示 `0.0%`；两胜率沿用既有分母与 cannot 规则。
 
 Web UI 入口为 `web_ui.start_server(...) -> HTTPServer`：CLI（`--ui` / `--ui-only`）默认 `block=True` 阻塞运行；`--port 0` 由操作系统分配端口并打印真实 URL；测试或嵌入场景可传 `block=False`，拿到 server 后自行 `shutdown()` / `server_close()`。
 

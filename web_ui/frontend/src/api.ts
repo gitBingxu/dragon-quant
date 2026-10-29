@@ -1,5 +1,8 @@
 // 后端 API 类型定义与 fetch 封装。字段对齐 dragon_quant/storage/db.py。
 
+/** Review 口径：strict=严格（首个交易日开盘价买入），loose=宽松（旧口径）。 */
+export type ReviewCaliber = "strict" | "loose";
+
 export interface Dragon {
   source: "v1" | "v2";
   trade_date: string;
@@ -72,6 +75,7 @@ export interface Summary {
 
 export interface DragonFilters {
   source?: "v1" | "v2";
+  review_caliber?: ReviewCaliber;
   code?: string;
   name?: string;
   date_from?: string;
@@ -95,6 +99,7 @@ export async function fetchDragons(
   const params = new URLSearchParams();
   const keys: (keyof DragonFilters)[] = [
     "source",
+    "review_caliber",
     "code",
     "name",
     "date_from",

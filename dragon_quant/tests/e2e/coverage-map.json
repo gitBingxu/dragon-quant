@@ -1083,11 +1083,12 @@
       "web": {
         "tests": [
           "dragon_quant/tests/e2e/test_web_api.py::test_w1_w3_w4_w7_review_ui_routes_and_404",
+          "dragon_quant/tests/e2e/test_web_api.py::test_w9_review_caliber_switch",
           "dragon_quant/tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
           "dragon_quant/tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
           "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series"
         ],
-        "notes": "W1-W8 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly)."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path."
       },
       "npm": {
         "tests": [

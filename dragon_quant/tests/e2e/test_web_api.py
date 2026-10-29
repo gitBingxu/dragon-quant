@@ -116,8 +116,15 @@ def web_strict_rows() -> list[dict]:
     }]
 
 
-def seed_dragons(box: EnvSandbox, rows: list[dict]) -> None:
+def seed_dragons(box: EnvSandbox, rows: list[dict], *,
+                 v1_rows: list[dict] | None = None) -> None:
     dragon_spec = sb.dragon_db_seed(rows)
+    if v1_rows:
+        dragon_spec["tables"]["dragons_v1"] = {
+            "columns": sb.DRAGON_COLUMNS,
+            "primary_key": ["trade_date", "code"],
+            "rows": v1_rows,
+        }
     if any(row.get("review_status") == "completed" for row in rows):
         dragon_spec["tables"]["dragon_review_strict"] = {
             "columns": STRICT_COLUMNS,
@@ -296,6 +303,85 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
         assert "http://localhost:0" not in server.stdout
         assert server.returncode is not None
         assert port_is_free(server.port)
+
+
+# ─── W9: review_caliber switch on /api/dragons ─────────────────────────────
+
+
+def test_w9_review_caliber_switch():
+    """strict 为默认；loose 让筛选/状态/汇总同源切到宽松列，行内仍带严格值。
+
+    v1 强制宽松；legacy ``/api/summary`` 不接收口径参数（传入被忽略）。
+    """
+
+    v1_row = sb.dragon_row("2026-08-20", "600009", "旧样本", 1, 70.0, ["AI算力"])
+    v1_row.update(
+        source="v1",
+        review_status="completed",
+        buy_date="2026-08-21",
+        buy_price=9.5,
+        max_return_5d=6.0,
+        max_drawdown_5d=-2.0,
+        max_return_hold_days=3,
+    )
+    with sandbox("m1f1-w9-caliber") as box:
+        seed_dragons(box, web_dragon_rows(), v1_rows=[v1_row])
+        with web_server(box, server_command(REVIEW_UI, 0)) as server:
+            default = server.request("GET", "/api/dragons").json()
+            explicit = server.request(
+                "GET", "/api/dragons?review_caliber=strict").json()
+            # 默认 strict 与显式 strict 逐值等价；非法值同样回退 strict。
+            assert explicit == default
+            assert server.request(
+                "GET", "/api/dragons?review_caliber=foo").json() == default
+            assert default["count"] == 3
+
+            loose = server.request(
+                "GET", "/api/dragons?review_caliber=loose").json()
+            assert loose["count"] == 3
+            # 宽松派生状态直接等于 review_status，不出现 pending_recompute。
+            assert [row["derived_status"] for row in loose["data"]] == [
+                row["review_status"] for row in loose["data"]]
+            assert [row["derived_status"] for row in loose["data"]] == [
+                "completed", "pending", "pending"]
+            # 宽松范围筛选用宽松列：8.0 不命中 8.5，7.5 命中。
+            assert server.request(
+                "GET", "/api/dragons?review_caliber=loose&return_min=8.5"
+            ).json()["count"] == 0
+            loose_hit = server.request(
+                "GET", "/api/dragons?review_caliber=loose&return_min=7.5"
+            ).json()
+            assert loose_hit["count"] == 1
+            hit = loose_hit["data"][0]
+            assert hit["code"] == "600001"
+            assert hit["max_return_5d"] == 8.0
+            # 宽松行仍保留严格字段。
+            assert hit["strict_max_return_5d"] == 9.0
+            assert hit["strict_buy_date"] == "2026-08-18"
+            # 宽松状态筛选：严格专有状态为空集。
+            assert server.request(
+                "GET", "/api/dragons?review_caliber=loose&status=pending_recompute"
+            ).json()["count"] == 0
+            # 派生计数随口径：宽松 completed=1（600001），pending=2。
+            assert loose["summary"]["derived_completed"] == 1
+            assert loose["summary"]["derived_pending"] == 2
+
+            # v1 强制宽松：显式 strict 与缺省一致，范围筛选用旧字段。
+            v1_default = server.request("GET", "/api/dragons?source=v1").json()
+            v1_strict = server.request(
+                "GET", "/api/dragons?source=v1&review_caliber=strict").json()
+            assert v1_strict == v1_default
+            assert v1_default["count"] == 1
+            assert v1_default["data"][0]["derived_status"] == "completed"
+            assert v1_default["data"][0]["strict_max_return_5d"] is None
+            assert server.request(
+                "GET", "/api/dragons?source=v1&review_caliber=strict&return_min=5.5"
+            ).json()["count"] == 1
+
+            # legacy /api/summary 完全不变：口径参数被忽略。
+            base_summary = server.request("GET", "/api/summary").json()
+            assert server.request(
+                "GET", "/api/summary?review_caliber=loose").json() == base_summary
 
 
 # ─── W8: SIGTERM exits and releases the port ────────────────────────────────

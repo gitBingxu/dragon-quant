@@ -227,6 +227,70 @@ def _run_backfill(args) -> AssetsOutcome:
     return AssetsOutcome(command, result, exit_code)
 
 
+def _run_purge_derived(args) -> AssetsOutcome:
+    """``assets purge-derived``：默认 dry-run；``--apply --yes`` 单事务删除。
+
+    锁在装配层（本模块）获取，``infra/factor/maintenance.py`` 只做 DB、不 import sync；
+    云端同步代码完全不参与。
+    """
+
+    from dragon_quant.infra.factor import maintenance
+
+    command = "assets purge-derived"
+    apply = bool(getattr(args, "apply_purge", False))
+    confirm = bool(getattr(args, "yes", False))
+    empty = {
+        "ok": False, "command": command, "dry_run": not apply,
+        "applied": False, "db_exists": None, "counts": {}, "protected": {},
+        "recheck": None, "deleted": None, "rebuild_steps": [], "warnings": [],
+        "failed": [],
+    }
+    if apply and not confirm:
+        empty["failed"] = [{"reason": "--apply 必须同时传入 --yes（二次确认）"}]
+        return AssetsOutcome(command, empty, 2, completed=False)
+
+    plan = maintenance.plan_purge()
+    payload = {
+        "ok": True, "command": command, "dry_run": not apply,
+        "applied": apply, "db_exists": plan.db_exists,
+        "counts": plan.counts, "protected": plan.protected,
+        "recheck": None, "deleted": None, "rebuild_steps": plan.rebuild_steps,
+        "warnings": plan.warnings, "failed": [],
+    }
+    if not apply:
+        return AssetsOutcome(command, payload, 0)
+
+    from dragon_quant.infra.assets.sync.errors import LockBusyError
+    from dragon_quant.infra.assets.sync.state import ProcessLock, default_paths
+
+    lock = ProcessLock(default_paths().lock_path)
+    try:
+        lock.acquire()
+    except LockBusyError as exc:
+        payload.update({"ok": False, "failed": [
+            {"reason": f"进程锁被占用: {exc}", "kind": "lock"}]})
+        return AssetsOutcome(command, payload, 1, completed=False)
+    try:
+        result = maintenance.apply_purge(plan)
+    finally:
+        lock.release()
+
+    payload["recheck"] = result.get("recheck")
+    payload["deleted"] = result.get("deleted")
+    if result.get("models"):
+        payload["models"] = result["models"]
+    if result.get("model_rebuild_required"):
+        payload["model_rebuild_required"] = True
+    if not result.get("ok"):
+        payload["ok"] = False
+        payload["reason"] = result.get("reason")
+        payload["failed"] = result.get("failed") or [
+            {"reason": result.get("reason") or "apply_failed"}]
+        return AssetsOutcome(command, payload, 1,
+                             completed=False if result.get("reason") == "db_missing" else True)
+    return AssetsOutcome(command, payload, 0)
+
+
 def run(action, args, *, backend=None, services=None) -> AssetsOutcome:
     """执行一个 assets 动作并返回 JSON 载荷 + 退出码。
 
@@ -234,6 +298,8 @@ def run(action, args, *, backend=None, services=None) -> AssetsOutcome:
     注入后覆盖 doctor/push/pull/status/verify（``backfill-dragons`` 纯本地，
     不使用后端）。``services`` 目前仅保留组合根注入位，未参与装配。
     """
+    if action == "purge-derived":
+        return _run_purge_derived(args)
     if action == "backfill-dragons":
         return _run_backfill(args)
     if action in SYNC_ACTIONS:

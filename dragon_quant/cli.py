@@ -493,6 +493,28 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     assets_backfill.add_argument("--json", dest="json", action="store_true",
                                  help="输出完整 JSON（默认人读摘要）")
 
+    assets_purge = assets_subs.add_parser(
+        "purge-derived",
+        help="清理可重建的 prep 派生数据（默认 dry-run，不触云端）",
+        usage="dragon-quant assets purge-derived [--json] | "
+              "dragon-quant assets purge-derived --apply --yes [--json]",
+        description="删除 prep_snapshots、25 个 prep/prep_review 因子值/注册版本，"
+                    "以及引用这些因子的模型快照；保护 prep_assets、auction 资产、"
+                    "非目标因子、factor_build_runs 与云端。默认只读 dry-run；"
+                    "--apply 必须叠加 --yes，在单事务内复核计数后删除。",
+        epilog="""Examples:
+  dragon-quant assets purge-derived
+  dragon-quant assets purge-derived --json
+  dragon-quant assets purge-derived --apply --yes
+""",
+    )
+    assets_purge.add_argument("--apply", dest="apply_purge", action="store_true",
+                              help="真正删除（默认 dry-run）；必须同时传 --yes")
+    assets_purge.add_argument("--yes", action="store_true",
+                              help="二次确认（与 --apply 成对使用）")
+    assets_purge.add_argument("--json", dest="json", action="store_true",
+                              help="输出稳定 JSON（默认人读摘要到 stderr）")
+
     # factor 子命令（因子层：只读迁移 scan/vpa 产物，落 assets.db）
     factor_p = sub.add_parser(
         "factor",

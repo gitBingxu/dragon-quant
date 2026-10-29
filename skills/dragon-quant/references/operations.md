@@ -29,6 +29,7 @@
 - `prep` 不与 `scan`/`rebuild` 并发运行；镜像双写是锁外 best-effort，错开可以避免缺日误判。
 - `assets push`/`pull` 之间有进程锁；第二个进程会失败退出，不要强行并发。
 - `buy`/`sell` 不要同时运行；它们都会写信号表，可能相互覆盖状态。
+- 派生清理：先 `assets purge-derived --json` 核对计数，确认后 `--apply --yes`，再按 `prep_assets` 日期**升序**逐日 `prep --recompute` → `factor build --only <23 名>` → `factor decision-review`；purge 不重建、不触云。
 - 开启镜像后，T 日 `prep` 前建议先 `assets backfill-dragons --dry-run` 做只读体检。
 
 ## 数据耐久与备份

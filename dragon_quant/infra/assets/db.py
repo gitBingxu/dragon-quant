@@ -131,6 +131,18 @@ def _connect(create: bool = True, path=None) -> Optional[sqlite3.Connection]:
     return conn
 
 
+def _connect_readonly(path=None) -> Optional[sqlite3.Connection]:
+    """纯只读连接（``mode=ro``）：不执行 WAL PRAGMA、不建库/建表/建 sidecar。
+
+    仅供 dry-run / 审计计数使用；写路径仍走 :func:`_connect`。
+    """
+
+    db_path = ASSETS_DB_PATH if path is None else path
+    if not Path(db_path).exists():
+        return None
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+
 def _assert_schema_shape(conn: sqlite3.Connection, full: bool = False):
     required_map = _WRITE_REQUIRED_COLUMNS if full else _REQUIRED_COLUMNS
     for table, required in required_map.items():
@@ -338,6 +350,42 @@ def has_prep_snapshot(trade_date: str, source: str = "v2") -> bool:
         return row is not None
     finally:
         conn.close()
+
+
+def get_previous_prep_snapshot(before_date: str, source: str = "v2"
+                               ) -> tuple[Optional[dict], dict]:
+    """读取**严格早于** ``before_date`` 的最近一盘前快照（prev 注入，只读）。
+
+    返回 ``(payload | None, meta)``，``meta = {"trade_date", "created_at", "error"}``：
+
+    - 库不存在 / 无更早快照 → ``(None, {... None})``（首日无 prev 是合法状态）；
+    - JSON 损坏 → ``(None, {"trade_date": 该日, "error": "..."})``，调用方据此标
+      ``prev_snapshot_corrupt``；
+    - ``trade_date < ?`` 严格小于，绝不返回当日快照（避免自己和自己比）。
+    """
+
+    empty_meta = {"trade_date": None, "created_at": None, "error": None}
+    conn = _connect(create=False)
+    if conn is None:
+        return None, dict(empty_meta)
+    try:
+        _ensure_schema(conn, migrate=False)
+        row = conn.execute(
+            "SELECT result_json, trade_date, created_at FROM prep_snapshots "
+            "WHERE trade_date < ? AND source = ? "
+            "ORDER BY trade_date DESC LIMIT 1",
+            (before_date, source),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None, dict(empty_meta)
+    payload, error = _load_json(row[0], None)
+    meta = {"trade_date": row[1], "created_at": row[2],
+            "error": None if error is None else error}
+    if error is not None or not isinstance(payload, dict):
+        return None, meta
+    return payload, meta
 
 
 # ─── auction 原始资产 ──────────────────────────────────────────────────────

@@ -328,8 +328,10 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
                 days_ignored = True
                 warnings.append("⚠️ --days 仅在 legacy 路径生效，本次已忽略")
 
-    if not by_code:
-        # 显式 legacy，或 prep 路径回退后仍无候选：走旧口径（最近 N 日龙头并集）。
+    if not by_code and not ctx.get("review_decision"):
+        # 显式 legacy，或旧 prep 路径回退后仍无候选：走旧口径（最近 N 日龙头并集）。
+        # 0.8 有效决策（review_decision=True）的空池绝不回落：第二套旧口径会
+        # 重新给出推荐，破坏唯一权威。
         # 读源 = assets.db.dragons 镜像（AC5）；枚举型读路径必须逐日对账，
         # 否则镜像整体缺行会让日期集合前移、池静默换日 + 变小。
         try:

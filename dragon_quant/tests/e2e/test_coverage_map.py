@@ -72,9 +72,9 @@ def test_parser_snapshot_has_52_nodes_and_15_top_level_commands():
     snapshot = _load_map()["parser_snapshot"]
     nodes = snapshot["nodes"]
 
-    assert snapshot["node_count"] == len(nodes) == 52
+    assert snapshot["node_count"] == len(nodes) == 53
     assert snapshot["top_level_count"] == sum(1 for node in nodes if " " not in node["command"]) == 15
-    assert len({node["command"] for node in nodes}) == 52
+    assert len({node["command"] for node in nodes}) == 53
     for node in nodes:
         assert node["command"].strip() == node["command"]
         assert node["flags"], f"{node['command']} must list its parser flags"

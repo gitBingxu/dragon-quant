@@ -56,6 +56,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-30 | prep 新旧算法统一与派生清理（六维唯一决策 / prev / purge-derived） | [2026-10-30-prep-unified-review-technical-design.md](prep/2026-10-30-prep-unified-review-technical-design.md) | `docs/solutions/2026-10-30-prep-unified-review-technical-design.md` |
+| 2026-10-30 | prep 算法统一调研（双头推荐 / 兼容投影 / 精确清理边界） | [2026-10-30-prep-unified-review-research.md](prep/2026-10-30-prep-unified-review-research.md) | `docs/solutions/2026-10-30-prep-unified-review-research.md` |
 | 2026-10-21 | prep 宏观改日经225期指 + 富时A50期指（同日口径，16:40 门禁） | [2026-10-21-prep-macro-jp-a50-design.md](prep/2026-10-21-prep-macro-jp-a50-design.md) | `docs/solutions/2026-10-21-prep-macro-jp-a50-design.md` |
 | 2026-10-21 | prep 重复运行增量语义（健康零采集 / 补采 diff / report 逐条合并） | [2026-10-21-prep-incremental-rerun-design.md](prep/2026-10-21-prep-incremental-rerun-design.md) | `docs/solutions/2026-10-21-prep-incremental-rerun-design.md` |
 | 2026-10-20 | prep 宏观扰动采集 + 近三日龙头逐只参与判定 | [2026-10-20-prep-macro-candidate-verdict-design.md](prep/2026-10-20-prep-macro-candidate-verdict-design.md) | `docs/solutions/2026-10-20-prep-macro-candidate-verdict-design.md` |

@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (52), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (53), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 52,
+    "node_count": 53,
     "top_level_count": 15,
     "nodes": [
       {
@@ -545,6 +545,16 @@
           "--logs",
           "--days"
         ]
+      },
+      {
+        "command": "assets purge-derived",
+        "flags": [
+          "-h",
+          "--help",
+          "--apply",
+          "--yes",
+          "--json"
+        ]
       }
     ]
   },
@@ -1009,6 +1019,12 @@
           "dragon_quant/tests/e2e/test_logs_data_storage.py::test_st4_clear_all_empties_directories_and_protects_databases"
         ],
         "notes": ""
+      },
+      "assets purge-derived": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_assets.py::test_as19_purge_derived_dry_run_and_apply_temp_db"
+        ],
+        "notes": "默认 dry-run；--apply 必须叠加 --yes；仅临时库验证"
       }
     },
     "hidden_aliases": {

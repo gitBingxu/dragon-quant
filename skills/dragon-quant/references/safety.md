@@ -33,6 +33,8 @@
 | assets | push | T2 | 上传数据到云端；先 dry-run |
 | assets | push --dry-run | T0 | 不写远端 |
 | assets | pull --apply / pull --force | T2 | 写本地库；主线库禁止 pull --force，恢复走 target-dir |
+| assets | purge-derived | T0 | 只读 dry-run（默认） |
+| assets | purge-derived --apply --yes | T2 | 删除 prep 派生数据；需二次确认 |
 | assets | backfill-dragons | T1 | 写 assets.db.dragons |
 | assets | backfill-dragons --dry-run | T0 | 只读体检 |
 | assets | backfill-dragons --prune | T2 | 删除镜像孤儿行 |
@@ -61,7 +63,7 @@
 
 ## 禁止操作
 
-- 未确认执行 `buy` / `sell` / `blacklist add|remove` / `storage clear` / `assets push` / `assets pull --apply` / `backfill-dragons --prune`。
+- 未确认执行 `buy` / `sell` / `blacklist add|remove` / `storage clear` / `assets push` / `assets pull --apply` / `assets purge-derived --apply` / `backfill-dragons --prune`。
 - 在主库执行 `assets pull --force`；恢复应使用 `--target-dir` 隔离目录。
 - 手工用 SQL 删除或修改业务表（包括信号表）；CLI 没有清理接口时，说明限制并停止。
 - 回显 Cookie、token、`assets_sync` 凭据，或把它们写入日志/仓库。

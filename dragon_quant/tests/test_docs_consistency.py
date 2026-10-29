@@ -20,7 +20,7 @@ Layout contract (``archived_md/agents/2026-10-27-agents-progressive-disclosure-d
   set", never weakened, plus new size / link / ownership gates.
 
 The parser surface is taken from the reviewed E2E snapshot
-(``dragon_quant/tests/e2e/coverage-map.json``, 52 nodes / 15 top-level commands).  Every node
+(``dragon_quant/tests/e2e/coverage-map.json``, 53 nodes / 15 top-level commands).  Every node
 must be reachable from the README command reference.
 """
 
@@ -63,7 +63,7 @@ EXPECTED_MODULE_DOCS = {
 # stay in the root on purpose and therefore must never be listed here.
 CRITICAL_TOKEN_OWNERS = {
     "summarize_review_rows": "review.md",
-    "version=0.7": "prep-auction.md",
+    "version=0.8": "prep-auction.md",
     "collection_report": "prep-auction.md",
     "factor_ranking_enabled": "factor.md",
     "idx_buy_sell_open": "trading.md",
@@ -206,7 +206,7 @@ def _local_markdown_links(path: Path) -> list[str]:
 def _parser_nodes() -> list[str]:
     payload = json.loads(_read(COVERAGE_MAP))
     snapshot = payload["parser_snapshot"]
-    assert snapshot["node_count"] == 52
+    assert snapshot["node_count"] == 53
     assert snapshot["top_level_count"] == 15
     return [node["command"] for node in snapshot["nodes"]]
 
@@ -246,7 +246,7 @@ def test_documented_snapshot_version_matches_production():
     match = re.search(r'"version":\s*"([0-9.]+)"', production)
     assert match, "prep service must declare its snapshot version"
     version = match.group(1)
-    assert version == "0.7"
+    assert version == "0.8"
 
     # The owner moved from AGENTS.md to prep-auction.md, but neither owner is
     # allowed to lose its own assertion: no "somewhere in the doc set" shortcut.

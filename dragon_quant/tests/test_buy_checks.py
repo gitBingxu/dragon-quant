@@ -423,5 +423,41 @@ class TestBuySignalGolden(unittest.TestCase):
                 self.assertEqual(sig["code"] if sig else None, expected)
 
 
+class TestReviewEligiblePreconditions(unittest.TestCase):
+    """0.8 候选：review_eligible 短路旧身份/分数；pool 非 eligible 直接拒绝。"""
+
+    def test_review_eligible_skips_legacy_identity_and_min_score(self):
+        cand = {**CAND, "is_true_dragon": False, "composite_score": 0.0,
+                "review_pool": True, "review_eligible": True}
+        cfg = StrategyConfig(min_score=90)
+        r = row()
+        signal = evaluate_buy(cand, r, cfg, r["prev_row"])
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["code"], MA5)
+
+    def test_review_pool_not_eligible_is_rejected(self):
+        from dragon_quant.review_account.strategy.common import BuyRejected
+
+        cand = {**CAND, "review_pool": True, "review_eligible": False,
+                "composite_score": 99.0, "is_true_dragon": True}
+        cfg = StrategyConfig()
+        r = row()
+        with self.assertRaises(BuyRejected) as ctx:
+            evaluate_buy(cand, r, cfg, r["prev_row"])
+        self.assertEqual(ctx.exception.code, "review_not_eligible")
+
+        detail = explain_buy_candidate(cand, r, cfg, r["prev_row"])
+        self.assertEqual(detail["reason_code"], "review_not_eligible")
+        self.assertEqual({c["status"] for c in detail["checks"]}, {"skipped"})
+
+    def test_legacy_candidate_still_uses_identity_and_score(self):
+        cfg = StrategyConfig(min_score=90)
+        r = row()
+        self.assertIsNone(evaluate_buy(
+            {**CAND, "composite_score": 50.0}, r, cfg, r["prev_row"]))
+        self.assertIsNone(evaluate_buy(
+            {**CAND, "is_true_dragon": False}, r, cfg, r["prev_row"]))
+
+
 if __name__ == "__main__":
     unittest.main()

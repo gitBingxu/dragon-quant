@@ -1,213 +1,16 @@
 {
   "candidates": [
     {
-      "amount": 100000000.0,
       "announcements": [],
-      "board_count": 2,
-      "buy_date": null,
-      "buy_price": null,
-      "close_px": 11.0,
-      "code": "600001",
-      "composite_score": 88.0,
-      "concepts": [
-        "AI算力"
-      ],
-      "dimensions": [
-        "质量维度：五维综合 88.0（排名 1）；题材：AI算力（今日主线第 2）",
-        "今日维度：涨幅 +5.00%，未进入涨停池（入选日 2026-09-07）",
-        "资金维度：主力净流入 1234.56 万（占成交额 12.3%）"
-      ],
-      "facts": {
-        "announcement_count": 0,
-        "announcements_available": true,
-        "first_limit_up_time": null,
-        "flow_available": true,
-        "high_days": null,
-        "in_pool_today": false,
-        "limit_up_suc_rate": null,
-        "limit_up_type": null,
-        "main_net_amount": 12345600.0,
-        "open_num": null,
-        "pool_available": true,
-        "reason_type_today": null,
-        "risk_announcement": null,
-        "t_amount": 100000000.0,
-        "t_pct": 5.0,
-        "t_turnover": 8.0
-      },
-      "first_limit_up_time": null,
-      "high_px": 11.0,
-      "ignore_reason": null,
-      "is_again_limit": null,
-      "is_true_dragon": true,
-      "limit_up_type": null,
-      "low_px": 10.0,
-      "main_net_amount": 12345600.0,
-      "market_cap": 1000000000.0,
-      "max_drawdown_5d": null,
-      "max_return_5d": null,
-      "max_return_hold_days": null,
-      "name": "龙头A",
-      "open_num": null,
-      "open_px": 10.0,
-      "pct": 10.0,
-      "rank": 1,
-      "reason_type": null,
-      "report_text": "龙头A report",
-      "review_status": "pending",
-      "scan_id": "v2_20260907_5",
-      "source": "v2",
-      "trade_date": "2026-09-07",
-      "turnover_rate": 8.0,
-      "verdict": "light",
-      "verdict_label": "轻仓博弈",
-      "version": "0.7.2"
-    },
-    {
-      "amount": 100000000.0,
-      "announcements": [
-        {
-          "date": "2026-09-10",
-          "title": "关于股东减持计划的公告",
-          "type": "减持",
-          "url": "u"
-        }
-      ],
-      "board_count": 2,
-      "buy_date": null,
-      "buy_price": null,
-      "close_px": 11.0,
-      "code": "600002",
-      "composite_score": 62.0,
-      "concepts": [
-        "机器人"
-      ],
-      "dimensions": [],
-      "facts": {
-        "announcement_count": 1,
-        "announcements_available": true,
-        "first_limit_up_time": null,
-        "flow_available": true,
-        "high_days": null,
-        "in_pool_today": false,
-        "limit_up_suc_rate": null,
-        "limit_up_type": null,
-        "main_net_amount": -5000000.0,
-        "open_num": null,
-        "pool_available": true,
-        "reason_type_today": null,
-        "risk_announcement": {
-          "date": "2026-09-10",
-          "level": "soft",
-          "title": "关于股东减持计划的公告"
-        },
-        "t_amount": 80000000.0,
-        "t_pct": -2.2,
-        "t_turnover": 5.0
-      },
-      "first_limit_up_time": null,
-      "high_px": 11.0,
-      "ignore_reason": "今日涨幅 -2.20%、主力净流出 500.00 万（占成交额 -6.2%），资金离场",
-      "is_again_limit": null,
-      "is_true_dragon": true,
-      "limit_up_type": null,
-      "low_px": 10.0,
-      "main_net_amount": -5000000.0,
-      "market_cap": 1000000000.0,
-      "max_drawdown_5d": null,
-      "max_return_5d": null,
-      "max_return_hold_days": null,
-      "name": "跟风B",
-      "open_num": null,
-      "open_px": 10.0,
-      "pct": 10.0,
-      "rank": 2,
-      "reason_type": null,
-      "report_text": "跟风B report",
-      "review_status": "pending",
-      "scan_id": "v2_20260910_5",
-      "source": "v2",
-      "trade_date": "2026-09-10",
-      "turnover_rate": 8.0,
-      "verdict": "ignore",
-      "verdict_label": "忽略",
-      "version": "0.7.2"
-    },
-    {
-      "amount": 100000000.0,
-      "announcements": [],
-      "board_count": 2,
-      "buy_date": null,
-      "buy_price": null,
-      "close_px": 11.0,
-      "code": "600003",
-      "composite_score": 90.0,
-      "concepts": [
-        "机器人"
-      ],
-      "dimensions": [],
-      "facts": {
-        "announcement_count": 0,
-        "announcements_available": true,
-        "first_limit_up_time": null,
-        "flow_available": true,
-        "high_days": null,
-        "in_pool_today": false,
-        "limit_up_suc_rate": null,
-        "limit_up_type": null,
-        "main_net_amount": 2000000.0,
-        "open_num": null,
-        "pool_available": true,
-        "reason_type_today": null,
-        "risk_announcement": null,
-        "t_amount": 50000000.0,
-        "t_pct": -10.0,
-        "t_turnover": 6.0
-      },
-      "first_limit_up_time": null,
-      "high_px": 11.0,
-      "ignore_reason": "今日涨幅 -10.00%，已退出涨停梯队（入选日 2026-09-09）",
-      "is_again_limit": null,
-      "is_true_dragon": true,
-      "limit_up_type": null,
-      "low_px": 10.0,
-      "main_net_amount": 2000000.0,
-      "market_cap": 1000000000.0,
-      "max_drawdown_5d": null,
-      "max_return_5d": null,
-      "max_return_hold_days": null,
-      "name": "补涨C",
-      "open_num": null,
-      "open_px": 10.0,
-      "pct": 10.0,
-      "rank": 1,
-      "reason_type": null,
-      "report_text": "补涨C report",
-      "review_status": "pending",
-      "scan_id": "v2_20260909_5",
-      "source": "v2",
-      "trade_date": "2026-09-09",
-      "turnover_rate": 8.0,
-      "verdict": "ignore",
-      "verdict_label": "忽略",
-      "version": "0.7.2"
-    },
-    {
-      "amount": 100000000.0,
-      "announcements": [],
-      "board_count": 2,
-      "buy_date": null,
-      "buy_price": null,
-      "close_px": 11.0,
       "code": "600005",
-      "composite_score": 82.0,
+      "composite_score": 70.3,
       "concepts": [
         "机器人"
       ],
       "dimensions": [
-        "质量维度：五维综合 82.0（排名 1）；题材：机器人（今日主线第 1）",
-        "涨停维度：换手板 3天3板，首封 10:05:00，炸板 0 次，封板成功率 100%",
-        "资金维度：主力净流入 3000.00 万（占成交额 6.0%）"
+        "复盘分 70.3 / B",
+        "龙头 / 仓位 4.0%",
+        "主线 机器人 第1"
       ],
       "facts": {
         "announcement_count": 0,
@@ -227,36 +30,19 @@
         "t_pct": 10.0,
         "t_turnover": 12.0
       },
-      "first_limit_up_time": "10:05:00",
-      "high_px": 11.0,
       "ignore_reason": null,
-      "is_again_limit": true,
-      "is_true_dragon": true,
-      "limit_up_type": "换手板",
-      "low_px": 10.0,
+      "is_true_dragon": null,
       "main_net_amount": 30000000.0,
-      "market_cap": 1000000000.0,
-      "max_drawdown_5d": null,
-      "max_return_5d": null,
-      "max_return_hold_days": null,
       "name": "龙头E",
-      "open_num": 0,
-      "open_px": 10.0,
-      "pct": 10.0,
+      "position_pct": 4.0,
       "rank": 1,
-      "reason_type": "机器人",
-      "report_text": "龙头E report",
-      "review_status": "pending",
-      "scan_id": "v2_20260911_5",
-      "source": "v2",
+      "review_eligible": true,
+      "review_pool": true,
       "trade_date": "2026-09-11",
-      "turnover_rate": 8.0,
-      "verdict": "strong",
-      "verdict_label": "强烈建议",
-      "version": "0.7.2"
+      "verdict": "light",
+      "verdict_label": "轻仓博弈"
     },
     {
-      "amount": 100000000.0,
       "announcements": [
         {
           "date": "2026-09-10",
@@ -265,16 +51,16 @@
           "url": "u"
         }
       ],
-      "board_count": 2,
-      "buy_date": null,
-      "buy_price": null,
-      "close_px": 11.0,
       "code": "600004",
-      "composite_score": 40.0,
+      "composite_score": 54.4,
       "concepts": [
         "银行科技"
       ],
-      "dimensions": [],
+      "dimensions": [
+        "复盘分 54.4 / C",
+        "龙头 / 仓位 0",
+        "主线 银行科技 第3"
+      ],
       "facts": {
         "announcement_count": 1,
         "announcements_available": true,
@@ -297,33 +83,154 @@
         "t_pct": 10.0,
         "t_turnover": 4.0
       },
-      "first_limit_up_time": "09:30:00",
-      "high_px": 11.0,
-      "ignore_reason": "近 3 日公告「立案调查公告」，按公告风险规则忽略",
-      "is_again_limit": false,
-      "is_true_dragon": true,
-      "limit_up_type": "T字板",
-      "low_px": 10.0,
+      "ignore_reason": "公告「立案调查公告」：硬风险：hard_risk_announcement",
+      "is_true_dragon": null,
       "main_net_amount": -1000000.0,
-      "market_cap": 1000000000.0,
-      "max_drawdown_5d": null,
-      "max_return_5d": null,
-      "max_return_hold_days": null,
       "name": "银行D",
-      "open_num": 5,
-      "open_px": 10.0,
-      "pct": 10.0,
+      "position_pct": 0.0,
       "rank": 2,
-      "reason_type": "银行科技",
-      "report_text": "银行D report",
-      "review_status": "pending",
-      "scan_id": "v2_20260911_5",
-      "source": "v2",
+      "review_eligible": false,
+      "review_pool": true,
       "trade_date": "2026-09-11",
-      "turnover_rate": 8.0,
       "verdict": "ignore",
-      "verdict_label": "忽略",
-      "version": "0.7.2"
+      "verdict_label": "忽略"
+    },
+    {
+      "announcements": [],
+      "code": "600001",
+      "composite_score": 47.0,
+      "concepts": [
+        "AI算力"
+      ],
+      "dimensions": [
+        "复盘分 47.0 / D",
+        "非主线 / 仓位 0",
+        "主线 —"
+      ],
+      "facts": {
+        "announcement_count": 0,
+        "announcements_available": true,
+        "first_limit_up_time": null,
+        "flow_available": true,
+        "high_days": null,
+        "in_pool_today": false,
+        "limit_up_suc_rate": null,
+        "limit_up_type": null,
+        "main_net_amount": 12345600.0,
+        "open_num": null,
+        "pool_available": true,
+        "reason_type_today": null,
+        "risk_announcement": null,
+        "t_amount": 100000000.0,
+        "t_pct": 5.0,
+        "t_turnover": 8.0
+      },
+      "ignore_reason": "流动性不足：amount=100000000",
+      "is_true_dragon": null,
+      "main_net_amount": 12345600.0,
+      "name": "龙头A",
+      "position_pct": 0.0,
+      "rank": 3,
+      "review_eligible": false,
+      "review_pool": true,
+      "trade_date": "2026-09-07",
+      "verdict": "ignore",
+      "verdict_label": "忽略"
+    },
+    {
+      "announcements": [],
+      "code": "600003",
+      "composite_score": 42.3,
+      "concepts": [
+        "机器人"
+      ],
+      "dimensions": [
+        "复盘分 42.3 / D",
+        "非主线 / 仓位 0",
+        "主线 —"
+      ],
+      "facts": {
+        "announcement_count": 0,
+        "announcements_available": true,
+        "first_limit_up_time": null,
+        "flow_available": true,
+        "high_days": null,
+        "in_pool_today": false,
+        "limit_up_suc_rate": null,
+        "limit_up_type": null,
+        "main_net_amount": 2000000.0,
+        "open_num": null,
+        "pool_available": true,
+        "reason_type_today": null,
+        "risk_announcement": null,
+        "t_amount": 50000000.0,
+        "t_pct": -10.0,
+        "t_turnover": 6.0
+      },
+      "ignore_reason": "流动性不足：amount=50000000",
+      "is_true_dragon": null,
+      "main_net_amount": 2000000.0,
+      "name": "补涨C",
+      "position_pct": 0.0,
+      "rank": 4,
+      "review_eligible": false,
+      "review_pool": true,
+      "trade_date": "2026-09-09",
+      "verdict": "ignore",
+      "verdict_label": "忽略"
+    },
+    {
+      "announcements": [
+        {
+          "date": "2026-09-10",
+          "title": "关于股东减持计划的公告",
+          "type": "减持",
+          "url": "u"
+        }
+      ],
+      "code": "600002",
+      "composite_score": 35.1,
+      "concepts": [
+        "机器人"
+      ],
+      "dimensions": [
+        "复盘分 35.1 / D",
+        "非主线 / 仓位 0",
+        "主线 —"
+      ],
+      "facts": {
+        "announcement_count": 1,
+        "announcements_available": true,
+        "first_limit_up_time": null,
+        "flow_available": true,
+        "high_days": null,
+        "in_pool_today": false,
+        "limit_up_suc_rate": null,
+        "limit_up_type": null,
+        "main_net_amount": -5000000.0,
+        "open_num": null,
+        "pool_available": true,
+        "reason_type_today": null,
+        "risk_announcement": {
+          "date": "2026-09-10",
+          "level": "soft",
+          "title": "关于股东减持计划的公告"
+        },
+        "t_amount": 80000000.0,
+        "t_pct": -2.2,
+        "t_turnover": 5.0
+      },
+      "ignore_reason": "流动性不足：amount=80000000",
+      "is_true_dragon": null,
+      "main_net_amount": -5000000.0,
+      "name": "跟风B",
+      "position_pct": 0.0,
+      "rank": 5,
+      "review_eligible": false,
+      "review_pool": true,
+      "trade_date": "2026-09-10",
+      "verdict": "ignore",
+      "verdict_label": "忽略"
     }
   ],
   "dragon_source": {
@@ -547,7 +454,7 @@
           "N": 100.0,
           "S": 100.0
         },
-        "unknown_reason": null,
+        "unknown_reason": "prev_snapshot_missing",
         "watchlist": false
       },
       {
@@ -577,7 +484,7 @@
           "N": 100.0,
           "S": 100.0
         },
-        "unknown_reason": null,
+        "unknown_reason": "prev_snapshot_missing",
         "watchlist": false
       },
       {
@@ -609,7 +516,7 @@
           "N": 50.0,
           "S": 53.8
         },
-        "unknown_reason": null,
+        "unknown_reason": "prev_snapshot_missing",
         "watchlist": false
       }
     ],
@@ -663,6 +570,14 @@
     "portfolio": {
       "sum_pct": 4.0,
       "warning": null
+    },
+    "prev": {
+      "degraded": [
+        "prev_snapshot_missing"
+      ],
+      "mainlines": "snapshot_missing",
+      "snapshot_date": null,
+      "snapshot_version": null
     },
     "review_version": "review_v1"
   },
@@ -961,7 +876,7 @@
       "legacy": {
         "composite_score": 82.0,
         "in_candidates": true,
-        "verdict": "strong"
+        "verdict": null
       },
       "mainline": {
         "board_name": "机器人",
@@ -1337,7 +1252,7 @@
       "legacy": {
         "composite_score": 40.0,
         "in_candidates": true,
-        "verdict": "ignore"
+        "verdict": null
       },
       "mainline": {
         "board_name": "银行科技",
@@ -1617,7 +1532,7 @@
       "legacy": {
         "composite_score": 88.0,
         "in_candidates": true,
-        "verdict": "light"
+        "verdict": null
       },
       "mainline": null,
       "missing_dims": [
@@ -1894,7 +1809,7 @@
       "legacy": {
         "composite_score": 90.0,
         "in_candidates": true,
-        "verdict": "ignore"
+        "verdict": null
       },
       "mainline": null,
       "missing_dims": [
@@ -2171,7 +2086,7 @@
       "legacy": {
         "composite_score": 62.0,
         "in_candidates": true,
-        "verdict": "ignore"
+        "verdict": null
       },
       "mainline": null,
       "missing_dims": [
@@ -2476,7 +2391,7 @@
           "follower": "600005"
         },
         "state": "unknown",
-        "unknown_reason": null
+        "unknown_reason": "prev_snapshot_missing"
       },
       {
         "board_name": "AI算力",
@@ -2488,7 +2403,7 @@
         "mainline_score": 79.2,
         "role_map": {},
         "state": "unknown",
-        "unknown_reason": null
+        "unknown_reason": "prev_snapshot_missing"
       },
       {
         "board_name": "银行科技",
@@ -2502,7 +2417,7 @@
           "follower": "600004"
         },
         "state": "unknown",
-        "unknown_reason": null
+        "unknown_reason": "prev_snapshot_missing"
       }
     ],
     "market": {
@@ -3889,5 +3804,5 @@
     "trade_date": "2026-09-11"
   },
   "trade_date": "2026-09-11",
-  "version": "0.7"
+  "version": "0.8"
 }

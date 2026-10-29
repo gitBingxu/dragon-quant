@@ -30,6 +30,7 @@ from dragon_quant.tests.e2e.harness.assertlib import (
     assert_exit,
     sqlite_count,
     sqlite_rows,
+    sqlite_tables,
 )
 from dragon_quant.tests.e2e.harness.canonical import assert_json_equal
 from dragon_quant.tests.e2e.harness.sandbox import EnvSandbox
@@ -228,7 +229,7 @@ def test_f1_list_json_and_human_match_registry():
         assert payload["ok"] is True
         items = payload["factors"]
         assert [item["name"] for item in items] == list(fb.EXPECTED_FACTOR_NAMES)
-        assert len(items) == 51
+        assert len(items) == 58
         assert list(items[0]) == LIST_ITEM_KEYS
         for item in items:
             assert VERSION_RE.fullmatch(item["version"]), item
@@ -242,7 +243,7 @@ def test_f1_list_json_and_human_match_registry():
         assert by_name["fin_roe"]["pit_rule"] == "asof"
         assert by_name["fin_roe"]["available_phase"] == "prep"
         assert by_name["fin_roe"]["frequency"] == "1q"
-        assert by_name["prep_verdict"]["pit_rule"] == "derived"
+        assert by_name["prep_t_pct"]["pit_rule"] == "derived"
         assert by_name["auction_strength"]["available_phase"] == "auction"
 
         human = run(box, "factor", "list")
@@ -250,7 +251,7 @@ def test_f1_list_json_and_human_match_registry():
         lines = human.stdout.splitlines()
         assert lines[0].split() == ["因子", "版本", "源", "阶段", "PIT", "默认"]
         assert lines[1].startswith("------")
-        assert len(lines) == 2 + 51
+        assert len(lines) == 2 + 58
         assert lines[2].startswith("auction_dim_direction")
         assert re.fullmatch(
             r"five_dim_composite\s+v[0-9a-f]{12}\s+scan\s+close\s+recorded\s+开",
@@ -430,17 +431,15 @@ def test_f4_only_builds_named_factors_and_default_off_stays_off():
         default_report = json.loads(default.stdout)["reports"][0]
         assert list(default_report["factors"]) == list(fb.DEFAULT_ENABLED_NAMES)
         produced = {row["factor_name"] for row in _factor_rows(box)}
-        assert not {"prep_verdict", "auction_strength", "fin_roe"} & produced
+        assert not {"prep_t_pct", "auction_strength", "fin_roe"} & produced
         assert produced == set(fb.DEFAULT_ENABLED_NAMES)
 
         # An explicit --only is a user opt-in even for a default-off factor.
-        explicit = run(box, "factor", "build", "--date", "20260911",
-                       "--only", "prep_verdict", "--json")
-        assert_exit(explicit, 0)
-        explicit_report = json.loads(explicit.stdout)["reports"][0]
-        assert list(explicit_report["factors"]) == ["prep_verdict"]
-        assert explicit_report["factors"]["prep_verdict"]["status"] == \
-            "missing_source"
+        # 退役因子不可再显式构建：未知因子 → exit 2（不静默成功）
+        retired = run(box, "factor", "build", "--date", "20260911",
+                      "--only", "prep_verdict", "--json")
+        assert_exit(retired, 2)
+        assert "未知因子" in retired.stdout
 
 
 # ─── F5: --all / mutual exclusion / no fin data -> no transport ────────────
@@ -454,7 +453,7 @@ def test_f5_all_builds_every_registered_factor_and_stays_offline():
         assert_exit(result, 0)
         report = json.loads(result.stdout)["reports"][0]
         assert list(report["factors"]) == list(fb.EXPECTED_FACTOR_NAMES)
-        assert report["registry_inserted"] == 51
+        assert report["registry_inserted"] == 58
         statuses = {name: entry["status"] for name, entry in report["factors"].items()}
         # 2026-09-10 has no vpa_analysis / prep / auction snapshots.
         assert {name for name, status in statuses.items() if status == "ok"} == \
@@ -592,7 +591,7 @@ def test_f7_status_counts_and_human_output():
         for version in registered.values():
             assert VERSION_RE.fullmatch(version)
         factors = payload["factors"]
-        assert len(factors) == 51
+        assert len(factors) == 58
         assert {item["name"] for item in factors
                 if item["registered_version"] is not None} == \
             set(fb.DEFAULT_ENABLED_NAMES)
@@ -1247,3 +1246,297 @@ def test_m9b2_runtime_clock_mode_drives_build_export_and_captured_at():
                        "--date", "20260911", "--json", clock_mode="runtime")
         assert_exit(snapshot, 0)
         assert json.loads(snapshot.stdout)["captured_at"] == "2026-09-11T15:30:00"
+
+
+# ─── F17–F20: factor decision-review (prep/auction 决策结果回测) ────────────
+
+DECISION_PREP_DATE = "2026-09-09"
+DECISION_UNSUPPORTED_DATE = "2026-09-10"
+DECISION_REVIEW_KEYS = [
+    "schema_version", "ok", "status", "source", "date_from", "date_to",
+    "universe", "coverage_basis", "config", "snapshots", "versions", "groups",
+    "spreads", "exclusions", "caveats", "warnings",
+]
+_ASSETS_STANDARD_TABLES = {
+    "prep_assets", "auction_assets", "prep_snapshots", "auction_snapshots",
+    "dragons", "factor_values", "factor_build_runs", "factor_sector_snapshots",
+    "factor_registry", "factor_model_snapshots", "fin_observed_snapshots",
+    "fin_report_files", "fin_report_records", "fin_field_calibrations",
+    "fin_xdxr_records",
+}
+
+
+def _prep_snapshot_row(day: str, payload: dict) -> dict:
+    return {
+        "trade_date": day,
+        "source": "v2",
+        "result_json": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        "created_at": f"{day} 17:02:11",
+    }
+
+
+def _auction_snapshot_row(day: str, code: str, analysis, *,
+                          created_at="2026-09-09 09:25:00") -> dict:
+    text = analysis if isinstance(analysis, str) else json.dumps(
+        analysis, ensure_ascii=False, sort_keys=True)
+    return {"trade_date": day, "code": code, "source": "v2",
+            "analysis_json": text, "created_at": created_at}
+
+
+def _prep_decision_seed() -> dict:
+    supported = {
+        "version": "0.7",
+        "trade_date": DECISION_PREP_DATE,
+        "review_candidates": [
+            {"code": "600001", "name": "龙头A", "eligibility": "eligible",
+             "position_pct": 4.0, "review_score": 70.0, "review_grade": "B"},
+            {"code": "600002", "name": "跟风B", "eligibility": "not_qualified",
+             "position_pct": 0.0, "review_score": 40.0, "review_grade": "D"},
+            {"code": "600003", "name": "补涨C", "eligibility": "unknown",
+             "position_pct": None, "review_score": None, "review_grade": None},
+        ],
+        "strategy_context": {
+            "frozen_at": f"{DECISION_PREP_DATE}T16:40:00+08:00"},
+    }
+    unsupported = {"version": "0.6", "trade_date": DECISION_UNSUPPORTED_DATE,
+                   "review_candidates": []}
+    rows = [
+        _prep_snapshot_row(DECISION_PREP_DATE, supported),
+        _prep_snapshot_row(DECISION_UNSUPPORTED_DATE, unsupported),
+    ]
+    return {"tables": {"prep_snapshots": {
+        "columns": {"trade_date": "TEXT NOT NULL", "source": "TEXT NOT NULL",
+                    "result_json": "TEXT NOT NULL", "created_at": "TEXT"},
+        "primary_key": ["trade_date", "source"],
+        "rows": rows,
+    }}}
+
+
+def _auction_decision_seed() -> dict:
+    day = DECISION_PREP_DATE
+
+    def analysis(code, *, version="2", weak=False, strength=70.0, level="强",
+                 unverified=False, status="ok"):
+        return {"version": version, "code": code, "is_weak": weak,
+                "strength": strength, "level": level, "unverified": unverified,
+                "data_quality": {"status": status}}
+
+    rows = [
+        _auction_snapshot_row(day, "600001", analysis("600001", level="强")),
+        _auction_snapshot_row(day, "600002", analysis(
+            "600002", strength=50.0, level="中")),
+        _auction_snapshot_row(day, "600003", analysis(
+            "600003", strength=40.0, level="弱")),
+        _auction_snapshot_row(day, "600004", analysis(
+            "600004", weak=True, strength=30.0, level="弱")),
+        _auction_snapshot_row(day, "600005", analysis(
+            "600005", status="unavailable")),
+        _auction_snapshot_row(day, "600006", analysis("600006", version="1")),
+        _auction_snapshot_row(day, "600007", "not json"),
+    ]
+    return {"tables": {"auction_snapshots": {
+        "columns": {"trade_date": "TEXT NOT NULL", "code": "TEXT NOT NULL",
+                    "source": "TEXT NOT NULL", "analysis_json": "TEXT NOT NULL",
+                    "created_at": "TEXT"},
+        "primary_key": ["trade_date", "code", "source"],
+        "rows": rows,
+    }}}
+
+
+def _merge_seed(*specs: dict) -> dict:
+    tables: dict = {}
+    for spec in specs:
+        tables.update(spec["tables"])
+    return {"tables": tables}
+
+
+def _decision_scenario(box: EnvSandbox) -> Path:
+    """复用 factor scenario 的行情，但把成交额抬到可成交门槛（≥2 亿）。
+
+    评测 fixture 的日 K 成交额只有 1000 万（``factor eval`` 不看流动性），
+    决策回测会按可成交口径剔除 ``illiquid``，因此这里只调整 amount/volume。
+    """
+    payload = json.loads(SCENARIO.read_text(encoding="utf-8"))
+    by_code = payload["providers"]["xueqiu"]["get_kline"]["by_code"]
+    for code, bars in by_code.items():
+        if code == "SH000001":
+            continue
+        for bar in bars:
+            bar["amount"] = 500_000_000.0
+            bar["volume"] = 1_000_000.0
+    path = box.root / "scenario_decision.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_f17_decision_review_prep_groups_coverage_and_golden():
+    with sandbox("f17") as box:
+        seed_db(box, _prep_decision_seed(), db_name="assets.db")
+        scenario = _decision_scenario(box)
+        result = run(box, "factor", "decision-review", "--source", "prep",
+                     "--from", "20260907", "--to", "20260910",
+                     "--min-days", "1", "--min-group-samples", "1", "--json",
+                     scenario=scenario)
+        assert_exit(result, 0)
+        payload = json.loads(result.stdout)
+        assert list(payload) == DECISION_REVIEW_KEYS
+        assert payload["schema_version"] == "dr_v1"
+        assert payload["ok"] is True
+        assert payload["status"] == "ok"
+        assert payload["source"] == "prep"
+        assert payload["universe"] == "persisted_decision_snapshots"
+        assert payload["coverage_basis"] == "persisted_snapshots"
+        assert payload["config"] == {
+            "horizons": [1, 3, 5], "cost_bps": 13.0, "min_days": 1,
+            "min_group_samples": 1, "include_samples": False,
+            "outcome_basis": "net_open_to_open_after_cost",
+            "net_return_basis": "gross_minus_cost",
+            "entry_rule": "available_at_first_tradable_open",
+            "exit_rule": "nth_trading_day_open",
+            "calendar_basis": "index_calendar",
+        }
+        assert payload["snapshots"] == {
+            "requested_days": 4, "with_snapshot": 2, "missing": 2, "usable": 1,
+            "unsupported_version": 1, "malformed": 0, "empty_decision": 0,
+            "corrupt_rows": 0, "non_trading_snapshot_dates": 0,
+        }
+        assert payload["versions"] == {
+            "accepted": ["0.7", "0.8"], "seen": {"0.6": 1, "0.7": 1},
+            "unsupported_units": 1,
+        }
+        assert [group["group"] for group in payload["groups"]] == [
+            "recommended", "not_recommended", "data_insufficient"]
+        groups = {group["group"]: group for group in payload["groups"]}
+        recommended = groups["recommended"]["horizons"]["1"]
+        assert recommended["observations"] == 1
+        assert recommended["valid"] == 1
+        assert recommended["up"] == 1
+        assert recommended["direction_hit_rate"] == 1.0
+        assert _close(recommended["mean_net_return_pct"], 0.87)
+        assert recommended["quality"] == "ok"
+        assert recommended["above_reference"] is True
+        assert groups["not_recommended"]["horizons"]["1"]["direction_hit_rate"] == 0.0
+        assert groups["data_insufficient"]["horizons"]["1"]["direction_evaluable"] is False
+        assert _close(payload["spreads"]["1"]["value"], -1.0)
+        assert payload["spreads"]["3"]["value"] is None
+        assert payload["exclusions"]["sample"] == {"insufficient_horizon": 6}
+        assert payload["exclusions"]["snapshot"] == {
+            "duplicate_code": 0, "missing_snapshot": 2,
+            "unsupported_snapshot_version": 1, "unparsed_position_pct": 0,
+        }
+        assert any(warning.startswith("unsupported_snapshot_version: prep 1 日")
+                   for warning in payload["warnings"])
+        assert "snapshot_missing: 2/4 交易日无快照（仅统计库内持久化快照）" \
+            in payload["warnings"]
+        assert_json_equal(payload, golden_json("decision_review_prep.json"))
+
+        human = run(box, "factor", "decision-review", "--source", "prep",
+                    "--from", "20260907", "--to", "20260910",
+                    "--min-days", "1", "--min-group-samples", "1",
+                    scenario=scenario)
+        assert_exit(human, 0)
+        assert human.stdout.splitlines()[0].startswith(
+            "决策回测 prep 2026-09-07~2026-09-10｜快照 1/4 日")
+        assert "horizon=1" in human.stdout
+        assert "差值 推荐−不推荐:" in human.stdout
+
+
+def test_f18_decision_review_auction_priority_and_coverage_basis():
+    with sandbox("f18") as box:
+        seed_db(box, _auction_decision_seed(), db_name="assets.db")
+        scenario = _decision_scenario(box)
+        result = run(box, "factor", "decision-review", "--source", "auction",
+                     "--from", "20260909", "--to", "20260909", "--horizon", "1",
+                     "--min-days", "1", "--min-group-samples", "1", "--json",
+                     "--include-samples", scenario=scenario)
+        assert_exit(result, 0)
+        payload = json.loads(result.stdout)
+        assert list(payload) == DECISION_REVIEW_KEYS + ["samples"]
+        assert payload["status"] == "ok"
+        assert payload["coverage_basis"] == "persisted_snapshots"
+        assert [group["group"] for group in payload["groups"]] == [
+            "strong", "medium", "weak", "vetoed", "unavailable"]
+        groups = {group["group"]: group for group in payload["groups"]}
+        assert groups["strong"]["horizons"]["1"]["up"] == 1
+        assert groups["medium"]["horizons"]["1"]["direction_evaluable"] is False
+        assert groups["weak"]["horizons"]["1"]["direction_hit_rate"] == 0.0
+        assert groups["vetoed"]["horizons"]["1"]["direction_hit_rate"] == 0.0
+        assert payload["spreads"]["1"]["pair"] == ["strong", "weak"]
+        assert _close(payload["spreads"]["1"]["value"], -2.0)
+        assert payload["snapshots"] == {
+            "requested_days": 1, "with_snapshot": 1, "missing": 0, "usable": 1,
+            "unsupported_version": 1, "malformed": 0, "empty_decision": 0,
+            "corrupt_rows": 1, "non_trading_snapshot_dates": 0,
+        }
+        assert payload["versions"]["seen"] == {"1": 1, "2": 5}
+        assert payload["versions"]["unsupported_units"] == 1
+        assert "coverage_basis=persisted_snapshots: 未持久化的空盘口/失败候选" \
+               "不在分母内（无 run manifest）" in payload["warnings"]
+        assert "corrupt_snapshot_rows: 1 行 JSON 损坏已跳过" in payload["warnings"]
+        assert payload["caveats"][-1] == \
+            "auction 分母仅为已持久化快照，不含未持久化的空盘口/失败候选"
+        assert [sample["code"] for sample in payload["samples"]] == [
+            "600001", "600002", "600003", "600004", "600005"]
+        assert_json_equal(payload, golden_json("decision_review_auction.json"))
+
+
+def test_f19_decision_review_param_errors_and_empty_db():
+    with sandbox("f19") as box:
+        missing_source = run(box, "factor", "decision-review",
+                             "--from", "20260909", "--to", "20260909")
+        assert_exit(missing_source, 2)
+        assert missing_source.stdout == ""
+
+        bad_horizon = run(box, "factor", "decision-review", "--source", "prep",
+                          "--from", "20260909", "--to", "20260909",
+                          "--horizon", "0", "--json")
+        assert_exit(bad_horizon, 2)
+        assert json.loads(bad_horizon.stdout) == {
+            "ok": False, "error": "horizon 必须是 ≥ 1 的整数: 0"}
+
+        bad_cost = run(box, "factor", "decision-review", "--source", "prep",
+                       "--from", "20260909", "--to", "20260909",
+                       "--cost-bps", "-1", "--json")
+        assert_exit(bad_cost, 2)
+        assert json.loads(bad_cost.stdout) == {
+            "ok": False, "error": "cost_bps 必须是有限非负数: -1.0"}
+
+        empty = run(box, "factor", "decision-review", "--source", "prep",
+                    "--from", "20260907", "--to", "20260910", "--json")
+        assert_exit(empty, 0)
+        empty_payload = json.loads(empty.stdout)
+        assert empty_payload["status"] == "insufficient_data"
+        assert empty_payload["reason"] == "no_snapshot_in_range"
+        assert empty_payload["snapshots"]["with_snapshot"] == 0
+        assert not (box.data_dir / "assets.db").exists()
+
+
+def test_f20_decision_review_is_read_only():
+    with sandbox("f20") as box:
+        seed_db(box, _merge_seed(_prep_decision_seed(), _auction_decision_seed()),
+                db_name="assets.db")
+        db_path = box.data_dir / "assets.db"
+        scenario = _decision_scenario(box)
+        before_tables = set(sqlite_tables(db_path))
+        before_prep = sqlite_rows(db_path, "prep_snapshots", order_by="trade_date")
+        before_auction = sqlite_rows(db_path, "auction_snapshots",
+                                     order_by="trade_date, code")
+
+        assert_exit(run(box, "factor", "decision-review", "--source", "prep",
+                        "--from", "20260907", "--to", "20260910",
+                        "--min-days", "1", "--min-group-samples", "1", "--json",
+                        scenario=scenario), 0)
+        assert_exit(run(box, "factor", "decision-review", "--source", "auction",
+                        "--from", "20260909", "--to", "20260909", "--horizon", "1",
+                        "--min-days", "1", "--min-group-samples", "1", "--json",
+                        scenario=scenario), 0)
+
+        assert sqlite_rows(db_path, "prep_snapshots",
+                           order_by="trade_date") == before_prep
+        assert sqlite_rows(db_path, "auction_snapshots",
+                           order_by="trade_date, code") == before_auction
+        assert sqlite_count(db_path, "factor_values") == 0
+        after_tables = set(sqlite_tables(db_path))
+        # 读路径可能按 BASE_SCHEMA 补齐标准空表；绝不新建业务表。
+        assert (after_tables - before_tables) <= _ASSETS_STANDARD_TABLES
+        assert after_tables <= _ASSETS_STANDARD_TABLES

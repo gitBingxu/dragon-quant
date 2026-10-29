@@ -74,6 +74,16 @@ def handle(args, services):
                 horizon=args.horizon, groups=args.groups, version=args.version,
                 min_days=args.min_days, min_cross_section=args.min_cross_section,
                 pit_policy=args.pit_policy)
+        elif action == "decision-review":
+            from dragon_quant.review_account.main import MarketData
+            provider = getattr(getattr(services, "providers", None), "xueqiu", None)
+            data = MarketData(provider=provider) if provider is not None else MarketData()
+            payload = service.decision_review(
+                args.source, args.from_date, args.to_date,
+                horizons=args.horizons, cost_bps=args.cost_bps,
+                min_days=args.min_days,
+                min_group_samples=args.min_group_samples,
+                include_samples=args.include_samples, data=data)
         else:
             _emit_factor_error(
                 {"error": "未知 factor 子命令（build/list/query/status/export/eval/fin）"},
@@ -270,6 +280,73 @@ def _print_factor_human(action: str, payload: dict) -> None:
         for item in payload.get("degraded") or []:
             print(f"⚠️ degraded: {item}")
         return
+
+    if action == "decision-review":
+        _print_decision_review(payload)
+        return
+
+
+def _print_decision_review(payload: dict) -> None:
+    """``factor decision-review`` 人读摘要（默认模式；JSON 契约不受影响）。"""
+    source = payload.get("source", "?")
+    date_from = payload.get("date_from")
+    date_to = payload.get("date_to")
+    snapshots = payload.get("snapshots") or {}
+    config = payload.get("config") or {}
+    requested = snapshots.get("requested_days")
+    usable = snapshots.get("usable")
+    unsupported = snapshots.get("unsupported_version") or 0
+    cost = config.get("cost_bps")
+    total_samples = 0
+    for group in payload.get("groups") or []:
+        for entry in (group.get("horizons") or {}).values():
+            total_samples += int(entry.get("observations") or 0)
+    period = (f"{usable}/{requested}" if requested is not None
+              else str(snapshots.get("with_snapshot") or 0))
+    cost_text = f"{cost:g}" if isinstance(cost, (int, float)) else "?"
+    print(f"决策回测 {source} {date_from}~{date_to}｜快照 {period} 日"
+          f"（unsupported {unsupported}）｜样本 {total_samples}｜成本 {cost_text}bp")
+
+    pair_labels = {"prep": ("推荐", "不推荐"), "auction": ("强", "弱")}
+    for horizon in config.get("horizons") or []:
+        key = str(horizon)
+        print(f"horizon={horizon}")
+        print("  组          方向  命中      有效/观测   覆盖     "
+              "mean净收益  quality")
+        for group in payload.get("groups") or []:
+            entry = (group.get("horizons") or {}).get(key) or {}
+            arrow = {"up": "↑", "down": "↓"}.get(
+                group.get("expected_direction"), "-")
+            hit = entry.get("direction_hit_rate")
+            hit_text = f"{hit * 100:.1f}%" if isinstance(hit, (int, float)) else "-"
+            valid = entry.get("valid") or 0
+            observations = entry.get("observations") or 0
+            coverage = entry.get("coverage")
+            coverage_text = (f"{coverage * 100:.1f}%"
+                             if isinstance(coverage, (int, float)) else "-")
+            mean_net = entry.get("mean_net_return_pct")
+            mean_text = (f"{mean_net:+.2f}%"
+                         if isinstance(mean_net, (int, float)) else "-")
+            quality = entry.get("quality") or "-"
+            print(f"  {group.get('label', '-'):<10}{arrow:<4}{hit_text:<10}"
+                  f"{f'{valid}/{observations}':<12}{coverage_text:<8}"
+                  f"{mean_text:<12}{quality}")
+        spread = (payload.get("spreads") or {}).get(key) or {}
+        pair = spread.get("pair") or []
+        if len(pair) == 2:
+            left, right = pair_labels.get(source, (pair[0], pair[1]))
+            value = spread.get("value")
+            value_text = (f"{value:+.2f}pp"
+                          if isinstance(value, (int, float)) else "-")
+            print(f"  差值 {left}−{right}: {value_text}")
+
+    print("参考线 65%（只描述，不做策略判定）；quality 只描述样本充足度")
+    if config.get("include_samples"):
+        print("（--include-samples 仅影响 --json；人读模式不打印逐样本账本）")
+    for warning in payload.get("warnings") or []:
+        print(f"⚠️ {warning}")
+    print(f"说明：命中/涨跌按扣除 {cost_text}bp 后的净收益判定；"
+          "flat=净收益恰为 0（保本）；Wilson 区间受同日/相邻 horizon 相关性影响，偏窄。")
 
 
 def _print_fin_human(action: str, payload: dict) -> None:

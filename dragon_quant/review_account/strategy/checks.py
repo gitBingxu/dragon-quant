@@ -11,6 +11,9 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Optional
 
+from dragon_quant.review_account.candidate_view import (
+    is_review_eligible, is_review_pool,
+)
 from dragon_quant.review_account.market import SHANGHAI, bar_times
 from dragon_quant.review_account.models import (
     BUY_SIGNAL_DIVERGENCE_BREAK,
@@ -318,12 +321,18 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
     elif row is None:
         reason, text = "missing_kline", "缺少决策时点行情"
         checks = _static_check_dicts(cfg, BUY_CHECK_UNAVAILABLE, "缺少决策时点行情")
-    elif candidate.get("is_true_dragon") is False:
+    elif is_review_pool(candidate) and not is_review_eligible(candidate):
+        reason = "review_not_eligible"
+        text = "复盘候选未达可买条件（eligible 且仓位>0）"
+        checks = _static_check_dicts(cfg, BUY_CHECK_SKIPPED,
+                                     f"前置闸门：{text}，未进入形态判断",
+                                     date=row.get("date"))
+    elif not is_review_eligible(candidate) and candidate.get("is_true_dragon") is False:
         reason, text = "not_true_dragon", "历史记录明确否决，跳过"
         checks = _static_check_dicts(cfg, BUY_CHECK_SKIPPED,
                                      f"前置闸门：{text}，未进入形态判断",
                                      date=row.get("date"))
-    elif (candidate.get("composite_score") or 0) < cfg.min_score:
+    elif not is_review_eligible(candidate) and (candidate.get("composite_score") or 0) < cfg.min_score:
         reason = "score_too_low"
         text = f"综合分{candidate.get('composite_score') or 0:.1f} < 门槛{cfg.min_score:.0f}"
         checks = _static_check_dicts(cfg, BUY_CHECK_SKIPPED,

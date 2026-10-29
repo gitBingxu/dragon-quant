@@ -13,7 +13,7 @@
 | 查询历史扫描 | dragon-quant scan --date | --date --top | T0 | json | 仅 YYYYMMDD；格式错只写 stderr 但 exit 0；错误 JSON 含 available_top_n |
 | 导出龙头 | dragon-quant dragons | --date --true-only | T0 | json | 结构化结果优先；默认最新有数据交易日 |
 | 盘后复盘 | dragon-quant prep | --date --recompute --force --json | T1 | human/json | 当日 ≥16:40；重算不触网但仍写快照 |
-| 集合竞价 | dragon-quant auction | --pool --days --recompute --json | T1 | human/json | 当日 ≥09:25；无 --date；空池不等于弱 |
+| 集合竞价 | dragon-quant auction | --pool --days --force --recompute --json | T1 | human/json | 命中当日快照即只读；需重采加 --force；无 --date；空池不等于弱 |
 | 买入信号 | dragon-quant buy | --date --at --force --json | T1 | human/json | 写信号表；必须确认 |
 | 卖出信号 | dragon-quant sell | --date --at --force | T1 | human | 写信号表；无 JSON；T+1 |
 | 龙头回测 | dragon-quant review | --date --source | T1 | human | 回写 review 字段 |
@@ -26,6 +26,8 @@
 | 资产拉取落库 | dragon-quant assets pull --apply | --apply --target-dir | T2 | human/json | 主库 --force 禁止 |
 | 资产探测 | dragon-quant assets doctor | --profile --samples | T1 | human/json | 会向远端 _doctor 前缀 PUT/DELETE 探针 |
 | 资产推送 | dragon-quant assets push | --profile --from --to --all --allow-shrink | T2 | human/json | 先 --dry-run |
+| 派生清理体检 | dragon-quant assets purge-derived | --json | T0 | human/json | dry-run 只读计数（prep_snapshots/25 因子/模型） |
+| 派生清理执行 | dragon-quant assets purge-derived --apply --yes | --apply --yes | T2 | human/json | 单事务删除可重建派生；不触云端 |
 | 资产回填体检 | dragon-quant assets backfill-dragons --dry-run | --dry-run --json | T0 | human/json | 区分 missing_rows / orphan_rows |
 | 资产回填 | dragon-quant assets backfill-dragons | --from --to | T1 | human/json | 写 assets.db.dragons |
 | 资产回填清理 | dragon-quant assets backfill-dragons --prune | --prune | T2 | human/json | 删除镜像孤儿行 |
@@ -39,6 +41,7 @@
 | 因子查询 | dragon-quant factor query | --date --from --to --name --code | T0 | human/json | 输出 resolved_versions |
 | 因子状态 | dragon-quant factor status | — | T0 | human | 只读 |
 | 因子评估 | dragon-quant factor eval | --name --from --to --groups --pit-policy | T0 | human/json | insufficient_data 是有效结论，exit 0 |
+| 因子决策回测 | dragon-quant factor decision-review | --source --from --to --horizon --cost-bps --min-days --min-group-samples --include-samples | T0 | human/json | 只读冻结快照；不要求 build；insufficient_data exit 0 |
 | 因子构建 | dragon-quant factor build | --date --from --to --only --all | T1 | human/json | 写 factor_*；与 --only 互斥的 --all |
 | 因子导出 | dragon-quant factor export | --from --to --name --out | T1 | human/json | 写用户指定文件；确认路径 |
 | 财务同步 | dragon-quant factor fin sync | --snapshot --backfill --force | T1 | human/json | 写 fin_*；触网 |

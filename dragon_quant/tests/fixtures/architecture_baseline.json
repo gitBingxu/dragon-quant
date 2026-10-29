@@ -668,35 +668,71 @@
   },
   "factor_versions": {
     "auction_dim_direction": [
-      "v6e5e1f6b6156",
+      "vf1a74a1a9d4a",
+      "source"
+    ],
+    "auction_dim_liquidity": [
+      "v4697838be42c",
       "source"
     ],
     "auction_dim_supply": [
-      "ve915348c2d8a",
+      "v12c1d6ae7de7",
       "source"
     ],
     "auction_dim_tail_grab": [
-      "vf425de75f773",
+      "vbc87203454ac",
       "source"
     ],
     "auction_dim_vol_price": [
-      "v0791015087c5",
+      "v240a8f939eaf",
       "source"
     ],
     "auction_direction": [
-      "vf27a4c8bd111",
+      "vf74ec48fdf3e",
+      "source"
+    ],
+    "auction_final_slippage_pct": [
+      "ve7780cc8dabe",
       "source"
     ],
     "auction_is_weak": [
-      "vce29f9e06774",
+      "v61c25a319c47",
+      "source"
+    ],
+    "auction_open_gap_pct": [
+      "v21d57a4d577a",
       "source"
     ],
     "auction_rank": [
-      "v25b67ded45ea",
+      "v738084e25ed2",
       "source"
     ],
     "auction_strength": [
-      "vb94ad38c4877",
+      "vec6a8c865362",
+      "source"
+    ],
+    "auction_strong_to_weak": [
+      "v60b136cb7ec0",
+      "source"
+    ],
+    "auction_tail_matched_acceleration": [
+      "v501aab828b95",
+      "source"
+    ],
+    "auction_turnover_pct": [
+      "v6d81c08a09df",
+      "source"
+    ],
+    "auction_unmatched_matched_ratio": [
+      "v84fa35d723d2",
+      "source"
+    ],
+    "auction_volume_ratio_5d": [
+      "v958efd935cc7",
+      "source"
+    ],
+    "auction_weak_to_strong": [
+      "vee13e6ce7d03",
       "source"
     ],
     "fin_bps": [
@@ -753,10 +789,6 @@
     ],
     "prep_chip_concentration": [
       "v929fe1b2b290",
-      "source"
-    ],
-    "prep_composite": [
-      "vd6589a85b70f",
       "source"
     ],
     "prep_dim_d1": [
@@ -847,10 +879,6 @@
       "v9d4741eca63d",
       "source"
     ],
-    "prep_verdict": [
-      "v9d521ce01b92",
-      "source"
-    ],
     "vpa_breakout": [
       "vef593955eb84",
       "source"
@@ -883,10 +911,14 @@
     "assets/status_clean.json": "1ec4c3bc0e992d98f185aca237c6744dcb995ebf45a4a81723496e6541e66037",
     "auction/assets.json": "91962844bf44cdea5ad89a976500226e9e1eec2a0e54af91ffd7a6e827ad7629",
     "auction/calls.json": "94ab53dde21d8e7c44a10bc383d8fc693dec6cfee6c941c935c001fceb1b0c09",
-    "auction/json_collect.json": "15bdaa0004f012ba113ea3426bc741ca95c41720b2ddf6918a399f624ac6131b",
-    "auction/snapshots.json": "d72ac1c2a9708da072c78ccd0fdc6b339ea52e47fa5fe5caacfb09debc4f90fa",
-    "auction/stdout_collect.txt": "ce09805775c6f1f4c1e7f1cf72323b752fa9e9e4595e94c3c2e58d3cb6cfbb97",
+    "auction/json_collect.json": "ce47ee5a771aeced620f5636d7879831f6cac121ffd287f3ff5ea25512fc0498",
+    "auction/json_snapshot.json": "6799ccd9d03c18fe271154b99bfcbd7e7c5862c794ceae5c290e7b7c0b3c0d2b",
+    "auction/snapshots.json": "14937f3588d9e7a2a7a5c4ab4bc34e14a16be0577f3edb45be04b9acdbc64570",
+    "auction/stdout_collect.txt": "a24e8accb674a8633d7576c7581e3fd84a0d3e5906537ea151e1120d1403d4aa",
+    "auction/stdout_snapshot.txt": "e5d727004160676def2f51a03db41d587dbc32a4b9fc712ccacf860647dcc066",
     "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
+    "factor/decision_review_auction.json": "79a3846164797875375840c86dcc2ac4d9443bb0104f72fb9e35c2576f10403f",
+    "factor/decision_review_prep.json": "005aa8f35abad7c98b00c6941b9f0dac4ba72c1c1c07fa1c143c74942a76e066",
     "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",
     "factor/export_matrix.csv": "46655b3c09b4aaf6fc0c6281a74d6694dca6d302968b79eb9d2682c104682a1c",
     "factor/export_meta.json": "7e931a536c92a65d740586bbe5621420be6fa668da207ffd84b3e908a8958e40",
@@ -904,8 +936,8 @@
     "local/vpa.json": "4fa2979932c9e5ea88503ed1107998c94857b94e4fa54ab3a96a2f26ce44cbcf",
     "prep/assets.json": "a008adac8d46b489e410f882d27a5294e3ceb5462d67f95f3da591331ad45281",
     "prep/calls.json": "5e6da0f4086a213c7692709be96205a251c3401b9cc6109afa78563d58f4a0b7",
-    "prep/snapshot.json": "585bb9188017fc66f1d83a0f60b3d33da478b40b161c9d707cc382348ee0c35b",
-    "prep/stdout.txt": "7b603765b987cb743ee38b3da57941bcf8a8a3ed3b0a4aabe028187a53ace06b",
+    "prep/snapshot.json": "c0dc0b697e561c329ac5b9885b2a1a0a73c992a7087198b4e23a47eb29d19071",
+    "prep/stdout.txt": "30756ed1a49ee1d49b387086bbbc298712241b85c958a1022802acd1fe0ad7b9",
     "review/db.json": "25a8fc2e83bc4b2d870992a6131982bb9b93cc2c2fbc9e2231b96ef1d3bd6f1d",
     "review/stdout_lines.json": "ef65201ffb463d2fff50f9d99e2e6e2dbe4a50466274d093bd9f19bde15b949e",
     "review_account/config_legal.json": "d25147d78680fdc8762eff750334158eae6ca15922d55c13a2cfdcf9d9ca26e0",

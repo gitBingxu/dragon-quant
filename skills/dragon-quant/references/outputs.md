@@ -96,15 +96,26 @@
 
 ## auction
 
-**看到什么**：人读摘要按排名逐只列出等级、强度、方向，并附否决/未验证标记；汇总行给强/中/弱/其他计数。
+**看到什么**：人读摘要按排名逐只列出等级、强度、方向、关键证据与数据状态，并附否决/未验证标记；汇总行给强/中/弱、否决、不可用、失败计数，末尾一行 `validation_status=baseline_unvalidated`。
 
-**`--json` 顶层**：`ok`、`mode`、`trade_date`、`source`、`pool_source`、`fallback_reason`、`candidate_codes`、`saved`、`empty`、`failed`、`quote`、`quote_missing`、`scored_count`、`snapshots`、`snapshot_saved_count`。
+**`--json` 顶层**：旧键（`ok`/`mode`/`trade_date`/`source`/`pool_source`/`fallback_reason`/`candidate_codes`/`saved`/`empty`/`failed`/`quote`/`quote_missing`/`scored_count`/`snapshots`/`snapshot_saved_count` 等）全部保留，末尾新增 `strategy_context`（`auction_sc_v1`）。
+
+**快照命中（`mode="snapshot"`）**：普通 `auction` 当日已有可用快照时直接只读返回，标题为「快照｜来自缓存」。`--json` 在 `source` 后多一个 `from_cache=true`，`pool_source="snapshot"`，`saved_count=0`、`scored_count=candidate_codes=可用快照数`、`snapshot_saved_count=0`、`snapshot_ok=true`、`snapshot_skipped="cache_hit"`；`failed` 只含损坏快照行（`stage="snapshot"`），部分损坏时 `ok=false` 但 exit 0。`pool` 为 `{"source":"snapshot","coverage":"assets_only","snapshot_config_versions":[...]}`，不重算强度、不伪造 prep 血缘。**普通 auction 永远优先最新快照，想更新必须 `--force`；想按当前算法重算已存资产用 `--recompute DATE`。**
 
 - `pool_source=prep`：候选来自严格 T-1 的复盘推荐；`pool_source=legacy` 表示回退到最近若干交易日的龙头并集。
 - `fallback_reason`：`no_snapshot` / `snapshot_read_error` / `calendar` / `empty_snapshot` / `no_eligible` / `all_ignored` 等。回退时这批候选不是今天的盘前重点，解读要降权。
-- `unverified=true`：口径尚未实测验证，`strength`/`level`/`direction` 只能当诊断值，不能当决策依据；此时 `rank` 通常为空。
-- `is_weak=true`：否决闸门触发，不是“低分档位”；`reject_reason` 给原因。`reject_reason` 为“竞价明细缺失”时是数据不足，不等于确认看空。
+- `data_quality.status`：`ok`（五维完整）/ `degraded`（可评价但缺非必要输入，`rank=null`，`rank_reason=partial_data`）/ `unavailable`（必要输入缺失，`strength/level=null`，**不是看空**）。稳定原因码见 `data_quality.reason_codes`。
+- `risk_events[]`：盘口估计事件（含 `veto`），不是订单级成交。只有 `limit_down_queue_sell` / `high_position_green_increasing` / `strong_to_weak` 三个核心窗口或静态价格事实事件会 veto；`cancel_spoof_pre20` 等 09:20 前证据永不 veto。
+- `is_weak=true`：真实风险 veto，不是“低分档位”；`reject_reason` 给原因。`is_weak=false` 且 `unavailable` 时是数据不足，不等于确认看空。
+- legacy `unverified=true`：**本次评价不可用**（数据不足/无法计算），分数只能当诊断值；模型未验证由 `validation_status=baseline_unvalidated` 单独表达，不等于本次数据不可用。
 - `empty` 是“没有盘口”，`failed` 是“采集失败”，都不是“弱”。`ok=true` 也不等于有数据。
+
+**盘中预案（`strategy_context.positions[]`）**：
+- 只读 `positions[]` 与其中 `actions[]`；上下文缺失时只输出旧摘要，并说明「没有结构化策略上下文，无法给出条件化盘中预案」。
+- `status` 区分：`scored`（可评价）/ `vetoed`（真实风险）/ `unavailable`、`empty`、`failed`、`unknown`（数据不足，不是看空）；`data_quality.status="degraded"` 表示可评价但不完整（`rank=null`），不能与 `unavailable` 混为一谈。
+- `actions[]` 只有 `observe` / `await_confirmation` / `flag_risk` / `request_data` 四类；每条必须带 `requires`，09:30 后的检查点必须 `requires="post_open"` 且文本是条件句（「若…则观察…」），不得写成已发生事实。
+- 预案最多 4 条，必须是 `actions[]` 的原文或等价改写。禁止承诺胜率、禁止输出买入/卖出/加仓/减仓/清仓/目标价，禁止把 `validation_status=baseline_unvalidated` 省略。
+- 若用户同时要求对照昨日计划，可**另行只读** T-1 `prep` 的 `strategy_context.positions[].expectations` 并排展示；auction 输出不嵌入也不重算 prep 预期，缺失就写「无 T-1 预期」，不得补造阈值。
 
 ## buy
 
@@ -169,6 +180,16 @@
 - 因子缺失表示“无行”，不等于 0 或中性分。
 - `build` 报告里的 `warnings`、`unverified_rows`、`missing_source` 要如实转述。
 - `prep_review_*`（复盘分因子族）默认关、不参与选股模型排序（因子排序开关仍只读五维/vpa）；`prep_feedback_state` 的 `available_at` 属 close 阶段，不要当成盘中实时信号。影子/评估结论只在跑满影子期后讨论，当前一律按 `insufficient_data` 处理。
+
+### `factor decision-review`（`dr_v1`）
+
+**看到什么**：`groups[]` 里每个组在每个 horizon 的 `observations/valid/coverage/up/down/flat/direction_hit_rate/quality`、`spreads` 差值、`snapshots` 覆盖计数与 `warnings`。
+
+- 只需看组级命中/覆盖/`quality`；`quality` 只表示**样本充足度**（`days`/`valid` 是否达 `min_days`/`min_group_samples`），不代表结论稳健。
+- **不要把 `wilson95` 当显著性检验**：同日多只与相邻 horizon 重叠会让区间偏窄，`wilson_caveat=date_correlated_descriptive_only` 是固定提示。
+- 方向按**扣除 `cost_bps`（默认 13bp）后的净收益**判定；`flat` = 净收益恰为 0（保本），计入分母但永不算命中。`gross_return_pct` 只在 `--include-samples` 的逐样本账本里供审计。
+- `spreads[].value` 是两侧组均值净收益之差；任一侧无样本 → `null`（`-`）。
+- `status=insufficient_data`（含 `no_snapshot_in_range` / `calendar_unavailable`）是有效结论（exit 0）；**不得**据此宣称策略有效。prep `position_pct=0` 只表示不建议新建仓，不等于看空；auction 分母只含已持久化快照。
 
 ## storage
 

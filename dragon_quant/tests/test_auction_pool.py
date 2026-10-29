@@ -20,7 +20,7 @@ class TestAuctionPool(unittest.TestCase):
 
         dragons = dragons or []
         legacy_dates = legacy_dates if legacy_dates is not None else (
-            [DAY] if dragons else [])
+            [PREV] if dragons else [])
         calendar = calendar if calendar is not None else [PREV, DAY]
 
         buf, err = io.StringIO(), io.StringIO()
@@ -82,6 +82,9 @@ class TestAuctionPool(unittest.TestCase):
                 "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=[]))
             stack.enter_context(patch(
+                "dragon_quant.infra.assets.db.list_auction_history",
+                return_value={}))
+            stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 return_value=0))
             stack.enter_context(redirect_stdout(buf))
@@ -114,6 +117,76 @@ class TestAuctionPool(unittest.TestCase):
         self.assertEqual(saved, ["A", "B"])
         # 空 dragons_v2 不得阻止 prep 池（M5）
         self.assertNotIn("无 v2 龙头", err)
+
+
+    def test_review_pool_uses_eligibility_and_position(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [
+                {"code": "A", "name": "甲", "facts": {"in_pool_today": True},
+                 "composite_score": None},
+                {"code": "B", "name": "乙", "facts": {"in_pool_today": True},
+                 "composite_score": None},
+                {"code": "C", "name": "丙", "facts": {"in_pool_today": True},
+                 "composite_score": None},
+            ],
+            "review_candidates": [
+                {"code": "A", "name": "甲", "review_score": 75.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 4.0, "reason_code": None, "gate_trace": []},
+                {"code": "B", "name": "乙", "review_score": 70.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 0.0, "reason_code": "illiquid",
+                 "gate_trace": [{"gate": "G3a_liquidity", "evaluated": True,
+                                 "passed": False, "reason_code": "illiquid",
+                                 "detail": "amount=1000"}]},
+                {"code": "C", "name": "丙", "review_score": 60.0,
+                 "review_grade": "D", "eligibility": "not_qualified",
+                 "position_pct": 0.0, "reason_code": "not_mainline",
+                 "gate_trace": []},
+            ],
+        }
+        out, err, code, calls, saved = self._run(snapshot=snapshot, dragons=[])
+        self.assertIsNone(code)
+        self.assertEqual(out["pool_source"], "prep")
+        self.assertIsNone(out["fallback_reason"])
+        self.assertEqual(out["recommended_count"], 1)
+        # 只取 eligible ∧ position>0；不叠加旧 min_score / 旧身份 / 旧 verdict
+        self.assertEqual(calls["auction"], ["A"])
+        self.assertEqual(saved, ["A"])
+
+    def test_review_pool_empty_does_not_fallback(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": "A", "name": "甲", "facts": {}}],
+            "review_candidates": [
+                {"code": "A", "name": "甲", "review_score": 75.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 0.0, "reason_code": "position_below_min_unit",
+                 "gate_trace": []},
+            ],
+        }
+        # legacy 有 A，但 0.8 有效决策为空 → 不得回退 legacy 重新推荐
+        out, err, code, calls, saved = self._run(
+            snapshot=snapshot, dragons=[{"code": "A", "name": "甲"}])
+        self.assertIsNone(code)
+        self.assertEqual(out["pool_source"], "prep")
+        self.assertEqual(out["fallback_reason"], "all_ignored")
+        self.assertTrue(out["pool_empty"])
+        self.assertEqual(calls["auction"], [])
+        self.assertEqual(saved, [])
+
+    def test_review_missing_does_not_fallback(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": "A", "name": "甲", "facts": {}}],
+        }
+        out, err, code, calls, saved = self._run(
+            snapshot=snapshot, dragons=[{"code": "A", "name": "甲"}])
+        self.assertIsNone(code)
+        self.assertEqual(out["pool_source"], "prep")
+        self.assertEqual(out["fallback_reason"], "review_missing")
+        self.assertEqual(calls["auction"], [])
 
     def test_all_ignored_falls_back_and_does_not_refilter(self):
         snapshot = {"candidates": [
@@ -170,7 +243,7 @@ class TestAuctionPool(unittest.TestCase):
             "fallback_reason", "prep_snapshot_date", "prep_unavailable_reason",
             "pool_empty", "candidate_codes", "recommended_count",
             "ignore_reason_count", "ignore_reason_samples", "prep_degraded",
-            "days_ignored", "message",
+            "days_ignored", "message", "strategy_context",
         ])
 
     def test_no_snapshot_falls_back(self):
@@ -245,6 +318,14 @@ class TestAuctionPool(unittest.TestCase):
             legacy_dates=dates)
         self.assertIsNone(code)
         self.assertEqual(out["lookback_dates"], dates[-5:])
+
+    def test_legacy_excludes_current_day_from_lookback(self):
+        dates = [f"2026-10-{d:02d}" for d in range(14, 21)]
+        out, _, code, _, _ = self._run(
+            pool="legacy", dragons=[{"code": "L", "name": "龙"}],
+            legacy_dates=dates)
+        self.assertIsNone(code)
+        self.assertEqual(out["lookback_dates"], dates[-6:-1])
 
     def test_prep_snapshot_date_matches_collect_candidates_ex(self):
         """N1：auction 与 buy 的池解析必须命中同一 T-1 快照。"""

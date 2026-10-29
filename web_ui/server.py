@@ -221,23 +221,28 @@ class ReviewHandler(BaseHTTPRequestHandler):
         - name: 名称（模糊匹配）
         - date_from / date_to: 入选日期范围
         - score_min / score_max: 综合分范围
-        - return_min / return_max: 最大收益率范围（v2=严格口径，v1=旧口径）
-        - drawdown_min / drawdown_max: 最大回撤范围（v2=严格口径，v1=旧口径）
-        - status: 派生状态过滤（v2: completed/pending/pending_recompute/cannot_evaluate/error；
-          v1: completed/pending/no_entry/error，逗号分隔）
-        - sort_by: 排序字段（默认 composite_score；v2 支持 strict_* 严格键）
+        - return_min / return_max: 最大收益率范围（按 review_caliber 选择的收益列）
+        - drawdown_min / drawdown_max: 最大回撤范围（按 review_caliber 选择的回撤列）
+        - status: 派生状态过滤（v2 strict: completed/pending/pending_recompute/
+          cannot_evaluate/error；v2 loose 与 v1: completed/pending/no_entry/error，
+          逗号分隔）
+        - sort_by: 排序字段（默认 composite_score；逻辑键按口径映射物理列）
         - sort_dir: asc / desc（默认 desc）
+        - review_caliber: strict / loose（v2 默认 strict，v1 强制 loose，
+          非法值回退默认；不影响响应键，仅决定查询上下文）
         """
         db = _get_db()
         filters = _parse_filters(params)
         sort_by = _first(params, "sort_by") or "composite_score"
         sort_dir = _first(params, "sort_dir") or "desc"
         source = _parse_source(params, getattr(self.server, "default_source", "v2"))
-        rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir, source=source)
+        caliber = db.resolve_caliber(_first(params, "review_caliber"), source)
+        rows = db.query_dragons(filters, sort_by=sort_by, sort_dir=sort_dir,
+                                source=source, caliber=caliber)
         # summary 必须基于筛选后的**完整** rows 计算（分页在客户端进行）。
         # 若未来在此做服务端分页，务必先汇总再切片，否则卡片会只统计当前页。
         summary = db.summarize_review_rows(
-            rows, source=source, include_derived_counts=True)
+            rows, source=source, include_derived_counts=True, caliber=caliber)
         self._send_json({"data": rows, "count": len(rows), "summary": summary})
 
     def _serve_api_summary(self, params: dict):

@@ -30,7 +30,7 @@
 ## 测试与 E2E 细则
 
 - **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 51 个 parser 节点 / 15 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。
+- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 52 个 parser 节点 / 15 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。
 - **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
 
 ## 打包边界

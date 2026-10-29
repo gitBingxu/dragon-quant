@@ -329,16 +329,18 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p = sub.add_parser(
         "auction",
         help="采集最近 N 日龙头的当日集合竞价盘口（TDX），或重算已存快照",
-        usage="dragon-quant auction [--pool prep|legacy] [--days N] [--json] | "
+        usage="dragon-quant auction [--pool prep|legacy] [--days N] [--force] [--json] | "
               "dragon-quant auction --recompute DATE [--json]",
-        description="默认读取严格 T-1 的 prep 快照，采集 verdict∈{strong,light} 的推荐标的；"
-                    "推荐集为空/快照缺失时回退最近 N 个交易日的龙头并集。落库原始资产"
-                    "（assets.db/auction_assets）并计算强度快照（auction_snapshots）。"
-                    "默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。"
-                    "使用 --recompute 时不触网，用已存原始资产重算指定交易日快照。",
+        description="默认先只读当日已存快照（命中即零采集/零评分/零写入）；无快照或"
+                    "全部损坏时读取严格 T-1 的 prep 快照并采集 verdict∈{strong,light} 的"
+                    "推荐标的。落库原始资产（assets.db/auction_assets）并计算强度快照"
+                    "（auction_snapshots）。--force 绕过快照缓存重新采集；"
+                    "--recompute 不触网，用已存原始资产重算。默认输出人读摘要；"
+                    "--json 输出完整 JSON。",
         epilog="""Examples:
-  dragon-quant auction                        # 优先 prep 推荐，空则回退 legacy
-  dragon-quant auction --pool legacy          # 强制旧口径
+  dragon-quant auction                        # 优先已存快照，其次 prep 推荐
+  dragon-quant auction --force                # 忽略快照缓存，重新采集并替换
+  dragon-quant auction --pool legacy          # 未命中时强制旧口径
   dragon-quant auction --days 5               # 仅 legacy/回退路径生效
   dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
   dragon-quant auction --json                 # 输出完整 JSON
@@ -348,8 +350,11 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                            help="候选池来源：prep=盘后复盘推荐（默认），legacy=最近 N 日龙头并集")
     auction_p.add_argument("--days", type=int, default=None,
                            help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 5）")
-    auction_p.add_argument("--recompute", metavar="DATE", default=None,
-                           help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
+    auction_mode = auction_p.add_mutually_exclusive_group()
+    auction_mode.add_argument("--force", action="store_true",
+                              help="忽略当日已存快照，强制重新采集/评分并替换快照")
+    auction_mode.add_argument("--recompute", metavar="DATE", default=None,
+                              help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
     auction_p.add_argument("--json", dest="json", action="store_true",
                            help="输出完整 JSON（默认只展示参与竞价判断的标的强弱与汇总）")
 
@@ -487,6 +492,28 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                                  help="删除源库不存在的镜像行（源库为权威）")
     assets_backfill.add_argument("--json", dest="json", action="store_true",
                                  help="输出完整 JSON（默认人读摘要）")
+
+    assets_purge = assets_subs.add_parser(
+        "purge-derived",
+        help="清理可重建的 prep 派生数据（默认 dry-run，不触云端）",
+        usage="dragon-quant assets purge-derived [--json] | "
+              "dragon-quant assets purge-derived --apply --yes [--json]",
+        description="删除 prep_snapshots、25 个 prep/prep_review 因子值/注册版本，"
+                    "以及引用这些因子的模型快照；保护 prep_assets、auction 资产、"
+                    "非目标因子、factor_build_runs 与云端。默认只读 dry-run；"
+                    "--apply 必须叠加 --yes，在单事务内复核计数后删除。",
+        epilog="""Examples:
+  dragon-quant assets purge-derived
+  dragon-quant assets purge-derived --json
+  dragon-quant assets purge-derived --apply --yes
+""",
+    )
+    assets_purge.add_argument("--apply", dest="apply_purge", action="store_true",
+                              help="真正删除（默认 dry-run）；必须同时传 --yes")
+    assets_purge.add_argument("--yes", action="store_true",
+                              help="二次确认（与 --apply 成对使用）")
+    assets_purge.add_argument("--json", dest="json", action="store_true",
+                              help="输出稳定 JSON（默认人读摘要到 stderr）")
 
     # factor 子命令（因子层：只读迁移 scan/vpa 产物，落 assets.db）
     factor_p = sub.add_parser(
@@ -631,6 +658,43 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                              help="PIT 口径（strict 默认剔除 statutory_backfilled）")
     factor_eval.add_argument("--json", dest="json", action="store_true",
                              help="输出完整 JSON（默认人读摘要）")
+
+    # 决策结果回测（只读冻结快照，不要求 factor build）
+    factor_decision = factor_subs.add_parser(
+        "decision-review", help="prep/auction 决策结果回测（分组 × 1/3/5 日）",
+        usage="dragon-quant factor decision-review --source {prep,auction} "
+              "--from D --to D [options]",
+        description="只读冻结快照：把既有 prep/auction 决策按组归因，算可成交"
+                    "开盘→第 N 日开盘、扣 13bp 净收益的方向命中与覆盖率。"
+                    "不要求 factor build、不写任何表；insufficient_data 是有效结论。",
+        epilog="""Examples:
+  dragon-quant factor decision-review --source prep --from 20260501 --to 20260630
+  dragon-quant factor decision-review --source auction --from 20260601 --to 20260630 \\
+      --horizon 1 --json --include-samples
+""",
+    )
+    factor_decision.add_argument("--source", required=True,
+                                 choices=("prep", "auction"),
+                                 help="决策来源（一次只回测一个）")
+    factor_decision.add_argument("--from", dest="from_date", required=True,
+                                 help="区间起始日")
+    factor_decision.add_argument("--to", dest="to_date", required=True,
+                                 help="区间结束日")
+    factor_decision.add_argument("--horizon", dest="horizons", action="append",
+                                 type=int, default=None,
+                                 help="前向交易日数（可重复，默认 1/3/5）")
+    factor_decision.add_argument("--cost-bps", dest="cost_bps", type=float,
+                                 default=13.0, help="往返成本 bp（默认 13）")
+    factor_decision.add_argument("--min-days", dest="min_days", type=int,
+                                 default=20, help="组内有效决策日下限（默认 20）")
+    factor_decision.add_argument("--min-group-samples", dest="min_group_samples",
+                                 type=int, default=30,
+                                 help="组内有效样本下限（默认 30）")
+    factor_decision.add_argument("--include-samples", dest="include_samples",
+                                 action="store_true",
+                                 help="仅 --json：附完整账本 samples[]")
+    factor_decision.add_argument("--json", dest="json", action="store_true",
+                                 help="输出完整 JSON（默认人读摘要）")
 
     # 财务链接（P0.5）：观测 / 回填 / 校准 / 状态
     factor_fin = factor_subs.add_parser(

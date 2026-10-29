@@ -122,12 +122,43 @@ def _emit_backfill(outcome, *, as_json: bool) -> None:
     sys.exit(outcome.exit_code)
 
 
+def _emit_purge(payload: dict, exit_code: int, as_json: bool) -> None:
+    """``purge-derived`` 输出：JSON 到 stdout，人读摘要到 stderr。"""
+
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        if payload.get("ok"):
+            counts = payload.get("counts") or {}
+            prefix = "体检（dry-run）" if payload.get("dry_run") else "清理"
+            print(f"{prefix}：prep_snapshots={counts.get('prep_snapshots', {}).get('rows', 0)} "
+                  f"factor_values={counts.get('factor_values', {}).get('rows', 0)} "
+                  f"factor_registry={counts.get('factor_registry', {}).get('rows', 0)} "
+                  f"model_snapshots={counts.get('factor_model_snapshots', {}).get('rows', 0)}",
+                  file=sys.stderr)
+            if payload.get("dry_run"):
+                print("dry-run 未写库；确认后执行 --apply --yes", file=sys.stderr)
+        else:
+            reasons = [item.get("reason", str(item))
+                       for item in payload.get("failed") or []]
+            print(f"❌ 清理失败：{reasons[0] if reasons else '未知错误'}",
+                  file=sys.stderr)
+    sys.exit(exit_code)
+
+
 def handle(args, services):
-    """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。"""
+    """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。
+
+    另含本地派生清理 ``purge-derived``（默认 dry-run，不触云端）。
+    """
     from dragon_quant.infra.assets.main import SYNC_ACTIONS, run
 
     action = getattr(args, "assets_action", None)
     outcome = run(action, args, services=services)
+    if action == "purge-derived":
+        _emit_purge(outcome.payload, outcome.exit_code,
+                    bool(getattr(args, "json", False)))
+        return
     if action in SYNC_ACTIONS:
         payload = outcome.payload
         if outcome.completed:

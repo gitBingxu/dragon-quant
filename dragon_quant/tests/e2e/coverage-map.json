@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (51), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (53), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 51,
+    "node_count": 53,
     "top_level_count": 15,
     "nodes": [
       {
@@ -245,6 +245,7 @@
           "--help",
           "--pool",
           "--days",
+          "--force",
           "--recompute",
           "--json"
         ]
@@ -420,6 +421,22 @@
         ]
       },
       {
+        "command": "factor decision-review",
+        "flags": [
+          "-h",
+          "--help",
+          "--source",
+          "--from",
+          "--to",
+          "--horizon",
+          "--cost-bps",
+          "--min-days",
+          "--min-group-samples",
+          "--include-samples",
+          "--json"
+        ]
+      },
+      {
         "command": "factor fin",
         "flags": [
           "-h",
@@ -527,6 +544,16 @@
           "--results",
           "--logs",
           "--days"
+        ]
+      },
+      {
+        "command": "assets purge-derived",
+        "flags": [
+          "-h",
+          "--help",
+          "--apply",
+          "--yes",
+          "--json"
         ]
       }
     ]
@@ -770,9 +797,15 @@
           "dragon_quant/tests/e2e/test_auction.py::test_a12b_all_corrupt_assets_fail_without_touching_snapshots",
           "dragon_quant/tests/e2e/test_auction.py::test_a12c_snapshot_reads_isolate_corrupt_rows",
           "dragon_quant/tests/e2e/test_auction.py::test_a13_runtime_clock_mode_recompute_future_gate_uses_the_runtime_clock",
-          "dragon_quant/tests/e2e/test_auction.py::test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam"
+          "dragon_quant/tests/e2e/test_auction.py::test_a14_auction_cli_future_gate_runs_on_the_single_runtime_clock_seam",
+          "dragon_quant/tests/e2e/test_auction.py::test_a15_repeated_auction_returns_the_stored_snapshot_with_zero_calls",
+          "dragon_quant/tests/e2e/test_auction.py::test_a16_force_bypasses_the_snapshot_cache",
+          "dragon_quant/tests/e2e/test_auction.py::test_a17_all_corrupt_snapshots_fall_back_to_full_collection",
+          "dragon_quant/tests/e2e/test_auction.py::test_a18_partially_corrupt_snapshots_return_valid_rows",
+          "dragon_quant/tests/e2e/test_auction.py::test_a19_force_and_recompute_conflict_exits_two",
+          "dragon_quant/tests/e2e/test_auction.py::test_a20_snapshot_hit_does_not_evaluate_pool_or_days"
         ],
-        "notes": "A13 pins the runtime.clock recompute date gate."
+        "notes": "A13 pins the runtime.clock recompute date gate; A15-A20 pin snapshot-first caching, --force bypass, corruption isolation and the --force/--recompute conflict."
       },
       "assets": {
         "tests": [
@@ -882,6 +915,15 @@
         ],
         "notes": ""
       },
+      "factor decision-review": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_factor.py::test_f17_decision_review_prep_groups_coverage_and_golden",
+          "dragon_quant/tests/e2e/test_factor.py::test_f18_decision_review_auction_priority_and_coverage_basis",
+          "dragon_quant/tests/e2e/test_factor.py::test_f19_decision_review_param_errors_and_empty_db",
+          "dragon_quant/tests/e2e/test_factor.py::test_f20_decision_review_is_read_only"
+        ],
+        "notes": "只读冻结快照（不要求 factor build、无新表、不读 review_account）；insufficient_data exit 0。"
+      },
       "factor fin": {
         "tests": [
           "dragon_quant/tests/e2e/test_factor.py::test_f16_group_without_action_exits_2"
@@ -977,6 +1019,12 @@
           "dragon_quant/tests/e2e/test_logs_data_storage.py::test_st4_clear_all_empties_directories_and_protects_databases"
         ],
         "notes": ""
+      },
+      "assets purge-derived": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_assets.py::test_as19_purge_derived_dry_run_and_apply_temp_db"
+        ],
+        "notes": "默认 dry-run；--apply 必须叠加 --yes；仅临时库验证"
       }
     },
     "hidden_aliases": {
@@ -1035,11 +1083,12 @@
       "web": {
         "tests": [
           "dragon_quant/tests/e2e/test_web_api.py::test_w1_w3_w4_w7_review_ui_routes_and_404",
+          "dragon_quant/tests/e2e/test_web_api.py::test_w9_review_caliber_switch",
           "dragon_quant/tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
           "dragon_quant/tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
           "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series"
         ],
-        "notes": "W1-W8 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly)."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path."
       },
       "npm": {
         "tests": [
@@ -1236,7 +1285,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_51_nodes_and_15_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_52_nodes_and_15_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",

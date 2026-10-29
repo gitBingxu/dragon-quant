@@ -43,19 +43,15 @@ LEGACY_STDOUT_PREFIX = """是否建议买入：是
 建议等级：一般
 买入理由：复盘日 2026-09-11；外围：日经225期指 +0.61%、富时A50期指 -0.87%（同日收盘）；美债10Y 5.15%（较前值 +6bp，近似）；COMEX金 -0.63%；涨停 62 家；跌停 3 家；炸板率 1.6%；昨日涨停溢价 +5.67%；晋级率 66.7%；最高 4 板；主线：机器人、AI算力、银行科技。涨跌停家数处中性区间，建议仓位 50%。
 
-✅ 龙头E-强烈建议
-- 质量维度：五维综合 82.0（排名 1）；题材：机器人（今日主线第 1）
-- 涨停维度：换手板 3天3板，首封 10:05:00，炸板 0 次，封板成功率 100%
-- 资金维度：主力净流入 3000.00 万（占成交额 6.0%）
+✅ 龙头E-轻仓博弈
+- 复盘分 70.3 / B
+- 龙头 / 仓位 4.0%
+- 主线 机器人 第1
 
-✅ 龙头A-轻仓博弈
-- 质量维度：五维综合 88.0（排名 1）；题材：AI算力（今日主线第 2）
-- 今日维度：涨幅 +5.00%，未进入涨停池（入选日 2026-09-07）
-- 资金维度：主力净流入 1234.56 万（占成交额 12.3%）
-
-补涨C-忽略：今日涨幅 -10.00%，已退出涨停梯队（入选日 2026-09-09）
-跟风B-忽略：今日涨幅 -2.20%、主力净流出 500.00 万（占成交额 -6.2%），资金离场
-银行D-忽略：近 3 日公告「立案调查公告」，按公告风险规则忽略"""
+银行D-忽略：公告「立案调查公告」：硬风险：hard_risk_announcement
+龙头A-忽略：流动性不足：amount=100000000
+补涨C-忽略：流动性不足：amount=50000000
+跟风B-忽略：流动性不足：amount=80000000"""
 
 TOP_KEYS = ["trade_date", "version", "sentiment", "main_boards", "macro",
             "candidates", "dragon_source", "review", "review_candidates",
@@ -251,7 +247,7 @@ def test_p1_success_human_output_and_persisted_rows_match_reviewed_golden():
         }
 
         snapshot = snapshot_result(box)
-        assert snapshot["version"] == "0.7"
+        assert snapshot["version"] == "0.8"
         assert snapshot["trade_date"] == TRADE_DATE
         assert snapshot["dragon_source"]["window_days"] == 5
         assert [day["status"] for day in snapshot["dragon_source"]["dates"]] == \
@@ -265,15 +261,16 @@ def test_p1_success_human_output_and_persisted_rows_match_reviewed_golden():
                                                for key in sb.MACRO_KEYS}
 
         candidates = candidates_by_code(snapshot)
-        assert list(candidates) == ["600001", "600002", "600003", "600005",
-                                    "600004"]
-        assert candidates["600005"]["verdict"] == "strong"
-        assert candidates["600001"]["verdict"] == "light"
+        assert list(candidates) == ["600005", "600004", "600001", "600003",
+                                    "600002"]
+        # 0.8：verdict 由 review 档位与仓位确定性映射（S/A 且仓位>0 才是 strong）
+        assert candidates["600005"]["verdict"] == "light"
         assert {code: candidates[code]["verdict"]
-                for code in ("600002", "600003", "600004")} == {
-            "600002": "ignore", "600003": "ignore", "600004": "ignore"}
-        assert candidates["600004"]["ignore_reason"] == (
-            "近 3 日公告「立案调查公告」，按公告风险规则忽略")
+                for code in ("600001", "600002", "600003", "600004")} == {
+            "600001": "ignore", "600002": "ignore",
+            "600003": "ignore", "600004": "ignore"}
+        assert "立案调查公告" in candidates["600004"]["ignore_reason"]
+        assert "review_pool" in candidates["600005"]
         assert candidates["600005"]["facts"]["in_pool_today"] is True
         assert candidates["600005"]["facts"]["flow_available"] is True
 
@@ -323,8 +320,9 @@ def test_p2_json_key_order_and_snapshot_equality():
         assert list(payload["dragon_source"]) == DRAGON_SOURCE_KEYS
         for candidate in payload["candidates"]:
             assert list(candidate["facts"]) == FACTS_KEYS
-            assert list(candidate) [-4:] == [
-                "verdict", "verdict_label", "dimensions", "ignore_reason"]
+            # 0.8 投影在旧字段之后追加 review 来源标记（只增键）
+            assert list(candidate)[-4:] == [
+                "position_pct", "is_true_dragon", "review_pool", "review_eligible"]
         assert_json_equal(payload, golden_json("snapshot.json"))
         # The persisted snapshot is the same pure function of the assets.
         assert_json_equal(snapshot_result(box), payload)
@@ -624,9 +622,11 @@ def test_p11b_explicit_date_with_missing_target_day_fails_the_collector():
         assert "backfill-dragons" in report["dragons"]["error"]
         snapshot = snapshot_result(box)
         assert snapshot["trade_date"] == TRADE_DATE
-        assert snapshot["candidates"] == []
+        # 0.8：候选主集合来自 review 详细池；dragons 缺失不阻断池内其它资产
+        assert ({item["code"] for item in snapshot["candidates"]}
+                == {item["code"] for item in snapshot["review_candidates"]})
+        assert all(item["review_pool"] for item in snapshot["candidates"])
         assert "dragons" in snapshot["sentiment"]["degraded"]
-        assert "无参与复盘标的" in result.stdout
 
 
 def test_p11c_historical_mirror_gap_degrades_but_keeps_other_days():
@@ -670,7 +670,8 @@ def test_p12a_short_calendar_marks_window_short():
         assert snapshot["dragon_source"]["window_days"] == 5
         assert len(snapshot["dragon_source"]["dates"]) == 2
         assert "dragons_window_short" in snapshot["sentiment"]["degraded"]
-        assert set(candidates_by_code(snapshot)) == {"600002", "600005", "600004"}
+        assert set(candidates_by_code(snapshot)) == {
+            "600001", "600002", "600003", "600005", "600004"}
 
 
 def test_p12b_empty_window_is_empty_not_an_error():
@@ -682,10 +683,11 @@ def test_p12b_empty_window_is_empty_not_an_error():
         report = report_of(prep_assets(box))
         assert report["dragons"]["status"] == "empty"
         snapshot = snapshot_result(box)
-        assert snapshot["candidates"] == []
+        # 0.8：candidates 与 review_candidates 是同一主集合（dragons 空不阻断池内其它资产）
+        assert ({item["code"] for item in snapshot["candidates"]}
+                == {item["code"] for item in snapshot["review_candidates"]})
         assert snapshot["dragon_source"]["count"] == 0
         assert "dragons_partial" in snapshot["sentiment"]["degraded"]
-        assert "无参与复盘标的" in result.stdout
 
 
 def test_p12c_unreadable_mirror_raises_inside_the_collector():
@@ -705,7 +707,8 @@ def test_p12c_unreadable_mirror_raises_inside_the_collector():
         assert report["dragons"]["status"] == "error"
         assert "5日龙头读取失败" in report["dragons"]["error"]
         snapshot = snapshot_result(box)
-        assert snapshot["candidates"] == []
+        assert ({item["code"] for item in snapshot["candidates"]}
+                == {item["code"] for item in snapshot["review_candidates"]})
         assert "dragons" in snapshot["sentiment"]["degraded"]
 
 
@@ -784,7 +787,7 @@ def test_p14_single_factor_failure_is_isolated_and_snapshot_still_written():
         assert_exit(result, 0)
         assert transport_since(box, offset) == []
         payload = json.loads(result.stdout)
-        assert payload["version"] == "0.7"
+        assert payload["version"] == "0.8"
         assert payload["main_boards"] == []
         assert "main_boards" in payload["sentiment"]["factor_errors"]
         assert "TypeError" in payload["sentiment"]["factor_errors"]["main_boards"]
@@ -821,7 +824,7 @@ def test_p16_runtime_clock_mode_full_prep_matches_reviewed_golden():
         assert result.stdout == golden_text("stdout.txt")
         assert_json_equal(prep_assets(box), golden_json("assets.json"))
         snapshot = snapshot_result(box)
-        assert snapshot["version"] == "0.7"
+        assert snapshot["version"] == "0.8"
         assert snapshot["trade_date"] == TRADE_DATE
         assert snapshot["sentiment"]["position_pct"] == 0.5
 

@@ -1,6 +1,6 @@
 import { Card, Group, SimpleGrid, Text, Tooltip } from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
-import type { Summary } from "../api";
+import type { ReviewCaliber, Summary } from "../api";
 import { fmtPct } from "../utils";
 
 function StatCard({
@@ -43,22 +43,34 @@ function pnlClass(v: number | null | undefined) {
   return v > 0 ? "red" : "teal";
 }
 
-export function SummaryCards({ summary }: { summary: Summary | null }) {
+export function SummaryCards({
+  summary,
+  caliber,
+}: {
+  summary: Summary | null;
+  caliber: ReviewCaliber;
+}) {
   const s = summary;
   const isV1 = s?.source === "v1";
+  const isStrict = caliber === "strict";
 
-  const avgReturn = isV1 ? s?.avg_return : s?.avg_return_strict;
+  // 平均收益 / 最佳随所选口径；v1 生效口径恒为 loose，等同旧口径。
+  const avgReturn = isStrict ? s?.avg_return_strict : s?.avg_return;
+  // 两胜率卡始终同时展示（对比用）。
   const looseRate = isV1 ? s?.win_rate : s?.win_rate_loose;
   const looseN = isV1 ? s?.completed : s?.win_rate_loose_n;
   const strictRate = isV1 ? null : s?.win_rate_strict;
   const strictN = isV1 ? 0 : s?.win_rate_strict_n;
-  const bestName = isV1 ? s?.best_stock_name : s?.best_stock_name_strict;
-  const bestCode = isV1 ? s?.best_stock_code : s?.best_stock_code_strict;
-  const bestReturn = isV1 ? s?.best_return : s?.best_return_strict;
+  const bestName = isStrict ? s?.best_stock_name_strict : s?.best_stock_name;
+  const bestCode = isStrict ? s?.best_stock_code_strict : s?.best_stock_code;
+  const bestReturn = isStrict ? s?.best_return_strict : s?.best_return;
 
-  const pendingSub = isV1 || !s
+  // 「待回测」副文案来自严格侧重算进度，仅 v2 + strict 有意义。
+  const pendingSub = isV1 || !s || !isStrict
     ? undefined
     : `待重算 ${s.pending_recompute} · 失败 ${s.failed_recompute}`;
+
+  const caliberLabel = isV1 ? "旧口径" : isStrict ? "严格口径" : "宽松口径";
 
   return (
     <SimpleGrid cols={{ base: 2, sm: 3, lg: 7 }} spacing="sm" mb="md">
@@ -71,7 +83,7 @@ export function SummaryCards({ summary }: { summary: Summary | null }) {
       <StatCard label="待回测" sub={pendingSub}>
         {s?.derived_pending ?? s?.pending ?? 0}
       </StatCard>
-      <StatCard label="平均收益" sub={isV1 ? "旧口径" : "严格口径"}>
+      <StatCard label="平均收益" sub={caliberLabel}>
         <Text span c={pnlClass(avgReturn)} inherit>
           {fmtPct(avgReturn)}
         </Text>

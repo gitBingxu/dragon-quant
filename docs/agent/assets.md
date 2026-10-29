@@ -33,6 +33,14 @@ python -m dragon_quant assets verify [--from D --to D | --samples N] [--deep] [-
 - **里程碑**：M1 `doctor`、M2 数据层、M3 同步层、M4 CLI、M6 全表同步 + 行级恢复已完成；**M5（launchd / `assets_daily.sh` / 门槛 B）未实现**。门槛 A 的 R2 通道已实测通过，B2 profile 未配置（v1 以 R2 为主通道）。
 - 方案与风险记录：`archived_md/assets_sync/2026-10-23-assets-db-full-sync-design.md`（M6 已落地）、`docs/solutions/2026-10-18-assets-cloud-sync-design.md`（M5 待做，未归档）、`archived_md/assets_sync/2026-10-22-assets-sync-m2-m4-implementation.md`、`archived_md/assets_sync/2026-10-18-assets-cloud-storage.md`、`archived_md/assets_sync/2026-10-22-assets-sync-m2-m4-reality-check.md`；配置样例 `docs/assets_sync.example.json`。
 
+## `assets purge-derived`（本地派生清理，不触云端）
+
+- 默认 dry-run（只读计数，不建库）；`--apply --yes` 才执行，缺 `--yes` exit 2。与 push/pull 共用 `<DQ_DATA_DIR>/assets_sync.lock`（锁占用 exit 1）。
+- 删除范围：`prep_snapshots`、25 个 prep/prep_review 因子值/注册版本、引用目标名的模型快照；单事务 `BEGIN IMMEDIATE`，事务内重算计数与 dry-run 不一致即回滚（exit 1），提交前复核保护表未变。
+- 保护：`prep_assets`（含 collection_report/prev_plan/auction_feedback/t1_intraday）、`auction_assets`/`auction_snapshots`/`auction_*` 因子、非目标因子、`factor_build_runs`；云端/manifest/state **零操作**（不 import sync.service、不调 provider）。
+- 回滚：apply 前 `sqlite3 .backup` 或文件副本；主库禁止 `pull --force`；迁移完成前禁止把云端旧派生恢复到主库。
+- 重建由用户显式执行（purge 自身不重建）：`prep --recompute` 升序逐日 → `factor build --only <23 名>` → `factor decision-review`。
+
 ## `dragons` 镜像表契约
 
 | 表 | 用途 | 关键点 |

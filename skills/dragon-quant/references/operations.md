@@ -6,7 +6,7 @@
 
 1. **收盘后扫描**：`dragon-quant scan`（写库并触网；盘中扫描会因缺少收盘信息而失真，CLI 也会拦截）。
 2. **盘后复盘**：`dragon-quant prep`，当日运行必须在 **16:40** 之后；`--force` 不绕过该门禁。
-3. **次日竞价**：`dragon-quant auction`，当日 **09:25** 之后才可用；它默认读取严格 T-1 的复盘快照。
+3. **次日竞价**：`dragon-quant auction`，当日 **09:25** 之后才可用；它默认读取严格 T-1 的复盘快照。当日已有快照时重复运行直接返回已存快照（只读，不会自动刷新）；需要重采加 `--force`，按当前算法重算已存资产用 `--recompute DATE`。
 4. **买入信号**：`dragon-quant buy`，交易时段运行；需要对写信号表做确认。
 5. **卖出信号**：`dragon-quant sell`，T+1 之后每个交易日至少运行一次。
 
@@ -29,6 +29,7 @@
 - `prep` 不与 `scan`/`rebuild` 并发运行；镜像双写是锁外 best-effort，错开可以避免缺日误判。
 - `assets push`/`pull` 之间有进程锁；第二个进程会失败退出，不要强行并发。
 - `buy`/`sell` 不要同时运行；它们都会写信号表，可能相互覆盖状态。
+- 派生清理：先 `assets purge-derived --json` 核对计数，确认后 `--apply --yes`，再按 `prep_assets` 日期**升序**逐日 `prep --recompute` → `factor build --only <23 名>` → `factor decision-review`；purge 不重建、不触云。
 - 开启镜像后，T 日 `prep` 前建议先 `assets backfill-dragons --dry-run` 做只读体检。
 
 ## 数据耐久与备份

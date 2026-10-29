@@ -6,7 +6,7 @@
   "_ctx": "6be45f0e66c167efece19eb871dbfbae3d1dd5469f858ad6ebf493ca156d817f",
   "_detail_frame": "ffa983a45ba29f78ad687853af6b27297ea91f0f563e6e60c7acd7423fccbcf8",
   "_divergence_check": "9a86e21beb6c0dfe6c74b8f80c01048fc074c74b0c5ef8009139f70c6a45eab3",
-  "_divergence_preconditions": "9c45ad541e6c61ae158d84f874d9b432704f7059da0c07a487138bf284b35f21",
+  "_divergence_preconditions": "a338d8c260e48858899ee1e4d9f813de7ad7ede2b4237d0869d048cea0f49dc5",
   "_divergence_window": "724bc8e2b6405351c136bd5f3ceaa4ddd513fc1c92c582c77e272b7177d82b2e",
   "_dragon_check": "55113f8df2f2bfd13fca2c25dc5af4ca45c3731f2dfe7150ff514fc9361ea7f0",
   "_enrich_detail": "bfdecb34122b4e5a00e7b4d4e4c39c6da81f7a05f5f17a31bf327dae16af64e8",
@@ -39,10 +39,10 @@
   "_window_label": "be6013e12e9ac1ddff18c1a00395e590abf9fa53552dd3138d799f04c9c13207",
   "buy_check_placeholders": "d0fb313d9204a5c643aa123643748194419a4a8031f59f01fcba8b25c43925e7",
   "entry_veto": "4057b12e9ab2cd965adfd1eeba89fae3362bcffd70e651dc7a9fae37af56facb",
-  "evaluate_buy": "562e1cfb89c81e79b7f068ca6d92ac2f326c3af883863dbaa65c1301759f16ca",
+  "evaluate_buy": "d050a9a243d8c8edd426acc71e24f806f34ce42d34907532859e35a7852fb568",
   "evaluate_buy_checks": "77cbfbef810f9257990051cea800973eddb7384c5d839224b879b0c546ac2740",
   "evaluate_divergence_buy": "9dfe6810a894a2e00f8b324be4fe35eda00a87fcdb2e2fcc8b87b3ba62582659",
   "evaluate_sell": "364108b333642ec4a981d835d5487de28702b9cc7ea874af2719ee00805d94b8",
-  "explain_buy_candidate": "e302e53ea04ed0ab0e506dfd906641608a388645a1d08817f9c2a73ff2fc3df4",
+  "explain_buy_candidate": "5a289ea14198ea460e72faa34622d5a7f1cc045bcadd4e990c10a5c75860548d",
   "explain_buy_checks": "f98b9d17acc92d79dfe0623b324a513d244738c5832c8db4eb546026c521e41e"
 }

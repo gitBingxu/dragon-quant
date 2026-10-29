@@ -31,18 +31,28 @@ COLLECT_KEYS = [
     "days_ignored", "lookback_dates", "candidate_codes", "saved_count", "saved",
     "empty", "failed", "quote", "quote_missing", "asset_read_error",
     "scored_count", "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
-    "snapshot_error", "snapshots",
+    "snapshot_error", "snapshots", "strategy_context",
 ]
 EMPTY_KEYS = [
     "ok", "mode", "trade_date", "source", "pool_source", "fallback_reason",
     "prep_snapshot_date", "prep_unavailable_reason", "pool_empty",
     "candidate_codes", "recommended_count", "ignore_reason_count",
     "ignore_reason_samples", "prep_degraded", "days_ignored", "message",
+    "strategy_context",
 ]
 RECOMPUTE_KEYS = [
     "ok", "mode", "trade_date", "source", "asset_count", "usable_count",
     "skipped_empty", "quote_missing", "scored_count", "snapshot_saved_count",
     "snapshot_ok", "snapshot_skipped", "snapshot_error", "failed", "snapshots",
+    "strategy_context",
+]
+SNAPSHOT_KEYS = [
+    "ok", "mode", "trade_date", "source", "from_cache", "pool_source",
+    "fallback_reason", "prep_snapshot_date", "prep_unavailable_reason",
+    "recommended_count", "days_ignored", "lookback_dates", "candidate_codes",
+    "saved_count", "saved", "empty", "failed", "quote", "quote_missing",
+    "asset_read_error", "scored_count", "snapshot_saved_count", "snapshot_ok",
+    "snapshot_skipped", "snapshot_error", "snapshots", "strategy_context",
 ]
 
 
@@ -80,6 +90,24 @@ def _asset(code: str, *, name=None, items=None, quote="default"):
     }
 
 
+def _cache_row(code: str, **overrides) -> dict:
+    """``list_auction_snapshots`` 摊平后的行形状（analysis_json + code/trade_date）。"""
+    row = {
+        "trade_date": DAY, "code": code, "version": "2",
+        "is_weak": False, "strength": 60.0, "direction": "neutral",
+        "level": "中", "dims": {}, "reject_reason": None,
+        "unverified": False, "rank": 1, "rank_reason": None,
+        "validation_status": "baseline_unvalidated",
+        "config_version": "auction_v2_baseline",
+        "data_quality": {"status": "ok", "completeness": 1.0,
+                         "reason_codes": [], "reasons": []},
+        "risk_events": [], "raw_factors": {}, "evidence": {},
+        "reference_prices": {}, "windows": {}, "actions": [],
+    }
+    row.update(overrides)
+    return row
+
+
 class _CollectHarness:
     """Patch every I/O seam of ``run_auction`` and record the calls."""
 
@@ -89,7 +117,7 @@ class _CollectHarness:
         self.calls = {
             "calendar": [], "auction": [], "quotes": [],
             "saved": [], "saved_rows": [], "replaced": None, "factory": 0,
-            "snapshot_reads": 0,
+            "snapshot_reads": 0, "cache_reads": 0,
         }
 
     def __enter__(self):
@@ -99,7 +127,7 @@ class _CollectHarness:
         dragons = opt.get("dragons", [])
         legacy_dates = opt.get("legacy_dates")
         if legacy_dates is None:
-            legacy_dates = [DAY] if dragons else []
+            legacy_dates = [PREV] if dragons else []
         calendar = opt.get("calendar", [PREV, DAY])
 
         if opt.get("patch_factory"):
@@ -173,6 +201,16 @@ class _CollectHarness:
                     for row in calls["saved_rows"]]
         self._patch("dragon_quant.infra.assets.db.list_auction_assets",
                     side_effect=_list)
+        self._patch("dragon_quant.infra.assets.db.list_auction_history",
+                    return_value={})
+
+        def _list_cached(date, source="v2", with_meta=False):
+            calls["cache_reads"] += 1
+            if opt.get("cache_error") is not None:
+                raise opt["cache_error"]
+            return list(opt.get("cache_rows") or [])
+        self._patch("dragon_quant.infra.assets.db.list_auction_snapshots",
+                    side_effect=_list_cached)
 
         def _replace(trade_date, payloads, source="v2"):
             calls["replaced"] = dict(payloads)
@@ -307,6 +345,9 @@ class TestRecomputeContract(unittest.TestCase):
             stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=assets))
+            stack.enter_context(patch(
+                "dragon_quant.infra.assets.db.list_auction_history",
+                return_value={}))
             replace = stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 return_value=2))
@@ -358,6 +399,9 @@ class TestRecomputeContract(unittest.TestCase):
                 "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=[_asset("600001")]))
             stack.enter_context(patch(
+                "dragon_quant.infra.assets.db.list_auction_history",
+                return_value={}))
+            stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 side_effect=RuntimeError("db locked")))
             outcome = run_auction_recompute("20261020", today=DAY)
@@ -366,6 +410,145 @@ class TestRecomputeContract(unittest.TestCase):
         self.assertEqual(outcome.mode, "error")
         self.assertIn("快照写入失败", outcome.payload["error"])
         self.assertIn("db locked", outcome.payload["error"])
+
+
+class TestSnapshotCacheContract(unittest.TestCase):
+    """快照命中：零 provider/零采集/零评分/零业务写入。"""
+
+    def test_cache_hit_returns_snapshots_without_any_collection(self):
+        rows = [_cache_row("600001"),
+                _cache_row("600002", rank=2, strength=55.0)]
+        with _CollectHarness(self, patch_factory=True,
+                             cache_rows=rows) as harness:
+            outcome = run_auction(pool="legacy", days=3,
+                                  services=_services(), today=DAY)
+
+        self.assertEqual(outcome.mode, "snapshot")
+        self.assertEqual(outcome.exit_code, 0)
+        payload = outcome.payload
+        self.assertEqual(list(payload), SNAPSHOT_KEYS)
+        self.assertTrue(payload["from_cache"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["pool_source"], "snapshot")
+        self.assertIsNone(payload["fallback_reason"])
+        self.assertIsNone(payload["prep_snapshot_date"])
+        self.assertEqual(payload["candidate_codes"], 2)
+        self.assertEqual(payload["saved_count"], 0)
+        self.assertEqual(payload["saved"], [])
+        self.assertEqual(payload["scored_count"], 2)
+        self.assertEqual(payload["snapshot_saved_count"], 0)
+        self.assertTrue(payload["snapshot_ok"])
+        self.assertEqual(payload["snapshot_skipped"], "cache_hit")
+        self.assertIsNone(payload["snapshot_error"])
+        self.assertEqual(payload["failed"], [])
+        self.assertEqual([item["code"] for item in payload["snapshots"]],
+                         ["600001", "600002"])
+        self.assertFalse(payload["days_ignored"])
+        self.assertEqual(outcome.render_names, {})
+
+        self.assertEqual(harness.calls["cache_reads"], 1)
+        self.assertEqual(harness.calls["factory"], 0)
+        self.assertEqual(harness.calls["calendar"], [])
+        self.assertEqual(harness.calls["auction"], [])
+        self.assertEqual(harness.calls["quotes"], [])
+        self.assertEqual(harness.calls["saved"], [])
+        self.assertIsNone(harness.calls["replaced"])
+
+    def test_partial_corruption_returns_valid_rows_and_reports_bad_ones(self):
+        rows = [_cache_row("600001"),
+                {"trade_date": DAY, "code": "600002",
+                 "error": "JSONDecodeError: bad"}]
+        with _CollectHarness(self, patch_factory=True,
+                             cache_rows=rows) as harness:
+            outcome = run_auction(services=_services(), today=DAY)
+
+        payload = outcome.payload
+        self.assertEqual(outcome.mode, "snapshot")
+        self.assertEqual(outcome.exit_code, 0)
+        self.assertFalse(payload["ok"])
+        self.assertEqual([item["code"] for item in payload["snapshots"]],
+                         ["600001"])
+        self.assertEqual([(item["code"], item["stage"])
+                          for item in payload["failed"]],
+                         [("600002", "snapshot")])
+        self.assertEqual(harness.calls["auction"], [])
+        self.assertEqual(harness.calls["saved"], [])
+        positions = {item["code"]: item
+                     for item in payload["strategy_context"]["positions"]}
+        self.assertEqual(positions["600002"]["status"], "failed")
+        self.assertEqual(positions["600002"]["unknown_reason"],
+                         "snapshot_corrupt")
+
+    def test_all_corrupt_rows_fall_back_to_full_collection(self):
+        rows = [{"trade_date": DAY, "code": "600001",
+                 "error": "JSONDecodeError: bad"}]
+        with _CollectHarness(self, cache_rows=rows) as harness:
+            outcome = run_auction(services=_services(), today=DAY)
+
+        self.assertEqual(outcome.mode, "collect")
+        self.assertEqual(harness.calls["cache_reads"], 1)
+        self.assertEqual(harness.calls["auction"], ["600001", "600002"])
+
+    def test_empty_shell_rows_fall_back_without_a_warning(self):
+        rows = [{"trade_date": DAY, "code": "600001"}]
+        with _CollectHarness(self, cache_rows=rows) as harness:
+            outcome = run_auction(services=_services(), today=DAY)
+
+        self.assertEqual(outcome.mode, "collect")
+        self.assertEqual(outcome.warnings, [])
+        self.assertEqual(harness.calls["auction"], ["600001", "600002"])
+
+    def test_cache_read_error_falls_back_with_a_warning(self):
+        with _CollectHarness(self, cache_error=RuntimeError("db locked")) as harness:
+            outcome = run_auction(services=_services(), today=DAY)
+
+        self.assertEqual(outcome.mode, "collect")
+        self.assertEqual(harness.calls["auction"], ["600001", "600002"])
+        self.assertTrue(any("竞价快照读取失败" in line
+                            for line in outcome.warnings))
+
+    def test_force_skips_the_cache_and_collects(self):
+        rows = [_cache_row("600001")]
+        with _CollectHarness(self, cache_rows=rows) as harness:
+            outcome = run_auction(services=_services(), today=DAY, force=True)
+
+        self.assertEqual(outcome.mode, "collect")
+        self.assertEqual(harness.calls["cache_reads"], 0)
+        self.assertEqual(harness.calls["auction"], ["600001", "600002"])
+
+    def test_projection_failure_isolates_only_the_bad_row(self):
+        from dragon_quant.review_account.auction import scoring
+
+        rows = [_cache_row("600001"), _cache_row("600002")]
+
+        def _summary(payload):
+            if payload["code"] == "600002":
+                raise RuntimeError("boom")
+            return scoring.snapshot_summary(payload)
+
+        with _CollectHarness(self, patch_factory=True, cache_rows=rows):
+            with patch("dragon_quant.review_account.auction.collect.snapshot_summary",
+                       side_effect=_summary):
+                outcome = run_auction(services=_services(), today=DAY)
+
+        self.assertEqual(outcome.mode, "snapshot")
+        self.assertEqual([item["code"] for item in outcome.payload["snapshots"]],
+                         ["600001"])
+        self.assertEqual([(item["code"], item["stage"])
+                          for item in outcome.payload["failed"]],
+                         [("600002", "snapshot")])
+        self.assertIn("snapshot_projection_failed",
+                      outcome.payload["failed"][0]["error"])
+
+    def test_all_projection_failures_fall_back_to_collection(self):
+        rows = [_cache_row("600001")]
+        with _CollectHarness(self, cache_rows=rows) as harness:
+            with patch("dragon_quant.review_account.auction.collect.snapshot_summary",
+                       side_effect=RuntimeError("boom")):
+                outcome = run_auction(services=_services(), today=DAY)
+
+        self.assertEqual(outcome.mode, "collect")
+        self.assertEqual(harness.calls["auction"], ["600001", "600002"])
 
 
 class TestPublicFacade(unittest.TestCase):

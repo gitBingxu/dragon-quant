@@ -1,0 +1,367 @@
+{
+  "schema_version": "dr_v1",
+  "ok": true,
+  "status": "ok",
+  "source": "auction",
+  "date_from": "2026-09-09",
+  "date_to": "2026-09-09",
+  "universe": "persisted_decision_snapshots",
+  "coverage_basis": "persisted_snapshots",
+  "config": {
+    "horizons": [
+      1
+    ],
+    "cost_bps": 13.0,
+    "min_days": 1,
+    "min_group_samples": 1,
+    "include_samples": true,
+    "outcome_basis": "net_open_to_open_after_cost",
+    "net_return_basis": "gross_minus_cost",
+    "entry_rule": "available_at_first_tradable_open",
+    "exit_rule": "nth_trading_day_open",
+    "calendar_basis": "index_calendar"
+  },
+  "snapshots": {
+    "requested_days": 1,
+    "with_snapshot": 1,
+    "missing": 0,
+    "usable": 1,
+    "unsupported_version": 1,
+    "malformed": 0,
+    "empty_decision": 0,
+    "corrupt_rows": 1,
+    "non_trading_snapshot_dates": 0
+  },
+  "versions": {
+    "accepted": [
+      "2"
+    ],
+    "seen": {
+      "1": 1,
+      "2": 5
+    },
+    "unsupported_units": 1
+  },
+  "groups": [
+    {
+      "group": "strong",
+      "label": "强",
+      "expected_direction": "up",
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": true,
+          "direction_hit_rate": 1.0,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": 1.0,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "wilson_n": 1,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 0.8700000000000009,
+          "median_net_return_pct": 0.8700000000000009,
+          "p25_net_return_pct": 0.8700000000000009,
+          "p75_net_return_pct": 0.8700000000000009,
+          "reference_line": 0.65,
+          "above_reference": true,
+          "quality": "ok",
+          "expected_direction": "up"
+        }
+      }
+    },
+    {
+      "group": "medium",
+      "label": "中",
+      "expected_direction": null,
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 1.8700000000000019,
+          "median_net_return_pct": 1.8700000000000019,
+          "p25_net_return_pct": 1.8700000000000019,
+          "p75_net_return_pct": 1.8700000000000019,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "ok",
+          "expected_direction": null
+        }
+      }
+    },
+    {
+      "group": "weak",
+      "label": "弱",
+      "expected_direction": "down",
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": true,
+          "direction_hit_rate": 0.0,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": 0.0,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "wilson_n": 1,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 2.8700000000000028,
+          "median_net_return_pct": 2.8700000000000028,
+          "p25_net_return_pct": 2.8700000000000028,
+          "p75_net_return_pct": 2.8700000000000028,
+          "reference_line": 0.65,
+          "above_reference": false,
+          "quality": "ok",
+          "expected_direction": "down"
+        }
+      }
+    },
+    {
+      "group": "vetoed",
+      "label": "否决",
+      "expected_direction": "down",
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": true,
+          "direction_hit_rate": 0.0,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": 0.0,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "wilson_n": 1,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 3.8700000000000037,
+          "median_net_return_pct": 3.8700000000000037,
+          "p25_net_return_pct": 3.8700000000000037,
+          "p75_net_return_pct": 3.8700000000000037,
+          "reference_line": 0.65,
+          "above_reference": false,
+          "quality": "ok",
+          "expected_direction": "down"
+        }
+      }
+    },
+    {
+      "group": "unavailable",
+      "label": "数据不足",
+      "expected_direction": null,
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 4.8700000000000045,
+          "median_net_return_pct": 4.8700000000000045,
+          "p25_net_return_pct": 4.8700000000000045,
+          "p75_net_return_pct": 4.8700000000000045,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "ok",
+          "expected_direction": null
+        }
+      }
+    }
+  ],
+  "spreads": {
+    "1": {
+      "pair": [
+        "strong",
+        "weak"
+      ],
+      "basis": "mean_net_return_pct",
+      "value": -2.0000000000000018
+    }
+  },
+  "exclusions": {
+    "sample": {},
+    "snapshot": {
+      "duplicate_code": 0,
+      "missing_snapshot": 0,
+      "unmapped_level": 0,
+      "unsupported_snapshot_version": 1
+    }
+  },
+  "caveats": [
+    "方向命中率仅描述历史样本，不构成策略有效性结论",
+    "Wilson 95% 区间假设样本近似独立；同日多只与相邻 horizon 存在相关性，区间偏窄",
+    "auction 分母仅为已持久化快照，不含未持久化的空盘口/失败候选"
+  ],
+  "warnings": [
+    "unsupported_snapshot_version: auction 1 行（seen {'1': 1, '2': 5}）；请先按当前实现重算（prep --recompute / auction --recompute DATE）",
+    "corrupt_snapshot_rows: 1 行 JSON 损坏已跳过",
+    "coverage_basis=persisted_snapshots: 未持久化的空盘口/失败候选不在分母内（无 run manifest）"
+  ],
+  "samples": [
+    {
+      "sample_id": "auction:2026-09-09:600001:1",
+      "source": "auction",
+      "snapshot_date": "2026-09-09",
+      "snapshot_version": "2",
+      "snapshot_created_at": "2026-09-09 09:25:00",
+      "code": "600001",
+      "name": null,
+      "group": "strong",
+      "expected_direction": "up",
+      "available_at": "2026-09-09T09:25:00+08:00",
+      "horizon": 1,
+      "entry_date": "2026-09-09",
+      "exit_date": "2026-09-10",
+      "entry_price": 10.0,
+      "exit_price": 10.1,
+      "cost_bps": 13.0,
+      "gross_return_pct": 1.0000000000000009,
+      "net_return_pct": 0.8700000000000009,
+      "outcome": "up",
+      "exclusion_reason": null
+    },
+    {
+      "sample_id": "auction:2026-09-09:600002:1",
+      "source": "auction",
+      "snapshot_date": "2026-09-09",
+      "snapshot_version": "2",
+      "snapshot_created_at": "2026-09-09 09:25:00",
+      "code": "600002",
+      "name": null,
+      "group": "medium",
+      "expected_direction": null,
+      "available_at": "2026-09-09T09:25:00+08:00",
+      "horizon": 1,
+      "entry_date": "2026-09-09",
+      "exit_date": "2026-09-10",
+      "entry_price": 10.0,
+      "exit_price": 10.2,
+      "cost_bps": 13.0,
+      "gross_return_pct": 2.0000000000000018,
+      "net_return_pct": 1.8700000000000019,
+      "outcome": "up",
+      "exclusion_reason": null
+    },
+    {
+      "sample_id": "auction:2026-09-09:600003:1",
+      "source": "auction",
+      "snapshot_date": "2026-09-09",
+      "snapshot_version": "2",
+      "snapshot_created_at": "2026-09-09 09:25:00",
+      "code": "600003",
+      "name": null,
+      "group": "weak",
+      "expected_direction": "down",
+      "available_at": "2026-09-09T09:25:00+08:00",
+      "horizon": 1,
+      "entry_date": "2026-09-09",
+      "exit_date": "2026-09-10",
+      "entry_price": 10.0,
+      "exit_price": 10.3,
+      "cost_bps": 13.0,
+      "gross_return_pct": 3.0000000000000027,
+      "net_return_pct": 2.8700000000000028,
+      "outcome": "up",
+      "exclusion_reason": null
+    },
+    {
+      "sample_id": "auction:2026-09-09:600004:1",
+      "source": "auction",
+      "snapshot_date": "2026-09-09",
+      "snapshot_version": "2",
+      "snapshot_created_at": "2026-09-09 09:25:00",
+      "code": "600004",
+      "name": null,
+      "group": "vetoed",
+      "expected_direction": "down",
+      "available_at": "2026-09-09T09:25:00+08:00",
+      "horizon": 1,
+      "entry_date": "2026-09-09",
+      "exit_date": "2026-09-10",
+      "entry_price": 10.0,
+      "exit_price": 10.4,
+      "cost_bps": 13.0,
+      "gross_return_pct": 4.0000000000000036,
+      "net_return_pct": 3.8700000000000037,
+      "outcome": "up",
+      "exclusion_reason": null
+    },
+    {
+      "sample_id": "auction:2026-09-09:600005:1",
+      "source": "auction",
+      "snapshot_date": "2026-09-09",
+      "snapshot_version": "2",
+      "snapshot_created_at": "2026-09-09 09:25:00",
+      "code": "600005",
+      "name": null,
+      "group": "unavailable",
+      "expected_direction": null,
+      "available_at": "2026-09-09T09:25:00+08:00",
+      "horizon": 1,
+      "entry_date": "2026-09-09",
+      "exit_date": "2026-09-10",
+      "entry_price": 10.0,
+      "exit_price": 10.5,
+      "cost_bps": 13.0,
+      "gross_return_pct": 5.000000000000004,
+      "net_return_pct": 4.8700000000000045,
+      "outcome": "up",
+      "exclusion_reason": null
+    }
+  ]
+}

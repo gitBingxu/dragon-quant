@@ -69,6 +69,15 @@ class TestFactorLayerIsLeaf(unittest.TestCase):
                          "dragon_quant.infra.provider", "sqlite3", "socket",
                          "requests", "urllib", "pandas")), [])
 
+    def test_decision_review_core_is_data_injected(self):
+        """决策回测纯核心零 I/O：快照经 store 注入、行情经 market 注入。"""
+        path = FACTOR_DIR / "decision_review.py"
+        self.assertTrue(path.exists())
+        self.assertEqual(
+            _hits(path, ("dragon_quant.review_account", "dragon_quant.review",
+                         "dragon_quant.infra.provider", "dragon_quant.infra.assets",
+                         "sqlite3", "socket", "requests", "urllib", "pandas")), [])
+
 
 class TestReviewPackageIsPure(unittest.TestCase):
     def test_review_does_not_import_provider_storage_or_service(self):

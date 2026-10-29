@@ -266,6 +266,10 @@ _COMMAND_PUBLIC_EXACT = frozenset({
     "dragon_quant.infra.factor",
     "dragon_quant.infra.factor.service",
     "dragon_quant.infra.assets.main",
+    # purge-derived 的管理命令：DB 清理实现 + 复用 assets 同步进程锁（命令层组合）
+    "dragon_quant.infra.factor.maintenance",
+    "dragon_quant.infra.assets.sync.state",
+    "dragon_quant.infra.assets.sync.errors",
     "dragon_quant.scan.orchestrator.main",
     "dragon_quant.scan.logger.main",
     "dragon_quant.review.main",

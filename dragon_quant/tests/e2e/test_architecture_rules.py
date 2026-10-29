@@ -1192,6 +1192,7 @@ _M7_COMMAND_FACADE_NAMES = frozenset({"CleanConfig", "service"})
 _M7_COMMAND_SERVICE_CALLS = frozenset({
     "build", "list_factors", "query", "status", "export_matrix",
     "evaluate_factor", "fin_sync", "fin_calibrate", "fin_status", "parse_only",
+    "decision_review",
 })
 
 

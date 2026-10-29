@@ -38,6 +38,7 @@ dragon_quant/
 ├── review_account/              # 账户级回测 + 策略 + 盘后复盘 + 竞价 + 实盘辅助
 │   ├── __init__.py / main.py / service.py / simulator.py / engine.py / data.py
 │   ├── market.py / indicators.py / evaluation.py / models.py / advice.py / verdicts.py
+│   ├── candidate_view.py       # 0.8 review→candidates 兼容投影（Adapter）
 │   ├── storage.py               # review_account_* 五表仓储
 │   ├── prep/                    # 盘后复盘
 │   │   ├── __init__.py / main.py / service.py / collectors.py / compute.py
@@ -46,8 +47,9 @@ dragon_quant/
 │   │       ├── __init__.py / config.py / scoring.py / market.py / mainline.py
 │   │       ├── roles.py / pool.py / gates.py / sizing.py / context.py
 │   │       └── feedback.py / board_rank.py / orchestrator.py
-│   ├── auction/                 # 集合竞价
+│   ├── auction/                 # 集合竞价（v2 纯函数流水线）
 │   │   ├── __init__.py / main.py / collect.py / recompute.py / scoring.py / dates.py
+│   │   ├── normalize.py / features.py / events.py / dimensions.py / context.py
 │   │   └── registry.py / strength.py / serialize.py / report.py / types.py
 │   ├── strategy/                # 策略纯拆分（main.py 只门面重导出）
 │   │   ├── __init__.py / main.py / common.py / buy.py / checks.py / sell.py
@@ -74,6 +76,8 @@ dragon_quant/
 │   │   ├── __init__.py / main.py / types.py / registry.py / engine.py / storage.py
 │   │   ├── decision.py / evaluation.py / matrix.py / stats.py / service.py
 │   │   ├── review_shadow.py / finance.py / sql.py / finance_store.py
+│   │   ├── maintenance.py      # assets purge-derived 的派生清理（注册表+单事务）
+│   │   ├── decision_review.py / decision_review_store.py
 │   │   └── builtin/             # five_dim / vpa / financial / prep / auction / prep_review
 │   │       ├── __init__.py / five_dim.py / vpa.py / financial.py
 │   │       └── prep.py / auction.py / prep_review.py
@@ -114,7 +118,7 @@ web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine /
 > `review_account.auction.main.run_auction/run_auction_recompute`；
 > `infra.factor.main` 13 个批准出口（`build/list_factors/query/status/export_matrix/evaluate_factor/
 > fin_sync/fin_calibrate/fin_status/parse_only/FactorModel/annotate_pool/CleanConfig`）；
-> `infra.assets.main.run`；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；
+> `infra.assets.main.run`；`infra.factor.maintenance.plan_purge/apply_purge`（`assets purge-derived`，命令层取锁）；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；
 > `infra.storage.main`（`init_db`/`DataCache`/`StorageManager`）与 `scan.storage.main`
 > （扫描/龙头/日志/黑名单持久化）为文档化公共契约，`infra/storage`、`scan/storage` 的
 > `__init__.py` 不做急切重导出；`web_ui.start_server`。

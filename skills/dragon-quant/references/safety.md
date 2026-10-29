@@ -27,16 +27,18 @@
 | review-account | --ui-only | T0 | 只读启动 Web UI，长驻 |
 | dragons | --date --true-only | T0 | 只读 JSON |
 | prep | --date --recompute --force --json | T1 | 写 assets.db；当日需 16:40 后 |
-| auction | --pool --days --recompute --json | T1 | 写 assets.db；当日需 09:25 后 |
+| auction | --pool --days --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读，--force 才重采；当日需 09:25 后 |
 | assets | status/verify/pull | T0 | pull 默认 dry-run，不加 --apply 不写 |
 | assets | doctor | T1 | 向远端 _doctor 前缀写入并删除临时探针 |
 | assets | push | T2 | 上传数据到云端；先 dry-run |
 | assets | push --dry-run | T0 | 不写远端 |
 | assets | pull --apply / pull --force | T2 | 写本地库；主线库禁止 pull --force，恢复走 target-dir |
+| assets | purge-derived | T0 | 只读 dry-run（默认） |
+| assets | purge-derived --apply --yes | T2 | 删除 prep 派生数据；需二次确认 |
 | assets | backfill-dragons | T1 | 写 assets.db.dragons |
 | assets | backfill-dragons --dry-run | T0 | 只读体检 |
 | assets | backfill-dragons --prune | T2 | 删除镜像孤儿行 |
-| factor | list/query/status/eval/fin status | T0 | 只读或计算 |
+| factor | list/query/status/eval/decision-review/fin status | T0 | 只读或计算 |
 | factor | build/export/fin sync/fin calibrate | T1 | 写 factor_* / fin_* 或用户指定文件 |
 | buy | --date --at --force --json | T1 | 写信号表；必须确认 |
 | sell | --date --at --force | T1 | 写信号表；必须确认；T+1 |
@@ -61,7 +63,7 @@
 
 ## 禁止操作
 
-- 未确认执行 `buy` / `sell` / `blacklist add|remove` / `storage clear` / `assets push` / `assets pull --apply` / `backfill-dragons --prune`。
+- 未确认执行 `buy` / `sell` / `blacklist add|remove` / `storage clear` / `assets push` / `assets pull --apply` / `assets purge-derived --apply` / `backfill-dragons --prune`。
 - 在主库执行 `assets pull --force`；恢复应使用 `--target-dir` 隔离目录。
 - 手工用 SQL 删除或修改业务表（包括信号表）；CLI 没有清理接口时，说明限制并停止。
 - 回显 Cookie、token、`assets_sync` 凭据，或把它们写入日志/仓库。
@@ -79,7 +81,7 @@
 ## 常见误判
 
 - `scan`/`prep`/`auction`/`review`/`review-account`/`factor build`/`factor fin sync` 都不是只读。
-- `dragons`、`scan --date`、`logs tail`、`data *`、`factor list/query/status/eval`、`storage status/size` 是只读。
+- `dragons`、`scan --date`、`logs tail`、`data *`、`factor list/query/status/eval/decision-review`、`storage status/size` 是只读。
 - `assets pull` 默认只预览；`assets doctor` 虽名为检查，但会远端写探针，按 T1 处理。
 - `storage clear` 不删数据库文件，但仍是破坏性操作（删缓存/结果/日志）。
 - 部分只读命令在首次运行或旧库上会做幂等的 schema 初始化/迁移并拿写锁（例如读历史扫描、读龙头）；这不改变其 T0 语义，但不要与写库命令并发执行。

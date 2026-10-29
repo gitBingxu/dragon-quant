@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dragon_quant.review_account.auction.context import build_strategy_context
 from dragon_quant.review_account.auction.dates import _parse_auction_date, _today
-from dragon_quant.review_account.auction.scoring import _score_auction_assets
+from dragon_quant.review_account.auction.scoring import evaluate_batch
 from dragon_quant.review_account.auction.types import AuctionOutcome
 
 
@@ -72,7 +73,16 @@ def run_auction_recompute(raw_date: str, *, services=None,
              "failed": failed,
              "error": "无可计算资产（items 全为空或行情 payload 全部损坏）"})
 
-    payloads, score_failures, summaries = _score_auction_assets(usable)
+    names = {asset["code"]: (asset.get("name") or "") for asset in assets}
+    history = {}
+    try:
+        history = assets_db.list_auction_history(
+            trade_date, codes=[asset["code"] for asset in usable], limit=5) or {}
+    except Exception:
+        history = {}
+
+    payloads, score_failures, summaries, evaluations = evaluate_batch(
+        usable, history=history, names=names)
     failed.extend(score_failures)
     if not payloads:
         return AuctionOutcome.error(
@@ -104,7 +114,9 @@ def run_auction_recompute(raw_date: str, *, services=None,
         "snapshot_error": None,
         "failed": failed,
         "snapshots": [summaries[c] for c in sorted(summaries)],
+        "strategy_context": build_strategy_context(
+            trade_date, mode="recompute", evaluations=evaluations, names=names,
+            failed=failed, empty=skipped_empty),
     }
-    names = {asset["code"]: (asset.get("name") or "") for asset in assets}
     return AuctionOutcome(payload=payload, exit_code=0, render_names=names,
                           mode="recompute")

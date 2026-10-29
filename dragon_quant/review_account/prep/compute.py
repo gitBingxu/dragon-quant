@@ -30,6 +30,56 @@ from .review import (  # noqa: F401
 # 快照/窗口/交易日统一时区（service / rebuild 也复用本常量，避免多处定义漂移）
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
+# T-1 计划投影字段（strategy_context → prev_plan 资产的唯一字段清单；collectors 复用）
+_PLAN_POSITION_KEYS = (
+    "code", "name", "role", "review_score", "review_grade", "position_pct",
+    "eligibility", "reason_code", "mainline", "confidence",
+)
+_PLAN_FEEDBACK_KEYS = ("code", "role", "position_pct", "expected",
+                       "allowed_actions", "unknown_reason")
+
+
+def _plan_rows(context: dict, key: str, keys: tuple) -> list[dict]:
+    rows = context.get(key)
+    rows = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    return [
+        {field: row.get(field) for field in keys}
+        for row in rows
+        if isinstance(row.get("code"), str) and row.get("code")
+    ]
+
+
+def effective_prev_plan(prev: dict | None,
+                        stored_prev_plan: dict | None) -> dict | None:
+    """有效 T-1 计划：上一快照 ``strategy_context`` 优先，保留资产回退。
+
+    升序重建时第 2 天起上一快照就是新算出的快照，因此反馈评估的是新计划；
+    快照存在但无 ``strategy_context`` 时才回退到已保留的 ``prev_plan`` 资产。
+    两者都没有 → ``None``（首日计划合法缺席，不伪造）。
+    """
+
+    if isinstance(prev, dict):
+        context = prev.get("strategy_context")
+        if isinstance(context, dict) and isinstance(context.get("positions"), list):
+            market = context.get("market") if isinstance(context.get("market"), dict) else {}
+            trade_date = prev.get("trade_date")
+            return {
+                "as_of": trade_date,
+                "source_trade_date": trade_date,
+                "context_version": context.get("context_version"),
+                "context_hash": None,
+                "market_state": market.get("state"),
+                "positions": _plan_rows(context, "positions", _PLAN_POSITION_KEYS),
+                "feedback_plans": _plan_rows(
+                    context, "feedback_plans", _PLAN_FEEDBACK_KEYS),
+                "degraded": [],
+            }
+    if isinstance(stored_prev_plan, dict):
+        positions = stored_prev_plan.get("positions")
+        if isinstance(positions, list) and positions:
+            return stored_prev_plan
+    return None
+
 
 # ─── v0.1 情绪 → 建议仓位启发式（阈值不变，输入口径升级为 T 日权威值）─────────
 

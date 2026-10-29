@@ -255,7 +255,7 @@ class TestComputeErrorIsolation(unittest.TestCase):
     def test_output_contract_keys(self):
         from dragon_quant.review_account.prep import _compute_all
         out = _compute_all("2026-10-19", _assets())
-        self.assertEqual(out["version"], "0.7")
+        self.assertEqual(out["version"], "0.8")
         self.assertEqual(out["dragon_source"]["scan_id"], "v2_20261019_top25")
         for k in ("sentiment", "main_boards", "candidates"):
             self.assertIn(k, out)
@@ -521,7 +521,7 @@ class TestRunPrepIntegration(unittest.TestCase):
         # 快照已落库，且由资产计算而来
         self.assertEqual(snap["sentiment"]["limit_up_cnt"], 10)
         self.assertEqual(snap["candidates"][0]["code"], "600001")
-        self.assertEqual(out["version"], "0.7")
+        self.assertEqual(out["version"], "0.8")
         # run_prep → resolve_window_dates → PrepContext 的窗口透传不能断链
         self.assertEqual(captured["window"], ["2026-10-15", "2026-10-16"])
         self.assertEqual(captured["window_days"], 5)
@@ -947,7 +947,7 @@ class TestRunPrepRecompute(unittest.TestCase):
              patch("dragon_quant.review_account.prep.TdxProvider"), \
              patch("dragon_quant.review_account.prep.THSProvider"):
             out = run_prep(day, recompute=True)
-        self.assertEqual(out["version"], "0.7")
+        self.assertEqual(out["version"], "0.8")
         self.assertFalse(out["macro"]["available"])
         self.assertIn("macro_global", out["sentiment"]["degraded"])
         self.assertTrue(out["candidates"])
@@ -995,7 +995,7 @@ class TestRunPrepRecompute(unittest.TestCase):
         self.assertEqual(payload["rebuilt_from_window_days"], 3)
         self.assertNotIn("collection_report", written)   # 不伪造采集健康状态
         save_assets.assert_called_once()
-        self.assertEqual(out["version"], "0.7")
+        self.assertEqual(out["version"], "0.8")
 
     def test_recompute_keeps_single_day_asset(self):
         """旧单日资产（无 days[]）不重建，按单日口径重放（R1 既有语义）。"""
@@ -1573,7 +1573,9 @@ class TestWindowDegradation(unittest.TestCase):
         assets["dragons"] = "garbage"
         out = _compute_all("2026-10-19", assets)
         self.assertEqual(out["sentiment"]["limit_up_cnt"], 59)
-        self.assertEqual(out["candidates"], [])
+        # 0.8：candidates 主集合 = review 详细池（dragons 畸形不阻断池内其它资产）
+        self.assertEqual([c["code"] for c in out["candidates"]], ["600001"])
+        self.assertTrue(out["candidates"][0]["review_pool"])
 
         assets = _assets()
         assets["dragons"] = {"trade_date": "2026-10-19", "window_days": 3,
@@ -1670,7 +1672,8 @@ class TestComputeCandidatesWindow(unittest.TestCase):
         self.assertEqual(cand["facts"]["t_pct"], 9.99)
         self.assertEqual(cand["facts"]["reason_type_today"], "低空经济")
         self.assertEqual(cand["verdict"], "strong")
-        self.assertIsNone(cand["reason_type"])     # 入选日归因仍为 null（跨日）
+        self.assertIsNone(cand["is_true_dragon"])  # 0.8 兼容视图不复活旧身份
+        self.assertTrue(cand["review_pool"])
 
     def test_main_boards_count_uses_union(self):
         from dragon_quant.review_account.prep import compute_main_boards
@@ -2413,7 +2416,7 @@ class TestRunPrepIncremental(unittest.TestCase):
             self.assertEqual(assets_db.get_prep_assets(self.day), before)
             self.assertEqual(snap1, snap2)          # 快照覆盖写且内容一致
             self.assertTrue(plans[0].is_empty())
-            self.assertEqual(out1["version"], "0.7")
+            self.assertEqual(out1["version"], "0.8")
             self.assertTrue(snap1 and snap2)        # 零采集 ≠ 零 compute
 
     def test_partial_unhealthy_collects_only_that_type(self):
@@ -2500,7 +2503,7 @@ class TestRunPrepIncremental(unittest.TestCase):
         save_snap.assert_called_once()
         tdx_cls.assert_not_called()
         ths_cls.assert_not_called()
-        self.assertEqual(out["version"], "0.7")
+        self.assertEqual(out["version"], "0.8")
 
     def test_force_recollects_all_collectable(self):
         import tempfile
@@ -2611,3 +2614,79 @@ class TestRunPrepIncremental(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPrevInjection(unittest.TestCase):
+    """prev 严格前一快照 + 升序重建首日反馈合法为空（技术方案 §4.2–§4.4）。"""
+
+    def test_previous_snapshot_is_strictly_before_and_not_self(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        from dragon_quant.infra.assets import db as assets_db
+        from dragon_quant.review_account import prep
+
+        day1, day2 = "2026-10-15", "2026-10-16"
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "assets.db")
+
+            def connect(*args, **kwargs):
+                return sqlite3.connect(db_path)
+
+            with patch("dragon_quant.infra.assets.db._connect",
+                       side_effect=connect):
+                assets_db.save_prep_snapshot(day1, {"version": "0.8",
+                                                    "trade_date": day1})
+                assets_db.save_prep_snapshot(day2, {"version": "0.8",
+                                                    "trade_date": day2})
+            saved = []
+            with patch("dragon_quant.infra.assets.db._connect",
+                       side_effect=connect), \
+                 patch("dragon_quant.review_account.prep.assets_db.get_prep_assets",
+                       return_value=_assets(day2)), \
+                 patch("dragon_quant.review_account.prep.assets_db.save_prep_snapshot",
+                       side_effect=lambda day, result, source="v2": saved.append(result)), \
+                 patch.object(prep, "TdxProvider"), patch.object(prep, "THSProvider"):
+                first = prep.run_prep(day2, recompute=True)
+                second = prep.run_prep(day2, recompute=True)
+
+        # 同日快照存在也不得自比：prev 恒为严格更早的 day1
+        self.assertEqual(first["review"]["prev"]["snapshot_date"], day1)
+        self.assertEqual(second["review"]["prev"]["snapshot_date"], day1)
+        self.assertEqual(first["version"], "0.8")
+
+    def test_first_rebuild_day_has_no_feedback_next_day_uses_previous_plan(self):
+        from dragon_quant.review_account import prep
+
+        day1, day2 = "2026-10-15", "2026-10-16"
+        first = prep._compute_all(day1, _assets(day1), prev=None,
+                                  prev_meta={"trade_date": None,
+                                             "created_at": None, "error": None})
+        self.assertNotIn("feedback", first)
+        self.assertNotIn("plan_review", first)
+        self.assertEqual(first["review"]["prev"]["mainlines"], "snapshot_missing")
+
+        prev = {
+            "version": "0.8",
+            "trade_date": day1,
+            "review": {"mainlines": [{"board_name": "低空经济", "rank": 1,
+                                      "mainline_score": 90.0}]},
+            "strategy_context": {
+                "context_version": "sc_v1",
+                "market": {"state": "neutral"},
+                "positions": [{"code": "600001", "name": "样本", "role": "leader",
+                               "position_pct": 4.0, "eligibility": "eligible"}],
+                "feedback_plans": [{"code": "600001", "role": "leader",
+                                    "position_pct": 4.0,
+                                    "expected": {"gap_low": -1.0, "ratio_low": 0.5,
+                                                 "seal_by": None}}],
+            },
+        }
+        second = prep._compute_all(day2, _assets(day2), prev=prev,
+                                   prev_meta={"trade_date": day1,
+                                              "created_at": "2026-10-15 18:00:00",
+                                              "error": None})
+        self.assertIn("feedback", second)
+        self.assertEqual(second["feedback"]["source_plan_date"], day1)
+        self.assertEqual(second["feedback"]["items"][0]["code"], "600001")
+        self.assertEqual(second["review"]["prev"]["mainlines"], "ok")

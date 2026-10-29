@@ -462,12 +462,43 @@ def _apply_gates_and_sizing(
 # ---------------------------------------------------------------------------
 
 
+def _prev_audit(prev: dict | None, prev_meta: Mapping[str, Any] | None) -> dict:
+    """上一快照审计块（只增键）：状态 + 来源 + 降级原因。"""
+
+    meta = prev_meta if isinstance(prev_meta, Mapping) else {}
+    snapshot_date = meta.get("trade_date")
+    snapshot_version = prev.get("version") if isinstance(prev, Mapping) else None
+    if meta.get("error"):
+        status = "corrupt"
+    elif not isinstance(prev, Mapping):
+        status = "snapshot_missing"
+    else:
+        review = prev.get("review")
+        mainlines = review.get("mainlines") if isinstance(review, Mapping) else None
+        status = "ok" if isinstance(mainlines, list) and mainlines else "missing"
+    degraded: list[str] = []
+    if status != "ok":
+        degraded.append({
+            "corrupt": "prev_snapshot_corrupt",
+            "snapshot_missing": "prev_snapshot_missing",
+            "missing": "prev_mainlines_missing",
+        }.get(status, f"prev_{status}"))
+    return {
+        "snapshot_date": snapshot_date if isinstance(snapshot_date, str) else None,
+        "snapshot_version": (snapshot_version
+                             if isinstance(snapshot_version, str) else None),
+        "mainlines": status,
+        "degraded": degraded,
+    }
+
+
 def compute_review(
     assets: dict,
     trade_date: str,
     *,
     config: ReviewConfig = CONFIG,
     prev: dict | None = None,
+    prev_meta: Mapping[str, Any] | None = None,
 ) -> dict:
     """资产 → ``review`` / ``review_candidates``（纯函数）。
 
@@ -478,7 +509,7 @@ def compute_review(
 
     source = assets if isinstance(assets, dict) else {}
     market = compute_market_state(source, prev, config)
-    mainlines = compute_mainlines(source, prev, config)
+    mainlines = compute_mainlines(source, prev, config, prev_meta=prev_meta)
     mainlines_available = bool(mainlines)
 
     pool = derive_pool_codes(source, config)
@@ -651,6 +682,9 @@ def compute_review(
         "degraded": sorted(set(degraded)),
         "portfolio": portfolio,
         "review_candidates": review_candidates,
+        # 上一快照审计（只增键）：无快照 / 损坏 / 无主线时给出稳定原因，
+        # 避免 Agent 面对无说明的「主线未知」。
+        "prev": _prev_audit(prev, prev_meta),
     }
     review_payload["strategy_context"] = build_context(
         {

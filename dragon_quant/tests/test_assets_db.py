@@ -631,3 +631,74 @@ class TestAuctionCorruptJson(AssetsDbTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPreviousPrepSnapshot(AssetsDbTestBase):
+    """严格早于 before_date 的最近快照（prev 注入；绝不返回当日）。"""
+
+    def _save(self, day, version="0.8", source="v2"):
+        from dragon_quant.infra.assets import db as assets_db
+        with self._patch():
+            assets_db.save_prep_snapshot(day, {"version": version, "trade_date": day},
+                                         source=source)
+
+    def test_strictly_before_returns_latest_earlier_snapshot(self):
+        from dragon_quant.infra.assets import db as assets_db
+        self._save("2026-10-16")
+        self._save("2026-10-18")
+        self._save("2026-10-19")
+        with self._patch():
+            payload, meta = assets_db.get_previous_prep_snapshot("2026-10-19")
+        self.assertEqual(payload["trade_date"], "2026-10-18")
+        self.assertEqual(meta["trade_date"], "2026-10-18")
+        self.assertIsNone(meta["error"])
+
+    def test_same_day_snapshot_is_never_returned(self):
+        from dragon_quant.infra.assets import db as assets_db
+        self._save("2026-10-19")
+        with self._patch():
+            payload, meta = assets_db.get_previous_prep_snapshot("2026-10-19")
+        self.assertIsNone(payload)
+        self.assertIsNone(meta["trade_date"])
+
+    def test_first_day_has_no_previous_snapshot(self):
+        from dragon_quant.infra.assets import db as assets_db
+        self._save("2026-10-19")
+        with self._patch():
+            payload, meta = assets_db.get_previous_prep_snapshot("2026-10-16")
+        self.assertIsNone(payload)
+        self.assertEqual(meta, {"trade_date": None, "created_at": None, "error": None})
+
+    def test_missing_db_is_read_only(self):
+        from dragon_quant.infra.assets import db as assets_db
+        missing = str(Path(self._tmpdir.name) / "absent.db")
+        with patch("dragon_quant.infra.assets.db._connect",
+                   side_effect=lambda *a, **k: None):
+            payload, meta = assets_db.get_previous_prep_snapshot("2026-10-19")
+        self.assertIsNone(payload)
+        self.assertIsNone(meta["error"])
+        self.assertFalse(Path(missing).exists())
+
+    def test_corrupt_snapshot_reports_error(self):
+        from dragon_quant.infra.assets import db as assets_db
+        self._save("2026-10-18")
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute("UPDATE prep_snapshots SET result_json='{bad' "
+                         "WHERE trade_date='2026-10-18'")
+            conn.commit()
+        finally:
+            conn.close()
+        with self._patch():
+            payload, meta = assets_db.get_previous_prep_snapshot("2026-10-19")
+        self.assertIsNone(payload)
+        self.assertEqual(meta["trade_date"], "2026-10-18")
+        self.assertIn("JSONDecodeError", meta["error"])
+
+    def test_source_filter_is_applied(self):
+        from dragon_quant.infra.assets import db as assets_db
+        self._save("2026-10-18", source="v1")
+        with self._patch():
+            payload, meta = assets_db.get_previous_prep_snapshot("2026-10-19")
+        self.assertIsNone(payload)
+        self.assertIsNone(meta["trade_date"])

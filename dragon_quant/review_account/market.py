@@ -10,11 +10,68 @@ from dragon_quant.review_account.indicators import (
     enrich_daily_klines,
     is_tradable_daily_bar as is_tradable_daily_bar,
 )
+from dragon_quant.review_account.candidate_view import (
+    is_review_eligible, project_candidates,
+)
 from dragon_quant.review_account.strategy.priority import (
     PREP_RECOMMENDED, auction_state, prep_state, ranking_mode,
 )
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+_REVIEW_SNAPSHOT_VERSION = 0.8
+
+
+def _snapshot_version(value) -> Optional[float]:
+    """快照版本 → 数值；缺失/非法 → None（按 <=0.7 历史分支处理）。"""
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _review_decision_branch(snap: dict, day: str, ctx: dict,
+                            snapshot_date: Optional[str]
+                            ) -> tuple[list[dict], dict[str, dict], bool]:
+    """0.8 分支：``eligible ∧ position>0`` 为唯一候选集合。
+
+    返回 ``(pool, verdict_map, has_review_decision)``。**有效决策的空池不回落
+    legacy**：``has_review_decision=True`` 时调用方必须尊重空池（第二套算法
+    重新给推荐会破坏唯一权威）。只有快照缺 ``review_candidates``（损坏/disabled）
+    才标 ``review_missing``，同样不回落。
+    """
+
+    raw = snap.get("candidates")
+    raw = [c for c in raw if isinstance(c, dict) and c.get("code")] \
+        if isinstance(raw, list) else []
+    review_candidates = snap.get("review_candidates")
+    if not isinstance(review_candidates, list):
+        ctx["pool_source"] = "prep"
+        ctx["fallback_reason"] = "review_missing"
+        return [], {}, True
+
+    views = project_candidates(review_candidates, raw, day)
+    views = [view for view in views if isinstance(view, dict) and view.get("code")]
+    verdict_map = {view["code"]: view for view in views}
+    pool = [view for view in views if is_review_eligible(view)]
+    ctx["pool_source"] = "prep"
+    ctx["recommended_count"] = len(pool)
+    ctx["filtered_ignore"] = sum(
+        1 for item in review_candidates
+        if isinstance(item, dict) and item.get("position_pct") == 0)
+    ctx["ignore_reasons"] = [
+        view.get("ignore_reason") for view in views
+        if not is_review_eligible(view) and view.get("ignore_reason")
+    ]
+    if pool:
+        ctx["fallback_reason"] = None
+    elif any(isinstance(item, dict) and item.get("eligibility") == "eligible"
+             for item in review_candidates):
+        ctx["fallback_reason"] = "all_ignored"
+    else:
+        ctx["fallback_reason"] = "no_eligible"
+    return pool, verdict_map, True
 
 
 class DataCoverageError(ValueError):
@@ -158,6 +215,8 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
         "recommended_count": 0,
         "ignore_reasons": [],
         "prep_degraded": False,
+        # 0.8 有效决策标记：下游（auction）据此禁止空池回落 legacy。
+        "review_decision": False,
         "degraded": [],
         # 因子决策接入（只增键；关闭时保持 off/None/[]）
         "factor_mode": "off",
@@ -174,6 +233,7 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
 
     verdict_map: dict[str, dict] = {}
     pool: Optional[list[dict]] = None
+    review_decision = False
     if isinstance(snap, dict):
         # 只要快照存在就记录降级状态（含 empty_snapshot 窄路径）。
         # macro_same_day_missing 只影响复盘展示（外围期指休市/源延迟），重跑 prep 也修不好，
@@ -185,7 +245,13 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
             degraded = [d for d in raw_degraded if d != "macro_same_day_missing"]
             ctx["prep_degraded"] = bool(
                 degraded or sentiment.get("factor_errors"))
-    if isinstance(snap, dict) and isinstance(snap.get("candidates"), list) and snap["candidates"]:
+    version = _snapshot_version(snap.get("version")) if isinstance(snap, dict) else None
+    if version is not None and version >= _REVIEW_SNAPSHOT_VERSION:
+        # 0.8：新六维 review 是唯一权威；候选集合 = eligible ∧ position>0。
+        pool, verdict_map, review_decision = _review_decision_branch(
+            snap, day, ctx, snapshot_date)
+        ctx["review_decision"] = review_decision
+    elif isinstance(snap, dict) and isinstance(snap.get("candidates"), list) and snap["candidates"]:
         raw = [c for c in snap["candidates"] if isinstance(c, dict) and c.get("code")]
         verdict_map = {c["code"]: c for c in raw}
         # 诊断字段先于 eligible 判定计算：no_eligible 的空池输出也要有原因样本。
@@ -215,7 +281,7 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
     elif source == "v2":
         ctx["fallback_reason"] = _FALLBACK_REASONS.get(reason or "missing", "no_snapshot")
 
-    if pool is None:
+    if pool is None and not review_decision:
         pool = _legacy_candidates(calendar, day, cfg, loader)
         ctx["pool_source"] = "legacy"
         for cand in pool:
@@ -224,6 +290,10 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
             state = prep_state(snap_cand) if snap_cand is not None else None
             _annotate(cand, _prep_block(snap_cand, snapshot_date, state),
                       _auction_block(None, day))
+    elif pool is None:
+        # 0.8 有效决策的空池：保留空池，不回落 legacy（唯一权威）。
+        pool = []
+        ctx["pool_source"] = "prep"
     else:
         ctx["pool_source"] = "prep"
         for cand in pool:

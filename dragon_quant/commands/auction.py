@@ -48,7 +48,7 @@ def _render_report(outcome):
     else:
         kwargs = {
             "trade_date": payload["trade_date"],
-            "mode": "collect",
+            "mode": outcome.mode,
             "pool_source": payload["pool_source"],
             "candidate_count": payload["candidate_codes"],
             "fallback_reason": payload["fallback_reason"],
@@ -113,5 +113,6 @@ def handle(args, services):
             days=getattr(args, "days", None),
             services=services,
             today=today,
+            force=getattr(args, "force", False),
         )
     _emit(outcome, as_json)

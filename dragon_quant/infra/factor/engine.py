@@ -507,21 +507,30 @@ def _elapsed_ms(started: float) -> float:
 
 
 def _absence_expected(meta: dict, codes: int) -> bool:
-    """空结果是否可由 counters 完全解释（R26）：全部未校准 / 全部预期缺席。"""
+    """空结果是否可由 counters 完全解释（R26）：全部未校准 / 预期缺席 / v1 行。"""
     meta = meta or {}
     if meta.get("expected_empty") is True:
         return True
     counters = meta.get("counters") or {}
     unverified = counters.get("unverified_rows")
-    return (isinstance(unverified, int) and not isinstance(unverified, bool)
-            and codes > 0 and unverified == codes)
+    if (isinstance(unverified, int) and not isinstance(unverified, bool)
+            and codes > 0 and unverified == codes):
+        return True
+    for key in ("schema_v1_rows", "unavailable_rows"):
+        value = counters.get(key)
+        if (isinstance(value, int) and not isinstance(value, bool)
+                and codes > 0 and value == codes):
+            return True
+    return False
 
 
 def _absence_warning(meta: dict, codes: int) -> str:
     counters = (meta or {}).get("counters") or {}
-    unverified = counters.get("unverified_rows")
-    if isinstance(unverified, int) and not isinstance(unverified, bool) and unverified == codes:
-        return f"unverified_rows={unverified}"
+    for key in ("unverified_rows", "schema_v1_rows", "unavailable_rows"):
+        value = counters.get(key)
+        if (isinstance(value, int) and not isinstance(value, bool)
+                and value == codes):
+            return f"{key}={value}"
     return "expected_empty（缺失可由 counters 解释）"
 
 

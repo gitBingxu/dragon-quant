@@ -12,6 +12,31 @@
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-30
+
+> 草稿：覆盖 `v0.7.2`（`e22d783`）至 `95e4580`，包含 MR #31～#33 与 `feat/auction-op` 后续提交；合入 main 并完成版本提交后补记版本依据。
+
+### Added
+- **review 双口径回测与面板筛选**：保留宽松最低价口径，新增严格开盘价口径及 `dragon_review_strict` 侧表，支持 `review --recompute-all` 历史双口径回填；回测面板同时展示双胜率，收益、回撤、状态筛选、排序、表格与指标卡片可统一切换严格/宽松口径，且卡片与筛选后的列表保持同源。
+- **prep 六维决策与次日策略**：快照升级至 `version=0.8`，新增 `review_candidates` 六维评分、闸门、仓位与 `strategy_context` 明日操盘契约；支持 T+1 计划反馈、盘中冻结刻度对照和结果归因。`review_candidates` 成为唯一权威，`candidates[]` 仅保留同结果兼容投影。
+- **auction 强度分析 v2 与盘中预案**：围绕 09:20–09:25 重建五维评分，分离强度、风险事件、数据质量与模型验证状态；新增 `auction_sc_v1` 条件化观察动作、17 个竞价因子及完整证据/配置血缘，缺失数据不再以 0 或中性分冒充有效结果。
+- **决策结果回测**：新增只读 `factor decision-review --source prep|auction`，按决策分组统计 1/3/5 日扣费净收益、方向命中、覆盖率与分位指标，保留逐样本账本、版本过滤、剔除原因和小样本质量提示，不要求预先执行 `factor build`。
+- **派生数据安全清理**：新增 `assets purge-derived`，默认 dry-run，`--apply --yes` 后在单事务内清理 prep 快照及相关派生因子/模型快照；支持按日期升序重放 prep、重建因子并复核决策结果。
+
+### Changed
+- **auction 重复执行改为快照优先**：当日已有可用快照时直接返回只读结果，零采集、零评分、零业务写入；`--force` 用于强制重采，`--recompute` 用于离线重算，两者互斥，损坏快照按行隔离并支持回退。
+- **prep 下游候选语义统一**：`auction` / `buy` / `review-account` 直接消费 `eligible ∧ position_pct > 0` 的复盘候选；有效决策空池不再回落旧算法，旧 `prep_composite` / `prep_verdict` 因子退役。
+- **项目结构按业务与基建边界重组**：收敛 `scan` / `review` / `review_account` / `vpa` 功能入口，provider、storage、factor、assets 统一迁入 `infra`，CLI 经 `commands` 分发；Python 测试迁入包内，建立覆盖 53 个 parser 节点、15 个顶层命令的全量离线 E2E 与真实数据隔离门禁。
+- **README 面向人类读者精简**：突出多维量化龙头识别定位、稳定性、scan/review 截图与快速使用；完整命令参数改由 CLI `-h` 和模块文档承担。
+
+### Fixed
+- 修正 auction 正式开盘价、虚拟匹配量、未匹配方向与换手单位口径，避免错误行情语义进入评分。
+- review 取消默认 20 个交易日回测上限，并修复默认 Web UI 端口占用时的启动回退。
+- 清理现有检查范围内的类型错误，补齐架构、文档与离线行为回归门禁。
+
+### Docs
+- `AGENTS.md` 拆分为根约束与按需加载的模块文档，统一父级工作流来源；归档本轮架构、prep、auction、review 与决策回测方案。
+
 ## [0.7.2] - 2026-10-24
 
 > 草稿：覆盖 `feat/skills` 分支的 `d71abcb` 与 `96dadc8`；合入 main 后补记 MR 编号。

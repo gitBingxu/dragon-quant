@@ -11,6 +11,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-29 | prep / auction 决策结果回测（factor decision-review：分组 × 1/3/5 日净收益） | [2026-10-29-decision-outcome-review-technical-design.md](factor_framework/2026-10-29-decision-outcome-review-technical-design.md) | `docs/solutions/2026-10-29-decision-outcome-review-technical-design.md` |
+| 2026-10-29 | prep / auction 决策回测调研（快照分组 / 可成交标签 / 覆盖与剔除偏差） | [2026-10-29-decision-outcome-review-research.md](factor_framework/2026-10-29-decision-outcome-review-research.md) | `docs/solutions/2026-10-29-decision-outcome-review-research.md` |
 | 2026-10-22 | 量化因子框架技术方案（issue #28，P0-P2 全部落地；含财务 tmdx delta） | [2026-10-22-factor-framework-design.md](factor_framework/2026-10-22-factor-framework-design.md) | `docs/solutions/2026-10-22-factor-framework-design.md` |
 | 2026-10-22 | 量化因子框架调研（开源候选否决 + 业界规范；结论：混合自研零新增依赖） | [2026-10-22-factor-framework-survey.md](factor_framework/2026-10-22-factor-framework-survey.md) | `docs/research/2026-10-22-factor-framework-survey.md` |
 
@@ -29,6 +31,9 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-29 | auction 快照优先与 --force 强制重跑（缓存短路 / 只读投影 / 损坏回退） | [2026-10-29-auction-snapshot-short-circuit-design.md](auction/2026-10-29-auction-snapshot-short-circuit-design.md) | `docs/solutions/2026-10-29-auction-snapshot-short-circuit-design.md` |
+| 2026-10-29 | auction 证据化重建技术方案（五维评分 / 四轴 / strategy_context / 8+9 因子） | [2026-10-29-auction-strength-technical-design.md](auction/2026-10-29-auction-strength-technical-design.md) | `docs/solutions/2026-10-29-auction-strength-technical-design.md` |
+| 2026-10-29 | auction 字段语义与六篇参考资料调研（真实资产证据 / 因子映射） | [2026-10-29-auction-strength-research.md](auction/2026-10-29-auction-strength-research.md) | `docs/solutions/2026-10-29-auction-strength-research.md` |
 | 2026-10-21 | auction 候选池改 prep 推荐 + 买入 P/A 三值优先级与否决 | [2026-10-21-auction-prep-buy-priority-design.md](auction/2026-10-21-auction-prep-buy-priority-design.md) | `docs/solutions/2026-10-21-auction-prep-buy-priority-design.md` |
 | 2026-10-20 | 集合竞价强度快照接线（`quote_json` / `auction_snapshots` / `--recompute`） | [2026-10-20-auction-snapshot-wiring-design.md](auction/2026-10-20-auction-snapshot-wiring-design.md) | `docs/solutions/2026-10-20-auction-snapshot-wiring-design.md` |
 | 2026-10-14 | 集合竞价强度分析技术方案 | [集合竞价强度分析_技术方案.md](auction/集合竞价强度分析_技术方案.md) | — |
@@ -51,6 +56,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-30 | prep 新旧算法统一与派生清理（六维唯一决策 / prev / purge-derived） | [2026-10-30-prep-unified-review-technical-design.md](prep/2026-10-30-prep-unified-review-technical-design.md) | `docs/solutions/2026-10-30-prep-unified-review-technical-design.md` |
+| 2026-10-30 | prep 算法统一调研（双头推荐 / 兼容投影 / 精确清理边界） | [2026-10-30-prep-unified-review-research.md](prep/2026-10-30-prep-unified-review-research.md) | `docs/solutions/2026-10-30-prep-unified-review-research.md` |
 | 2026-10-21 | prep 宏观改日经225期指 + 富时A50期指（同日口径，16:40 门禁） | [2026-10-21-prep-macro-jp-a50-design.md](prep/2026-10-21-prep-macro-jp-a50-design.md) | `docs/solutions/2026-10-21-prep-macro-jp-a50-design.md` |
 | 2026-10-21 | prep 重复运行增量语义（健康零采集 / 补采 diff / report 逐条合并） | [2026-10-21-prep-incremental-rerun-design.md](prep/2026-10-21-prep-incremental-rerun-design.md) | `docs/solutions/2026-10-21-prep-incremental-rerun-design.md` |
 | 2026-10-20 | prep 宏观扰动采集 + 近三日龙头逐只参与判定 | [2026-10-20-prep-macro-candidate-verdict-design.md](prep/2026-10-20-prep-macro-candidate-verdict-design.md) | `docs/solutions/2026-10-20-prep-macro-candidate-verdict-design.md` |
@@ -75,6 +82,12 @@
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
 | 2026-09-12 | 五维评分器 Refactor | [评分器Refactor.md](score/评分器Refactor.md) | `dragon_quant/scorers/评分器Refactor.md` |
+
+## review/
+
+| 日期 | 主题 | 文件 | 原路径 |
+|------|------|------|--------|
+| 2026-10-30 | review 双口径筛选与展示（严格 / 宽松查询上下文 + Web UI 联动） | [2026-10-30-review-dual-caliber-filter-design.md](review/2026-10-30-review-dual-caliber-filter-design.md) | `docs/solutions/2026-10-30-review-dual-caliber-filter-design.md` |
 
 ## review_account/
 

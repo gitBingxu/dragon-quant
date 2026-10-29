@@ -184,7 +184,7 @@ def rank_boards(
         if members is None or not members:
             reasons.append("board_members_missing")
         if scored["score"] is None:
-            reasons.append("mainline_score_unavailable")
+            reasons.append("mainline_score_missing")
 
         ranked.append(
             {

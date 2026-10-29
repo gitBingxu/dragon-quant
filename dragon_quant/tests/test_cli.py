@@ -424,7 +424,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
             from dragon_quant.infra.assets import dragons_mirror
             stack.enter_context(
                 patch.object(dragons_mirror, "list_dragon_trade_dates",
-                             return_value=["2026-10-20"]))
+                             return_value=["2026-10-19"]))
             stack.enter_context(patch.object(dragons_mirror, "get_dragons",
                                              return_value=dragons))
             stack.enter_context(patch.object(dragons_mirror, "stale_dates",
@@ -439,7 +439,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
                 patch("dragon_quant.infra.provider.data.batch_get_quotes", **batch_kwargs))
             if evaluate_side_effect is not None:
                 stack.enter_context(
-                    patch("dragon_quant.review_account.auction.evaluate",
+                    patch("dragon_quant.review_account.auction.scoring.evaluate",
                           side_effect=evaluate_side_effect))
             if quote_serialize_side_effect is not None:
                 stack.enter_context(
@@ -458,6 +458,8 @@ class TestCmdAuctionStorage(unittest.TestCase):
             replace = stack.enter_context(
                 patch.object(assets_db, "replace_auction_snapshots",
                              side_effect=replace_side_effect))
+            stack.enter_context(
+                patch.object(assets_db, "list_auction_history", return_value={}))
             stack.enter_context(redirect_stdout(buf))
             stack.enter_context(redirect_stderr(err))
             try:
@@ -483,9 +485,12 @@ class TestCmdAuctionStorage(unittest.TestCase):
         payload = payloads["600172"]
         self.assertEqual(set(payload), {
             "version", "code", "is_weak", "strength", "direction", "level",
-            "dims", "reject_reason", "unverified", "rank",
+            "dims", "reject_reason", "unverified", "rank", "rank_reason",
+            "pre_veto_strength", "validation_status", "config_version",
+            "config_hash", "semantics", "data_quality", "risk_events",
+            "raw_factors", "evidence", "reference_prices", "windows", "actions",
         })
-        self.assertEqual(payload["version"], "1")
+        self.assertEqual(payload["version"], "2")
         self.assertIsNone(payload["rank"])
         self.assertTrue(payload["unverified"])
 
@@ -528,7 +533,7 @@ class TestCmdAuctionStorage(unittest.TestCase):
             "candidate_codes", "saved_count", "saved", "empty", "failed",
             "quote", "quote_missing", "asset_read_error", "scored_count",
             "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
-            "snapshot_error", "snapshots",
+            "snapshot_error", "snapshots", "strategy_context",
         ])
 
     def test_human_names_from_previously_persisted_assets(self):
@@ -753,6 +758,7 @@ class TestCmdAuctionRecompute(unittest.TestCase):
         list_kwargs = ({"side_effect": list_side_effect}
                        if list_side_effect is not None else {"return_value": assets})
         with patch.object(assets_db, "list_auction_assets", **list_kwargs), \
+             patch.object(assets_db, "list_auction_history", return_value={}), \
              patch.object(assets_db, "replace_auction_snapshots",
                           side_effect=replace_side_effect) as replace, \
              patch("dragon_quant.commands.auction._resolve_trade_date", return_value=today), \
@@ -787,7 +793,7 @@ class TestCmdAuctionRecompute(unittest.TestCase):
             "ok", "mode", "trade_date", "source", "asset_count",
             "usable_count", "skipped_empty", "quote_missing", "scored_count",
             "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
-            "snapshot_error", "failed", "snapshots",
+            "snapshot_error", "failed", "snapshots", "strategy_context",
         ])
 
     def test_invalid_date_human_error(self):
@@ -882,7 +888,10 @@ class TestCmdAuctionRecompute(unittest.TestCase):
         self.assertIsNone(code)
         self.assertEqual(out["quote_missing"], ["600001"])
         replace.assert_called_once()
-        self.assertTrue(out["snapshots"][0]["is_weak"])
+        snapshot = out["snapshots"][0]
+        self.assertFalse(snapshot["is_weak"])          # 数据不足不是看空
+        self.assertIsNone(snapshot["strength"])
+        self.assertEqual(snapshot["data_quality_status"], "unavailable")
 
     def test_corrupt_quote_error_isolated(self):
         corrupt = self._asset("600001", quote=None)

@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from dragon_quant.infra import clock
 from dragon_quant.infra.assets.dragons_mirror import BACKFILL_HINT, DragonsMirrorStale
 
-from .compute import SHANGHAI, _list_of_dicts
+from .compute import SHANGHAI, _PLAN_FEEDBACK_KEYS, _PLAN_POSITION_KEYS, _list_of_dicts
 from .rebuild import (
     MIRROR_RETRY_DELAY, WINDOW_TRADING_DAYS, _is_mirror_stale_day,
     build_dragons_payload, legacy,
@@ -634,14 +634,6 @@ def _stock_daily_suspicious(payload: dict) -> Optional[str]:
 
 
 # ─── M5：T-1 计划 / T+1 竞价反馈 / 盘中刻度 ─────────────────────────────────
-
-_PLAN_POSITION_KEYS = (
-    "code", "name", "role", "review_score", "review_grade", "position_pct",
-    "eligibility", "reason_code", "mainline", "confidence",
-)
-_PLAN_FEEDBACK_KEYS = ("code", "role", "position_pct", "expected",
-                       "allowed_actions", "unknown_reason")
-
 
 def _previous_trade_date(ctx: PrepContext) -> Optional[str]:
     """窗口内 ``< trade_date`` 的最近交易日（T-1）；无日历 → None。"""

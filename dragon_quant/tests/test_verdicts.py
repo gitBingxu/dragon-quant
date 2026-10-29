@@ -1,4 +1,11 @@
-"""逐只参与判定与 CLI 清单单测：规则分支 / 优先级 / 降级 / 排序 / 未评级。"""
+"""旧评级常量、公告风险共享工具与 CLI 清单展示单测。
+
+旧五维推荐规则链已退役（2026-10-30），本文件不再测试已删除的
+``evaluate_one`` / ``evaluate_candidates``；保留：
+* ``find_risk_announcement`` 的公告风险语义（新六维 G1 与旧资产共用）；
+* 0.7/legacy 候选池读取分支（历史快照必须可复现）；
+* CLI 清单的排序与展示。
+"""
 
 import unittest
 from unittest.mock import MagicMock
@@ -8,129 +15,13 @@ from dragon_quant.review_account.advice import (
 )
 from dragon_quant.review_account.verdicts import (
     VERDICT_IGNORE, VERDICT_LIGHT, VERDICT_STRONG, VERDICT_UNRATED,
-    build_facts, evaluate_candidates, evaluate_one, find_risk_announcement,
+    find_risk_announcement,
 )
 
 T = "2026-10-19"
 
 
-def _facts(**overrides):
-    base = {
-        "code": "600001", "name": "样本", "trade_date": T,
-        "composite_score": 82.0, "rank": 1, "concepts": ["低空经济"],
-        "reason_type": None,
-        "pool_available": True, "in_pool_today": True,
-        "t_pct": 9.99, "t_turnover": 10.0, "t_amount": 2.0e9,
-        "main_net": 1.2e8, "flow_available": True,
-        "announcements_available": True, "announcement_count": 0,
-        "open_num": 0, "high_days": "3天3板", "limit_up_type": "换手板",
-        "first_limit_up_time": "09:32:00", "limit_up_suc_rate": 1.0,
-        "board_height": 3, "flow_ratio": 0.06, "risk_announcement": None,
-        "mainline_hit": True, "mainline_name": "低空经济", "mainline_rank": 1,
-    }
-    base.update(overrides)
-    return base
-
-
-class TestVerdictBranches(unittest.TestCase):
-    def test_strong(self):
-        self.assertEqual(evaluate_one(_facts())["verdict"], VERDICT_STRONG)
-
-    def test_non_mainline_is_light(self):
-        out = evaluate_one(_facts(mainline_hit=False))
-        self.assertEqual(out["verdict"], VERDICT_LIGHT)
-        self.assertIn("非今日主线", " ".join(out["dimensions"]))
-
-    def test_missing_flow_or_announcement_downgrades(self):
-        self.assertEqual(
-            evaluate_one(_facts(flow_available=False))["verdict"], VERDICT_LIGHT)
-        self.assertEqual(
-            evaluate_one(_facts(announcements_available=False))["verdict"],
-            VERDICT_LIGHT)
-
-    def test_open_num_2_downgrades(self):
-        self.assertEqual(evaluate_one(_facts(open_num=2))["verdict"], VERDICT_LIGHT)
-
-    def test_suc_rate_below_half_does_not_block_strong(self):
-        # 方案 §5.5 未设封板成功率门槛；回归防止后续误加
-        self.assertEqual(evaluate_one(_facts(limit_up_suc_rate=0.4))["verdict"],
-                         VERDICT_STRONG)
-
-    def test_soft_announcement_downgrades_not_ignores(self):
-        facts = _facts(risk_announcement={"level": "soft", "title": "股东减持"})
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_LIGHT)
-        self.assertIn("股东减持", " ".join(out["dimensions"]))
-
-    def test_limit_up_with_outflow_is_light_not_ignore(self):
-        facts = _facts(main_net=-1e8, flow_ratio=-0.08)
-        self.assertEqual(evaluate_one(facts)["verdict"], VERDICT_LIGHT)
-
-    def test_hard_announcement_ignores(self):
-        facts = _facts(risk_announcement={"level": "hard", "title": "立案调查"})
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("立案调查", out["ignore_reason"])
-        self.assertEqual(out["dimensions"], [])
-
-    def test_high_board_broken_ignores(self):
-        facts = _facts(high_days="4天4板", board_height=4, open_num=3)
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("炸板 3 次", out["ignore_reason"])
-
-    def test_non_limit_up_outflow_below_3pct_ignores(self):
-        facts = _facts(in_pool_today=False, t_pct=1.2, main_net=-1e8,
-                       flow_ratio=-0.08, mainline_hit=None)
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("资金离场", out["ignore_reason"])
-
-    def test_non_limit_up_outflow_above_3pct_has_explicit_reason(self):
-        facts = _facts(in_pool_today=False, t_pct=4.0, main_net=-1e8,
-                       flow_ratio=-0.08, mainline_hit=None)
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("主力净流出", out["ignore_reason"])
-
-    def test_dropped_pool_ignores(self):
-        facts = _facts(in_pool_today=False, t_pct=2.0, main_net=1e7,
-                       flow_ratio=0.01, mainline_hit=None)
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("已退出涨停梯队", out["ignore_reason"])
-
-    def test_low_score_ignores(self):
-        facts = _facts(composite_score=40.0)
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("低于参与阈值", out["ignore_reason"])
-
-    def test_data_insufficient_ignores(self):
-        facts = _facts(pool_available=False, in_pool_today=False, t_pct=None,
-                       main_net=None, flow_available=False, mainline_hit=None)
-        out = evaluate_one(facts)
-        self.assertEqual(out["verdict"], VERDICT_IGNORE)
-        self.assertIn("均缺失", out["ignore_reason"])
-
-    def test_non_limit_up_cross_day_positive_is_light(self):
-        facts = _facts(in_pool_today=False, t_pct=4.2, main_net=1e7,
-                       flow_ratio=0.01, mainline_hit=None)
-        self.assertEqual(evaluate_one(facts)["verdict"], VERDICT_LIGHT)
-
-
-class TestFactsAndAnnouncements(unittest.TestCase):
-    def test_build_facts_uses_today_reason_type_for_mainline(self):
-        cand = {
-            "code": "A", "name": "A", "composite_score": 80, "rank": 1,
-            "trade_date": "2026-10-17", "concepts": [], "reason_type": None,
-            "facts": {"reason_type_today": "低空经济", "in_pool_today": True,
-                      "pool_available": True, "t_pct": 9.99},
-        }
-        facts = build_facts(cand, [{"board_name": "低空经济"}], T)
-        self.assertTrue(facts["mainline_hit"])
-        self.assertEqual(facts["reason_type"], "低空经济")
-
+class TestAnnouncementRisk(unittest.TestCase):
     def test_announcement_hard_soft_negation(self):
         hard = [{"title": "关于收到立案告知书的公告", "date": T}]
         soft = [{"title": "关于股东减持计划的公告", "date": T}]
@@ -167,29 +58,6 @@ class TestFactsAndAnnouncements(unittest.TestCase):
             self.assertEqual(
                 find_risk_announcement([{"title": title, "date": T}], T, True)["level"],
                 "hard")
-
-
-class TestEvaluateCandidatesIsolation(unittest.TestCase):
-    def test_single_candidate_exception_is_unrated_and_kept(self):
-        from unittest.mock import patch
-        candidates = [
-            {"code": "A", "name": "正常", "composite_score": 80,
-             "facts": _facts()},
-            {"code": "B", "name": "异常", "composite_score": 60},
-        ]
-        with patch("dragon_quant.review_account.verdicts.build_facts",
-                   side_effect=[_facts(), RuntimeError("boom")]):
-            out = evaluate_candidates(candidates, [], T)
-        self.assertEqual(len(out), 2)
-        self.assertEqual(out[0]["verdict"], VERDICT_STRONG)
-        self.assertEqual(out[1]["verdict"], VERDICT_UNRATED)
-        self.assertEqual(out[1]["ignore_reason"], "评级字段异常")
-
-    def test_candidate_without_facts_does_not_crash(self):
-        out = evaluate_candidates([{"code": "A", "name": "A"}], [], T)
-        self.assertEqual(len(out), 1)
-        self.assertIn(out[0]["verdict"],
-                      (VERDICT_IGNORE, VERDICT_UNRATED))
 
 
 class TestSnapshotConsumption(unittest.TestCase):

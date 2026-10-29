@@ -9,62 +9,74 @@ import {
   Text,
 } from "@mantine/core";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
-import type { Dragon } from "../api";
+import type { Dragon, ReviewCaliber } from "../api";
+import { caliberField, type CaliberField } from "../caliber";
 import { fmtNum, fmtPct, pnlColor, statusMeta } from "../utils";
 
 interface SortState {
-  by: keyof Dragon;
+  by: string;
   dir: "asc" | "desc";
 }
 
 interface Col {
-  key: keyof Dragon;
+  /** 逻辑键：表头排序与列身份（口径字段见 field）。 */
+  key: string;
   label: string;
   sortable?: boolean;
+  /** 口径字段：渲染时经 caliberField 映射到物理列。 */
+  field?: CaliberField;
 }
 
 const COLUMNS: Col[] = [
   { key: "code", label: "代码", sortable: true },
   { key: "name", label: "名称", sortable: true },
   { key: "trade_date", label: "入选日", sortable: true },
-  { key: "strict_buy_date", label: "买入日", sortable: true },
+  { key: "buy_date", label: "买入日", sortable: true, field: "buy_date" },
   { key: "rank", label: "排名", sortable: true },
   { key: "composite_score", label: "综合分", sortable: true },
   { key: "is_true_dragon", label: "真龙" },
   { key: "board_count", label: "连板", sortable: true },
   { key: "concepts", label: "概念" },
-  { key: "strict_buy_price", label: "买入价", sortable: true },
-  { key: "strict_max_return_5d", label: "最大收益%", sortable: true },
-  { key: "strict_max_drawdown_5d", label: "最大回撤%", sortable: true },
-  { key: "strict_max_return_hold_days", label: "持有天", sortable: true },
-  { key: "strict_review_status", label: "状态", sortable: true },
+  { key: "buy_price", label: "买入价", sortable: true, field: "buy_price" },
+  {
+    key: "max_return_5d",
+    label: "最大收益%",
+    sortable: true,
+    field: "max_return_5d",
+  },
+  {
+    key: "max_drawdown_5d",
+    label: "最大回撤%",
+    sortable: true,
+    field: "max_drawdown_5d",
+  },
+  {
+    key: "max_return_hold_days",
+    label: "持有天",
+    sortable: true,
+    field: "max_return_hold_days",
+  },
+  { key: "status", label: "状态", sortable: true, field: "status" },
 ];
 
 const PAGE_SIZES = ["10", "25", "50", "100"];
 
-/** v2 展示严格口径；v1 没有严格结果，回落旧字段。 */
+/** 状态列直接展示服务端按口径给出的 derived_status；旧响应缺失时兜底。 */
 function displayStatus(r: Dragon): string | null {
-  // 服务端已给出统一派生状态，优先使用；缺失时保留旧前端推导作为兜底。
   if (r.derived_status != null) return r.derived_status;
-  if (r.source === "v1") return r.review_status;
-  if (r.strict_review_status) return r.strict_review_status;
-  if (r.review_status === "pending") return "pending";
-  if (r.review_status === "error") return "error";
-  return "pending_recompute";
-}
-
-function strictValue<T>(r: Dragon, strict: T | null, loose: T | null): T | null {
-  return r.source === "v1" ? loose : strict;
+  return r.review_status;
 }
 
 export function DragonTable({
   data,
+  caliber,
   sort,
   onSort,
 }: {
   data: Dragon[];
+  caliber: ReviewCaliber;
   sort: SortState;
-  onSort: (by: keyof Dragon) => void;
+  onSort: (by: string) => void;
 }) {
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
@@ -101,14 +113,17 @@ export function DragonTable({
 
   const renderRow = (r: Dragon) => {
     const st = statusMeta(displayStatus(r));
-    const buyDate = strictValue(r, r.strict_buy_date, r.buy_date);
-    const buyPrice = strictValue(r, r.strict_buy_price, r.buy_price);
-    const maxReturn = strictValue(
-      r, r.strict_max_return_5d, r.max_return_5d);
-    const maxDrawdown = strictValue(
-      r, r.strict_max_drawdown_5d, r.max_drawdown_5d);
-    const holdDays = strictValue(
-      r, r.strict_max_return_hold_days, r.max_return_hold_days);
+    const buyDate = r[caliberField(caliber, "buy_date")] as string | null;
+    const buyPrice = r[caliberField(caliber, "buy_price")] as number | null;
+    const maxReturn = r[
+      caliberField(caliber, "max_return_5d")
+    ] as number | null;
+    const maxDrawdown = r[
+      caliberField(caliber, "max_drawdown_5d")
+    ] as number | null;
+    const holdDays = r[
+      caliberField(caliber, "max_return_hold_days")
+    ] as number | null;
     return (
       <Table.Tr key={`${r.source}-${r.trade_date}-${r.code}`}>
         <Table.Td>{r.code}</Table.Td>

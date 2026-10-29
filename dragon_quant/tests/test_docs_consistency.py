@@ -19,14 +19,10 @@ Layout contract (``archived_md/agents/2026-10-27-agents-progressive-disclosure-d
 * the tests below were *moved* from "read AGENTS.md only" to "read the whole doc
   set", never weakened, plus new size / link / ownership gates.
 
-The parser surface is taken from the reviewed E2E snapshot
-(``dragon_quant/tests/e2e/coverage-map.json``, 53 nodes / 15 top-level commands).  Every node
-must be reachable from the README command reference.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from urllib.parse import unquote
@@ -35,7 +31,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS = REPO_ROOT / "AGENTS.md"
 README = REPO_ROOT / "README.md"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
-COVERAGE_MAP = REPO_ROOT / "dragon_quant" / "tests" / "e2e" / "coverage-map.json"
 
 DOCS_DIR = REPO_ROOT / "docs" / "agent"
 ARCHITECTURE = DOCS_DIR / "architecture.md"
@@ -203,14 +198,6 @@ def _local_markdown_links(path: Path) -> list[str]:
     return local
 
 
-def _parser_nodes() -> list[str]:
-    payload = json.loads(_read(COVERAGE_MAP))
-    snapshot = payload["parser_snapshot"]
-    assert snapshot["node_count"] == 53
-    assert snapshot["top_level_count"] == 15
-    return [node["command"] for node in snapshot["nodes"]]
-
-
 def test_documented_tree_paths_exist():
     # 测试树迁入 dragon_quant/tests 后，仓库根锚点必须仍指向项目根。
     assert (REPO_ROOT / "pyproject.toml").is_file()
@@ -255,8 +242,6 @@ def test_documented_snapshot_version_matches_production():
         "docs/agent/prep-auction.md (snapshot owner) must document version=" + version
     )
     readme = _read(README)
-    assert f"version={version}" in readme, f"README.md must document snapshot version={version}"
-
     stale = [str(path.relative_to(REPO_ROOT)) for path, text in
              [(AGENTS, _read(AGENTS)), *_agents_documents().items(), (README, readme)]
              if "version=0.5" in text]
@@ -264,10 +249,6 @@ def test_documented_snapshot_version_matches_production():
 
 
 def test_documented_fallback_window_is_five_days():
-    readme = _read(README)
-    assert "前 5 日真龙并集" in readme
-    assert "前 3 日真龙并集" not in readme
-    assert "candidate_lookback_days`（默认 5）" in readme
     trading = _read(DOCS_DIR / "trading.md")
     assert "之前 **5** 个真实交易日的**全部真龙**并集" in trading, (
         "docs/agent/trading.md (candidate-pool owner) must keep the five-day fallback sentence"
@@ -324,22 +305,6 @@ def test_task13_canonical_entrypoints_are_documented():
         "dragon_quant/review_account/live_trade/shadow.py",
         "dragon_quant/review_account/live_trade/storage.py",
     ])
-
-
-def test_every_parser_node_has_a_readme_command():
-    readme = _read(README)
-    missing: list[str] = []
-    for node in _parser_nodes():
-        parts = node.split()
-        top = re.escape(parts[0])
-        if len(parts) == 1:
-            pattern = rf"dragon-quant\s+{top}\b"
-        else:
-            leaf = re.escape(parts[-1])
-            pattern = rf"dragon-quant\s+{top}\b[^\n]*\b{leaf}\b"
-        if not re.search(pattern, readme):
-            missing.append(node)
-    assert not missing, "README command reference is missing parser nodes: " + ", ".join(missing)
 
 
 def test_current_navigation_has_no_removed_modules():
@@ -415,24 +380,11 @@ def test_new_architecture_packages_are_documented():
 
 
 def test_no_argument_behavior_is_documented_truthfully():
-    for document in (AGENTS, README):
-        text = _read(document)
-        assert "不带子命令" in text, f"{document.name} must document the actual no-argument behavior"
-        assert "打印帮助" in text, f"{document.name} must say that no arguments prints help"
-        # The old "no args == scan" claim is not what the parser does.
-        assert "无参数默认 scan" not in text
-
-
-def test_scan_date_and_extended_commands_are_documented():
-    readme = _read(README)
-    for snippet in (
-        "dragon-quant scan --date",
-        "dragon-quant data cookie-fetch",
-        "dragon-quant data cookie-set",
-        "dragon-quant logs list",
-        "dragon-quant storage clear --cache",
-    ):
-        assert snippet in readme, f"README must document {snippet}"
+    text = _read(AGENTS)
+    assert "不带子命令" in text, "AGENTS.md must document the actual no-argument behavior"
+    assert "打印帮助" in text, "AGENTS.md must say that no arguments prints help"
+    # The old "no args == scan" claim is not what the parser does.
+    assert "无参数默认 scan" not in text
 
 
 # --------------------------------------------------------------------------- #

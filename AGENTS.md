@@ -1,7 +1,7 @@
 # AGENTS.md — dragon-quant
 
 > 龙头战法量化筛选系统 · AI Agent 操作手册
-> 根宪法：跨模块硬约束 + 完整工作流 + 模块文档索引。模块细节按索引**按需读取**（不预读全部）；人读命令大全见 [README](README.md)。
+> 根宪法：跨模块硬约束 + 完整工作流 + 模块文档索引。模块细节按索引**按需读取**（不预读全部）；人读概览与快速使用见 [README](README.md)。
 
 ---
 
@@ -27,7 +27,7 @@ python -m dragon_quant scan --date 20260519 --top 5   # 只读历史扫描记录
 python -m dragon_quant prep               # 盘后复盘
 ```
 
-完整命令手册（15 个顶层命令与全部参数/示例）只维护在 [README](README.md)，本文不重复第二份。
+[README](README.md) 只保留项目定位、核心链路与 `scan` / `review` 快速使用；完整命令与参数以各命令 `-h` 为准，本文不重复第二份。
 
 **前置条件（一句版）**：板块数据走同花顺**无需 Cookie**；个股依赖雪球 Cookie；数据目录可用 `DQ_DATA_DIR` 覆盖。Cookie 路径与设置方式、数据源与反爬最小提示见 [scan](docs/agent/scan.md)。
 

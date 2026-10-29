@@ -18,9 +18,9 @@
 ## 目录
 
 - [稳定性说明](#稳定性说明)
+- [快速使用](#快速使用)
 - [龙头扫描](#龙头扫描)
 - [龙头回测](#龙头回测)
-- [快速使用](#快速使用)
 - [设计哲学](#设计哲学)
 - [目录结构](#目录结构)
 - [免责声明](#免责声明)
@@ -40,30 +40,6 @@
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
 | `agent-skill` 盘前预案复盘回测等 skills | 快速迭代中 | 2026 年 12 月中 |
 
-## 龙头扫描
-
-在**当日收盘后**运行，扫描涨停候选股，通过多维量化评分识别市场龙头：
-
-```bash
-dragon-quant scan --top 5
-```
-
-![龙头扫描示例](assets/scan.png)
-
-## 龙头回测
-
-这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计后续最多 5 个交易日的最大收益与回撤。
-
-```bash
-# 回测已到观察期的扫描结果
-dragon-quant review
-
-# 打开龙头回测面板
-dragon-quant review --ui-only
-```
-
-![龙头回测面板](assets/review.png)
-
 ## 快速使用
 
 要求 **Python ≥ 3.10**，推荐使用 `pipx` 安装：
@@ -79,6 +55,30 @@ dragon-quant review --ui
 ```
 
 只需查看已有回测结果时，运行 `dragon-quant review --ui-only`。
+
+## 龙头扫描
+
+在**当日收盘后**运行，扫描涨停候选股，通过多维量化评分识别市场龙头：
+
+```bash
+dragon-quant scan --top 5
+```
+
+![龙头扫描示例](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/scan.png)
+
+## 龙头回测
+
+这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计后续最多 5 个交易日的最大收益与回撤。
+
+```bash
+# 回测已到观察期的扫描结果
+dragon-quant review
+
+# 打开龙头回测面板
+dragon-quant review --ui-only
+```
+
+![龙头回测面板](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/review.png)
 
 ## 设计哲学
 

@@ -1,4 +1,7 @@
-"""prep 系 7 个因子（盘后复盘快照只读迁移，方案 §15.1.1）。
+"""prep 系 5 个事实因子（盘后复盘快照只读迁移，方案 §15.1.1）。
+
+2026-10-30 旧五维推荐链退役：``prep_verdict`` / ``prep_composite`` 已删除
+（唯一权威是 ``prep_review_*`` 六维因子），本模块只保留 T 日事实因子。
 
 数据源：``assets.db / prep_snapshots.result_json``（engine 的 ``_load_prep_source``
 适配为纯 dict）。本模块不发请求、不读库、不 import ``review_account``。
@@ -28,8 +31,6 @@ from dragon_quant.infra.factor.types import (
 SOURCE = "prep"
 IMPL_PREFIX = "builtin.prep"
 
-_VERDICT_MAPPING = {"strong": 3.0, "light": 2.0, "ignore": 0.0}
-_UNRATED_POLICY = "skip"
 _HIGH_DAYS_RE = re.compile(r"(\d+)天(\d+)板")
 
 
@@ -84,52 +85,6 @@ def _frame(ctx: FactorContext, values: dict[str, float], counters: dict,
         source=SOURCE,
         meta=meta,
     )
-
-
-# ─── 聚合档位 ──────────────────────────────────────────────────────────────
-
-
-def compute_verdict(ctx: FactorContext) -> FactorFrame:
-    mapping = ctx.params.get("mapping") or {}
-    policy = ctx.params.get("unrated_policy", "skip")
-    values: dict[str, float] = {}
-    counters = {"missing": 0, "unknown_enum": 0, "unrated": 0}
-    for candidate in _candidates(ctx):
-        code = candidate.get("code")
-        if not code:
-            continue
-        raw = candidate.get("verdict")
-        if raw is None:
-            counters["missing"] += 1
-            continue
-        if isinstance(raw, str) and raw in mapping:
-            scored = _finite(mapping[raw])
-            if scored is None:
-                counters["unknown_enum"] += 1
-                continue
-            values[str(code)] = scored
-        elif isinstance(raw, str) and raw == "unrated" and policy == "skip":
-            counters["unrated"] += 1
-        else:
-            counters["unknown_enum"] += 1
-    expected_empty = (not values and len(ctx.codes) > 0
-                      and counters["unrated"] == len(ctx.codes))
-    return _frame(ctx, values, counters, expected_empty=expected_empty)
-
-
-def compute_composite(ctx: FactorContext) -> FactorFrame:
-    values: dict[str, float] = {}
-    counters = {"missing": 0}
-    for candidate in _candidates(ctx):
-        code = candidate.get("code")
-        if not code:
-            continue
-        score = _finite(candidate.get("composite_score"))
-        if score is None:
-            counters["missing"] += 1
-            continue
-        values[str(code)] = score
-    return _frame(ctx, values, counters)
 
 
 # ─── T 日事实 ──────────────────────────────────────────────────────────────
@@ -256,21 +211,6 @@ _SPEC_FIELDS = SpecDefaults(
 )
 
 SPECS: tuple[FactorSpec, ...] = (
-    FactorSpec(
-        name="prep_verdict", label="复盘评级", compute=compute_verdict,
-        impl_key=f"{IMPL_PREFIX}.verdict.v1",
-        direction="higher_better", unit="score",
-        params={"mapping": _VERDICT_MAPPING, "unrated_policy": _UNRATED_POLICY},
-        description="prep_snapshots.candidates[].verdict 档位序（strong=3/light=2/ignore=0，unrated 不写行）",
-        **_SPEC_FIELDS,
-    ),
-    FactorSpec(
-        name="prep_composite", label="复盘综合分", compute=compute_composite,
-        impl_key=f"{IMPL_PREFIX}.composite.v1",
-        direction="higher_better", unit="score",
-        description="prep_snapshots.candidates[].composite_score（候选入选日五维综合分，落快照日）",
-        **_SPEC_FIELDS,
-    ),
     FactorSpec(
         name="prep_high_days", label="T 日连板高度", compute=compute_high_days,
         impl_key=f"{IMPL_PREFIX}.high_days.v1",

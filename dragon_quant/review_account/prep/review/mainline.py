@@ -125,15 +125,60 @@ def _evidence(item: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+def _merge_reasons(*groups: list[str]) -> str | None:
+    """按出现顺序去重合并原因码（``;`` 分隔）。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for group in groups:
+        for code in group:
+            if isinstance(code, str) and code and code not in seen:
+                seen.add(code)
+                out.append(code)
+    return ";".join(out) or None
+
+
+def _prev_reasons(
+    board_name: str,
+    rank: int,
+    state: str,
+    prev: Any,
+    prev_meta: Mapping[str, Any] | None,
+    prev_ranks: Mapping[str, tuple[int, float | None]],
+    config: ReviewConfig,
+) -> list[str]:
+    """主线的跨日原因码（稳定、禁止空说明）。
+
+    五态阈值不变，只补「为什么 unknown」：无上一快照 / 损坏 / 上一快照无主线 /
+    上一板块缺分 / 当前板块不在上一前 5 / 防御性阈值兜底。
+    """
+
+    if isinstance(prev_meta, Mapping) and prev_meta.get("error"):
+        return ["prev_snapshot_corrupt"]
+    if not isinstance(prev, Mapping):
+        return ["prev_snapshot_missing"]
+    if not _prev_mainlines(prev):
+        return ["prev_mainlines_missing"]
+    previous = prev_ranks.get(board_name)
+    if previous is not None and previous[1] is None:
+        return ["prev_mainline_score_missing"]
+    if state == "unknown":
+        if previous is None and rank > config.mainline_top_n:
+            return ["mainline_prev_rank_missing"]
+        return ["mainline_change_below_threshold"]
+    return []
+
+
 def compute_mainlines(
-    assets: dict, prev: dict | None = None, config: ReviewConfig = CONFIG
+    assets: dict, prev: dict | None = None, config: ReviewConfig = CONFIG,
+    *, prev_meta: Mapping[str, Any] | None = None,
 ) -> list[dict]:
     """主线排名 + 五态 + 角色映射（纯函数）。
 
     * 按主线分降序，取前 ``mainline_watchlist_n`` 名；前 ``mainline_top_n`` 名为当日主线；
     * 并列按（涨停家数 desc、板块名升序）稳定排序；
     * 无 T-1 快照 / T-1 板块榜不可用 → 全部 ``state="unknown"``；
-    * 成员缺失时主线分仍展示，``unknown_reason="board_members_missing"``。
+    * ``unknown_reason`` 给出稳定原因（无快照 / 损坏 / 无主线 / 缺分 / 排名不可判），
+      成员缺失时追加 ``board_members_missing``。
     """
 
     pool_payload = assets.get("ths_limit_up_pool")
@@ -151,6 +196,13 @@ def compute_mainlines(
         )
         item["state"] = _state_for(
             item["board_name"], index, item["mainline_score"], prev_ranks, config
+        )
+        existing = item.get("unknown_reason")
+        base = [code for code in str(existing or "").split(";") if code]
+        item["unknown_reason"] = _merge_reasons(
+            base,
+            _prev_reasons(item["board_name"], index, item["state"], prev,
+                          prev_meta, prev_ranks, config),
         )
         item["evidence"] = _evidence(item)
 

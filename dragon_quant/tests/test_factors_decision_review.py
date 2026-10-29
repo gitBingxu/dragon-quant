@@ -548,7 +548,7 @@ class TestLedgerAndMetrics(unittest.TestCase):
         self.assertEqual(result["snapshots"]["with_snapshot"], 2)
         self.assertEqual(result["snapshots"]["unsupported_version"], 1)
         self.assertEqual(result["snapshots"]["usable"], 1)
-        self.assertEqual(result["versions"]["accepted"], ["0.7"])
+        self.assertEqual(result["versions"]["accepted"], ["0.7", "0.8"])
         self.assertEqual(result["versions"]["seen"], {"0.6": 1, "0.7": 1})
         self.assertEqual(result["versions"]["unsupported_units"], 1)
         self.assertTrue(any("unsupported_snapshot_version" in warning

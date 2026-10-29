@@ -125,7 +125,7 @@ stateDiagram-v2
 - **A（竞价）**：有行 ∧ `unverified=False` ∧ `is_weak=False` → True；有行 ∧ verified ∧ `is_weak=True` → False；无行/损坏/`unverified`/空 items 哨兵 → Unknown。
 - **排序**：`tier(A,P)`（True<Unknown<False）→ `factor_rank`（0 有分 / 1 缺失）→ `factor_score` desc → composite desc → priority desc → code。`TradingEngine` 与 `SignalEngine` 共用 `rank_key`；`buy` 的 buy-all 语义不变。
 - **因子分量（P2）**：`factor_ranking_enabled` 默认 False。关闭时 `key_components` 强制 `factor_rank=0 / factor_score=0.0 / factor_mode="off"`，插入的两个零分量对所有候选相同 → 排序与旧实现逐位等价。开启时缺失候选进 `factor_rank=1` 桶排在有分者之后（缺失 ≠ 中性）；整日 `degraded`（无模型快照 / 读取失败 / 覆盖率 < `factor_min_coverage`）完全回退为关闭态。`key_components` 是唯一归零/缺失判定处，`rank_key` 只消费其输出；`priority_key` 落库携带 `factor_mode`，事后可判定当日排序是否受因子影响。
-- **候选池**：`prep_verdict_filter_enabled=True` 时 `ignore` 出池；推荐集为空/快照缺失/读取异常 → 回退 legacy，回退池不再应用 ignore 过滤；P 仍按快照如实标注。
+- **候选池**：0.8 快照直接取 `review_candidates` 中 `eligible ∧ position_pct>0`（不叠加旧 `min_score`/身份/verdict；有效决策空池不回落）。0.7 及更早：`prep_verdict_filter_enabled=True` 时 `ignore` 出池；推荐集为空/快照缺失/读取异常 → 回退 legacy，回退池不再应用 ignore 过滤；P 仍按快照如实标注。
 - **开关**：`auction_ranking_enabled`（A 参与排序）/ `auction_veto_enabled`（D3 否决）均默认 False；任一开启才读取 `auction_snapshots`，两者皆关时零读取/零否决/A 恒 Unknown（AC8'）。
 - **否决**：`auction_veto_enabled=True` 且 A=False → `BuyRejected("auction_veto")`；`auction_veto_exempt_signals` 按买点类型豁免。`entry_veto` 仍是无调用方的通用前置钩子。
 - **可观测**：detail 携带 `entry_priority` / `priority_key` / `would_veto` / `vetoed_signal`；`ranking_mode` ∈ {auction, auction_unverified, prep_only, legacy}；候选池回退输出 `fallback_reason`。`would_veto` 仅在已读取竞价数据时记录。

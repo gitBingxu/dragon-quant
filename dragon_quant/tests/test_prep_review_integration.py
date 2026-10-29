@@ -231,14 +231,14 @@ def _run(day: str, calls: list[tuple], tdx: FakeTdx, *, force: bool = False,
                              services=_services(tdx))
 
 
-def _legacy_candidates(assets: dict, day: str = DAY) -> list[dict]:
-    from dragon_quant.review_account.prep import (
-        compute_candidates, compute_main_boards,
-    )
-    from dragon_quant.review_account.verdicts import evaluate_candidates
+def _expected_candidates(assets: dict, day: str = DAY) -> list[dict]:
+    """0.8 期望值：同一份 review 结果的兼容投影（不是第二套算法）。"""
+    from dragon_quant.review_account.candidate_view import project_candidates
+    from dragon_quant.review_account.prep import compute_candidates, compute_review
 
-    boards = compute_main_boards(assets)
-    return evaluate_candidates(compute_candidates(assets, day), boards, day)
+    raw = compute_candidates(assets, day)
+    review = compute_review({**assets, "candidates": raw}, day)
+    return project_candidates(review["review_candidates"], raw, day)
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ def test_new_detail_code_only_triggers_review_collect_and_keeps_legacy_untouched
         report = _ok_report()
         assets_db.save_prep_assets(DAY, {k: v for k, v in stored.items()}, report)
         before = assets_db.get_prep_assets(DAY)
-        expected_candidates = _legacy_candidates(before, DAY)
+        expected_candidates = _expected_candidates(before, DAY)
 
         plan = prep.plan_prep(before, DAY, NOW_DAY)
         assert plan.collect == []                                  # legacy 零采集
@@ -280,11 +280,15 @@ def test_new_detail_code_only_triggers_review_collect_and_keeps_legacy_untouched
         assert after["stock_daily"]["requested_codes"] == \
             derive_pool_codes(after)["codes"]
 
-        assert out["candidates"] == expected_candidates
+        # legacy 代码 600001 的投影在 review-only 修复前后不变
+        out_by = {item["code"]: item for item in out["candidates"]}
+        expected_by = {item["code"]: item for item in expected_candidates}
+        assert out_by["600001"] == expected_by["600001"]
         review_codes = [item["code"] for item in out["review_candidates"]]
         assert "600777" in review_codes
-        assert "600777" not in {item["code"] for item in out["candidates"]}
-        assert out["version"] == "0.7"
+        # 0.8：candidates 主集合 = review 详细池，review-only 代码同样进入视图
+        assert "600777" in out_by
+        assert out["version"] == "0.8"
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +305,7 @@ def test_review_repair_failure_is_isolated_and_retried_next_round():
         stored = _assets(holdings=["600777"])
         assets_db.save_prep_assets(DAY, stored, _ok_report())
         before = assets_db.get_prep_assets(DAY)
-        expected_candidates = _legacy_candidates(before, DAY)
+        expected_candidates = _expected_candidates(before, DAY)
 
         calls: list[tuple] = []
         out = _run(DAY, calls, FakeTdx(fail_quotes=True))
@@ -333,7 +337,7 @@ def test_pool_rotation_updates_stock_daily_requested_codes():
         stored = _assets(block_extra=["600003"])
         assets_db.save_prep_assets(DAY, stored, _ok_report())
         before = assets_db.get_prep_assets(DAY)
-        expected_candidates = _legacy_candidates(before, DAY)
+        expected_candidates = _expected_candidates(before, DAY)
 
         calls: list[tuple] = []
         out = _run(DAY, calls, FakeTdx())
@@ -345,9 +349,10 @@ def test_pool_rotation_updates_stock_daily_requested_codes():
         assert "600003" in after["stock_daily"]["rows"]
         assert "600001" in after["stock_daily"]["rows"]      # 旧行保留
         assert after["fund_flow"]["legacy_codes"] == ["600001"]
-        assert out["candidates"] == expected_candidates
-        assert "600003" not in {item["code"] for item in out["candidates"]}
-        assert "600003" in {item["code"] for item in out["review_candidates"]}
+        # 0.8 一致性不变量：candidates 与 review_candidates 是同一主集合
+        assert ({item["code"] for item in out["candidates"]}
+                == {item["code"] for item in out["review_candidates"]})
+        assert "600003" in {item["code"] for item in out["candidates"]}
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +395,11 @@ def test_legacy_all_none_keeps_empty_suspicious_even_if_review_codes_healthy():
     baseline["collection_report"] = {**_ok_report(),
                                      "fund_flow": {"status": "empty_suspicious"}}
     base_out = _compute_all(DAY, baseline)
-    assert out["candidates"] == base_out["candidates"]
+    # 旧 legacy 代码（600001）的 facts 与投影逐字段不变；600777 是 0.8 详细池新增
+    out_by = {item["code"]: item for item in out["candidates"]}
+    base_by = {item["code"]: item for item in base_out["candidates"]}
+    assert out_by["600001"] == base_by["600001"]
+    assert "600777" in out_by
 
 
 def test_legacy_healthy_review_missing_keeps_legacy_ok_and_marks_review_degraded():
@@ -413,7 +422,7 @@ def test_legacy_healthy_review_missing_keeps_legacy_ok_and_marks_review_degraded
     assert entry["status"] == "ok"
 
     out = _compute_all(DAY, assets)
-    assert out["candidates"] == _legacy_candidates(
+    assert out["candidates"] == _expected_candidates(
         {**assets, "collection_report": {}}, DAY)
     assert "fund_flow_review_degraded" in out["review"]["degraded"]
     assert "cninfo_announcements_review_degraded" in out["review"]["degraded"]
@@ -467,7 +476,7 @@ def test_recompute_twice_is_byte_identical_and_keeps_old_keys():
             second = prep.run_prep(DAY, recompute=True)
 
         assert first == second
-        assert first["version"] == "0.7"
+        assert first["version"] == "0.8"
         for key in ("trade_date", "version", "sentiment", "main_boards", "macro",
                     "candidates", "dragon_source", "review", "review_candidates",
                     "strategy_context"):
@@ -479,7 +488,7 @@ def test_recompute_twice_is_byte_identical_and_keeps_old_keys():
         assert assets_db.get_prep_snapshot(DAY)["review"] == first["review"]
 
 
-def test_review_candidates_cover_sources_outside_legacy_candidates():
+def test_review_candidates_cover_sources_outside_expected_candidates():
     assets = _assets(holdings=["600777"], block_extra=["600003"])
     assets["collection_report"] = _ok_report()
     review = compute_review(assets, DAY)
@@ -629,7 +638,7 @@ def test_feedback_uses_prev_plan_codes_and_backfills_same_day_auction():
         _seed_m5(tmp)
         before_snapshot = assets_db.get_prep_snapshot(PREV_DAY)
         before_assets = assets_db.get_prep_assets(DAY)
-        expected_candidates = _legacy_candidates(before_assets, DAY)
+        expected_candidates = _expected_candidates(before_assets, DAY)
 
         calls: list[tuple] = []
         tdx = FakeTdx()
@@ -713,3 +722,47 @@ def test_without_prev_plan_feedback_is_absent_not_error():
         assert "feedback" not in out
         assert "plan_review" not in out
         assert out["candidates"]
+
+
+# ---------------------------------------------------------------------------
+# prev 审计块（review.prev，只增键）
+# ---------------------------------------------------------------------------
+
+
+def test_review_prev_block_snapshot_missing():
+    from dragon_quant.review_account.prep import compute_review
+
+    out = compute_review(_assets(), DAY)
+    assert out["prev"] == {
+        "snapshot_date": None, "snapshot_version": None,
+        "mainlines": "snapshot_missing", "degraded": ["prev_snapshot_missing"],
+    }
+
+
+def test_review_prev_block_corrupt():
+    from dragon_quant.review_account.prep import compute_review
+
+    out = compute_review(_assets(), DAY, prev=None,
+                         prev_meta={"trade_date": None, "error": "bad json"})
+    assert out["prev"]["mainlines"] == "corrupt"
+    assert "prev_snapshot_corrupt" in out["prev"]["degraded"]
+
+
+def test_review_prev_block_missing_mainlines_and_ok():
+    from dragon_quant.review_account.prep import compute_review
+
+    out = compute_review(
+        _assets(), DAY,
+        prev={"version": "0.8", "review": {"enabled": False}},
+        prev_meta={"trade_date": "2026-10-18", "error": None})
+    assert out["prev"]["mainlines"] == "missing"
+    assert out["prev"]["snapshot_version"] == "0.8"
+
+    out = compute_review(
+        _assets(), DAY,
+        prev={"version": "0.8", "review": {"mainlines": [
+            {"board_name": "机器人", "rank": 1, "mainline_score": 91.7}]}},
+        prev_meta={"trade_date": "2026-10-18", "error": None})
+    assert out["prev"]["mainlines"] == "ok"
+    assert out["prev"]["snapshot_date"] == "2026-10-18"
+    assert out["prev"]["degraded"] == []

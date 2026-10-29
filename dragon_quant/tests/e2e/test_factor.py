@@ -229,7 +229,7 @@ def test_f1_list_json_and_human_match_registry():
         assert payload["ok"] is True
         items = payload["factors"]
         assert [item["name"] for item in items] == list(fb.EXPECTED_FACTOR_NAMES)
-        assert len(items) == 60
+        assert len(items) == 58
         assert list(items[0]) == LIST_ITEM_KEYS
         for item in items:
             assert VERSION_RE.fullmatch(item["version"]), item
@@ -243,7 +243,7 @@ def test_f1_list_json_and_human_match_registry():
         assert by_name["fin_roe"]["pit_rule"] == "asof"
         assert by_name["fin_roe"]["available_phase"] == "prep"
         assert by_name["fin_roe"]["frequency"] == "1q"
-        assert by_name["prep_verdict"]["pit_rule"] == "derived"
+        assert by_name["prep_t_pct"]["pit_rule"] == "derived"
         assert by_name["auction_strength"]["available_phase"] == "auction"
 
         human = run(box, "factor", "list")
@@ -251,7 +251,7 @@ def test_f1_list_json_and_human_match_registry():
         lines = human.stdout.splitlines()
         assert lines[0].split() == ["因子", "版本", "源", "阶段", "PIT", "默认"]
         assert lines[1].startswith("------")
-        assert len(lines) == 2 + 60
+        assert len(lines) == 2 + 58
         assert lines[2].startswith("auction_dim_direction")
         assert re.fullmatch(
             r"five_dim_composite\s+v[0-9a-f]{12}\s+scan\s+close\s+recorded\s+开",
@@ -431,17 +431,15 @@ def test_f4_only_builds_named_factors_and_default_off_stays_off():
         default_report = json.loads(default.stdout)["reports"][0]
         assert list(default_report["factors"]) == list(fb.DEFAULT_ENABLED_NAMES)
         produced = {row["factor_name"] for row in _factor_rows(box)}
-        assert not {"prep_verdict", "auction_strength", "fin_roe"} & produced
+        assert not {"prep_t_pct", "auction_strength", "fin_roe"} & produced
         assert produced == set(fb.DEFAULT_ENABLED_NAMES)
 
         # An explicit --only is a user opt-in even for a default-off factor.
-        explicit = run(box, "factor", "build", "--date", "20260911",
-                       "--only", "prep_verdict", "--json")
-        assert_exit(explicit, 0)
-        explicit_report = json.loads(explicit.stdout)["reports"][0]
-        assert list(explicit_report["factors"]) == ["prep_verdict"]
-        assert explicit_report["factors"]["prep_verdict"]["status"] == \
-            "missing_source"
+        # 退役因子不可再显式构建：未知因子 → exit 2（不静默成功）
+        retired = run(box, "factor", "build", "--date", "20260911",
+                      "--only", "prep_verdict", "--json")
+        assert_exit(retired, 2)
+        assert "未知因子" in retired.stdout
 
 
 # ─── F5: --all / mutual exclusion / no fin data -> no transport ────────────
@@ -455,7 +453,7 @@ def test_f5_all_builds_every_registered_factor_and_stays_offline():
         assert_exit(result, 0)
         report = json.loads(result.stdout)["reports"][0]
         assert list(report["factors"]) == list(fb.EXPECTED_FACTOR_NAMES)
-        assert report["registry_inserted"] == 60
+        assert report["registry_inserted"] == 58
         statuses = {name: entry["status"] for name, entry in report["factors"].items()}
         # 2026-09-10 has no vpa_analysis / prep / auction snapshots.
         assert {name for name, status in statuses.items() if status == "ok"} == \
@@ -593,7 +591,7 @@ def test_f7_status_counts_and_human_output():
         for version in registered.values():
             assert VERSION_RE.fullmatch(version)
         factors = payload["factors"]
-        assert len(factors) == 60
+        assert len(factors) == 58
         assert {item["name"] for item in factors
                 if item["registered_version"] is not None} == \
             set(fb.DEFAULT_ENABLED_NAMES)
@@ -1403,7 +1401,7 @@ def test_f17_decision_review_prep_groups_coverage_and_golden():
             "corrupt_rows": 0, "non_trading_snapshot_dates": 0,
         }
         assert payload["versions"] == {
-            "accepted": ["0.7"], "seen": {"0.6": 1, "0.7": 1},
+            "accepted": ["0.7", "0.8"], "seen": {"0.6": 1, "0.7": 1},
             "unsupported_units": 1,
         }
         assert [group["group"] for group in payload["groups"]] == [

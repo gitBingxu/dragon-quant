@@ -440,7 +440,13 @@ def _mainline_headline(mainlines: list) -> str:
             continue
         state = item.get("state")
         label = _MAINLINE_STATE_LABELS.get(state, "未知")
-        names.append(f"{_clean(name)}（{label}）")
+        text = f"{_clean(name)}（{label}"
+        if state == "unknown":
+            reason = item.get("unknown_reason")
+            text += f"：{_clean(reason)}" if isinstance(reason, str) and reason \
+                else "：原因未知"
+        text += "）"
+        names.append(text)
     return "、".join(names) if names else "不可用"
 
 

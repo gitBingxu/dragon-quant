@@ -27,9 +27,10 @@ from dragon_quant.infra.factor import sql as sqlstore
 
 DAY = "2026-10-23"
 PREP_NAMES = (
-    "prep_verdict", "prep_composite", "prep_high_days", "prep_t_pct",
-    "prep_t_turnover", "prep_limit_up_suc_rate", "prep_in_pool_today",
+    "prep_high_days", "prep_t_pct", "prep_t_turnover",
+    "prep_limit_up_suc_rate", "prep_in_pool_today",
 )
+RETIRED_PREP_NAMES = ("prep_verdict", "prep_composite")
 AUCTION_NAMES = (
     "auction_strength", "auction_is_weak", "auction_direction", "auction_rank",
     "auction_dim_direction", "auction_dim_liquidity", "auction_dim_supply",
@@ -200,18 +201,11 @@ def _candidate(code, **overrides):
 
 
 class TestMapping(unittest.TestCase):
-    def test_verdict_mapping_and_unknown(self):
-        source = _prep_source([
-            _candidate("A", verdict="strong"),
-            _candidate("B", verdict="light"),
-            _candidate("C", verdict="ignore"),
-            _candidate("D", verdict="unrated"),
-            _candidate("E", verdict="sideways"),
-            _candidate("F", verdict=None),
-        ])
-        frame = _compute("prep_verdict", _ctx(source,
-                                             params=get_spec("prep_verdict").params))
-        self.assertEqual(frame.values, {"A": 3.0, "B": 2.0, "C": 0.0})
+    def test_retired_verdict_factors_are_unregistered(self):
+        from dragon_quant.infra.factor.registry import FactorRegistryError
+        for name in RETIRED_PREP_NAMES:
+            with self.assertRaises(FactorRegistryError):
+                get_spec(name)
 
     def test_direction_mapping_and_unknown(self):
         source = _auction_source({
@@ -346,7 +340,7 @@ class TestDerivedPit(TempDb):
     def test_available_at_and_backfilled_lineage(self):
         self._seed_prep(_healthy_prep([
             _candidate("A", trade_date="2026-10-22")]))
-        entry = engine.build_factor(get_spec("prep_verdict"), DAY)
+        entry = engine.build_factor(get_spec("prep_t_pct"), DAY)
         self.assertEqual(entry["status"], "ok")
         self.assertEqual(entry["available_at"], f"{DAY}T16:40:00")
 
@@ -368,12 +362,12 @@ class TestDerivedPit(TempDb):
 class TestSourceFailure(TempDb):
     def test_prep_json_corruption_keeps_old_rows(self):
         self._seed_prep(_healthy_prep([_candidate("A")]))
-        engine.build_factor(get_spec("prep_verdict"), DAY)
+        engine.build_factor(get_spec("prep_t_pct"), DAY)
         self._exec("UPDATE prep_snapshots SET result_json = ? WHERE trade_date = ?",
                    ("{broken", DAY))
-        entry = engine.build_factor(get_spec("prep_verdict"), DAY)
+        entry = engine.build_factor(get_spec("prep_t_pct"), DAY)
         self.assertEqual(entry["status"], "missing_source")
-        self.assertEqual(len(self._rows(["prep_verdict"])), 1)
+        self.assertEqual(len(self._rows(["prep_t_pct"])), 1)
 
     def test_auction_missing_or_all_corrupt_keeps_old_rows(self):
         self._seed_auction({"A": _auction_row(code="A")})
@@ -434,7 +428,7 @@ class TestIsolation(TempDb):
         ])
         self._seed_prep(_healthy_prep([_candidate("A")]))
         self._seed_auction({"A": _auction_row(code="A")})
-        self.assertEqual(engine.build_factor(get_spec("prep_composite"), DAY)["status"],
+        self.assertEqual(engine.build_factor(get_spec("prep_t_pct"), DAY)["status"],
                          "ok")
         self.assertEqual(engine.build_factor(get_spec("auction_strength"), DAY)["status"],
                          "ok")

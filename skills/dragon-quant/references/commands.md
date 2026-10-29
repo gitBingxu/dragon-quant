@@ -26,6 +26,8 @@
 | 资产拉取落库 | dragon-quant assets pull --apply | --apply --target-dir | T2 | human/json | 主库 --force 禁止 |
 | 资产探测 | dragon-quant assets doctor | --profile --samples | T1 | human/json | 会向远端 _doctor 前缀 PUT/DELETE 探针 |
 | 资产推送 | dragon-quant assets push | --profile --from --to --all --allow-shrink | T2 | human/json | 先 --dry-run |
+| 派生清理体检 | dragon-quant assets purge-derived | --json | T0 | human/json | dry-run 只读计数（prep_snapshots/25 因子/模型） |
+| 派生清理执行 | dragon-quant assets purge-derived --apply --yes | --apply --yes | T2 | human/json | 单事务删除可重建派生；不触云端 |
 | 资产回填体检 | dragon-quant assets backfill-dragons --dry-run | --dry-run --json | T0 | human/json | 区分 missing_rows / orphan_rows |
 | 资产回填 | dragon-quant assets backfill-dragons | --from --to | T1 | human/json | 写 assets.db.dragons |
 | 资产回填清理 | dragon-quant assets backfill-dragons --prune | --prune | T2 | human/json | 删除镜像孤儿行 |

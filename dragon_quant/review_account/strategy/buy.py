@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+from dragon_quant.review_account.candidate_view import (
+    is_review_eligible, is_review_pool,
+)
 from dragon_quant.review_account.market import bar_times
 from dragon_quant.review_account.models import (
     BUY_SIGNAL_DIVERGENCE_BREAK,
@@ -71,7 +74,14 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
     veto = entry_veto(cfg, candidate, row)
     if veto:
         raise BuyRejected("vetoed", veto)
-    if candidate.get("is_true_dragon") is False or (candidate.get("composite_score") or 0) < cfg.min_score:
+    if is_review_pool(candidate) and not is_review_eligible(candidate):
+        # 0.8 兼容视图但未达 eligible ∧ 仓位>0：直接拒绝，绝不进入买点形态。
+        raise BuyRejected(
+            "review_not_eligible", "复盘候选未达可买条件（eligible 且仓位>0）")
+    if not is_review_eligible(candidate) \
+            and (candidate.get("is_true_dragon") is False
+                 or (candidate.get("composite_score") or 0) < cfg.min_score):
+        # 旧口径（0.7 / legacy）：保留原身份与分数前置。
         return None
     signal = _compute_buy_signal(candidate, row, cfg, prev_row, hist_rows, intraday_bars)
     return _apply_entry_priority_gate(cfg, candidate, signal)
@@ -240,11 +250,14 @@ def _count_shrinking_one_word_boards(hist_rows: list, cfg: StrategyConfig) -> tu
 def _divergence_preconditions(ctx: BuyCheckContext) -> tuple[Optional[str], bool]:
     """③ 除窗口外的全部条件（真龙/综合分/连续一字板/缩量）。"""
     candidate, cfg = ctx.candidate, ctx.cfg
-    if candidate.get("is_true_dragon") is False:
-        return "非真龙，跳过分歧买龙", False
-    if (candidate.get("composite_score") or 0) < cfg.min_score:
-        return (f"综合分{candidate.get('composite_score') or 0:.1f} "
-                f"< 门槛{cfg.min_score:.0f}", False)
+    if is_review_pool(candidate) and not is_review_eligible(candidate):
+        return "复盘候选未达可买条件（eligible 且仓位>0）", False
+    if not is_review_eligible(candidate):
+        if candidate.get("is_true_dragon") is False:
+            return "非真龙，跳过分歧买龙", False
+        if (candidate.get("composite_score") or 0) < cfg.min_score:
+            return (f"综合分{candidate.get('composite_score') or 0:.1f} "
+                    f"< 门槛{cfg.min_score:.0f}", False)
     if ctx.hist_rows is None:
         return "缺少历史日K，无法判定连板", True
     boards, shrinking = _count_shrinking_one_word_boards(ctx.hist_rows, cfg)

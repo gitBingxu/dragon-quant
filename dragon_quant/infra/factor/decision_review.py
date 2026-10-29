@@ -65,7 +65,7 @@ SOURCE_GROUP_SPECS: dict[str, tuple[GroupSpec, ...]] = {
 }
 
 ACCEPTED_VERSIONS: dict[str, tuple[str, ...]] = {
-    "prep": ("0.7",),
+    "prep": ("0.7", "0.8"),
     "auction": ("2",),
 }
 

@@ -1413,3 +1413,59 @@ def test_as18_group_without_action_emits_json_error_exit_2():
         assert result.stderr == ""
         assert backend_calls(box) == []
         assert_no_data_warehouse(box.data_dir)
+
+
+# ─── AS19: purge-derived（仅临时库；真实库零操作） ─────────────────────────
+
+
+def test_as19_purge_derived_dry_run_and_apply_temp_db():
+    from dragon_quant.infra.assets.schema import BASE_SCHEMA
+    from dragon_quant.infra.factor.maintenance import TARGET_FACTOR_NAMES
+
+    with sandbox("as19") as box:
+        # 1) 库不存在：dry-run 只读，exit 0，且绝不建库
+        dry = run_assets(box, ["purge-derived", "--json"])
+        assert_exit(dry, 0)
+        payload = payload_of(dry)
+        assert payload["dry_run"] is True and payload["applied"] is False
+        assert payload["db_exists"] is False
+        assert payload["counts"]["prep_snapshots"]["rows"] == 0
+        assert_no_data_warehouse(box.data_dir)
+
+        # 2) --apply 缺 --yes：参数错误 exit 2，零写入
+        bad = run_assets(box, ["purge-derived", "--apply", "--json"])
+        assert_exit(bad, 2)
+        assert payload_of(bad)["ok"] is False
+
+        # 3) 临时库种子：目标行 + 保护行
+        db_path = box.data_dir / "assets.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(BASE_SCHEMA)
+            conn.execute("INSERT INTO prep_snapshots(trade_date, source, result_json) "
+                         "VALUES ('2026-09-10','v2','{}')")
+            conn.execute("INSERT INTO prep_assets(trade_date, asset_type, payload_json) "
+                         "VALUES ('2026-09-10','dragons','{}')")
+            for name in TARGET_FACTOR_NAMES:
+                conn.execute(
+                    "INSERT INTO factor_registry(factor_name, factor_version, "
+                    "frequency, source, direction, available_phase, pit_rule, "
+                    "spec_hash) VALUES (?, 'v1','1d','prep','higher_better',"
+                    "'prep','derived','h')", (name,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        plan = run_assets(box, ["purge-derived", "--json"])
+        assert_exit(plan, 0)
+        counts = payload_of(plan)["counts"]
+        assert counts["prep_snapshots"]["rows"] == 1
+        assert counts["factor_registry"]["rows"] == len(TARGET_FACTOR_NAMES)
+
+        applied = run_assets(box, ["purge-derived", "--apply", "--yes", "--json"])
+        assert_exit(applied, 0)
+        result = payload_of(applied)
+        assert result["applied"] is True
+        assert result["deleted"]["prep_snapshots"] == 1
+        assert sqlite_count(db_path, "prep_snapshots") == 0
+        assert sqlite_count(db_path, "prep_assets") == 1

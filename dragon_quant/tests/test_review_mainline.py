@@ -392,3 +392,74 @@ def test_mainline_numbers_come_from_config() -> None:
     cfg = dataclasses.replace(CONFIG, weights_mainline=weights)
     result = compute_mainlines(_assets(_default_rows()), None, config=cfg)
     assert result[0]["mainline_score"] != pytest.approx(91.7, abs=0.05)
+
+
+# ---------------------------------------------------------------------------
+# unknown_reason：稳定原因码（禁止无说明的「未知」）
+# ---------------------------------------------------------------------------
+
+
+def _reasons(result: list[dict]) -> dict[str, str]:
+    return {item["board_name"]: item.get("unknown_reason") or "" for item in result}
+
+
+def test_no_prev_marks_prev_snapshot_missing() -> None:
+    reasons = _reasons(compute_mainlines(_assets(_default_rows()), None))
+    assert all("prev_snapshot_missing" in text for text in reasons.values())
+
+
+def test_corrupt_prev_marks_prev_snapshot_corrupt() -> None:
+    reasons = _reasons(compute_mainlines(
+        _assets(_default_rows()), None,
+        prev_meta={"error": "JSONDecodeError: bad", "trade_date": None}))
+    assert all("prev_snapshot_corrupt" in text for text in reasons.values())
+
+
+def test_prev_without_mainlines_marks_prev_mainlines_missing() -> None:
+    prev = {"review": {"enabled": False}}
+    result = compute_mainlines(_assets(_default_rows()), prev)
+    assert {item["state"] for item in result} == {"unknown"}
+    assert all("prev_mainlines_missing" in text
+               for text in _reasons(result).values())
+
+
+def test_prev_board_without_score_marks_prev_mainline_score_missing() -> None:
+    prev = _prev([{"board_name": "机器人", "rank": 1, "mainline_score": None}])
+    robot = {item["board_name"]: item
+             for item in compute_mainlines(_assets(_default_rows()), prev)}["机器人"]
+    assert robot["state"] == "unknown"
+    assert "prev_mainline_score_missing" in robot["unknown_reason"]
+
+
+def test_current_score_missing_uses_mainline_score_missing() -> None:
+    rows = [{"name": "空板"}]
+    result = compute_mainlines(_assets(rows), None)
+    assert "mainline_score_missing" in result[0]["unknown_reason"]
+    assert "mainline_score_unavailable" not in result[0]["unknown_reason"]
+
+
+def test_board_outside_prev_topn_marks_prev_rank_missing() -> None:
+    prev = _prev([{"board_name": "算力", "rank": 1, "mainline_score": 70.8}])
+    result = {item["board_name"]: item
+              for item in compute_mainlines(_assets(_default_rows()), prev)}
+    # 第 4 名（watchlist，rank > top_n=3）不在 prev 前 5：无法判定 new
+    assert result["医药"]["state"] == "unknown"
+    assert "mainline_prev_rank_missing" in result["医药"]["unknown_reason"]
+
+
+def test_defensive_below_threshold_reason() -> None:
+    base = {item["board_name"]: item
+            for item in compute_mainlines(_assets(_default_rows()), None)}
+    prev = _prev([
+        {"board_name": "机器人", "rank": 1, "mainline_score": 91.7},
+        {"board_name": "医药", "rank": 2,
+         "mainline_score": base["医药"]["mainline_score"]},
+    ])
+    cfg = dataclasses.replace(
+        CONFIG, mainline_state_rank_up=3, mainline_state_rank_down=3)
+    result = {item["board_name"]: item
+              for item in compute_mainlines(
+                  _assets(_default_rows()), prev, config=cfg)}
+    # 医药 prev rank 2 → 当前 rank 4（-2，未达本配置的 ±3），分数不变 → 五态兜底 unknown
+    assert result["医药"]["state"] == "unknown"
+    assert "mainline_change_below_threshold" in result["医药"]["unknown_reason"]

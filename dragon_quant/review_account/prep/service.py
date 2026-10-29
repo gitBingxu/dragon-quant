@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Optional
 
 from dragon_quant.infra.provider.macro import MACRO_INDEX_KEYS
-from dragon_quant.review_account.verdicts import evaluate_candidates
+from dragon_quant.review_account.candidate_view import project_candidates
 from dragon_quant.infra import clock
 from dragon_quant.infra.assets import db as assets_db
 from dragon_quant.infra.market_calendar import tdx_trade_dates
@@ -37,7 +37,7 @@ from .collectors import (
 from .compute import (
     SHANGHAI, _dragon_source, _empty_macro, compute_candidates,
     compute_feedback, compute_macro, compute_main_boards, compute_plan_review,
-    compute_review, compute_sentiment,
+    compute_review, compute_sentiment, effective_prev_plan,
 )
 from .rebuild import (
     WINDOW_TRADING_DAYS, _same_dragons_payload, legacy,
@@ -169,8 +169,13 @@ def plan_prep(assets: dict, trade_date: str, today: str, *,
 
 # ─── 计算编排 ──────────────────────────────────────────────────────────────
 
-def _compute_all(trade_date: str, assets: dict) -> dict:
+def _compute_all(trade_date: str, assets: dict, *,
+                 prev: dict | None = None,
+                 prev_meta: dict | None = None) -> dict:
     """compute 段：先按 collection_report/as_of 过滤不可用资产，再逐因子错误隔离。
+
+    固定顺序（技术方案 §4.1）：原始事实装配 → 六维 review（唯一权威）→
+    candidates 兼容投影；禁止任何反向依赖。
 
     collection_report 中 error/unavailable/empty_suspicious（及必然非空资产的 empty）
     一律按缺失降级——残缺数据绝不进入 position_pct 等下游信号。
@@ -193,10 +198,10 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
         dict(sentiment_result) if isinstance(sentiment_result, dict)
         else {"degraded": ["compute_error"]})
     main_boards = _guard("main_boards", lambda: compute_main_boards(usable), [])
-    candidates = _guard("candidates", lambda: compute_candidates(usable, trade_date), [])
-    candidates = _guard("verdicts",
-                        lambda: evaluate_candidates(candidates, main_boards, trade_date),
-                        candidates)
+    # 原始事实装配：窗口真龙去重 / 入选日 / THS 归因 / 资金公告 / facts；
+    # 不再运行旧 evaluate_candidates 推荐规则链（唯一权威是 review）。
+    raw_candidates = _guard(
+        "candidates", lambda: compute_candidates(usable, trade_date), [])
     macro = _guard("macro", lambda: compute_macro(usable, trade_date), _empty_macro())
 
     macro_marks: list[str] = []
@@ -224,49 +229,71 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
     sentiment["degraded"] = sorted(
         set(base_degraded) | set(degraded) | set(macro_marks))
 
+    # 复盘分（M3）：唯一权威；旧键之后追加，整体异常只影响自身键。
+    review_market = None
+    review_mainlines = None
+    review_candidates: list = []
+    review_available = False
+    if not _review_v2_enabled():
+        result_review: dict = {"enabled": False, "reason": "disabled"}
+    else:
+        review_assets = {**usable, "candidates": raw_candidates}
+        review_payload = _guard(
+            "review",
+            lambda: compute_review(review_assets, trade_date,
+                                   prev=prev, prev_meta=prev_meta),
+            None)
+        if not isinstance(review_payload, dict):
+            result_review = {"enabled": True,
+                             "compute_error": errors.get("review")}
+        else:
+            review_available = True
+            candidate_list = review_payload.get("review_candidates")
+            review_candidates = (
+                candidate_list if isinstance(candidate_list, list) else [])
+            result_review = {
+                key: value for key, value in review_payload.items()
+                if key not in ("review_candidates", "strategy_context")
+            }
+            strategy_context = review_payload.get("strategy_context")
+            if isinstance(strategy_context, dict):
+                result_review["strategy_context"] = strategy_context
+            market = review_payload.get("market")
+            review_market = market if isinstance(market, dict) else None
+            mainlines = review_payload.get("mainlines")
+            review_mainlines = mainlines if isinstance(mainlines, list) else None
+
+    # candidates[] = review_candidates 的同结果兼容投影；raw 只补齐事实 / 截断兜底。
+    candidates = _guard(
+        "candidates_projection",
+        lambda: project_candidates(
+            review_candidates, raw_candidates, trade_date,
+            review_available=review_available),
+        [])
+
     result: dict = {
         "trade_date": trade_date,
-        "version": "0.7",
+        "version": "0.8",
         "sentiment": sentiment,
         "main_boards": main_boards,
         "macro": macro,
         "candidates": candidates,
         "dragon_source": _dragon_source(usable),
     }
-
-    # 复盘分（M3）：旧键之后追加；整体异常只影响自身键，绝不中断旧链路。
-    review_market = None
-    review_mainlines = None
-    if not _review_v2_enabled():
-        result["review"] = {"enabled": False, "reason": "disabled"}
+    if review_available:
+        result["review"] = result_review
+        result["review_candidates"] = review_candidates
+        strategy_context = result_review.pop("strategy_context", None)
+        if isinstance(strategy_context, dict):
+            result["strategy_context"] = strategy_context
     else:
-        review_assets = {**usable, "candidates": candidates}
-        review_payload = _guard(
-            "review", lambda: compute_review(review_assets, trade_date), None)
-        if not isinstance(review_payload, dict):
-            result["review"] = {"enabled": True,
-                                "compute_error": errors.get("review")}
-            result["review_candidates"] = []
-        else:
-            review_candidates = review_payload.get("review_candidates")
-            result["review"] = {
-                key: value for key, value in review_payload.items()
-                if key not in ("review_candidates", "strategy_context")
-            }
-            result["review_candidates"] = (
-                review_candidates if isinstance(review_candidates, list) else [])
-            strategy_context = review_payload.get("strategy_context")
-            if isinstance(strategy_context, dict):
-                result["strategy_context"] = strategy_context
-            market = review_payload.get("market")
-            review_market = market if isinstance(market, dict) else None
-            mainlines = review_payload.get("mainlines")
-            review_mainlines = mainlines if isinstance(mainlines, list) else None
+        result["review"] = result_review
+        result["review_candidates"] = []
 
-    # T+1 反馈（M5）：与 review 互不依赖；任一失败只影响自身键。
-    # 只在存在 T-1 计划（prev_plan.positions 非空）时产出，首日无计划 → 不写该键。
-    prev_plan = usable.get("prev_plan")
-    positions = prev_plan.get("positions") if isinstance(prev_plan, dict) else None
+    # T+1 反馈（M5）：有效 T-1 计划 = 上一快照 strategy_context（优先）
+    # → 已保留的 prev_plan 资产（回退）；首日无计划 → 不写该键。
+    plan = effective_prev_plan(prev, usable.get("prev_plan"))
+    positions = plan.get("positions") if isinstance(plan, dict) else None
     if isinstance(positions, list) and positions:
         feedback = None
         auction = usable.get("auction_feedback")
@@ -274,7 +301,7 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
             feedback = _guard(
                 "feedback",
                 lambda: compute_feedback(
-                    prev_plan, auction, usable.get("t1_intraday"),
+                    plan, auction, usable.get("t1_intraday"),
                     usable.get("stock_daily", {}), trade_date,
                     current_mainlines=review_mainlines),
                 None)
@@ -283,7 +310,7 @@ def _compute_all(trade_date: str, assets: dict) -> dict:
         plan_review = _guard(
             "plan_review",
             lambda: compute_plan_review(
-                prev_plan, feedback or {}, usable.get("t1_intraday"),
+                plan, feedback or {}, usable.get("t1_intraday"),
                 usable.get("stock_daily", {}), trade_date,
                 holdings=usable.get("holdings"), current_market=review_market),
             None)
@@ -422,6 +449,9 @@ def run_prep(trade_date: str, recompute: bool = False, *,
             assets = legacy("_run_collection")(
                 trade_date, tdx, calendar, stored, plan, today, now,
                 services=services)
-    result = _compute_all(trade_date, assets)
+    # prev 注入（修复「主线永远 unknown」）：严格早于 trade_date 的最近快照，
+    # 正常与 --recompute 两种模式都接线；绝不返回当日快照（禁止自己和自己比）。
+    prev, prev_meta = assets_db.get_previous_prep_snapshot(trade_date, source="v2")
+    result = _compute_all(trade_date, assets, prev=prev, prev_meta=prev_meta)
     assets_db.save_prep_snapshot(trade_date, result, source="v2")
     return result

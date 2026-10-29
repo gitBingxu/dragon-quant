@@ -318,6 +318,11 @@ dragon-quant factor eval --name five_dim_composite --from 20260501 --to 20260831
 dragon-quant factor eval --name fin_roe --from 20260101 --to 20260930 \
     --pit-policy research --groups 3 --json
 
+# 决策结果回测（只读冻结快照，不要求 factor build；insufficient_data 也是 exit 0）
+dragon-quant factor decision-review --source prep --from 20260501 --to 20260630
+dragon-quant factor decision-review --source auction --from 20260601 --to 20260630 \
+    --horizon 1 --json --include-samples
+
 dragon-quant factor fin sync --snapshot                   # 当日财务观测（same_day_only）
 dragon-quant factor fin sync --backfill                   # gpcw 按报告期回填（md5 幂等 / 追加 vintage）
 dragon-quant factor fin calibrate --sample 20             # 字段索引/单位校准（未校准即 fail-closed）
@@ -335,6 +340,7 @@ dragon-quant factor fin status                            # 账本/校准/观测
 - **财务链路**：`assets.db` 的 `fin_observed_snapshots` / `fin_report_files` / `fin_report_records` / `fin_field_calibrations` / `fin_xdxr_records`。观测仅当日可采；回填默认最近 12 期（`--from-period` 扩大），按 `(报告期, md5)` 幂等、修订追加 vintage（不回溯、不覆盖，值未变的 code 不产新行也不撤销）；法定截止日按 23:59:59；`observed` / `statutory_backfilled` / `revised` 三桶可审计。字段映射未校准 → 财务因子整体禁用（`layout_unverified` 计数进报告）；stale 逾期判定用真实交易日历，缺失时告警 `stale_calendar_missing`。
 - **矩阵导出（P1）**：`factor export` 是派生视图（不写因子表），CSV/JSON + `<out>.meta.json`（`dates` / `codes` / `resolved_versions` / `clean` / `missing_rate_by_factor` / `coverage_by_date` / `build_ids` / `generated_at` / `pipeline_version`）。默认导出原始值；`--clean` 启用当日截面内的 MAD/quantile 缩尾与 rank/zscore 归一（`MAD=0` 跳过并记 `winsorize_skipped="mad_zero"`，绝不除零、绝不回退全样本分位）。
 - **因子评估（P1）**：`factor eval` 主指标 Spearman RankIC（Pearson 附加）、ICIR、`nw_lag=max(horizon-1,0)` 的 Newey-West t、2/3 分组（5 直接拒绝；某日某组 <3 只跳过）、换手、覆盖率与 `effective_independent_days`；样本不足返回 `insufficient_data`（**这是有效结论，进程 exit 0**；参数错误 exit 2、运行时失败 exit 1）。标签从 `available_at` 之后第一个可成交日开盘起算（开盘→开盘），停牌剔除；行情以参数注入，不 import `review_account`。`--pit-policy strict`（默认）只统计 `observed`/`revised`，`research` 纳入 `statutory_backfilled` 并标 `restatement_unverifiable`（结论禁止写入模型快照）；`1q` 额外输出 `effective_independent_observations`、报告期 block bootstrap t、IC 一阶自相关，日频 naive t 标 `pseudo_independent`。所有统计量纯 Python 实现（零 numpy/scipy/pandas）。
+- **决策结果回测（P1，只读）**：`factor decision-review` 只读 `prep_snapshots` / `auction_snapshots` 冻结快照，把既有 prep（推荐 / 明确不推荐 / 数据不足）与 auction（强 / 中 / 弱 / 否决 / 数据不足）决策按组归因，算「可成交开盘 → 第 N 日开盘」、扣 13bp 往返净收益（默认 1/3/5 日）的方向命中率、覆盖、分位与 Wilson 描述性区间。**不要求 `factor build`、不写任何表、不 import `review_account`**；prep 仅接受 `version=0.7`、auction 仅 `version=2`，旧版本显式计 `unsupported_snapshot_version`；auction 分母只含已持久化快照（`coverage_basis=persisted_snapshots`，不含未持久化的空盘口/失败候选）。方向按**扣除成本后的净收益**判定（`flat` = 净收益恰为 0 保本），毛收益只进逐样本账本审计；`min_days` / `min_group_samples` 逐组独立，group 的 `quality` 只表示样本充足度。`insufficient_data` 是有效结论（exit 0）。
 - **决策接入（P2，默认关）**：`StrategyConfig.factor_ranking_enabled=True` 时，`review-account` / `buy` 在 tier(A,P) 内插入因子分量（`factor_rank` → `-factor_score` → `-composite` → `-priority` → code）；关闭时零读取，排序与旧实现逐位等价。`infra/factor/decision.py` 的 `EqualWeightRankModel` 按**每只候选自己的 `trade_date`** 读因子值、组内 rank 归一；模型快照存 `factor_model_snapshots`（`factor_model_version=""` 取最新，无快照 → 整日 `degraded(model_snapshot_missing)`，不隐式兜底）。任一必需因子缺值 → 该候选进 `factor_rank=1` 桶排在所有有分者之后；覆盖率低于 `factor_min_coverage`（默认 0.6）/ 读取失败 → 整日排序回退，绝不中断回测或 buy。`metrics` 新增 `sharpe`（只增键）；`industry_exposure` 只统计 `category="hy"` 并输出 `unattributed_ratio` / `unattributed_reasons`（归属日用 `entry_date` 快照）。
 - **A/B**：`compare_strategies` 的 `variant_grid` 可跑 `factor_ranking_enabled=True/False`，但区间内因子 build 完成率必须 ≥ 95%，否则结论标 `insufficient_data`；`trial_count` 计入所有 variant。
 - **默认零影响**：因子层不进入 `scan` / `prep` 候选池；决策层只有 `rank_key` 单一注入点，`factor_ranking_enabled` 默认关。
@@ -639,7 +645,7 @@ web_ui/                          # 回测 Web UI（Vite+React+TS / stdlib HTTPSe
 # M0 harness 自检（不跑业务用例）
 python dragon_quant/tests/e2e/harness/runner.py --self-check
 
-# 全量离线 E2E（真实 CLI 子进程 + golden；51 个 parser 节点 / 15 个顶层命令）
+# 全量离线 E2E（真实 CLI 子进程 + golden；52 个 parser 节点 / 15 个顶层命令）
 python -m pytest dragon_quant/tests/e2e -q
 
 # 单元 / 集成测试（排除 e2e 与需要真实网络的 smoke）

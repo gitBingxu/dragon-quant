@@ -1,0 +1,365 @@
+{
+  "schema_version": "dr_v1",
+  "ok": true,
+  "status": "ok",
+  "source": "prep",
+  "date_from": "2026-09-07",
+  "date_to": "2026-09-10",
+  "universe": "persisted_decision_snapshots",
+  "coverage_basis": "persisted_snapshots",
+  "config": {
+    "horizons": [
+      1,
+      3,
+      5
+    ],
+    "cost_bps": 13.0,
+    "min_days": 1,
+    "min_group_samples": 1,
+    "include_samples": false,
+    "outcome_basis": "net_open_to_open_after_cost",
+    "net_return_basis": "gross_minus_cost",
+    "entry_rule": "available_at_first_tradable_open",
+    "exit_rule": "nth_trading_day_open",
+    "calendar_basis": "index_calendar"
+  },
+  "snapshots": {
+    "requested_days": 4,
+    "with_snapshot": 2,
+    "missing": 2,
+    "usable": 1,
+    "unsupported_version": 1,
+    "malformed": 0,
+    "empty_decision": 0,
+    "corrupt_rows": 0,
+    "non_trading_snapshot_dates": 0
+  },
+  "versions": {
+    "accepted": [
+      "0.7"
+    ],
+    "seen": {
+      "0.6": 1,
+      "0.7": 1
+    },
+    "unsupported_units": 1
+  },
+  "groups": [
+    {
+      "group": "recommended",
+      "label": "推荐",
+      "expected_direction": "up",
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": true,
+          "direction_hit_rate": 1.0,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": 1.0,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "wilson_n": 1,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 0.8700000000000009,
+          "median_net_return_pct": 0.8700000000000009,
+          "p25_net_return_pct": 0.8700000000000009,
+          "p75_net_return_pct": 0.8700000000000009,
+          "reference_line": 0.65,
+          "above_reference": true,
+          "quality": "ok",
+          "expected_direction": "up"
+        },
+        "3": {
+          "observations": 1,
+          "valid": 0,
+          "excluded": 1,
+          "coverage": 0.0,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 1,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "low_confidence",
+          "expected_direction": "up"
+        },
+        "5": {
+          "observations": 1,
+          "valid": 0,
+          "excluded": 1,
+          "coverage": 0.0,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 1,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "low_confidence",
+          "expected_direction": "up"
+        }
+      }
+    },
+    {
+      "group": "not_recommended",
+      "label": "明确不推荐",
+      "expected_direction": "down",
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": true,
+          "direction_hit_rate": 0.0,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": 0.0,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "wilson_n": 1,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 1.8700000000000019,
+          "median_net_return_pct": 1.8700000000000019,
+          "p25_net_return_pct": 1.8700000000000019,
+          "p75_net_return_pct": 1.8700000000000019,
+          "reference_line": 0.65,
+          "above_reference": false,
+          "quality": "ok",
+          "expected_direction": "down"
+        },
+        "3": {
+          "observations": 1,
+          "valid": 0,
+          "excluded": 1,
+          "coverage": 0.0,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 1,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "low_confidence",
+          "expected_direction": "down"
+        },
+        "5": {
+          "observations": 1,
+          "valid": 0,
+          "excluded": 1,
+          "coverage": 0.0,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 1,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "low_confidence",
+          "expected_direction": "down"
+        }
+      }
+    },
+    {
+      "group": "data_insufficient",
+      "label": "数据不足",
+      "expected_direction": null,
+      "horizons": {
+        "1": {
+          "observations": 1,
+          "valid": 1,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 1,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 5.869999999999983,
+          "median_net_return_pct": 5.869999999999983,
+          "p25_net_return_pct": 5.869999999999983,
+          "p75_net_return_pct": 5.869999999999983,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "ok",
+          "expected_direction": null
+        },
+        "3": {
+          "observations": 1,
+          "valid": 0,
+          "excluded": 1,
+          "coverage": 0.0,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 1,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "low_confidence",
+          "expected_direction": null
+        },
+        "5": {
+          "observations": 1,
+          "valid": 0,
+          "excluded": 1,
+          "coverage": 0.0,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 1,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "low_confidence",
+          "expected_direction": null
+        }
+      }
+    }
+  ],
+  "spreads": {
+    "1": {
+      "pair": [
+        "recommended",
+        "not_recommended"
+      ],
+      "basis": "mean_net_return_pct",
+      "value": -1.0000000000000009
+    },
+    "3": {
+      "pair": [
+        "recommended",
+        "not_recommended"
+      ],
+      "basis": "mean_net_return_pct",
+      "value": null
+    },
+    "5": {
+      "pair": [
+        "recommended",
+        "not_recommended"
+      ],
+      "basis": "mean_net_return_pct",
+      "value": null
+    }
+  },
+  "exclusions": {
+    "sample": {
+      "insufficient_horizon": 6
+    },
+    "snapshot": {
+      "duplicate_code": 0,
+      "missing_snapshot": 2,
+      "unparsed_position_pct": 0,
+      "unsupported_snapshot_version": 1
+    }
+  },
+  "caveats": [
+    "方向命中率仅描述历史样本，不构成策略有效性结论",
+    "Wilson 95% 区间假设样本近似独立；同日多只与相邻 horizon 存在相关性，区间偏窄",
+    "prep 分组为决策语义：position_pct=0 表示不建议新建仓，不等于看空"
+  ],
+  "warnings": [
+    "unsupported_snapshot_version: prep 1 日（seen {'0.6': 1, '0.7': 1}）；请先按当前实现重算（prep --recompute / auction --recompute DATE）",
+    "snapshot_missing: 2/4 交易日无快照（仅统计库内持久化快照）"
+  ]
+}

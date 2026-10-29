@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (51), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (52), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 51,
+    "node_count": 52,
     "top_level_count": 15,
     "nodes": [
       {
@@ -416,6 +416,22 @@
           "--min-days",
           "--min-cross-section",
           "--pit-policy",
+          "--json"
+        ]
+      },
+      {
+        "command": "factor decision-review",
+        "flags": [
+          "-h",
+          "--help",
+          "--source",
+          "--from",
+          "--to",
+          "--horizon",
+          "--cost-bps",
+          "--min-days",
+          "--min-group-samples",
+          "--include-samples",
           "--json"
         ]
       },
@@ -882,6 +898,15 @@
         ],
         "notes": ""
       },
+      "factor decision-review": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_factor.py::test_f17_decision_review_prep_groups_coverage_and_golden",
+          "dragon_quant/tests/e2e/test_factor.py::test_f18_decision_review_auction_priority_and_coverage_basis",
+          "dragon_quant/tests/e2e/test_factor.py::test_f19_decision_review_param_errors_and_empty_db",
+          "dragon_quant/tests/e2e/test_factor.py::test_f20_decision_review_is_read_only"
+        ],
+        "notes": "只读冻结快照（不要求 factor build、无新表、不读 review_account）；insufficient_data exit 0。"
+      },
       "factor fin": {
         "tests": [
           "dragon_quant/tests/e2e/test_factor.py::test_f16_group_without_action_exits_2"
@@ -1236,7 +1261,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_51_nodes_and_15_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_52_nodes_and_15_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",

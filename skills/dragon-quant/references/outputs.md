@@ -179,6 +179,16 @@
 - `build` 报告里的 `warnings`、`unverified_rows`、`missing_source` 要如实转述。
 - `prep_review_*`（复盘分因子族）默认关、不参与选股模型排序（因子排序开关仍只读五维/vpa）；`prep_feedback_state` 的 `available_at` 属 close 阶段，不要当成盘中实时信号。影子/评估结论只在跑满影子期后讨论，当前一律按 `insufficient_data` 处理。
 
+### `factor decision-review`（`dr_v1`）
+
+**看到什么**：`groups[]` 里每个组在每个 horizon 的 `observations/valid/coverage/up/down/flat/direction_hit_rate/quality`、`spreads` 差值、`snapshots` 覆盖计数与 `warnings`。
+
+- 只需看组级命中/覆盖/`quality`；`quality` 只表示**样本充足度**（`days`/`valid` 是否达 `min_days`/`min_group_samples`），不代表结论稳健。
+- **不要把 `wilson95` 当显著性检验**：同日多只与相邻 horizon 重叠会让区间偏窄，`wilson_caveat=date_correlated_descriptive_only` 是固定提示。
+- 方向按**扣除 `cost_bps`（默认 13bp）后的净收益**判定；`flat` = 净收益恰为 0（保本），计入分母但永不算命中。`gross_return_pct` 只在 `--include-samples` 的逐样本账本里供审计。
+- `spreads[].value` 是两侧组均值净收益之差；任一侧无样本 → `null`（`-`）。
+- `status=insufficient_data`（含 `no_snapshot_in_range` / `calendar_unavailable`）是有效结论（exit 0）；**不得**据此宣称策略有效。prep `position_pct=0` 只表示不建议新建仓，不等于看空；auction 分母只含已持久化快照。
+
 ## storage
 
 **看到什么**：`status` 显示数据根目录、数据库体积、缓存/结果/日志占用；`size` 显示目录占用；`clear` 显示各类清理数量。

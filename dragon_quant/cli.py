@@ -632,6 +632,43 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     factor_eval.add_argument("--json", dest="json", action="store_true",
                              help="输出完整 JSON（默认人读摘要）")
 
+    # 决策结果回测（只读冻结快照，不要求 factor build）
+    factor_decision = factor_subs.add_parser(
+        "decision-review", help="prep/auction 决策结果回测（分组 × 1/3/5 日）",
+        usage="dragon-quant factor decision-review --source {prep,auction} "
+              "--from D --to D [options]",
+        description="只读冻结快照：把既有 prep/auction 决策按组归因，算可成交"
+                    "开盘→第 N 日开盘、扣 13bp 净收益的方向命中与覆盖率。"
+                    "不要求 factor build、不写任何表；insufficient_data 是有效结论。",
+        epilog="""Examples:
+  dragon-quant factor decision-review --source prep --from 20260501 --to 20260630
+  dragon-quant factor decision-review --source auction --from 20260601 --to 20260630 \\
+      --horizon 1 --json --include-samples
+""",
+    )
+    factor_decision.add_argument("--source", required=True,
+                                 choices=("prep", "auction"),
+                                 help="决策来源（一次只回测一个）")
+    factor_decision.add_argument("--from", dest="from_date", required=True,
+                                 help="区间起始日")
+    factor_decision.add_argument("--to", dest="to_date", required=True,
+                                 help="区间结束日")
+    factor_decision.add_argument("--horizon", dest="horizons", action="append",
+                                 type=int, default=None,
+                                 help="前向交易日数（可重复，默认 1/3/5）")
+    factor_decision.add_argument("--cost-bps", dest="cost_bps", type=float,
+                                 default=13.0, help="往返成本 bp（默认 13）")
+    factor_decision.add_argument("--min-days", dest="min_days", type=int,
+                                 default=20, help="组内有效决策日下限（默认 20）")
+    factor_decision.add_argument("--min-group-samples", dest="min_group_samples",
+                                 type=int, default=30,
+                                 help="组内有效样本下限（默认 30）")
+    factor_decision.add_argument("--include-samples", dest="include_samples",
+                                 action="store_true",
+                                 help="仅 --json：附完整账本 samples[]")
+    factor_decision.add_argument("--json", dest="json", action="store_true",
+                                 help="输出完整 JSON（默认人读摘要）")
+
     # 财务链接（P0.5）：观测 / 回填 / 校准 / 状态
     factor_fin = factor_subs.add_parser(
         "fin", help="财务原始链路：观测/回填/校准/状态",

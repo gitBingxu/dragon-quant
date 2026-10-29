@@ -311,3 +311,36 @@ def evaluate_factor(name: str, date_from: str, date_to: str, *, data,
     # CLI 以 ok 决定退出码；insufficient_data 是有效结论（exit 0），不是失败。
     payload.setdefault("ok", True)
     return payload
+
+
+DECISION_REVIEW_SOURCES = ("prep", "auction")
+
+
+def decision_review(source: str, date_from: str, date_to: str, *, data,
+                    horizons=None, cost_bps: float = 13.0,
+                    min_days: int = 20, min_group_samples: int = 30,
+                    include_samples: bool = False) -> dict:
+    """``factor decision-review``：既有 prep/auction 决策的分组回测（只读）。
+
+    只读冻结快照 + 注入行情，不要求 ``factor build``、不写任何表；参数错误抛
+    ``ValueError``（CLI exit 2），``insufficient_data`` 是有效结论（exit 0）。
+    """
+    from . import decision_review as core
+    from . import decision_review_store as store_mod
+
+    if source not in DECISION_REVIEW_SOURCES:
+        raise ValueError(
+            f"未知决策回测来源: {source!r}（合法值 {' / '.join(DECISION_REVIEW_SOURCES)}）")
+    if data is None:
+        raise ValueError("decision_review 需要注入 data（MarketData 鸭子类型）")
+    start = normalize_date(date_from)
+    end = normalize_date(date_to)
+    if start > end:
+        raise ValueError(f"--from({start}) 不能晚于 --to({end})")
+    adapter = core.build_adapter(source, store_mod.build_store(source))
+    payload = core.run_decision_review(
+        adapter, market=data, date_from=start, date_to=end,
+        horizons=horizons, cost_bps=cost_bps, min_days=min_days,
+        min_group_samples=min_group_samples, include_samples=include_samples)
+    payload.setdefault("ok", True)
+    return payload

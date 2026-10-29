@@ -11,6 +11,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-29 | prep / auction 决策结果回测（factor decision-review：分组 × 1/3/5 日净收益） | [2026-10-29-decision-outcome-review-technical-design.md](factor_framework/2026-10-29-decision-outcome-review-technical-design.md) | `docs/solutions/2026-10-29-decision-outcome-review-technical-design.md` |
+| 2026-10-29 | prep / auction 决策回测调研（快照分组 / 可成交标签 / 覆盖与剔除偏差） | [2026-10-29-decision-outcome-review-research.md](factor_framework/2026-10-29-decision-outcome-review-research.md) | `docs/solutions/2026-10-29-decision-outcome-review-research.md` |
 | 2026-10-22 | 量化因子框架技术方案（issue #28，P0-P2 全部落地；含财务 tmdx delta） | [2026-10-22-factor-framework-design.md](factor_framework/2026-10-22-factor-framework-design.md) | `docs/solutions/2026-10-22-factor-framework-design.md` |
 | 2026-10-22 | 量化因子框架调研（开源候选否决 + 业界规范；结论：混合自研零新增依赖） | [2026-10-22-factor-framework-survey.md](factor_framework/2026-10-22-factor-framework-survey.md) | `docs/research/2026-10-22-factor-framework-survey.md` |
 

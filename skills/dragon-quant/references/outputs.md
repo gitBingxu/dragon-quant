@@ -96,15 +96,24 @@
 
 ## auction
 
-**看到什么**：人读摘要按排名逐只列出等级、强度、方向，并附否决/未验证标记；汇总行给强/中/弱/其他计数。
+**看到什么**：人读摘要按排名逐只列出等级、强度、方向、关键证据与数据状态，并附否决/未验证标记；汇总行给强/中/弱、否决、不可用、失败计数，末尾一行 `validation_status=baseline_unvalidated`。
 
-**`--json` 顶层**：`ok`、`mode`、`trade_date`、`source`、`pool_source`、`fallback_reason`、`candidate_codes`、`saved`、`empty`、`failed`、`quote`、`quote_missing`、`scored_count`、`snapshots`、`snapshot_saved_count`。
+**`--json` 顶层**：旧键（`ok`/`mode`/`trade_date`/`source`/`pool_source`/`fallback_reason`/`candidate_codes`/`saved`/`empty`/`failed`/`quote`/`quote_missing`/`scored_count`/`snapshots`/`snapshot_saved_count` 等）全部保留，末尾新增 `strategy_context`（`auction_sc_v1`）。
 
 - `pool_source=prep`：候选来自严格 T-1 的复盘推荐；`pool_source=legacy` 表示回退到最近若干交易日的龙头并集。
 - `fallback_reason`：`no_snapshot` / `snapshot_read_error` / `calendar` / `empty_snapshot` / `no_eligible` / `all_ignored` 等。回退时这批候选不是今天的盘前重点，解读要降权。
-- `unverified=true`：口径尚未实测验证，`strength`/`level`/`direction` 只能当诊断值，不能当决策依据；此时 `rank` 通常为空。
-- `is_weak=true`：否决闸门触发，不是“低分档位”；`reject_reason` 给原因。`reject_reason` 为“竞价明细缺失”时是数据不足，不等于确认看空。
+- `data_quality.status`：`ok`（五维完整）/ `degraded`（可评价但缺非必要输入，`rank=null`，`rank_reason=partial_data`）/ `unavailable`（必要输入缺失，`strength/level=null`，**不是看空**）。稳定原因码见 `data_quality.reason_codes`。
+- `risk_events[]`：盘口估计事件（含 `veto`），不是订单级成交。只有 `limit_down_queue_sell` / `high_position_green_increasing` / `strong_to_weak` 三个核心窗口或静态价格事实事件会 veto；`cancel_spoof_pre20` 等 09:20 前证据永不 veto。
+- `is_weak=true`：真实风险 veto，不是“低分档位”；`reject_reason` 给原因。`is_weak=false` 且 `unavailable` 时是数据不足，不等于确认看空。
+- legacy `unverified=true`：**本次评价不可用**（数据不足/无法计算），分数只能当诊断值；模型未验证由 `validation_status=baseline_unvalidated` 单独表达，不等于本次数据不可用。
 - `empty` 是“没有盘口”，`failed` 是“采集失败”，都不是“弱”。`ok=true` 也不等于有数据。
+
+**盘中预案（`strategy_context.positions[]`）**：
+- 只读 `positions[]` 与其中 `actions[]`；上下文缺失时只输出旧摘要，并说明「没有结构化策略上下文，无法给出条件化盘中预案」。
+- `status` 区分：`scored`（可评价）/ `vetoed`（真实风险）/ `unavailable`、`empty`、`failed`、`unknown`（数据不足，不是看空）；`data_quality.status="degraded"` 表示可评价但不完整（`rank=null`），不能与 `unavailable` 混为一谈。
+- `actions[]` 只有 `observe` / `await_confirmation` / `flag_risk` / `request_data` 四类；每条必须带 `requires`，09:30 后的检查点必须 `requires="post_open"` 且文本是条件句（「若…则观察…」），不得写成已发生事实。
+- 预案最多 4 条，必须是 `actions[]` 的原文或等价改写。禁止承诺胜率、禁止输出买入/卖出/加仓/减仓/清仓/目标价，禁止把 `validation_status=baseline_unvalidated` 省略。
+- 若用户同时要求对照昨日计划，可**另行只读** T-1 `prep` 的 `strategy_context.positions[].expectations` 并排展示；auction 输出不嵌入也不重算 prep 预期，缺失就写「无 T-1 预期」，不得补造阈值。
 
 ## buy
 

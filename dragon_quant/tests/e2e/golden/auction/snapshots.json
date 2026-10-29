@@ -1,114 +1,1115 @@
 [
   {
+    "actions": [
+      {
+        "condition": "post_open_price >= official_open_px",
+        "kind": "observe",
+        "requires": "post_open",
+        "text": "观察开盘后能否维持在 10.0 上方"
+      }
+    ],
     "code": "600001",
+    "config_hash": "d16623308182",
+    "config_version": "auction_v2_baseline",
+    "data_quality": {
+      "completeness": 1.0,
+      "reason_codes": [
+        "history_insufficient",
+        "tail_window_short"
+      ],
+      "reasons": [
+        {
+          "code": "history_insufficient",
+          "field": "volume_ratio_5d",
+          "severity": "warning"
+        },
+        {
+          "code": "tail_window_short",
+          "field": "tail",
+          "severity": "warning"
+        }
+      ],
+      "status": "ok"
+    },
     "dims": {
       "direction": {
         "details": {
-          "open_pct": 7.0,
-          "open_score": 80.0,
-          "slope_score": 100.0
+          "open": 30.0,
+          "post20": 85.0,
+          "slippage": 0.0,
+          "sub_missing": []
         },
         "dim": "direction",
-        "score": 90.0,
+        "effective_weight": 0.25,
+        "label": "价格表态",
+        "score": 42.0,
+        "status": "scored",
         "weight": 0.25
+      },
+      "liquidity": {
+        "details": {
+          "amount": 70.0,
+          "sub_missing": [],
+          "turnover": 100.0
+        },
+        "dim": "liquidity",
+        "effective_weight": 0.2,
+        "label": "竞价流动性",
+        "score": 89.5,
+        "status": "scored",
+        "weight": 0.2
       },
       "supply": {
         "details": {
-          "imb": 0.042,
-          "tail_med": 225.0,
-          "weak_to_strong": false
+          "change": 50.0,
+          "change_ratio": 0.0,
+          "conversion": 50.0,
+          "ratio": 60.0,
+          "sell_pressure_capped": false,
+          "sub_missing": []
         },
         "dim": "supply",
-        "score": 67.1,
-        "weight": 0.3
+        "effective_weight": 0.25,
+        "label": "供需与转换",
+        "score": 54.5,
+        "status": "scored",
+        "weight": 0.25
       },
       "tail_grab": {
         "details": {
-          "event": "无"
+          "accel": 96.19992266387375,
+          "return": 85.0,
+          "sub_missing": [],
+          "unmatched": 0.0
         },
         "dim": "tail_grab",
-        "score": 50.0,
-        "weight": 0.2
+        "effective_weight": 0.1,
+        "label": "末段执行",
+        "score": 78.97,
+        "status": "scored",
+        "weight": 0.1
       },
       "vol_price": {
         "details": {
-          "agree_ratio": 1.0,
-          "turnover_pct": 0.067
+          "agree": 100.0,
+          "divergence": 100.0,
+          "sub_missing": []
         },
         "dim": "vol_price",
-        "score": 60.89,
-        "weight": 0.25
+        "effective_weight": 0.2,
+        "label": "量价协同",
+        "score": 100.0,
+        "status": "scored",
+        "weight": 0.2
       }
     },
-    "direction": "bull",
+    "direction": "neutral",
+    "evidence": {
+      "core_sample_count": 8,
+      "event_density_ratio": 0.08,
+      "final_unmatched_lots_signed": 150.0,
+      "float_shares": 76190476.1905,
+      "float_shares_source": "quote.float_market_cap/quote.price",
+      "last_indicative_price": 10.7,
+      "last_matched_lots": 50000.0,
+      "last_time": "09:25:00",
+      "market": "sh",
+      "official_open_px": 10.0,
+      "prev_close": 10.0,
+      "quote_fields_used": [
+        "prev_close",
+        "open_px",
+        "limit_up",
+        "limit_down",
+        "float_market_cap",
+        "price"
+      ],
+      "sample_count": 10
+    },
     "is_weak": false,
     "level": "中",
-    "rank": null,
+    "pre_veto_strength": 69.92,
+    "rank": 1,
+    "rank_reason": null,
+    "raw_factors": {
+      "amount_estimated": true,
+      "amount_source": "official_open",
+      "auction_amount_estimated": 50000000.0,
+      "auction_turnover_pct": 6.5625,
+      "effective_open_gap_pct": 0.0,
+      "effective_open_source": "official",
+      "event_density_ratio": 0.08,
+      "final_indicative_slippage_pct": -6.5421,
+      "final_unmatched_lots_signed": 150.0,
+      "final_unmatched_matched_ratio": 0.003,
+      "float_shares": 76190476.1905,
+      "float_shares_source": "quote.float_market_cap/quote.price",
+      "last_indicative_gap_pct": 7.0,
+      "last_indicative_price": 10.7,
+      "last_matched_lots": 50000.0,
+      "last_time": "09:25:00",
+      "matched_at_0920_lots": 12000.0,
+      "official_open_gap_pct": 0.0,
+      "official_open_px": 10.0,
+      "post20_matched_delta_lots": 38000.0,
+      "post20_matched_rate": 126.6667,
+      "post20_max_drawdown_pct": 0.0,
+      "post20_price_return_pct": 1.9048,
+      "post20_unmatched_change": 0.0,
+      "pre20_cancel_estimate": 0.0,
+      "price_flat_ratio": 0.0,
+      "strong_to_weak": false,
+      "tail_absorption_strength": null,
+      "tail_matched_acceleration": 3.6,
+      "tail_matched_delta_lots": 18000.0,
+      "tail_price_return_pct": 0.7533,
+      "tail_unmatched_change": -150.0,
+      "unique_price_ratio": 1.0,
+      "vol_price_agree_ratio": 1.0,
+      "volume_price_divergence": false,
+      "volume_ratio_5d": null,
+      "volume_ratio_history_n": 0,
+      "volume_ratio_partial": null,
+      "weak_to_strong": false
+    },
+    "reference_prices": {
+      "effective_open": 10.0,
+      "effective_open_source": "official",
+      "last_indicative": 10.7,
+      "limit_down": 9.0,
+      "limit_up": 11.0,
+      "official_open": 10.0,
+      "prev_close": 10.0
+    },
     "reject_reason": null,
-    "strength": 67.85,
-    "unverified": true,
-    "version": "1"
+    "risk_events": [
+      {
+        "code": "600001",
+        "event_id": "tail_matched_spike@09:25:00",
+        "evidence": {
+          "tail_matched_acceleration": 3.6
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": "tail_grab",
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:00",
+          "09:25:00"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:21:00",
+        "evidence": {
+          "from_price": 10.5,
+          "to_price": 10.52
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:20:00",
+          "09:21:00"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:22:00",
+        "evidence": {
+          "from_price": 10.52,
+          "to_price": 10.55
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:21:00",
+          "09:22:00"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:23:00",
+        "evidence": {
+          "from_price": 10.55,
+          "to_price": 10.58
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:22:00",
+          "09:23:00"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:24:00",
+        "evidence": {
+          "from_price": 10.58,
+          "to_price": 10.62
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:23:00",
+          "09:24:00"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:24:30",
+        "evidence": {
+          "from_price": 10.62,
+          "to_price": 10.66
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:00",
+          "09:24:30"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:24:45",
+        "evidence": {
+          "from_price": 10.66,
+          "to_price": 10.68
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:30",
+          "09:24:45"
+        ]
+      },
+      {
+        "code": "600001",
+        "event_id": "queue_hidden_or_repriced@09:25:00",
+        "evidence": {
+          "from_price": 10.68,
+          "to_price": 10.7
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:45",
+          "09:25:00"
+        ]
+      }
+    ],
+    "semantics": {
+      "confidence": "protocol_plus_real_sample",
+      "core_window": [
+        "09:20:00",
+        "09:25:00"
+      ],
+      "matched_kind": "cumulative_virtual_match",
+      "matched_unit": "lots",
+      "pre_window": [
+        "09:15:00",
+        "09:20:00"
+      ],
+      "price_source": "official_open_px",
+      "semantics_version": "auction_sem_2026_10_29",
+      "unmatched_sign": "positive_is_buy_remainder"
+    },
+    "strength": 69.92,
+    "unverified": false,
+    "validation_status": "baseline_unvalidated",
+    "version": "2",
+    "windows": {
+      "core": {
+        "end": "09:25:00",
+        "n": 8,
+        "start": "09:20:00"
+      },
+      "pre": {
+        "end": "09:18:00",
+        "n": 2,
+        "start": "09:15:00"
+      },
+      "tail": {
+        "end": "09:25:00",
+        "extended": true,
+        "n": 4,
+        "start": "09:24:00"
+      }
+    }
   },
   {
+    "actions": [
+      {
+        "condition": "post_open_price >= official_open_px",
+        "kind": "observe",
+        "requires": "post_open",
+        "text": "观察开盘后能否维持在 10.0 上方"
+      }
+    ],
     "code": "600002",
+    "config_hash": "d16623308182",
+    "config_version": "auction_v2_baseline",
+    "data_quality": {
+      "completeness": 1.0,
+      "reason_codes": [
+        "history_insufficient",
+        "tail_window_short"
+      ],
+      "reasons": [
+        {
+          "code": "history_insufficient",
+          "field": "volume_ratio_5d",
+          "severity": "warning"
+        },
+        {
+          "code": "tail_window_short",
+          "field": "tail",
+          "severity": "warning"
+        }
+      ],
+      "status": "ok"
+    },
     "dims": {
       "direction": {
         "details": {
-          "open_pct": -2.2,
-          "open_score": 20.0,
-          "slope_score": 0.0
+          "open": 30.0,
+          "post20": 20.0,
+          "slippage": 90.0,
+          "sub_missing": []
         },
         "dim": "direction",
-        "score": 10.0,
+        "effective_weight": 0.25,
+        "label": "价格表态",
+        "score": 36.0,
+        "status": "scored",
         "weight": 0.25
+      },
+      "liquidity": {
+        "details": {
+          "amount": 50.0,
+          "sub_missing": [],
+          "turnover": 100.0
+        },
+        "dim": "liquidity",
+        "effective_weight": 0.2,
+        "label": "竞价流动性",
+        "score": 82.5,
+        "status": "scored",
+        "weight": 0.2
       },
       "supply": {
         "details": {
-          "imb": -0.1167,
-          "tail_med": -225.0,
-          "weak_to_strong": false
+          "change": 50.0,
+          "change_ratio": 0.0,
+          "conversion": 50.0,
+          "ratio": 45.0,
+          "sell_pressure_capped": false,
+          "sub_missing": []
         },
         "dim": "supply",
-        "score": 29.17,
-        "weight": 0.3
+        "effective_weight": 0.25,
+        "label": "供需与转换",
+        "score": 47.75,
+        "status": "scored",
+        "weight": 0.25
       },
       "tail_grab": {
         "details": {
-          "event": "无"
+          "accel": 83.04820237218405,
+          "return": 40.0,
+          "sub_missing": [],
+          "unmatched": 100.0
         },
         "dim": "tail_grab",
-        "score": 50.0,
-        "weight": 0.2
+        "effective_weight": 0.1,
+        "label": "末段执行",
+        "score": 74.83,
+        "status": "scored",
+        "weight": 0.1
       },
       "vol_price": {
         "details": {
-          "agree_ratio": 0.0,
-          "turnover_pct": 0.022
+          "agree": 0.0,
+          "divergence": 0.0,
+          "sub_missing": []
         },
         "dim": "vol_price",
-        "score": 0.29,
-        "weight": 0.25
+        "effective_weight": 0.2,
+        "label": "量价协同",
+        "score": 0.0,
+        "status": "scored",
+        "weight": 0.2
       }
     },
-    "direction": "bear",
+    "direction": "neutral",
+    "evidence": {
+      "core_sample_count": 8,
+      "event_density_ratio": 0.08,
+      "final_unmatched_lots_signed": -150.0,
+      "float_shares": 81799591.002,
+      "float_shares_source": "quote.float_market_cap/quote.price",
+      "last_indicative_price": 9.78,
+      "last_matched_lots": 18000.0,
+      "last_time": "09:25:00",
+      "market": "sh",
+      "official_open_px": 10.0,
+      "prev_close": 10.0,
+      "quote_fields_used": [
+        "prev_close",
+        "open_px",
+        "limit_up",
+        "limit_down",
+        "float_market_cap",
+        "price"
+      ],
+      "sample_count": 10
+    },
     "is_weak": false,
-    "level": "弱",
-    "rank": null,
+    "level": "中",
+    "pre_veto_strength": 44.92,
+    "rank": 2,
+    "rank_reason": null,
+    "raw_factors": {
+      "amount_estimated": true,
+      "amount_source": "official_open",
+      "auction_amount_estimated": 18000000.0,
+      "auction_turnover_pct": 2.2005,
+      "effective_open_gap_pct": 0.0,
+      "effective_open_source": "official",
+      "event_density_ratio": 0.08,
+      "final_indicative_slippage_pct": 2.2495,
+      "final_unmatched_lots_signed": -150.0,
+      "final_unmatched_matched_ratio": -0.0083,
+      "float_shares": 81799591.002,
+      "float_shares_source": "quote.float_market_cap/quote.price",
+      "last_indicative_gap_pct": -2.2,
+      "last_indicative_price": 9.78,
+      "last_matched_lots": 18000.0,
+      "last_time": "09:25:00",
+      "matched_at_0920_lots": 5000.0,
+      "official_open_gap_pct": 0.0,
+      "official_open_px": 10.0,
+      "post20_matched_delta_lots": 13000.0,
+      "post20_matched_rate": 43.3333,
+      "post20_max_drawdown_pct": -1.2121,
+      "post20_price_return_pct": -1.2121,
+      "post20_unmatched_change": 0.0,
+      "pre20_cancel_estimate": 0.0,
+      "price_flat_ratio": 0.0,
+      "strong_to_weak": false,
+      "tail_absorption_strength": null,
+      "tail_matched_acceleration": 2.5,
+      "tail_matched_delta_lots": 5000.0,
+      "tail_price_return_pct": -0.4073,
+      "tail_unmatched_change": 150.0,
+      "unique_price_ratio": 1.0,
+      "vol_price_agree_ratio": 0.0,
+      "volume_price_divergence": true,
+      "volume_ratio_5d": null,
+      "volume_ratio_history_n": 0,
+      "volume_ratio_partial": null,
+      "weak_to_strong": false
+    },
+    "reference_prices": {
+      "effective_open": 10.0,
+      "effective_open_source": "official",
+      "last_indicative": 9.78,
+      "limit_down": 9.0,
+      "limit_up": 11.0,
+      "official_open": 10.0,
+      "prev_close": 10.0
+    },
     "reject_reason": null,
-    "strength": 21.32,
-    "unverified": true,
-    "version": "1"
+    "risk_events": [
+      {
+        "code": "600002",
+        "event_id": "volume_price_divergence@09:25:00",
+        "evidence": {
+          "tail_matched_acceleration": 2.5,
+          "tail_price_return_pct": -0.4073
+        },
+        "family": "risk",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": "vol_price",
+        "severity": "medium",
+        "veto": false,
+        "window": [
+          "09:20:00",
+          "09:25:00"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "tail_matched_spike@09:25:00",
+        "evidence": {
+          "tail_matched_acceleration": 2.5
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": "tail_grab",
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:00",
+          "09:25:00"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:21:00",
+        "evidence": {
+          "from_price": 9.9,
+          "to_price": 9.88
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:20:00",
+          "09:21:00"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:22:00",
+        "evidence": {
+          "from_price": 9.88,
+          "to_price": 9.86
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:21:00",
+          "09:22:00"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:23:00",
+        "evidence": {
+          "from_price": 9.86,
+          "to_price": 9.84
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:22:00",
+          "09:23:00"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:24:00",
+        "evidence": {
+          "from_price": 9.84,
+          "to_price": 9.82
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:23:00",
+          "09:24:00"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:24:30",
+        "evidence": {
+          "from_price": 9.82,
+          "to_price": 9.8
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:00",
+          "09:24:30"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:24:45",
+        "evidence": {
+          "from_price": 9.8,
+          "to_price": 9.79
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:30",
+          "09:24:45"
+        ]
+      },
+      {
+        "code": "600002",
+        "event_id": "queue_hidden_or_repriced@09:25:00",
+        "evidence": {
+          "from_price": 9.79,
+          "to_price": 9.78
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:45",
+          "09:25:00"
+        ]
+      }
+    ],
+    "semantics": {
+      "confidence": "protocol_plus_real_sample",
+      "core_window": [
+        "09:20:00",
+        "09:25:00"
+      ],
+      "matched_kind": "cumulative_virtual_match",
+      "matched_unit": "lots",
+      "pre_window": [
+        "09:15:00",
+        "09:20:00"
+      ],
+      "price_source": "official_open_px",
+      "semantics_version": "auction_sem_2026_10_29",
+      "unmatched_sign": "positive_is_buy_remainder"
+    },
+    "strength": 44.92,
+    "unverified": false,
+    "validation_status": "baseline_unvalidated",
+    "version": "2",
+    "windows": {
+      "core": {
+        "end": "09:25:00",
+        "n": 8,
+        "start": "09:20:00"
+      },
+      "pre": {
+        "end": "09:18:00",
+        "n": 2,
+        "start": "09:15:00"
+      },
+      "tail": {
+        "end": "09:25:00",
+        "extended": true,
+        "n": 4,
+        "start": "09:24:00"
+      }
+    }
   },
   {
+    "actions": [
+      {
+        "event_id": "limit_down_queue_sell@09:25:00",
+        "kind": "flag_risk",
+        "text": "标记跌停价排队卖风险（09:25:00）"
+      }
+    ],
     "code": "600003",
-    "dims": {},
+    "config_hash": "d16623308182",
+    "config_version": "auction_v2_baseline",
+    "data_quality": {
+      "completeness": 1.0,
+      "reason_codes": [
+        "history_insufficient",
+        "tail_window_short"
+      ],
+      "reasons": [
+        {
+          "code": "history_insufficient",
+          "field": "volume_ratio_5d",
+          "severity": "warning"
+        },
+        {
+          "code": "tail_window_short",
+          "field": "tail",
+          "severity": "warning"
+        }
+      ],
+      "status": "ok"
+    },
+    "dims": {
+      "direction": {
+        "details": {
+          "open": 30.0,
+          "post20": 0.0,
+          "slippage": 90.0,
+          "sub_missing": []
+        },
+        "dim": "direction",
+        "effective_weight": 0.25,
+        "label": "价格表态",
+        "score": 30.0,
+        "status": "scored",
+        "weight": 0.25
+      },
+      "liquidity": {
+        "details": {
+          "amount": 10.0,
+          "sub_missing": [],
+          "turnover": 85.0
+        },
+        "dim": "liquidity",
+        "effective_weight": 0.2,
+        "label": "竞价流动性",
+        "score": 58.75,
+        "status": "scored",
+        "weight": 0.2
+      },
+      "supply": {
+        "details": {
+          "change": 34.44444444444444,
+          "change_ratio": -0.15555555555555556,
+          "conversion": 50.0,
+          "ratio": 30.0,
+          "sell_pressure_capped": false,
+          "sub_missing": []
+        },
+        "dim": "supply",
+        "effective_weight": 0.25,
+        "label": "供需与转换",
+        "score": 35.56,
+        "status": "scored",
+        "weight": 0.25
+      },
+      "tail_grab": {
+        "details": {
+          "accel": 89.6240625180289,
+          "return": 40.0,
+          "sub_missing": [],
+          "unmatched": 0.0
+        },
+        "dim": "tail_grab",
+        "effective_weight": 0.1,
+        "label": "末段执行",
+        "score": 63.77,
+        "status": "scored",
+        "weight": 0.1
+      },
+      "vol_price": {
+        "details": {
+          "agree": 0.0,
+          "divergence": 0.0,
+          "sub_missing": []
+        },
+        "dim": "vol_price",
+        "effective_weight": 0.2,
+        "label": "量价协同",
+        "score": 0.0,
+        "status": "scored",
+        "weight": 0.2
+      }
+    },
     "direction": "neutral",
+    "evidence": {
+      "core_sample_count": 8,
+      "event_density_ratio": 0.08,
+      "final_unmatched_lots_signed": -1000.0,
+      "float_shares": 88888888.8889,
+      "float_shares_source": "quote.float_market_cap/quote.price",
+      "last_indicative_price": 9.0,
+      "last_matched_lots": 4500.0,
+      "last_time": "09:25:00",
+      "market": "sh",
+      "official_open_px": 10.0,
+      "prev_close": 10.0,
+      "quote_fields_used": [
+        "prev_close",
+        "open_px",
+        "limit_up",
+        "limit_down",
+        "float_market_cap",
+        "price"
+      ],
+      "sample_count": 10
+    },
     "is_weak": true,
     "level": "弱",
+    "pre_veto_strength": 34.52,
     "rank": null,
-    "reject_reason": "0.4 跌停价排队卖",
+    "rank_reason": "vetoed",
+    "raw_factors": {
+      "amount_estimated": true,
+      "amount_source": "official_open",
+      "auction_amount_estimated": 4500000.0,
+      "auction_turnover_pct": 0.5062,
+      "effective_open_gap_pct": 0.0,
+      "effective_open_source": "official",
+      "event_density_ratio": 0.08,
+      "final_indicative_slippage_pct": 11.1111,
+      "final_unmatched_lots_signed": -1000.0,
+      "final_unmatched_matched_ratio": -0.2222,
+      "float_shares": 88888888.8889,
+      "float_shares_source": "quote.float_market_cap/quote.price",
+      "last_indicative_gap_pct": -10.0,
+      "last_indicative_price": 9.0,
+      "last_matched_lots": 4500.0,
+      "last_time": "09:25:00",
+      "matched_at_0920_lots": 1000.0,
+      "official_open_gap_pct": 0.0,
+      "official_open_px": 10.0,
+      "post20_matched_delta_lots": 3500.0,
+      "post20_matched_rate": 11.6667,
+      "post20_max_drawdown_pct": -5.2632,
+      "post20_price_return_pct": -5.2632,
+      "post20_unmatched_change": -700.0,
+      "pre20_cancel_estimate": 0.0,
+      "price_flat_ratio": 0.1429,
+      "strong_to_weak": false,
+      "tail_absorption_strength": null,
+      "tail_matched_acceleration": 3.0,
+      "tail_matched_delta_lots": 1500.0,
+      "tail_price_return_pct": -0.2217,
+      "tail_unmatched_change": -300.0,
+      "unique_price_ratio": 0.875,
+      "vol_price_agree_ratio": 0.0,
+      "volume_price_divergence": true,
+      "volume_ratio_5d": null,
+      "volume_ratio_history_n": 0,
+      "volume_ratio_partial": null,
+      "weak_to_strong": false
+    },
+    "reference_prices": {
+      "effective_open": 10.0,
+      "effective_open_source": "official",
+      "last_indicative": 9.0,
+      "limit_down": 9.0,
+      "limit_up": 11.0,
+      "official_open": 10.0,
+      "prev_close": 10.0
+    },
+    "reject_reason": "跌停价排队卖",
+    "risk_events": [
+      {
+        "code": "600003",
+        "event_id": "limit_down_queue_sell@09:25:00",
+        "evidence": {
+          "extreme_sell": false,
+          "front_sell_max": 700.0,
+          "limit_down": 9.0,
+          "near_limit": true,
+          "tail_sell_max": 1000.0
+        },
+        "family": "risk",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": "supply",
+        "severity": "high",
+        "veto": true,
+        "window": [
+          "09:24:00",
+          "09:25:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "volume_price_divergence@09:25:00",
+        "evidence": {
+          "tail_matched_acceleration": 3.0,
+          "tail_price_return_pct": -0.2217
+        },
+        "family": "risk",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": "vol_price",
+        "severity": "medium",
+        "veto": false,
+        "window": [
+          "09:20:00",
+          "09:25:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "tail_matched_spike@09:25:00",
+        "evidence": {
+          "tail_matched_acceleration": 3.0
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": "tail_grab",
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:00",
+          "09:25:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "queue_hidden_or_repriced@09:21:00",
+        "evidence": {
+          "from_price": 9.5,
+          "to_price": 9.2
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:20:00",
+          "09:21:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "queue_hidden_or_repriced@09:22:00",
+        "evidence": {
+          "from_price": 9.2,
+          "to_price": 9.1
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:21:00",
+          "09:22:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "queue_hidden_or_repriced@09:23:00",
+        "evidence": {
+          "from_price": 9.1,
+          "to_price": 9.05
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:22:00",
+          "09:23:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "queue_hidden_or_repriced@09:24:00",
+        "evidence": {
+          "from_price": 9.05,
+          "to_price": 9.02
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:23:00",
+          "09:24:00"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "queue_hidden_or_repriced@09:24:30",
+        "evidence": {
+          "from_price": 9.02,
+          "to_price": 9.01
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:00",
+          "09:24:30"
+        ]
+      },
+      {
+        "code": "600003",
+        "event_id": "queue_hidden_or_repriced@09:24:45",
+        "evidence": {
+          "from_price": 9.01,
+          "to_price": 9.0
+        },
+        "family": "context",
+        "note": "盘口估计，不是订单级成交",
+        "owner_dim": null,
+        "severity": "info",
+        "veto": false,
+        "window": [
+          "09:24:30",
+          "09:24:45"
+        ]
+      }
+    ],
+    "semantics": {
+      "confidence": "protocol_plus_real_sample",
+      "core_window": [
+        "09:20:00",
+        "09:25:00"
+      ],
+      "matched_kind": "cumulative_virtual_match",
+      "matched_unit": "lots",
+      "pre_window": [
+        "09:15:00",
+        "09:20:00"
+      ],
+      "price_source": "official_open_px",
+      "semantics_version": "auction_sem_2026_10_29",
+      "unmatched_sign": "positive_is_buy_remainder"
+    },
     "strength": 0.0,
-    "unverified": true,
-    "version": "1"
+    "unverified": false,
+    "validation_status": "baseline_unvalidated",
+    "version": "2",
+    "windows": {
+      "core": {
+        "end": "09:25:00",
+        "n": 8,
+        "start": "09:20:00"
+      },
+      "pre": {
+        "end": "09:18:00",
+        "n": 2,
+        "start": "09:15:00"
+      },
+      "tail": {
+        "end": "09:25:00",
+        "extended": true,
+        "n": 4,
+        "start": "09:24:00"
+      }
+    }
   }
 ]

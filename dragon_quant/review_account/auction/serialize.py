@@ -1,12 +1,11 @@
-"""auction.serialize — 竞价原始资产/结果的 JSON 序列化（纯函数）。
+"""auction.serialize — 竞价原始资产与 v2 结果序列化（纯函数）。
 
 职责边界：
   - 只做 Quote ↔ dict、AuctionVerdict → dict，不触碰存储层；
   - 输出仅含 JSON 原生类型（dict/list/str/int/float/bool/None）；
-  - 非有限浮点按上下文处理：
-      * Quote 快照 / ScoreResult.details：清洗为 ``None``（原始资产允许未知值）；
-      * 契约数值字段（strength / score / weight）：抛 ``ValueError``，
-        由调用方隔离为该股写入失败，**不得**写 null 污染契约。
+  - 非有限浮点一律清洗为 ``None``（``strength`` / ``level`` / ``dims.*.score``
+    允许 null，不再用 0 / 50 冒充）；
+  - ``version`` 固定字符串 ``"2"``；旧键顺序保留，新增键只追加。
 """
 
 from __future__ import annotations
@@ -18,14 +17,14 @@ from typing import Any, Optional
 from dragon_quant.infra.models import Quote
 from dragon_quant.review_account.auction.types import AuctionVerdict
 
+from .features import PIT_QUOTE_FIELDS
+
 
 class QuotePayloadError(ValueError):
     """quote_json 存在但无法还原为 Quote（损坏 / 关键字段缺失）。"""
 
 
-# quote 还原的必填字段：评分器实际消费的三个数值 + 代码身份。
 _REQUIRED_QUOTE_FIELDS = ("code", "prev_close", "limit_down", "float_market_cap")
-
 _STR_FIELDS = {"code", "name"}
 _INT_FIELDS = {"timestamp"}
 _OPTIONAL_FIELDS = {"main_net_amount"}
@@ -41,13 +40,20 @@ def sanitize_json(value: Any) -> Any:
         return [sanitize_json(v) for v in value]
     if value is None or isinstance(value, (str, int, bool)):
         return value
-    if hasattr(value, "item"):          # numpy 标量等：不引入依赖，尽力还原
+    if hasattr(value, "item"):
         return sanitize_json(value.item())
     raise TypeError(f"不支持 JSON 序列化的类型: {type(value).__name__}")
 
 
+def _nullable(value: Any) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _as_float(value: Any, strict_name: Optional[str] = None) -> float:
-    """None / 非有限 → 0.0；``strict_name`` 用于必填数值字段，非法即抛错。"""
     if value is None:
         return 0.0
     try:
@@ -72,20 +78,18 @@ def _as_int(value: Any) -> int:
         return 0
 
 
+def quote_pit_fields() -> tuple:
+    """允许进入竞价评分的行情字段（PIT 白名单，方案 §6.1）。"""
+    return PIT_QUOTE_FIELDS
+
+
 def quote_to_payload(quote: Optional[Quote]) -> Optional[dict]:
-    """Quote → JSON 原生 dict；非有限浮点清洗为 None。None → None。"""
     if quote is None:
         return None
     return sanitize_json(asdict(quote))
 
 
 def quote_from_payload(payload: Optional[dict]) -> Optional[Quote]:
-    """dict → Quote；None → None；损坏/必填缺失 → QuotePayloadError。
-
-    - 必填：code / prev_close / limit_down / float_market_cap；
-    - 可空数值字段按 0.0 还原（与 TDX `_f` 口径一致），main_net_amount 保持 None；
-    - 未知键忽略（前向兼容）。
-    """
     if payload is None:
         return None
     if not isinstance(payload, dict):
@@ -114,36 +118,49 @@ def quote_from_payload(payload: Optional[dict]) -> Optional[Quote]:
     return Quote(**kwargs)
 
 
-def _finite(value: Any, field_name: str) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} 不是数值: {value!r}") from exc
-    if not math.isfinite(number):
-        raise ValueError(f"{field_name} 非有限值: {value!r}")
-    return number
+def _dim_payload(item) -> dict:
+    return {
+        "dim": item.dim,
+        "label": item.label,
+        "score": _nullable(item.score),
+        "weight": _nullable(item.weight),
+        "effective_weight": _nullable(item.effective_weight),
+        "status": item.status,
+        "details": sanitize_json(item.details),
+    }
 
 
 def verdict_to_payload(verdict: AuctionVerdict) -> dict:
-    """AuctionVerdict → assets_db.analysis_json 契约 dict（version 固定 "1"）。"""
-    dims: dict[str, dict] = {}
-    for name, result in verdict.dims.items():
-        dims[name] = {
-            "dim": result.dim,
-            "score": _finite(result.score, f"dims.{name}.score"),
-            "weight": _finite(result.weight, f"dims.{name}.weight"),
-            "details": sanitize_json(result.details),
-        }
-    rank = None if verdict.rank is None else int(verdict.rank)
+    """AuctionVerdict → ``analysis_json`` v2 契约 dict（旧键顺序保留）。"""
+    dims = {name: _dim_payload(item) for name, item in verdict.dims.items()}
+    quality = verdict.data_quality
     return {
-        "version": "1",
+        "version": "2",
         "code": verdict.code,
         "is_weak": bool(verdict.is_weak),
-        "strength": _finite(verdict.strength, "strength"),
+        "strength": _nullable(verdict.strength),
         "direction": verdict.direction,
         "level": verdict.level,
         "dims": dims,
         "reject_reason": verdict.reject_reason,
         "unverified": bool(verdict.unverified),
-        "rank": rank,
+        "rank": None if verdict.rank is None else int(verdict.rank),
+        "rank_reason": verdict.rank_reason,
+        "pre_veto_strength": _nullable(verdict.pre_veto_strength),
+        "validation_status": verdict.validation_status,
+        "config_version": verdict.config_version,
+        "config_hash": verdict.config_hash,
+        "semantics": sanitize_json(dict(verdict.semantics)),
+        "data_quality": {
+            "status": quality.status,
+            "completeness": _nullable(quality.completeness),
+            "reason_codes": list(quality.reason_codes),
+            "reasons": sanitize_json([dict(r) for r in quality.reasons]),
+        },
+        "risk_events": [event.as_dict() for event in verdict.risk_events],
+        "raw_factors": sanitize_json(dict(verdict.raw_factors)),
+        "evidence": sanitize_json(dict(verdict.evidence)),
+        "reference_prices": sanitize_json(dict(verdict.reference_prices)),
+        "windows": sanitize_json(dict(verdict.windows)),
+        "actions": sanitize_json([dict(a) for a in verdict.actions]),
     }

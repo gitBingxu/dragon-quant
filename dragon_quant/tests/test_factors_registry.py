@@ -168,14 +168,14 @@ class TestRegistryValidation(unittest.TestCase):
     def test_builtin_count_and_names(self):
         from dragon_quant.infra.factor.registry import spec_names
         names = set(spec_names())
-        # 18 = 五维 7 + vpa 5 + 财务 6；P1.5 prep 7 + auction 8；M6 review 18。
-        self.assertEqual(len(names), 51)
+        # 18 = 五维 7 + vpa 5 + 财务 6；P1.5 prep 7 + auction 17；M6 review 18。
+        self.assertEqual(len(names), 60)
         fin_names = {"fin_bps", "fin_roe", "fin_net_margin", "fin_net_profit_yoy",
                      "fin_revenue_yoy", "fin_net_assets"}
         self.assertEqual(names & fin_names, fin_names)
         prep_auction = {name for name in names
                         if name.startswith(("prep_", "auction_"))}
-        self.assertEqual(len(prep_auction), 33)
+        self.assertEqual(len(prep_auction), 42)
         # 财务 / prep / auction 因子默认关：build without --only 不得静默计算
         from dragon_quant.infra.factor.registry import get_spec
         self.assertTrue(all(not get_spec(name).default_enabled

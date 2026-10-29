@@ -1,8 +1,9 @@
-"""dragon_quant.tests.test_auction_serialize — 竞价序列化契约与 NaN 清洗。"""
+"""dragon_quant.tests.test_auction_serialize — v2 契约与 null / NaN 清洗。"""
 
+import json
 import unittest
 
-from dragon_quant.infra.models import Quote, ScoreResult
+from dragon_quant.infra.models import Quote
 from dragon_quant.review_account.auction import AuctionVerdict
 from dragon_quant.review_account.auction.serialize import (
     QuotePayloadError,
@@ -11,6 +12,7 @@ from dragon_quant.review_account.auction.serialize import (
     sanitize_json,
     verdict_to_payload,
 )
+from dragon_quant.review_account.auction.types import DataQuality, DimensionScore
 
 
 def _quote(**overrides):
@@ -27,16 +29,30 @@ def _quote(**overrides):
     return Quote(**values)
 
 
-def _verdict(**overrides):
+def _dims(**overrides):
     dims = {
-        "direction": ScoreResult(dim="direction", score=70.0, weight=0.25,
-                                 details={"open_pct": 1.5, "nan": float("nan")}),
-        "supply": ScoreResult(dim="supply", score=80.0, weight=0.30, details={}),
-        "vol_price": ScoreResult(dim="vol_price", score=65.0, weight=0.25, details={}),
-        "tail_grab": ScoreResult(dim="tail_grab", score=60.0, weight=0.20, details={}),
+        "direction": DimensionScore("direction", "价格表态", 70.0, 0.25, 0.25, "scored",
+                                    {"nan": float("nan")}),
+        "liquidity": DimensionScore("liquidity", "竞价流动性", 55.0, 0.20, 0.20),
+        "supply": DimensionScore("supply", "供需与转换", 80.0, 0.25, 0.25),
+        "vol_price": DimensionScore("vol_price", "量价协同", 65.0, 0.20, 0.20),
+        "tail_grab": DimensionScore("tail_grab", "末段执行", 60.0, 0.10, 0.10),
     }
+    dims.update(overrides)
+    return dims
+
+
+def _verdict(**overrides):
     values = dict(code="600172", is_weak=False, strength=72.5, direction="bull",
-                  level="强", dims=dims, reject_reason=None, unverified=True, rank=None)
+                  level="强", dims=_dims(), reject_reason=None, unverified=False,
+                  rank=None, rank_reason=None, pre_veto_strength=72.5,
+                  validation_status="baseline_unvalidated",
+                  config_version="auction_v2_baseline", config_hash="d16623308182",
+                  semantics={"semantics_version": "auction_sem_2026_10_29"},
+                  data_quality=DataQuality("ok", 1.0), risk_events=[],
+                  raw_factors={"official_open_gap_pct": 2.0}, evidence={"market": "sh"},
+                  reference_prices={"prev_close": 10.0}, windows={"core": {"n": 3}},
+                  actions=[{"kind": "observe", "text": "观察"}])
     values.update(overrides)
     return AuctionVerdict(**values)
 
@@ -57,8 +73,7 @@ class TestSanitizeJson(unittest.TestCase):
 class TestQuotePayload(unittest.TestCase):
     def test_roundtrip(self):
         quote = _quote()
-        payload = quote_to_payload(quote)
-        self.assertEqual(quote_from_payload(payload), quote)
+        self.assertEqual(quote_from_payload(quote_to_payload(quote)), quote)
 
     def test_nan_and_inf_cleaned(self):
         payload = quote_to_payload(_quote(price=float("nan"), pe=float("inf")))
@@ -112,54 +127,75 @@ class TestQuotePayload(unittest.TestCase):
 
 
 class TestVerdictPayload(unittest.TestCase):
-    def test_contract_fields(self):
+    def test_contract_fields_and_key_order(self):
         payload = verdict_to_payload(_verdict())
-        self.assertEqual(set(payload), {
+        self.assertEqual(list(payload), [
             "version", "code", "is_weak", "strength", "direction", "level",
-            "dims", "reject_reason", "unverified", "rank",
-        })
-        self.assertEqual(payload["version"], "1")
+            "dims", "reject_reason", "unverified", "rank", "rank_reason",
+            "pre_veto_strength", "validation_status", "config_version",
+            "config_hash", "semantics", "data_quality", "risk_events",
+            "raw_factors", "evidence", "reference_prices", "windows", "actions",
+        ])
+        self.assertEqual(payload["version"], "2")
         self.assertIsNone(payload["rank"])
         self.assertEqual(set(payload["dims"]), {
-            "direction", "supply", "vol_price", "tail_grab",
+            "direction", "liquidity", "supply", "vol_price", "tail_grab",
         })
         self.assertEqual(set(payload["dims"]["direction"]),
-                         {"dim", "score", "weight", "details"})
+                         {"dim", "label", "score", "weight", "effective_weight",
+                          "status", "details"})
         self.assertIsNone(payload["dims"]["direction"]["details"]["nan"])
+
+    def test_null_strength_and_level_are_legal(self):
+        payload = verdict_to_payload(_verdict(strength=None, level=None,
+                                              unverified=True,
+                                              data_quality=DataQuality(
+                                                  "unavailable", 0.0,
+                                                  [{"code": "prev_close_missing",
+                                                    "severity": "unavailable",
+                                                    "field": "quote.prev_close"}])))
+        self.assertIsNone(payload["strength"])
+        self.assertIsNone(payload["level"])
+        self.assertEqual(payload["data_quality"]["status"], "unavailable")
+        self.assertEqual(payload["data_quality"]["reason_codes"],
+                         ["prev_close_missing"])
+        # 可 JSON 落库（allow_nan=False）
+        json.dumps(payload, ensure_ascii=False, allow_nan=False)
+
+    def test_non_finite_numeric_cleaned_to_null(self):
+        payload = verdict_to_payload(_verdict(strength=float("nan")))
+        self.assertIsNone(payload["strength"])
+        bad = _dims()
+        bad["supply"] = DimensionScore("supply", "供需与转换", float("inf"),
+                                       0.25, 0.25)
+        payload = verdict_to_payload(_verdict(dims=bad))
+        self.assertIsNone(payload["dims"]["supply"]["score"])
 
     def test_rank_serialized(self):
         self.assertEqual(verdict_to_payload(_verdict(rank=2))["rank"], 2)
 
-    def test_non_finite_contract_numeric_raises(self):
-        with self.assertRaises(ValueError):
-            verdict_to_payload(_verdict(strength=float("nan")))
-        bad_dims = dict(_verdict().dims)
-        bad_dims["supply"] = ScoreResult(dim="supply", score=float("inf"),
-                                         weight=0.30, details={})
-        with self.assertRaises(ValueError):
-            verdict_to_payload(_verdict(dims=bad_dims))
-
 
 class TestScorePipelineOrder(unittest.TestCase):
     def test_rank_is_serialized_after_ranking(self):
-        """evaluate → rank_auctions → payload：rank 不得因顺序错误丢失。"""
-        from unittest.mock import patch
-        from dragon_quant.review_account.auction import registry as R
+        """evaluate → rank → payload：rank 不得因顺序错误丢失。"""
         from dragon_quant.review_account.auction.main import _score_auction_assets
 
         items = [
-            {"time": "09:20:00", "price": 10.0, "matched": 100, "unmatched": 100},
-            {"time": "09:24:30", "price": 10.0, "matched": 200, "unmatched": 200},
-            {"time": "09:25:00", "price": 10.0, "matched": 300, "unmatched": 300},
+            {"time": "09:20:00", "price": 10.0, "matched": 1000, "unmatched": 100},
+            {"time": "09:23:00", "price": 10.1, "matched": 2000, "unmatched": 200},
+            {"time": "09:24:30", "price": 10.1, "matched": 3000, "unmatched": 200},
+            {"time": "09:25:00", "price": 10.2, "matched": 4000, "unmatched": 300},
         ]
         assets = [
             {"code": "600001", "items": items, "quote": _quote(code="600001")},
             {"code": "600002", "items": items, "quote": _quote(code="600002")},
         ]
-        with patch.object(R, "SEMANTICS_VERIFIED", True):
-            payloads, failures, _ = _score_auction_assets(assets)
+        payloads, failures, _ = _score_auction_assets(assets)
         self.assertEqual(failures, [])
         self.assertEqual({p["rank"] for p in payloads.values()}, {1, 2})
+        for payload in payloads.values():
+            self.assertEqual(payload["version"], "2")
+            self.assertEqual(payload["data_quality"]["status"], "ok")
 
 
 if __name__ == "__main__":

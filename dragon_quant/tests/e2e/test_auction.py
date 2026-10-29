@@ -39,18 +39,20 @@ COLLECT_KEYS = [
     "days_ignored", "lookback_dates", "candidate_codes", "saved_count", "saved",
     "empty", "failed", "quote", "quote_missing", "asset_read_error",
     "scored_count", "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
-    "snapshot_error", "snapshots",
+    "snapshot_error", "snapshots", "strategy_context",
 ]
 EMPTY_KEYS = [
     "ok", "mode", "trade_date", "source", "pool_source", "fallback_reason",
     "prep_snapshot_date", "prep_unavailable_reason", "pool_empty",
     "candidate_codes", "recommended_count", "ignore_reason_count",
     "ignore_reason_samples", "prep_degraded", "days_ignored", "message",
+    "strategy_context",
 ]
 RECOMPUTE_KEYS = [
     "ok", "mode", "trade_date", "source", "asset_count", "usable_count",
     "skipped_empty", "quote_missing", "scored_count", "snapshot_saved_count",
     "snapshot_ok", "snapshot_skipped", "snapshot_error", "failed", "snapshots",
+    "strategy_context",
 ]
 QUOTE_KEYS = [
     "code", "name", "price", "prev_close", "open_px", "high", "low", "pct",
@@ -61,7 +63,8 @@ QUOTE_KEYS = [
 ]
 SUMMARY_KEYS = [
     "code", "is_weak", "strength", "direction", "level", "unverified", "rank",
-    "reject_reason",
+    "reject_reason", "data_quality_status", "risk_event_codes", "rank_reason",
+    "validation_status", "config_version", "evidence_summary",
 ]
 
 
@@ -157,7 +160,31 @@ def auction_snapshots(box: EnvSandbox) -> list[dict]:
 
 
 def snapshot_summaries(rows: list[dict]) -> list[dict]:
-    return [{key: row.get(key) for key in SUMMARY_KEYS} for row in rows]
+    from dragon_quant.review_account.auction.context import (
+        evidence_summary_from_payload,
+    )
+
+    summaries = []
+    for row in rows:
+        quality = row.get("data_quality") or {}
+        summaries.append({
+            "code": row.get("code"),
+            "is_weak": row.get("is_weak"),
+            "strength": row.get("strength"),
+            "direction": row.get("direction"),
+            "level": row.get("level"),
+            "unverified": row.get("unverified"),
+            "rank": row.get("rank"),
+            "reject_reason": row.get("reject_reason"),
+            "data_quality_status": quality.get("status"),
+            "risk_event_codes": [event["event_id"].split("@")[0]
+                                 for event in (row.get("risk_events") or [])],
+            "rank_reason": row.get("rank_reason"),
+            "validation_status": row.get("validation_status"),
+            "config_version": row.get("config_version"),
+            "evidence_summary": evidence_summary_from_payload(row),
+        })
+    return summaries
 
 
 def seed_prep_pool(box: EnvSandbox, candidates: list[dict] | None = None) -> None:
@@ -436,9 +463,11 @@ def test_a11_tdx_quote_miss_falls_back_to_tencent_and_marks_missing():
         assert payload["scored_count"] == 3
         snapshots = {item["code"]: item for item in payload["snapshots"]}
         assert snapshots["600001"]["reject_reason"] is None
-        assert snapshots["600002"]["is_weak"] is True
-        assert snapshots["600002"]["reject_reason"] == "0.4 数据不足，无法清除否决"
-        assert snapshots["600003"]["reject_reason"] == "0.4 数据不足，无法清除否决"
+        assert snapshots["600002"]["is_weak"] is False
+        assert snapshots["600002"]["strength"] is None
+        assert snapshots["600002"]["data_quality_status"] == "unavailable"
+        assert "prev_close_missing" in snapshots["600002"]["evidence_summary"]
+        assert snapshots["600003"]["data_quality_status"] == "unavailable"
 
 
 def test_a11b_total_quote_failure_still_scores_with_quote_missing():
@@ -458,7 +487,9 @@ def test_a11b_total_quote_failure_still_scores_with_quote_missing():
         assert payload["quote"]["degraded"] is True
         assert payload["quote"]["reason"] == "empty"
         assert payload["quote_missing"] == ["600001", "600002", "600003"]
-        assert all(item["is_weak"] is True for item in payload["snapshots"])
+        assert all(item["is_weak"] is False for item in payload["snapshots"])
+        assert all(item["data_quality_status"] == "unavailable"
+                   for item in payload["snapshots"])
         assert payload["snapshot_saved_count"] == 3
 
 

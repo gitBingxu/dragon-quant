@@ -109,9 +109,13 @@ def _fin_values(index: int) -> dict:
 
 #: Registered factor names (reviewed from ``factor list --json``; sorted).
 EXPECTED_FACTOR_NAMES = (
-    "auction_dim_direction", "auction_dim_supply", "auction_dim_tail_grab",
-    "auction_dim_vol_price", "auction_direction", "auction_is_weak",
-    "auction_rank", "auction_strength", "fin_bps", "fin_net_assets",
+    "auction_dim_direction", "auction_dim_liquidity", "auction_dim_supply",
+    "auction_dim_tail_grab", "auction_dim_vol_price", "auction_direction",
+    "auction_final_slippage_pct", "auction_is_weak", "auction_open_gap_pct",
+    "auction_rank", "auction_strength", "auction_strong_to_weak",
+    "auction_tail_matched_acceleration", "auction_turnover_pct",
+    "auction_unmatched_matched_ratio", "auction_volume_ratio_5d",
+    "auction_weak_to_strong", "fin_bps", "fin_net_assets",
     "fin_net_margin", "fin_net_profit_yoy", "fin_revenue_yoy", "fin_roe",
     "five_dim_absorption", "five_dim_anti_drop", "five_dim_composite",
     "five_dim_drive", "five_dim_is_true_dragon", "five_dim_leadership",

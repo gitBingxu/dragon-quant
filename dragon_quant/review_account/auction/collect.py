@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from dragon_quant.review_account.auction.context import build_strategy_context
 from dragon_quant.review_account.auction.dates import _today
-from dragon_quant.review_account.auction.scoring import _score_auction_assets
+from dragon_quant.review_account.auction.scoring import evaluate_batch
 from dragon_quant.review_account.auction.types import AuctionOutcome
 
 
@@ -111,6 +112,38 @@ def _fetch_auction_quotes(codes: list[str], services=None) -> tuple[dict, dict]:
         report["degraded"] = True
         report["reason"] = "partial"
     return quote_map, report
+
+
+def _render_names(by_code, persisted, saved) -> dict:
+    names: dict = {}
+    for item in ([*(persisted or []), *saved]):
+        code = item.get("code")
+        name = item.get("name") or ""
+        if code and name and not names.get(code):
+            names[code] = name
+    for code, name in (by_code or {}).items():
+        if code and name and not names.get(code):
+            names[code] = name
+    return names
+
+
+def _load_history(assets_db, trade_date: str, score_inputs, warnings) -> dict:
+    """只读历史末点匹配量（量比）；失败按缺失处理，不中断采集。"""
+    try:
+        return assets_db.list_auction_history(
+            trade_date, codes=[asset["code"] for asset in score_inputs],
+            limit=5) or {}
+    except Exception as exc:
+        warnings.append("⚠️ 竞价历史读取失败，量比按缺失处理"
+                        f"（{type(exc).__name__}: {exc}）")
+        return {}
+
+
+def _score_inputs(assets_db, trade_date, score_inputs, by_code,
+                  persisted, saved, warnings):
+    names = _render_names(by_code, persisted, saved)
+    history = _load_history(assets_db, trade_date, score_inputs, warnings)
+    return evaluate_batch(score_inputs, history=history, names=names)
 
 
 def run_auction(*, pool: str = "prep", days=None, services=None,
@@ -215,6 +248,12 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
 
     if not by_code:
         ignore_reasons = ctx.get("ignore_reasons") or []
+        empty_pool = {
+            "source": ctx.get("pool_source"),
+            "fallback_reason": ctx.get("fallback_reason"),
+            "snapshot_date": ctx.get("prep_snapshot_date"),
+            "candidate_codes": 0,
+        }
         payload = {
             "ok": True, "mode": "collect", "trade_date": trade_date, "source": source,
             "pool_source": ctx.get("pool_source"),
@@ -228,6 +267,10 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
             "prep_degraded": bool(ctx.get("prep_degraded")),
             "days_ignored": days_ignored,
             "message": "prep 与 legacy 均无可用候选，本次不采集竞价数据",
+            "strategy_context": build_strategy_context(
+                trade_date, mode="collect", evaluations=[], names={},
+                failed=[], empty=[], candidate_codes=[], pool=empty_pool,
+                empty_reason="pool_empty"),
         }
         if ctx.get("prep_degraded"):
             warnings.append("⚠️ 本次未采集竞价原始资产（不可再生），可能因 prep 数据降级，"
@@ -316,7 +359,8 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
             score_inputs.append({"code": code, "items": asset["items"],
                                  "quote": score_quote})
 
-    payloads, score_failures, summaries = _score_auction_assets(score_inputs)
+    payloads, score_failures, summaries, evaluations = _score_inputs(
+        assets_db, trade_date, score_inputs, by_code, persisted, saved, warnings)
     failed.extend(score_failures)
     snapshot_saved_count, snapshot_error, snapshot_skipped = 0, None, None
     if payloads:
@@ -334,6 +378,15 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
     ok = not failed and snapshot_error is None and snapshot_ok
     if saved and not snapshot_ok:
         warnings.append("⚠️ 竞价原始资产已写入，但快照未产出；请检查 failed/snapshot_error")
+
+    names = _render_names(by_code, persisted, saved)
+    strategy_context = build_strategy_context(
+        trade_date, mode="collect", evaluations=evaluations, names=names,
+        failed=failed, empty=empty, candidate_codes=codes,
+        pool={"source": ctx.get("pool_source"),
+              "fallback_reason": ctx.get("fallback_reason"),
+              "snapshot_date": ctx.get("prep_snapshot_date"),
+              "candidate_codes": len(codes)})
 
     payload = {
         "ok": ok,
@@ -361,17 +414,8 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
         "snapshot_skipped": snapshot_skipped,
         "snapshot_error": snapshot_error,
         "snapshots": [summaries[c] for c in sorted(summaries)],
+        "strategy_context": strategy_context,
     }
-
-    names: dict = {}
-    for item in ([*(persisted or []), *saved]):
-        code = item.get("code")
-        name = item.get("name") or ""
-        if code and name and not names.get(code):
-            names[code] = name
-    for code, name in by_code.items():
-        if code and name and not names.get(code):
-            names[code] = name
 
     exit_code = 1 if (len(saved) == 0 and (failed or snapshot_error)) else 0
     return AuctionOutcome(payload=payload, exit_code=exit_code, render_names=names,

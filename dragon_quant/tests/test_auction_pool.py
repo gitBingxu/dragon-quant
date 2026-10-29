@@ -82,6 +82,9 @@ class TestAuctionPool(unittest.TestCase):
                 "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=[]))
             stack.enter_context(patch(
+                "dragon_quant.infra.assets.db.list_auction_history",
+                return_value={}))
+            stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 return_value=0))
             stack.enter_context(redirect_stdout(buf))
@@ -170,7 +173,7 @@ class TestAuctionPool(unittest.TestCase):
             "fallback_reason", "prep_snapshot_date", "prep_unavailable_reason",
             "pool_empty", "candidate_codes", "recommended_count",
             "ignore_reason_count", "ignore_reason_samples", "prep_degraded",
-            "days_ignored", "message",
+            "days_ignored", "message", "strategy_context",
         ])
 
     def test_no_snapshot_falls_back(self):

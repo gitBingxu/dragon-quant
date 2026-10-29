@@ -457,6 +457,68 @@ def list_auction_assets(trade_date: str) -> list[dict]:
         conn.close()
 
 
+def list_auction_history(before_date: str, codes=None,
+                         limit: int = 5) -> dict[str, dict]:
+    """只读历史末点匹配量（供竞价量比），绝不建库 / 建表 / 写库。
+
+    返回 ``{code: {"dates": [...], "last_matched_lots": [...]}}``：取
+    ``trade_date < before_date`` 的**不同交易日**降序最多 ``limit`` 个；某日某
+    code 无资产则不计入该 code 的 ``history_n``。损坏行逐行跳过。
+    """
+    conn = _connect(create=False)
+    if conn is None:
+        return {}
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='auction_assets'"
+        ).fetchone()
+        if not exists:
+            return {}
+        date_rows = conn.execute(
+            "SELECT DISTINCT trade_date FROM auction_assets "
+            "WHERE trade_date < ? ORDER BY trade_date DESC LIMIT ?",
+            (before_date, int(limit)),
+        ).fetchall()
+        dates = [row[0] for row in date_rows]
+        if not dates:
+            return {}
+        placeholders = ",".join("?" for _ in dates)
+        params = list(dates)
+        query = (f"SELECT trade_date, code, items_json FROM auction_assets "
+                 f"WHERE trade_date IN ({placeholders})")
+        wanted = {str(code) for code in (codes or []) if code}
+        if wanted:
+            query += " AND code IN (" + ",".join("?" for _ in wanted) + ")"
+            params.extend(sorted(wanted))
+        rows = conn.execute(query, params).fetchall()
+        result: dict[str, dict] = {}
+        order = {date: position for position, date in enumerate(dates)}
+        collected: dict[str, list] = {}
+        for trade_date, code, items_json in rows:
+            items, error = _load_json(items_json, [])
+            if error or not isinstance(items, list) or not items:
+                continue
+            last = items[-1]
+            if not isinstance(last, dict):
+                continue
+            try:
+                value = float(last.get("matched"))
+            except (TypeError, ValueError):
+                continue
+            if value != value or not (value > 0):
+                continue
+            collected.setdefault(str(code), []).append((trade_date, value))
+        for code, values in collected.items():
+            values.sort(key=lambda pair: order.get(pair[0], 0))
+            result[code] = {
+                "dates": [pair[0] for pair in values],
+                "last_matched_lots": [pair[1] for pair in values],
+            }
+        return result
+    finally:
+        conn.close()
+
+
 # ─── auction 强度快照 ──────────────────────────────────────────────────────
 
 

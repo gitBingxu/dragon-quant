@@ -73,7 +73,7 @@ metadata:
 按命令的解读重点：
 
 - `prep`：默认是市场摘要 + 逐只标的清单；仓位/等级来自复盘快照，仅供人工参考，不参与下单。需要完整结构时用 `--json`；问「明天买什么」时按「明日操盘策略」六段输出。
-- `auction`：逐只看强度、方向、等级、是否否决、是否未验证；`unverified` 为真时分数只能当诊断值，不能当决策依据；`pool_source`/`fallback_reason` 说明候选池是不是今天的盘前推荐。
+- `auction`：逐只看强度、方向、等级、`data_quality.status`、是否真实风险否决（`is_weak`）；legacy `unverified=true` 表示**本次评价不可用**（数据不足），分数只能当诊断值；模型未验证由 `validation_status=baseline_unvalidated` 单独表达。`pool_source`/`fallback_reason` 说明候选池是不是今天的盘前推荐；`strategy_context.positions[].actions[]` 是条件化盘中观察动作（observe/await_confirmation/flag_risk/request_data），不是买卖指令。
 - `buy`：先看有没有买入信号，再看 `ranking_mode`、`fallback_reason`、`data_quality`；四类买点诊断在 `details[].checks`，状态分为通过/失败/待定/窗口已过/不可用/跳过，不要把“跳过”说成“失败”。
 - `sell`：按人读输出解释卖出、减半仓或继续持有；`partial` 表示减半不是清仓；当天买入的仓位不会出现在卖出建议里。
 - `review-account`：终端没有 JSON；重点看数据质量三态与降级天数，兜底成交价是保守近似，不等于真实成交。

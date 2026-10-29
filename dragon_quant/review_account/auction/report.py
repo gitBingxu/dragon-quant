@@ -1,19 +1,17 @@
 """auction.report — 集合竞价人读摘要（纯函数，无 I/O）。
 
-CLI 展示层的默认策略：把 ``_snapshot_summary()`` 产出的 dict 渲染为
-「标题 + 逐只强弱 + 汇总」。``--json`` 模式完全不经过本模块，JSON 契约
-由 ``_cmd_auction`` / ``_cmd_auction_recompute`` 原样构造。
+CLI 默认展示：标题 + 逐只「排名/代码/名称/等级/强度/方向/关键证据/数据状态」
++ 汇总（强/中/弱；否决；不可用；失败）。旧前缀与旧快照兼容：缺少 v2 键时
+退化为旧格式，不插入空 token。
 
-约定：
-  - 本模块不 print、不 exit、不读环境；
-  - 名称只用于展示，缺失时不插入空 token；
-  - 空 snapshots 区分「无候选 / 采集层全失败 / 评分层全失败 / 全空盘口」。
+约束（方案 §12.4）：不出现买卖词、不写建议/仓位；「未验证」只表示本次评价不可用。
 """
 
 from __future__ import annotations
 
 _DIRECTION_LABELS = {"bull": "偏多", "bear": "偏空", "neutral": "中性"}
 _LEVELS = ("强", "中", "弱")
+_VALIDATION_NOTE = "ℹ️ validation_status=baseline_unvalidated（阈值为待验证基线，不构成投资建议）"
 
 
 def _code_of(snapshot: dict) -> str:
@@ -22,7 +20,7 @@ def _code_of(snapshot: dict) -> str:
 
 def _strength_of(snapshot: dict) -> float:
     raw = snapshot.get("strength")
-    if raw is None:          # None 原本走 float(None) 的 TypeError 兜底
+    if raw is None:
         return 0.0
     try:
         return float(raw)
@@ -32,9 +30,9 @@ def _strength_of(snapshot: dict) -> float:
 
 def _strength_text(snapshot: dict) -> str:
     raw = snapshot.get("strength")
+    if raw is None or (snapshot.get("is_weak") and _strength_of(snapshot) == 0.0):
+        return "—"
     try:
-        if raw is None:      # None 原本走 float(None) 的 TypeError 兜底
-            raise ValueError("missing strength")
         return f"{float(raw):.1f}"
     except (TypeError, ValueError):
         return "—"
@@ -62,8 +60,29 @@ def sort_snapshots(snapshots: list[dict]) -> list[dict]:
     return sorted(snapshots, key=_sort_key)
 
 
+def _data_status_text(snapshot: dict) -> str | None:
+    status = snapshot.get("data_quality_status")
+    if status is None:
+        return None
+    if status == "ok":
+        return "数据 ok"
+    if status == "degraded":
+        return "数据部分缺失"
+    evidence = snapshot.get("evidence_summary")
+    return evidence if evidence and str(evidence).startswith("数据不足") else "数据不足"
+
+
+def _evidence_text(snapshot: dict) -> str | None:
+    if snapshot.get("data_quality_status") is None:
+        return None
+    evidence = snapshot.get("evidence_summary")
+    if not evidence or str(evidence).startswith("数据不足"):
+        return None
+    return str(evidence)
+
+
 def format_verdict_line(snapshot: dict, name: str = "") -> str:
-    """单只判定：`1. 600001 甲 强 78.3 偏多[｜否决：…][｜未验证]`。"""
+    """单只判定：旧前缀行 + v2 证据 / 数据状态（若存在）。"""
     rank = snapshot.get("rank")
     if rank is not None:
         prefix = f"{rank}."
@@ -84,16 +103,27 @@ def format_verdict_line(snapshot: dict, name: str = "") -> str:
     line = " ".join(tokens)
     if snapshot.get("is_weak"):
         line += f"｜否决：{snapshot.get('reject_reason') or '未说明原因'}"
+
+    extras = []
+    evidence = _evidence_text(snapshot)
+    if evidence:
+        extras.append(evidence)
+    status = _data_status_text(snapshot)
+    if status:
+        extras.append(status)
+    if extras:
+        line += "｜" + "｜".join(extras)
+
     if snapshot.get("unverified"):
         line += "｜未验证"
     return line
 
 
 def format_summary(snapshots: list[dict], failed_count: int = 0) -> str:
-    """强/中/弱/其他计数 + 全量未验证计数；failed_count>0 时附「详情加 --json」。"""
+    """强/中/弱 + 否决/不可用/失败/未验证计数（v2）；旧快照只出旧计数字段。"""
     counts = {level: 0 for level in _LEVELS}
-    other = 0
-    unverified = 0
+    other = veto = unavailable = unverified = 0
+    has_v2 = False
     for snapshot in snapshots:
         level = snapshot.get("level")
         if level in counts:
@@ -102,14 +132,24 @@ def format_summary(snapshots: list[dict], failed_count: int = 0) -> str:
             other += 1
         if snapshot.get("unverified"):
             unverified += 1
+        if snapshot.get("is_weak"):
+            veto += 1
+        if snapshot.get("data_quality_status") == "unavailable":
+            unavailable += 1
+        if snapshot.get("data_quality_status") is not None:
+            has_v2 = True
 
     parts = [f"强 {counts['强']} / 中 {counts['中']} / 弱 {counts['弱']}"]
-    if other:
+    if other and not has_v2:
         parts.append(f"其他 {other}")
-    if unverified:
-        parts.append(f"未验证 {unverified}")
+    if veto:
+        parts.append(f"否决 {veto}")
+    if unavailable:
+        parts.append(f"不可用 {unavailable}")
     if failed_count:
-        parts.append(f"采集失败 {failed_count}（详情加 --json）")
+        parts.append(f"失败 {failed_count}")
+    if unverified and not has_v2:
+        parts.append(f"未验证 {unverified}")
     return "汇总：" + "；".join(parts)
 
 
@@ -189,4 +229,6 @@ def format_auction_report(
         for snapshot in sort_snapshots(snapshots)
     )
     lines.append(format_summary(snapshots, failed_count=failed_count))
+    if any(snapshot.get("validation_status") for snapshot in snapshots):
+        lines.append(_VALIDATION_NOTE)
     return lines

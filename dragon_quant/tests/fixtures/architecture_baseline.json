@@ -668,35 +668,71 @@
   },
   "factor_versions": {
     "auction_dim_direction": [
-      "v6e5e1f6b6156",
+      "vf1a74a1a9d4a",
+      "source"
+    ],
+    "auction_dim_liquidity": [
+      "v4697838be42c",
       "source"
     ],
     "auction_dim_supply": [
-      "ve915348c2d8a",
+      "v12c1d6ae7de7",
       "source"
     ],
     "auction_dim_tail_grab": [
-      "vf425de75f773",
+      "vbc87203454ac",
       "source"
     ],
     "auction_dim_vol_price": [
-      "v0791015087c5",
+      "v240a8f939eaf",
       "source"
     ],
     "auction_direction": [
-      "vf27a4c8bd111",
+      "vf74ec48fdf3e",
+      "source"
+    ],
+    "auction_final_slippage_pct": [
+      "ve7780cc8dabe",
       "source"
     ],
     "auction_is_weak": [
-      "vce29f9e06774",
+      "v61c25a319c47",
+      "source"
+    ],
+    "auction_open_gap_pct": [
+      "v21d57a4d577a",
       "source"
     ],
     "auction_rank": [
-      "v25b67ded45ea",
+      "v738084e25ed2",
       "source"
     ],
     "auction_strength": [
-      "vb94ad38c4877",
+      "vec6a8c865362",
+      "source"
+    ],
+    "auction_strong_to_weak": [
+      "v60b136cb7ec0",
+      "source"
+    ],
+    "auction_tail_matched_acceleration": [
+      "v501aab828b95",
+      "source"
+    ],
+    "auction_turnover_pct": [
+      "v6d81c08a09df",
+      "source"
+    ],
+    "auction_unmatched_matched_ratio": [
+      "v84fa35d723d2",
+      "source"
+    ],
+    "auction_volume_ratio_5d": [
+      "v958efd935cc7",
+      "source"
+    ],
+    "auction_weak_to_strong": [
+      "vee13e6ce7d03",
       "source"
     ],
     "fin_bps": [
@@ -883,9 +919,9 @@
     "assets/status_clean.json": "1ec4c3bc0e992d98f185aca237c6744dcb995ebf45a4a81723496e6541e66037",
     "auction/assets.json": "91962844bf44cdea5ad89a976500226e9e1eec2a0e54af91ffd7a6e827ad7629",
     "auction/calls.json": "94ab53dde21d8e7c44a10bc383d8fc693dec6cfee6c941c935c001fceb1b0c09",
-    "auction/json_collect.json": "15bdaa0004f012ba113ea3426bc741ca95c41720b2ddf6918a399f624ac6131b",
-    "auction/snapshots.json": "d72ac1c2a9708da072c78ccd0fdc6b339ea52e47fa5fe5caacfb09debc4f90fa",
-    "auction/stdout_collect.txt": "ce09805775c6f1f4c1e7f1cf72323b752fa9e9e4595e94c3c2e58d3cb6cfbb97",
+    "auction/json_collect.json": "ce47ee5a771aeced620f5636d7879831f6cac121ffd287f3ff5ea25512fc0498",
+    "auction/snapshots.json": "14937f3588d9e7a2a7a5c4ab4bc34e14a16be0577f3edb45be04b9acdbc64570",
+    "auction/stdout_collect.txt": "a24e8accb674a8633d7576c7581e3fd84a0d3e5906537ea151e1120d1403d4aa",
     "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
     "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",
     "factor/export_matrix.csv": "46655b3c09b4aaf6fc0c6281a74d6694dca6d302968b79eb9d2682c104682a1c",

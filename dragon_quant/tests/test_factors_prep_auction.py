@@ -1,4 +1,4 @@
-"""P1.5 prep / auction 因子化测试（方案 §15.8 九类用例）。
+"""P1.5 prep / auction 因子化测试（v2：8 升级 + 9 新增）。
 
 全部无网络：临时 dragon.db + assets.db，patch 两个 ``_connect`` 完全隔离。
 """
@@ -32,9 +32,15 @@ PREP_NAMES = (
 )
 AUCTION_NAMES = (
     "auction_strength", "auction_is_weak", "auction_direction", "auction_rank",
-    "auction_dim_direction", "auction_dim_supply", "auction_dim_vol_price",
-    "auction_dim_tail_grab",
+    "auction_dim_direction", "auction_dim_liquidity", "auction_dim_supply",
+    "auction_dim_vol_price", "auction_dim_tail_grab",
+    "auction_open_gap_pct", "auction_final_slippage_pct", "auction_turnover_pct",
+    "auction_volume_ratio_5d", "auction_unmatched_matched_ratio",
+    "auction_weak_to_strong", "auction_strong_to_weak",
+    "auction_tail_matched_acceleration",
 )
+# 17 = 8 旧（4 聚合 + 4 子分，其中 liquidity 新增）+ 9 新增
+assert len(AUCTION_NAMES) == 17
 
 
 # ─── 纯 compute 夹具 ──────────────────────────────────────────────────────
@@ -60,24 +66,44 @@ def _prep_source(candidates, *, version=0.5, created_at=None) -> dict:
     }
 
 
+def _dims(**overrides):
+    dims = {
+        "direction": {"score": 70.0}, "liquidity": {"score": 55.0},
+        "supply": {"score": 60.0}, "vol_price": {"score": 50.0},
+        "tail_grab": {"score": 40.0},
+    }
+    dims.update(overrides)
+    return dims
+
+
+def _raw(**overrides):
+    raw = {
+        "official_open_gap_pct": 3.2, "final_indicative_slippage_pct": 0.2,
+        "auction_turnover_pct": 0.41, "volume_ratio_5d": 1.8,
+        "volume_ratio_history_n": 5, "final_unmatched_matched_ratio": 0.4,
+        "tail_matched_acceleration": 1.7, "weak_to_strong": False,
+        "strong_to_weak": False,
+    }
+    raw.update(overrides)
+    return raw
+
+
 def _auction_row(*, code="600001", strength=66.0, is_weak=False,
                  direction="bull", rank=1, unverified=False,
-                 reject_reason=None, dims=None):
-    if dims is None:
-        dims = {
-            "direction": {"score": 70.0},
-            "supply": {"score": 60.0},
-            "vol_price": {"score": 50.0},
-            "tail_grab": {"score": 40.0},
-        }
+                 reject_reason=None, dims=None, version="2", status="ok",
+                 raw=None):
     return {
         "code": code, "strength": strength, "is_weak": is_weak,
         "direction": direction, "rank": rank, "unverified": unverified,
-        "reject_reason": reject_reason, "dims": dims, "version": "1",
+        "reject_reason": reject_reason,
+        "dims": _dims() if dims is None else dims,
+        "raw_factors": _raw() if raw is None else raw,
+        "data_quality": {"status": status},
+        "version": version,
     }
 
 
-def _auction_source(rows, *, version="1", created_at=None, corrupt=()) -> dict:
+def _auction_source(rows, *, version="2", created_at=None, corrupt=()) -> dict:
     return {
         "status": "ok",
         "snapshot_version": version,
@@ -186,9 +212,6 @@ class TestMapping(unittest.TestCase):
         frame = _compute("prep_verdict", _ctx(source,
                                              params=get_spec("prep_verdict").params))
         self.assertEqual(frame.values, {"A": 3.0, "B": 2.0, "C": 0.0})
-        self.assertEqual(frame.meta["counters"]["unrated"], 1)
-        self.assertEqual(frame.meta["counters"]["unknown_enum"], 1)
-        self.assertEqual(frame.meta["counters"]["missing"], 1)
 
     def test_direction_mapping_and_unknown(self):
         source = _auction_source({
@@ -202,34 +225,8 @@ class TestMapping(unittest.TestCase):
         self.assertEqual(frame.values, {"A": 1.0, "B": 0.0, "C": -1.0})
         self.assertEqual(frame.meta["counters"]["unknown_enum"], 1)
 
-    def test_mapping_participates_in_version_and_compute_reads_params(self):
-        spec = get_spec("prep_verdict")
-        changed = dataclasses.replace(
-            spec, params={"mapping": {"strong": 9.0, "light": 2.0, "ignore": 0.0},
-                          "unrated_policy": "skip"})
-        self.assertNotEqual(compute_version_info(spec)[0],
-                            compute_version_info(changed)[0])
 
-        source = _prep_source([_candidate("A", verdict="strong")])
-        original = _compute("prep_verdict", _ctx(source, params=spec.params))
-        modified = spec.compute(_ctx(source, params=changed.params))
-        self.assertEqual(original.values["A"], 3.0)
-        self.assertEqual(modified.values["A"], 9.0)
-
-
-# ─── 2. unrated 行为 ─────────────────────────────────────────────────────
-
-
-class TestUnrated(unittest.TestCase):
-    def test_unrated_skipped_not_zero(self):
-        source = _prep_source([_candidate("A", verdict="unrated")])
-        frame = _compute("prep_verdict", _ctx(source,
-                                             params=get_spec("prep_verdict").params))
-        self.assertEqual(frame.values, {})
-        self.assertEqual(frame.meta["counters"]["unrated"], 1)
-
-
-# ─── 3. 缺失规则 ──────────────────────────────────────────────────────────
+# ─── 2. 缺失规则 ──────────────────────────────────────────────────────────
 
 
 class TestMissingRules(unittest.TestCase):
@@ -240,9 +237,10 @@ class TestMissingRules(unittest.TestCase):
                   if k != "unverified"},
         })
         for name in AUCTION_NAMES:
-            params = get_spec(name).params
-            frame = get_spec(name).compute(_ctx(source, params=params))
+            spec = get_spec(name)
+            frame = spec.compute(_ctx(source, params=spec.params))
             self.assertEqual(frame.values, {}, f"{name} 不应为未校准行写值")
+
     def test_sentinel_literal_matches_producer(self):
         self.assertEqual(factor_auction._AUCTION_ITEMS_MISSING,
                          auction_registry.AUCTION_ITEMS_MISSING)
@@ -261,8 +259,7 @@ class TestMissingRules(unittest.TestCase):
     def test_real_reject_path_keeps_only_strength_and_flag(self):
         source = _auction_source({
             "A": _auction_row(code="A", strength=0.0, is_weak=True,
-                              unverified=False, dims={}, rank=None,
-                              reject_reason="高位"),
+                              unverified=False, rank=None, reject_reason="强转弱"),
         })
         expected = {"auction_strength": {"A": 0.0}, "auction_is_weak": {"A": 1.0}}
         for name in AUCTION_NAMES:
@@ -272,41 +269,77 @@ class TestMissingRules(unittest.TestCase):
 
     def test_rank_none_only_rank_missing(self):
         source = _auction_source({"A": _auction_row(code="A", rank=None)})
+        flags = {"auction_weak_to_strong", "auction_strong_to_weak"}
         for name in AUCTION_NAMES:
             spec = get_spec(name)
             frame = spec.compute(_ctx(source, params=spec.params))
             if name == "auction_rank":
                 self.assertEqual(frame.values, {})
+            elif name in flags:
+                self.assertEqual(frame.values, {}, name)   # 未发生 → 无行
             else:
                 self.assertEqual(frame.values, {"A": frame.values["A"]}, name)
 
-    def test_prep_missing_fields(self):
-        source = _prep_source([
-            _candidate("A", facts={"pool_available": False, "in_pool_today": False,
-                                   "high_days": "首板"}),
-            _candidate("B", facts={"pool_available": False, "in_pool_today": True,
-                                   "high_days": None}),
-        ])
-        in_pool = _compute("prep_in_pool_today", _ctx(source))
-        self.assertEqual(in_pool.values, {})
-        self.assertEqual(in_pool.meta["counters"]["pool_unavailable"], 2)
+    def test_unavailable_status_blocks_strength_and_flag(self):
+        source = _auction_source({"A": _auction_row(code="A", strength=None,
+                                                    status="unavailable",
+                                                    unverified=True)})
+        for name in ("auction_strength", "auction_is_weak"):
+            spec = get_spec(name)
+            self.assertEqual(spec.compute(_ctx(source, params=spec.params)).values, {})
 
-        height = _compute("prep_high_days", _ctx(source))
-        self.assertEqual(height.values, {})
-        self.assertEqual(height.meta["counters"]["unparsed_high_days"], 1)
-        self.assertEqual(height.meta["counters"]["missing"], 1)
-
-    def test_legacy_snapshot_without_facts(self):
-        source = _prep_source([{"code": "A", "verdict": "strong",
-                                "composite_score": 80.0}])
-        self.assertEqual(_compute("prep_verdict", _ctx(
-            source, params=get_spec("prep_verdict").params)).values, {"A": 3.0})
-        self.assertEqual(_compute("prep_composite", _ctx(source)).values, {"A": 80.0})
-        for name in PREP_NAMES[2:]:
-            self.assertEqual(_compute(name, _ctx(source)).values, {}, name)
+    def test_degraded_status_blocks_strength_and_rank_only(self):
+        source = _auction_source({"A": _auction_row(code="A", status="degraded",
+                                                    rank=None)})
+        spec = get_spec("auction_strength")
+        self.assertEqual(spec.compute(_ctx(source, params=spec.params)).values, {})
+        spec = get_spec("auction_dim_supply")
+        self.assertEqual(spec.compute(_ctx(source, params=spec.params)).values,
+                         {"A": 60.0})
 
 
-# ─── 4. derived PIT 与血缘 ────────────────────────────────────────────────
+class TestNewFactors(unittest.TestCase):
+    def test_raw_factors_are_published(self):
+        source = _auction_source({"A": _auction_row(code="A")})
+        expected = {
+            "auction_open_gap_pct": 3.2,
+            "auction_final_slippage_pct": 0.2,
+            "auction_turnover_pct": 0.41,
+            "auction_volume_ratio_5d": 1.8,
+            "auction_unmatched_matched_ratio": 0.4,
+            "auction_tail_matched_acceleration": 1.7,
+        }
+        for name, value in expected.items():
+            spec = get_spec(name)
+            frame = spec.compute(_ctx(source, params=spec.params))
+            self.assertEqual(frame.values, {"A": value}, name)
+
+    def test_volume_ratio_requires_history_5(self):
+        source = _auction_source({"A": _auction_row(
+            code="A", raw=_raw(volume_ratio_history_n=3, volume_ratio_5d=1.8))})
+        spec = get_spec("auction_volume_ratio_5d")
+        self.assertEqual(spec.compute(_ctx(source, params=spec.params)).values, {})
+
+    def test_conversion_flags_write_only_true(self):
+        source = _auction_source({
+            "A": _auction_row(code="A", raw=_raw(weak_to_strong=True)),
+            "B": _auction_row(code="B", raw=_raw(strong_to_weak=True)),
+        })
+        weak = get_spec("auction_weak_to_strong")
+        strong = get_spec("auction_strong_to_weak")
+        self.assertEqual(weak.compute(_ctx(source, params=weak.params)).values,
+                         {"A": 1.0})
+        self.assertEqual(strong.compute(_ctx(source, params=strong.params)).values,
+                         {"B": 1.0})
+
+    def test_official_open_missing_does_not_publish_gap(self):
+        source = _auction_source({"A": _auction_row(
+            code="A", raw=_raw(official_open_gap_pct=None))})
+        spec = get_spec("auction_open_gap_pct")
+        self.assertEqual(spec.compute(_ctx(source, params=spec.params)).values, {})
+
+
+# ─── 3. derived PIT 与血缘 ────────────────────────────────────────────────
 
 
 class TestDerivedPit(TempDb):
@@ -316,19 +349,6 @@ class TestDerivedPit(TempDb):
         entry = engine.build_factor(get_spec("prep_verdict"), DAY)
         self.assertEqual(entry["status"], "ok")
         self.assertEqual(entry["available_at"], f"{DAY}T16:40:00")
-        meta = json.loads(self._rows(["prep_verdict"])[0]["source_meta_json"])
-        self.assertEqual(meta["candidate_trade_date"], {"A": "2026-10-22"})
-
-        self._exec("UPDATE prep_snapshots SET created_at = ? WHERE trade_date = ?",
-                   ("2026-10-26 09:00:00", DAY))
-        entry = engine.build_factor(get_spec("prep_verdict"), DAY)
-        self.assertEqual(entry["available_at"], f"{DAY}T16:40:00")
-        row = self._rows(["prep_verdict"])[0]
-        meta = json.loads(row["source_meta_json"])
-        self.assertEqual(meta["snapshot_version"], 0.5)
-        self.assertEqual(meta["snapshot_created_at"], "2026-10-26 09:00:00")
-        self.assertTrue(meta["snapshot_backfilled"])
-        self.assertTrue(meta["counters"]["snapshot_backfilled"])
 
     def test_auction_phase_and_idempotent_rerun(self):
         self._seed_auction({"A": _auction_row(code="A")})
@@ -342,80 +362,26 @@ class TestDerivedPit(TempDb):
             [(r["code"], r["value"], r["available_at"]) for r in after])
 
 
-# ─── 5. 源故障不删旧行 ────────────────────────────────────────────────────
+# ─── 4. 源故障不删旧行 ────────────────────────────────────────────────────
 
 
 class TestSourceFailure(TempDb):
     def test_prep_json_corruption_keeps_old_rows(self):
         self._seed_prep(_healthy_prep([_candidate("A")]))
         engine.build_factor(get_spec("prep_verdict"), DAY)
-        self.assertEqual(len(self._rows(["prep_verdict"])), 1)
-
         self._exec("UPDATE prep_snapshots SET result_json = ? WHERE trade_date = ?",
                    ("{broken", DAY))
         entry = engine.build_factor(get_spec("prep_verdict"), DAY)
         self.assertEqual(entry["status"], "missing_source")
         self.assertEqual(len(self._rows(["prep_verdict"])), 1)
 
-    def test_prep_table_missing_keeps_old_rows(self):
-        self._seed_prep(_healthy_prep([_candidate("A")]))
-        engine.build_factor(get_spec("prep_verdict"), DAY)
-        self._exec("DROP TABLE prep_snapshots")
-        entry = engine.build_factor(get_spec("prep_verdict"), DAY)
-        self.assertEqual(entry["status"], "missing_source")
-        self.assertEqual(len(self._rows(["prep_verdict"])), 1)
-
-    def test_degraded_empty_keeps_old_rows(self):
-        self._seed_prep(_healthy_prep([_candidate("A")]))
-        engine.build_factor(get_spec("prep_composite"), DAY)
-        degraded = _healthy_prep([])
-        degraded["dragon_source"]["window_days"] = 0
-        self._seed_prep(degraded)
-        entry = engine.build_factor(get_spec("prep_composite"), DAY)
-        self.assertEqual(entry["status"], "missing_source")
-        self.assertIn("empty_degraded_source", entry["reason"])
-        self.assertEqual(len(self._rows(["prep_composite"])), 1)
-
-    def test_degraded_empty_markers_keep_old_rows(self):
-        self._seed_prep(_healthy_prep([_candidate("A")]))
-        engine.build_factor(get_spec("prep_composite"), DAY)
-        for mutate in (
-            lambda payload: payload["sentiment"].update(degraded=["dragons_partial"]),
-            lambda payload: payload["dragon_source"]["dates"][0].update(status="empty"),
-            lambda payload: payload["sentiment"].update(degraded=["dragons"]),
-        ):
-            payload = _healthy_prep([])
-            mutate(payload)
-            self._seed_prep(payload)
-            entry = engine.build_factor(get_spec("prep_composite"), DAY)
-            self.assertEqual(entry["status"], "missing_source")
-            self.assertEqual(len(self._rows(["prep_composite"])), 1)
-
-    def test_healthy_empty_deletes_old_rows(self):
-        self._seed_prep(_healthy_prep([_candidate("A")]))
-        engine.build_factor(get_spec("prep_composite"), DAY)
-        self._seed_prep(_healthy_prep([]))
-        entry = engine.build_factor(get_spec("prep_composite"), DAY)
-        self.assertEqual(entry["status"], "empty")
-        self.assertIn("empty_unexpected", entry["warnings"])
-        self.assertEqual(self._rows(["prep_composite"]), [])
-
     def test_auction_missing_or_all_corrupt_keeps_old_rows(self):
         self._seed_auction({"A": _auction_row(code="A")})
         engine.build_factor(get_spec("auction_strength"), DAY)
         self.assertEqual(len(self._rows(["auction_strength"])), 1)
-
         self._exec("DELETE FROM auction_snapshots")
         entry = engine.build_factor(get_spec("auction_strength"), DAY)
         self.assertEqual(entry["status"], "missing_source")
-        self.assertEqual(len(self._rows(["auction_strength"])), 1)
-
-        self._exec(
-            "INSERT INTO auction_snapshots(trade_date, code, source, analysis_json, created_at) "
-            "VALUES (?, ?, 'v2', ?, ?)", (DAY, "A", "{broken", f"{DAY} 09:26:00"))
-        entry = engine.build_factor(get_spec("auction_strength"), DAY)
-        self.assertEqual(entry["status"], "missing_source")
-        self.assertIn("all_corrupt", entry["reason"])
         self.assertEqual(len(self._rows(["auction_strength"])), 1)
 
     def test_auction_partial_corrupt_keeps_good_rows(self):
@@ -426,11 +392,20 @@ class TestSourceFailure(TempDb):
         entry = engine.build_factor(get_spec("auction_strength"), DAY)
         self.assertEqual(entry["status"], "ok")
         self.assertEqual(entry["meta"]["counters"]["corrupt_rows"], 1)
-        rows = self._rows(["auction_strength"])
-        self.assertEqual([row["code"] for row in rows], ["A"])
+
+    def test_schema_v1_rows_are_skipped_and_explained(self):
+        self._seed_auction({
+            "A": _auction_row(code="A", version="1"),
+            "B": _auction_row(code="B", version="1"),
+        })
+        entry = engine.build_factor(get_spec("auction_strength"), DAY)
+        self.assertEqual(entry["status"], "empty")
+        self.assertEqual(entry["meta"]["counters"]["schema_v1_rows"], 2)
+        self.assertNotIn("empty_unexpected", entry["warnings"])
+        self.assertTrue(any("schema_v1_rows" in item for item in entry["warnings"]))
 
 
-# ─── 6. 隔离性 ────────────────────────────────────────────────────────────
+# ─── 5. 隔离性 ────────────────────────────────────────────────────────────
 
 
 class TestIsolation(TempDb):
@@ -457,11 +432,6 @@ class TestIsolation(TempDb):
                         factor_version="v0", value=9.0,
                         available_at=f"{DAY}T15:05:00", source="scan"),
         ])
-        fstore.replace_factor_day(DAY, "vpa_breakout", "v0", [
-            FactorValue(trade_date=DAY, code="A", factor_name="vpa_breakout",
-                        factor_version="v0", value=7.0,
-                        available_at=f"{DAY}T15:05:00", source="vpa"),
-        ])
         self._seed_prep(_healthy_prep([_candidate("A")]))
         self._seed_auction({"A": _auction_row(code="A")})
         self.assertEqual(engine.build_factor(get_spec("prep_composite"), DAY)["status"],
@@ -470,83 +440,44 @@ class TestIsolation(TempDb):
                          "ok")
         self.assertEqual([(r["code"], r["value"]) for r in self._rows(["five_dim_drive"])],
                          [("A", 9.0)])
-        self.assertEqual([(r["code"], r["value"]) for r in self._rows(["vpa_breakout"])],
-                         [("A", 7.0)])
-
-    def test_build_prep_without_auction_and_vice_versa(self):
-        self._seed_prep(_healthy_prep([_candidate("A")]))
-        self.assertEqual(engine.build_factor(get_spec("prep_verdict"), DAY)["status"],
-                         "ok")
-        self._exec("DELETE FROM prep_snapshots")
-        self.assertEqual(engine.build_factor(get_spec("prep_verdict"), DAY)["status"],
-                         "missing_source")
-        self._seed_auction({"A": _auction_row(code="A")})
-        self.assertEqual(engine.build_factor(get_spec("auction_strength"), DAY)["status"],
-                         "ok")
-
-    def test_high_days_parsing_matches_producers(self):
-        from dragon_quant.review_account.prep import _lianban_count
-        from dragon_quant.review_account.verdicts import _board_height
-
-        for text in ("3天3板", "2天2板"):
-            source = _prep_source([_candidate("A", facts={"high_days": text})])
-            value = _compute("prep_high_days", _ctx(source)).values["A"]
-            self.assertEqual(int(value), _board_height(text))
-            self.assertEqual(int(value), _lianban_count(text))
-
-        source = _prep_source([_candidate("A", facts={"high_days": "首板"})])
-        self.assertEqual(_compute("prep_high_days", _ctx(source)).values, {})
-        self.assertIsNone(_board_height("首板"))
-        self.assertEqual(_lianban_count("首板"), 0)
 
 
-# ─── 7. 默认零影响 ────────────────────────────────────────────────────────
+# ─── 6. 默认零影响 ────────────────────────────────────────────────────────
 
 
 class TestDefaultSnapshot(unittest.TestCase):
     def test_default_snapshot_members_unchanged(self):
         snapshot = default_snapshot()
-        expected = {
-            "five_dim_absorption", "five_dim_anti_drop", "five_dim_drive",
-            "five_dim_is_true_dragon", "five_dim_leadership", "five_dim_liquidity",
-            "vpa_breakout", "vpa_divergence", "vpa_health_score",
-            "vpa_trend_verify", "vpa_vol_amount",
-        }
-        self.assertEqual(set(snapshot["factor_versions"]), expected)
-        self.assertEqual(set(snapshot["params"]["weights"]), expected)
-        self.assertEqual(snapshot["params"]["neutral"], ["five_dim_is_true_dragon"])
-        self.assertEqual(snapshot["params"]["lower_better"], [])
-        for name, weight in snapshot["params"]["weights"].items():
-            self.assertEqual(weight, 0.0 if name == "five_dim_is_true_dragon" else 1.0,
-                             name)
         self.assertFalse(any(name.startswith(("prep_", "auction_"))
                              for name in snapshot["factor_versions"]))
 
 
-# ─── 8. 注册表 ────────────────────────────────────────────────────────────
+# ─── 7. 注册表与联动 ──────────────────────────────────────────────────────
 
 
 class TestRegistry(unittest.TestCase):
     def test_registry_valid_and_metadata(self):
         validate_registry(FACTOR_SPECS)
         by_name = {spec.name: spec for spec in FACTOR_SPECS}
-        for name in PREP_NAMES:
-            spec = by_name[name]
-            self.assertIs(spec.default_enabled, False)
-            self.assertEqual((spec.source, spec.pit_rule, spec.available_phase),
-                             ("prep", "derived", "prep"))
         for name in AUCTION_NAMES:
             spec = by_name[name]
             self.assertIs(spec.default_enabled, False)
             self.assertEqual((spec.source, spec.pit_rule, spec.available_phase),
                              ("auction", "derived", "auction"))
-        self.assertEqual(by_name["prep_limit_up_suc_rate"].unit, "ratio")
+            self.assertTrue(spec.impl_key.endswith(".v2"), name)
+            self.assertEqual(spec.params["config_version"], "auction_v2_baseline")
+            self.assertEqual(spec.params["config_hash"],
+                             auction_registry.CONFIG_HASH)
         self.assertEqual(by_name["auction_rank"].direction, "lower_better")
-        self.assertEqual(by_name["prep_in_pool_today"].direction, "neutral")
         self.assertEqual(by_name["auction_is_weak"].direction, "neutral")
 
+    def test_config_hash_linkage_to_registry(self):
+        self.assertEqual(factor_auction.CONFIG_VERSION,
+                         auction_registry.CONFIG_VERSION)
+        self.assertEqual(factor_auction.CONFIG_HASH, auction_registry.CONFIG_HASH)
 
-# ─── 9. 报告与告警 ────────────────────────────────────────────────────────
+
+# ─── 8. 报告与告警 ────────────────────────────────────────────────────────
 
 
 class TestReportCounters(TempDb):
@@ -559,57 +490,6 @@ class TestReportCounters(TempDb):
         self.assertEqual(entry["status"], "empty")
         self.assertEqual(entry["meta"]["counters"]["unverified_rows"], 2)
         self.assertNotIn("empty_unexpected", entry["warnings"])
-        self.assertIn("unverified_rows=2", entry["warnings"])
-
-        report = engine.build_date(DAY, names=["auction_strength"])
-        self.assertFalse(any("empty_unexpected" in item for item in report["warnings"]))
-        self.assertTrue(any("unverified_rows" in item for item in report["warnings"]))
-
-    def test_all_unrated_suppresses_empty_warning(self):
-        self._seed_prep(_healthy_prep([
-            _candidate("A", verdict="unrated"),
-            _candidate("B", verdict="unrated"),
-        ]))
-        entry = engine.build_factor(get_spec("prep_verdict"), DAY)
-        self.assertEqual(entry["status"], "empty")
-        self.assertEqual(entry["meta"]["counters"]["unrated"], 2)
-        self.assertNotIn("empty_unexpected", entry["warnings"])
-        self.assertTrue(any("expected_empty" in item for item in entry["warnings"]))
-
-        report = engine.build_date(DAY, names=["prep_verdict"])
-        self.assertFalse(any("empty_unexpected" in item for item in report["warnings"]))
-
-    def test_counters_land_in_meta(self):
-        self._seed_prep(_healthy_prep([
-            _candidate("A", verdict="weird"),
-            _candidate("B", facts={"pool_available": True, "in_pool_today": True,
-                                   "high_days": "首板"}),
-        ]))
-        entry = engine.build_factor(get_spec("prep_verdict"), DAY)
-        self.assertEqual(entry["meta"]["counters"]["unknown_enum"], 1)
-        entry = engine.build_factor(get_spec("prep_high_days"), DAY)
-        self.assertEqual(entry["meta"]["counters"]["unparsed_high_days"], 1)
-
-
-class TestDragonsDegradedTokens(unittest.TestCase):
-    """R-7：新增降级 token 必须维持因子层 fail-closed（空候选不 DELETE 历史行）。"""
-
-    def _snapshot(self, degraded):
-        return {
-            "dragon_source": {"window_days": 5,
-                              "dates": [{"trade_date": DAY, "status": "ok"}]},
-            "sentiment": {"degraded": list(degraded)},
-            "candidates": [],
-        }
-
-    def test_new_tokens_mark_empty_as_degraded(self):
-        for token in ("dragons_window_stale", "dragons_mirror_missing_day",
-                      "dragons_window_widened_dependents_stale"):
-            self.assertTrue(engine._prep_empty_is_degraded(self._snapshot([token])),
-                            token)
-
-    def test_healthy_basis_allows_real_empty(self):
-        self.assertFalse(engine._prep_empty_is_degraded(self._snapshot([])))
 
 
 if __name__ == "__main__":

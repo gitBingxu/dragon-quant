@@ -46,8 +46,9 @@ dragon_quant/
 │   │       ├── __init__.py / config.py / scoring.py / market.py / mainline.py
 │   │       ├── roles.py / pool.py / gates.py / sizing.py / context.py
 │   │       └── feedback.py / board_rank.py / orchestrator.py
-│   ├── auction/                 # 集合竞价
+│   ├── auction/                 # 集合竞价（v2 纯函数流水线）
 │   │   ├── __init__.py / main.py / collect.py / recompute.py / scoring.py / dates.py
+│   │   ├── normalize.py / features.py / events.py / dimensions.py / context.py
 │   │   └── registry.py / strength.py / serialize.py / report.py / types.py
 │   ├── strategy/                # 策略纯拆分（main.py 只门面重导出）
 │   │   ├── __init__.py / main.py / common.py / buy.py / checks.py / sell.py

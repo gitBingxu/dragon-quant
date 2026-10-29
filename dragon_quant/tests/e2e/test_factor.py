@@ -228,7 +228,7 @@ def test_f1_list_json_and_human_match_registry():
         assert payload["ok"] is True
         items = payload["factors"]
         assert [item["name"] for item in items] == list(fb.EXPECTED_FACTOR_NAMES)
-        assert len(items) == 51
+        assert len(items) == 60
         assert list(items[0]) == LIST_ITEM_KEYS
         for item in items:
             assert VERSION_RE.fullmatch(item["version"]), item
@@ -250,7 +250,7 @@ def test_f1_list_json_and_human_match_registry():
         lines = human.stdout.splitlines()
         assert lines[0].split() == ["因子", "版本", "源", "阶段", "PIT", "默认"]
         assert lines[1].startswith("------")
-        assert len(lines) == 2 + 51
+        assert len(lines) == 2 + 60
         assert lines[2].startswith("auction_dim_direction")
         assert re.fullmatch(
             r"five_dim_composite\s+v[0-9a-f]{12}\s+scan\s+close\s+recorded\s+开",
@@ -454,7 +454,7 @@ def test_f5_all_builds_every_registered_factor_and_stays_offline():
         assert_exit(result, 0)
         report = json.loads(result.stdout)["reports"][0]
         assert list(report["factors"]) == list(fb.EXPECTED_FACTOR_NAMES)
-        assert report["registry_inserted"] == 51
+        assert report["registry_inserted"] == 60
         statuses = {name: entry["status"] for name, entry in report["factors"].items()}
         # 2026-09-10 has no vpa_analysis / prep / auction snapshots.
         assert {name for name, status in statuses.items() if status == "ok"} == \
@@ -592,7 +592,7 @@ def test_f7_status_counts_and_human_output():
         for version in registered.values():
             assert VERSION_RE.fullmatch(version)
         factors = payload["factors"]
-        assert len(factors) == 51
+        assert len(factors) == 60
         assert {item["name"] for item in factors
                 if item["registered_version"] is not None} == \
             set(fb.DEFAULT_ENABLED_NAMES)

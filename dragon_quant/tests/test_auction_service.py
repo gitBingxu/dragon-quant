@@ -31,18 +31,20 @@ COLLECT_KEYS = [
     "days_ignored", "lookback_dates", "candidate_codes", "saved_count", "saved",
     "empty", "failed", "quote", "quote_missing", "asset_read_error",
     "scored_count", "snapshot_saved_count", "snapshot_ok", "snapshot_skipped",
-    "snapshot_error", "snapshots",
+    "snapshot_error", "snapshots", "strategy_context",
 ]
 EMPTY_KEYS = [
     "ok", "mode", "trade_date", "source", "pool_source", "fallback_reason",
     "prep_snapshot_date", "prep_unavailable_reason", "pool_empty",
     "candidate_codes", "recommended_count", "ignore_reason_count",
     "ignore_reason_samples", "prep_degraded", "days_ignored", "message",
+    "strategy_context",
 ]
 RECOMPUTE_KEYS = [
     "ok", "mode", "trade_date", "source", "asset_count", "usable_count",
     "skipped_empty", "quote_missing", "scored_count", "snapshot_saved_count",
     "snapshot_ok", "snapshot_skipped", "snapshot_error", "failed", "snapshots",
+    "strategy_context",
 ]
 
 
@@ -173,6 +175,8 @@ class _CollectHarness:
                     for row in calls["saved_rows"]]
         self._patch("dragon_quant.infra.assets.db.list_auction_assets",
                     side_effect=_list)
+        self._patch("dragon_quant.infra.assets.db.list_auction_history",
+                    return_value={})
 
         def _replace(trade_date, payloads, source="v2"):
             calls["replaced"] = dict(payloads)
@@ -307,6 +311,9 @@ class TestRecomputeContract(unittest.TestCase):
             stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=assets))
+            stack.enter_context(patch(
+                "dragon_quant.infra.assets.db.list_auction_history",
+                return_value={}))
             replace = stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 return_value=2))
@@ -357,6 +364,9 @@ class TestRecomputeContract(unittest.TestCase):
             stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.list_auction_assets",
                 return_value=[_asset("600001")]))
+            stack.enter_context(patch(
+                "dragon_quant.infra.assets.db.list_auction_history",
+                return_value={}))
             stack.enter_context(patch(
                 "dragon_quant.infra.assets.db.replace_auction_snapshots",
                 side_effect=RuntimeError("db locked")))

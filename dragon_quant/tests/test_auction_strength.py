@@ -1,205 +1,109 @@
-"""dragon_quant.tests.test_auction_strength — 集合竞价强度评分器单元测试。"""
+"""normalize + evaluate/rank 门面测试（v2）。"""
 
 import unittest
 
-from dragon_quant.infra.models import Quote
-from dragon_quant.review_account.auction import evaluate, rank_auctions, AuctionVerdict
+from dragon_quant.review_account.auction import (
+    AuctionVerdict, evaluate, rank_auctions,
+)
 from dragon_quant.review_account.auction import registry as R
-from dragon_quant.review_account.auction.strength import normalize
-
-
-def _item(h, m, s, price, matched, unmatched):
-    return {"time": f"{h:02d}:{m:02d}:{s:02d}",
-            "price": price, "matched": matched, "unmatched": unmatched}
-
-
-def _quote(prev_close=10.0, limit_down=9.0, float_market_cap=50e8):
-    return Quote(code="600000", name="x", price=10.0, prev_close=prev_close,
-                 open_px=10.0, high=10.0, low=10.0, pct=0.0, chg=0.0,
-                 turnover_rate=0.0, amplitude=0.0, volume=0.0, amount=0.0,
-                 market_cap=100e8, float_market_cap=float_market_cap,
-                 volume_ratio=0.0, pe=0.0, limit_up=11.0, limit_down=limit_down,
-                 avg_price=10.0)
+from dragon_quant.review_account.auction.normalize import market_of, normalize
+from dragon_quant.review_account.auction.scoring import _level_of
+from dragon_quant.tests.support_auction import ascending, item, quote, real_sample_shape
 
 
 class TestNormalize(unittest.TestCase):
-    def test_sorts_by_time(self):
+    def test_sorts_by_time_and_slices_windows(self):
         items = [
-            _item(9, 25, 0, 10.0, 300, 0),
-            _item(9, 15, 0, 10.0, 100, 0),
-            _item(9, 20, 0, 10.0, 200, 0),
+            item("09:25:00", 10.0, 300, 0),
+            item("09:15:00", 10.0, 100, 0),
+            item("09:20:00", 10.0, 200, 0),
         ]
         data = normalize(items)
         self.assertEqual(data["times"][0], R.AUCTION_OPEN)
         self.assertEqual(data["times"][-1], R.AUCTION_CLOSE)
+        self.assertEqual(len(data["pre_idx"]), 1)
+        self.assertEqual(len(data["core_idx"]), 2)
 
-    def test_cumulative_total_matched(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, 0),
-            _item(9, 21, 0, 10.0, 250, 0),
-            _item(9, 25, 0, 10.0, 400, 0),
-        ]
-        data = normalize(items)
-        self.assertEqual(data["total_matched"], 400)  # 累计语义取末值
+    def test_core_window_is_the_only_scoring_window(self):
+        data = normalize(real_sample_shape())
+        self.assertTrue(all(R.NO_CANCEL <= data["times"][i] <= R.AUCTION_CLOSE
+                            for i in data["core_idx"]))
+        # 09:20 前 matched 下降不影响 core 增量
+        self.assertGreater(len(data["pre_idx"]), 0)
+        self.assertTrue(any(
+            data["matched"][i] < data["matched"][i - 1] for i in data["pre_idx"]))
 
-    def test_buy_side_sign(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, 50),
-            _item(9, 25, 0, 10.0, 200, -30),
-        ]
-        data = normalize(items)
-        self.assertEqual(data["buy_side"][0], 50 * R.UNMATCHED_SIGN)
-        self.assertEqual(data["buy_side"][1], -30 * R.UNMATCHED_SIGN)
+    def test_tail_extension_only_when_short(self):
+        short = normalize([item("09:24:10", 10.0, 50, 0),
+                           item("09:24:59", 10.0, 100, 0),
+                           item("09:25:00", 10.0, 200, 0)])
+        self.assertTrue(short["tail_extended"])
+        long = normalize(real_sample_shape())
+        self.assertFalse(long["tail_extended"])
 
+    def test_truncates_after_close(self):
+        data = normalize([item("09:25:00", 10.0, 100, 0),
+                          item("09:25:30", 10.0, 200, 0)])
+        self.assertTrue(data["truncated_after_close"])
+        self.assertEqual(data["n"], 1)
 
-class TestRejectGate(unittest.TestCase):
-    def test_empty_items(self):
-        v = evaluate("600000", [])
-        self.assertTrue(v.is_weak)
-        self.assertEqual(v.reject_reason, "竞价明细缺失")
-
-    def test_quote_none_conservative_reject(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, 10),
-            _item(9, 25, 0, 10.0, 200, 10),
-        ]
-        v = evaluate("600000", items, quote=None)
-        self.assertTrue(v.is_weak)
-        self.assertIn("0.4", v.reject_reason)
-        self.assertTrue(v.unverified)
-
-    def test_0_2_strong_to_weak(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, 100),
-            _item(9, 21, 0, 10.0, 200, 100),
-            _item(9, 22, 0, 10.0, 300, 100),
-            _item(9, 23, 0, 10.0, 400, 100),
-            _item(9, 24, 30, 10.0, 500, -50),
-            _item(9, 24, 45, 10.0, 600, -60),
-            _item(9, 25, 0, 10.0, 700, -70),
-        ]
-        v = evaluate("600000", items, quote=_quote())
-        self.assertTrue(v.is_weak)
-        self.assertIn("0.2 强转弱", v.reject_reason)
-
-    def test_0_4_tail_neg_amplify(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, -10),
-            _item(9, 22, 0, 10.0, 200, -10),
-            _item(9, 24, 30, 10.0, 300, -20),
-            _item(9, 24, 45, 10.0, 400, -40),
-            _item(9, 25, 0, 10.0, 500, -60),
-        ]
-        v = evaluate("600000", items, quote=_quote())
-        self.assertTrue(v.is_weak)
-        self.assertIn("0.4 跌停价排队卖", v.reject_reason)
-
-    def test_0_1_high_green_incr(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, 50),
-            _item(9, 21, 0, 10.1, 200, 50),
-            _item(9, 22, 0, 10.2, 300, 50),
-            _item(9, 23, 0, 10.3, 400, 50),
-            _item(9, 24, 30, 10.5, 500, -10),
-            _item(9, 24, 45, 10.5, 600, -20),
-            _item(9, 25, 0, 10.5, 700, -30),
-        ]
-        v = evaluate("600000", items, quote=_quote(prev_close=10.0))
-        self.assertTrue(v.is_weak)
-        self.assertIn("0.1 高位绿柱递增", v.reject_reason)
-
-    def test_0_3_cancel_order_bait(self):
-        items = [
-            _item(9, 19, 50, 10.0, 100, 1000),
-            _item(9, 20, 0, 10.0, 200, 100),
-            _item(9, 21, 0, 10.0, 300, 50),
-            _item(9, 22, 0, 10.0, 400, 50),
-            _item(9, 23, 0, 10.0, 500, 50),
-            _item(9, 24, 30, 10.0, 600, 50),
-            _item(9, 24, 45, 10.0, 700, 50),
-            _item(9, 25, 0, 10.0, 800, 50),
-        ]
-        v = evaluate("600000", items, quote=_quote())
-        self.assertTrue(v.is_weak)
-        self.assertIn("0.3 卡点撤单诱多", v.reject_reason)
-
-    def test_0_4_priority_over_0_2(self):
-        items = [
-            _item(9, 20, 0, 10.0, 100, 100),
-            _item(9, 21, 0, 10.0, 200, 100),
-            _item(9, 22, 0, 10.0, 300, -50),
-            _item(9, 23, 0, 10.0, 400, 100),
-            _item(9, 24, 30, 10.0, 500, -20),
-            _item(9, 24, 45, 10.0, 600, -50),
-            _item(9, 25, 0, 10.0, 700, -150),
-        ]
-        v = evaluate("600000", items, quote=_quote())
-        self.assertTrue(v.is_weak)
-        self.assertIn("0.4 跌停价排队卖", v.reject_reason)
+    def test_market_of(self):
+        self.assertEqual(market_of("600001"), "sh")
+        self.assertEqual(market_of("000001"), "sz")
+        self.assertEqual(market_of("300750"), "sz")
+        self.assertEqual(market_of("830799"), "bj")
+        self.assertEqual(market_of(""), "unknown")
 
 
-class TestScoring(unittest.TestCase):
-    def _weak_to_strong(self):
-        return [
-            _item(9, 20, 0, 10.0, 100, -100),
-            _item(9, 21, 0, 10.05, 200, -100),
-            _item(9, 22, 0, 10.1, 300, -100),
-            _item(9, 23, 0, 10.15, 400, -50),
-            _item(9, 24, 30, 10.18, 500, 50),
-            _item(9, 24, 45, 10.19, 600, 80),
-            _item(9, 25, 0, 10.2, 700, 100),
-        ]
+class TestEvaluateFacade(unittest.TestCase):
+    def test_returns_v2_verdict(self):
+        verdict = evaluate("600001", real_sample_shape(), quote())
+        self.assertEqual(verdict.validation_status, "baseline_unvalidated")
+        self.assertEqual(verdict.config_hash, R.CONFIG_HASH)
+        self.assertEqual(verdict.semantics["matched_unit"], "lots")
+        self.assertEqual(set(verdict.dims), set(R.DIM_ORDER))
+        self.assertIsNotNone(verdict.evidence["last_time"])
 
-    def test_weak_to_strong_bull(self):
-        v = evaluate("600000", self._weak_to_strong(), quote=_quote(prev_close=10.0))
-        self.assertFalse(v.is_weak)
-        self.assertEqual(v.direction, "bull")
-        self.assertIn(v.level, ("强", "中", "弱"))
+    def test_empty_items_is_unavailable_not_weak(self):
+        verdict = evaluate("600001", [], quote())
+        self.assertFalse(verdict.is_weak)          # 关键行为变更：空数据不再置 weak
+        self.assertIsNone(verdict.strength)
+        self.assertIsNone(verdict.level)
+        self.assertTrue(verdict.unverified)
+        self.assertEqual(verdict.reject_reason, R.AUCTION_ITEMS_MISSING)
+        self.assertEqual(verdict.data_quality.status, "unavailable")
 
-    def test_dims_populated(self):
-        v = evaluate("600000", self._weak_to_strong(), quote=_quote(prev_close=10.0))
-        self.assertEqual(set(v.dims.keys()), {"direction", "supply", "vol_price", "tail_grab"})
-        for dim, sr in v.dims.items():
-            self.assertEqual(sr.weight, R.AUCTION_DIM_WEIGHTS[dim])
 
+class TestLevelBuckets(unittest.TestCase):
     def test_level_buckets(self):
-        from dragon_quant.review_account.auction.strength import _level_of
         self.assertEqual(_level_of(80.0), "强")
         self.assertEqual(_level_of(50.0), "中")
         self.assertEqual(_level_of(20.0), "弱")
-
-    def test_tail_grab_snatch(self):
-        items = [
-            _item(9, 15, 0, 10.0, 50, 0),
-            _item(9, 20, 0, 10.0, 100, 50),
-            _item(9, 21, 0, 10.0, 110, 50),
-            _item(9, 22, 0, 10.0, 120, 50),
-            _item(9, 23, 0, 10.0, 130, 50),
-            _item(9, 24, 30, 10.0, 160, 80),
-            _item(9, 24, 45, 10.0, 210, 30),
-            _item(9, 25, 0, 10.0, 280, 10),
-        ]
-        v = evaluate("600000", items, quote=_quote())
-        self.assertFalse(v.is_weak)
-        tg = v.dims["tail_grab"]
-        self.assertEqual(tg.score, 100.0)
-        self.assertEqual(tg.details["event"], "抢筹")
+        self.assertIsNone(_level_of(None))
 
 
 class TestRankAuctions(unittest.TestCase):
-    def test_rank_only_usable(self):
-        vs = [
-            AuctionVerdict(code="a", is_weak=False, strength=80.0, direction="bull", level="强"),
-            AuctionVerdict(code="b", is_weak=True, strength=0.0, direction="neutral", level="弱"),
-            AuctionVerdict(code="c", is_weak=False, strength=60.0, direction="bull", level="中", unverified=True),
-            AuctionVerdict(code="d", is_weak=False, strength=70.0, direction="bull", level="强"),
-        ]
-        rank_auctions(vs)
-        by_code = {v.code: v.rank for v in vs}
-        self.assertEqual(by_code["a"], 1)
-        self.assertIsNone(by_code["b"])
-        self.assertIsNone(by_code["c"])
-        self.assertEqual(by_code["d"], 2)
+    def test_rank_only_ok_non_veto(self):
+        from dragon_quant.review_account.auction.types import DataQuality
+
+        good = AuctionVerdict(code="a", strength=80.0, direction="bull", level="强",
+                              data_quality=DataQuality("ok", 1.0))
+        weak = AuctionVerdict(code="b", is_weak=True, strength=0.0, level="弱",
+                              data_quality=DataQuality("ok", 1.0))
+        degraded = AuctionVerdict(code="c", strength=60.0, level="中",
+                                  data_quality=DataQuality("degraded", 0.8))
+        unavailable = AuctionVerdict(code="d", strength=None, unverified=True,
+                                     data_quality=DataQuality("unavailable", 0.0))
+        other = AuctionVerdict(code="e", strength=70.0, level="强",
+                               data_quality=DataQuality("ok", 1.0))
+        rank_auctions([good, weak, degraded, unavailable, other])
+        self.assertEqual(good.rank, 1)
+        self.assertEqual(other.rank, 2)
+        self.assertIsNone(weak.rank)
+        self.assertEqual(weak.rank_reason, "vetoed")
+        self.assertIsNone(degraded.rank)
+        self.assertEqual(degraded.rank_reason, "partial_data")
+        self.assertEqual(unavailable.rank_reason, "unavailable")
 
 
 if __name__ == "__main__":

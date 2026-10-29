@@ -36,7 +36,7 @@
 | assets | backfill-dragons | T1 | 写 assets.db.dragons |
 | assets | backfill-dragons --dry-run | T0 | 只读体检 |
 | assets | backfill-dragons --prune | T2 | 删除镜像孤儿行 |
-| factor | list/query/status/eval/fin status | T0 | 只读或计算 |
+| factor | list/query/status/eval/decision-review/fin status | T0 | 只读或计算 |
 | factor | build/export/fin sync/fin calibrate | T1 | 写 factor_* / fin_* 或用户指定文件 |
 | buy | --date --at --force --json | T1 | 写信号表；必须确认 |
 | sell | --date --at --force | T1 | 写信号表；必须确认；T+1 |
@@ -79,7 +79,7 @@
 ## 常见误判
 
 - `scan`/`prep`/`auction`/`review`/`review-account`/`factor build`/`factor fin sync` 都不是只读。
-- `dragons`、`scan --date`、`logs tail`、`data *`、`factor list/query/status/eval`、`storage status/size` 是只读。
+- `dragons`、`scan --date`、`logs tail`、`data *`、`factor list/query/status/eval/decision-review`、`storage status/size` 是只读。
 - `assets pull` 默认只预览；`assets doctor` 虽名为检查，但会远端写探针，按 T1 处理。
 - `storage clear` 不删数据库文件，但仍是破坏性操作（删缓存/结果/日志）。
 - 部分只读命令在首次运行或旧库上会做幂等的 schema 初始化/迁移并拿写锁（例如读历史扫描、读龙头）；这不改变其 T0 语义，但不要与写库命令并发执行。

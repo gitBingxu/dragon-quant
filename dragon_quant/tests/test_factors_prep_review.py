@@ -591,6 +591,21 @@ class TestTradableLabels(unittest.TestCase):
             _Market(bars), self.CAL, horizons=(1,))
         self.assertEqual(result["labels"][0]["entry_price"], 10.5)
 
+    def test_exclusion_items_expand_per_horizon_without_legacy_drift(self):
+        # Early exit-horizon exclusions are per-observation in ``exclusions`` but
+        # must be expanded to every requested horizon in ``exclusion_items``.
+        bars = {"L": [_bar("2026-10-28"), _bar("2026-10-29", 11.0,
+                                               amount=100_000_000.0)]}
+        result = review_shadow.build_tradable_labels(
+            [{"code": "L", "available_at": f"{DAY}T16:40:00"}], _Market(bars),
+            self.CAL, horizons=(1, 3, 5))
+        self.assertEqual(result["exclusions"]["illiquid"], 1)
+        self.assertEqual(len(result["exclusion_items"]), 3)
+        self.assertEqual([item["horizon"] for item in result["exclusion_items"]],
+                         [1, 3, 5])
+        self.assertEqual(set(result["exclusion_items"][0]),
+                         {"code", "trade_date", "horizon", "reason"})
+
 
 class TestAblationAndOos(unittest.TestCase):
     def _days(self, n=20):

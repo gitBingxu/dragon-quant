@@ -20,7 +20,7 @@ Layout contract (``archived_md/agents/2026-10-27-agents-progressive-disclosure-d
   set", never weakened, plus new size / link / ownership gates.
 
 The parser surface is taken from the reviewed E2E snapshot
-(``dragon_quant/tests/e2e/coverage-map.json``, 51 nodes / 15 top-level commands).  Every node
+(``dragon_quant/tests/e2e/coverage-map.json``, 52 nodes / 15 top-level commands).  Every node
 must be reachable from the README command reference.
 """
 
@@ -206,7 +206,7 @@ def _local_markdown_links(path: Path) -> list[str]:
 def _parser_nodes() -> list[str]:
     payload = json.loads(_read(COVERAGE_MAP))
     snapshot = payload["parser_snapshot"]
-    assert snapshot["node_count"] == 51
+    assert snapshot["node_count"] == 52
     assert snapshot["top_level_count"] == 15
     return [node["command"] for node in snapshot["nodes"]]
 

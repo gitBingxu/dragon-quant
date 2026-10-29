@@ -39,6 +39,7 @@
 | 因子查询 | dragon-quant factor query | --date --from --to --name --code | T0 | human/json | 输出 resolved_versions |
 | 因子状态 | dragon-quant factor status | — | T0 | human | 只读 |
 | 因子评估 | dragon-quant factor eval | --name --from --to --groups --pit-policy | T0 | human/json | insufficient_data 是有效结论，exit 0 |
+| 因子决策回测 | dragon-quant factor decision-review | --source --from --to --horizon --cost-bps --min-days --min-group-samples --include-samples | T0 | human/json | 只读冻结快照；不要求 build；insufficient_data exit 0 |
 | 因子构建 | dragon-quant factor build | --date --from --to --only --all | T1 | human/json | 写 factor_*；与 --only 互斥的 --all |
 | 因子导出 | dragon-quant factor export | --from --to --name --out | T1 | human/json | 写用户指定文件；确认路径 |
 | 财务同步 | dragon-quant factor fin sync | --snapshot --backfill --force | T1 | human/json | 写 fin_*；触网 |

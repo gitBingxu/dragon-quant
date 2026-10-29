@@ -3,7 +3,7 @@
 This module never launches a business process.  It reads ``coverage-map.json``
 and the E2E test sources, then proves:
 
-* every parser node from the stage-1 snapshot (51 nodes / 15 top-level
+* every parser node from the stage-1 snapshot (52 nodes / 15 top-level
   commands) maps to at least one *existing* test function;
 * every test function under ``dragon_quant/tests/e2e`` is referenced by the map (no
   silently unmapped cases);
@@ -68,13 +68,13 @@ def _covered_nodes(coverage: dict) -> dict[str, dict]:
     return coverage["nodes"]
 
 
-def test_parser_snapshot_has_51_nodes_and_15_top_level_commands():
+def test_parser_snapshot_has_52_nodes_and_15_top_level_commands():
     snapshot = _load_map()["parser_snapshot"]
     nodes = snapshot["nodes"]
 
-    assert snapshot["node_count"] == len(nodes) == 51
+    assert snapshot["node_count"] == len(nodes) == 52
     assert snapshot["top_level_count"] == sum(1 for node in nodes if " " not in node["command"]) == 15
-    assert len({node["command"] for node in nodes}) == 51
+    assert len({node["command"] for node in nodes}) == 52
     for node in nodes:
         assert node["command"].strip() == node["command"]
         assert node["flags"], f"{node['command']} must list its parser flags"

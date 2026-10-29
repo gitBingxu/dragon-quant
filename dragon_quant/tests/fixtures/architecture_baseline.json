@@ -923,6 +923,8 @@
     "auction/snapshots.json": "14937f3588d9e7a2a7a5c4ab4bc34e14a16be0577f3edb45be04b9acdbc64570",
     "auction/stdout_collect.txt": "a24e8accb674a8633d7576c7581e3fd84a0d3e5906537ea151e1120d1403d4aa",
     "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
+    "factor/decision_review_auction.json": "79a3846164797875375840c86dcc2ac4d9443bb0104f72fb9e35c2576f10403f",
+    "factor/decision_review_prep.json": "9b59379b042dc3d29f18b1db19fc41d87b949672a84162f05fa923e2b9de8b64",
     "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",
     "factor/export_matrix.csv": "46655b3c09b4aaf6fc0c6281a74d6694dca6d302968b79eb9d2682c104682a1c",
     "factor/export_meta.json": "7e931a536c92a65d740586bbe5621420be6fa668da207ffd84b3e908a8958e40",

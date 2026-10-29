@@ -141,66 +141,88 @@ def build_tradable_labels(
     calendar = sorted({str(day) for day in calendar if day})
     labels: list[dict] = []
     exclusions: dict[str, int] = {}
+    # 逐样本逐 horizon 的剔除事实（新增键；``exclusions`` 保持 legacy 计数不变）。
+    # 进入 horizon 循环前的早期剔除按每个请求 horizon 各展开一条。
+    exclusion_items: list[dict] = []
 
     def exclude(reason: str) -> None:
         exclusions[reason] = exclusions.get(reason, 0) + 1
+
+    def exclude_all_horizons(code, day, reason: str) -> None:
+        for horizon in horizons:
+            exclusion_items.append({
+                "code": str(code),
+                "trade_date": day,
+                "horizon": int(horizon),
+                "reason": reason,
+            })
 
     for observation in observations:
         code = observation.get("code")
         available_at = observation.get("available_at")
         if not code or not available_at:
             exclude("missing_observation")
+            exclude_all_horizons(code, None, "missing_observation")
             continue
         day, before_open = _available_parts(str(available_at))
         start_index = _entry_index(day, before_open, calendar)
         if start_index is None:
             exclude("no_entry_day")
+            exclude_all_horizons(code, day, "no_entry_day")
             continue
         bars = _bars_by_day(market, str(code), day)
         entry_day = calendar[start_index]
         auction_price = _num(observation.get("auction_price"))
         auction_fillable = observation.get("auction_fillable")
+        entry_price = None
+        early_reason = None
         if auction_fillable is False:
-            exclude("unfillable_one_word")
-            continue
-        if auction_fillable is True and auction_price is not None and auction_price > 0:
+            early_reason = "unfillable_one_word"
+        elif auction_fillable is True and auction_price is not None and auction_price > 0:
             # 只有显式「可成交」才用竞价价；未知状态回落到开盘价，不假设可成交。
             entry_price = auction_price
         else:
             entry_bar = bars.get(entry_day)
-            reason = _entry_exclusion(entry_bar, min_amount)
-            if reason is not None:
-                exclude(reason)
-                continue
-            entry_price = _num(_attr(entry_bar, "open"))
-            if entry_price is None or entry_price <= 0:
-                exclude("missing_bar")
-                continue
+            early_reason = _entry_exclusion(entry_bar, min_amount)
+            if early_reason is None:
+                entry_price = _num(_attr(entry_bar, "open"))
+                if entry_price is None or entry_price <= 0:
+                    early_reason = "missing_bar"
+        if early_reason is not None:
+            exclude(early_reason)
+            exclude_all_horizons(code, day, early_reason)
+            continue
         for horizon in horizons:
             end_index = start_index + int(horizon)
             if end_index >= len(calendar):
-                exclude("insufficient_horizon")
-                continue
-            exit_day = calendar[end_index]
-            exit_bar = bars.get(exit_day)
-            reason = _exit_exclusion(exit_bar)
-            if reason is not None:
-                exclude(reason)
-                continue
-            exit_price = _num(_attr(exit_bar, "open"))
-            if exit_price is None or exit_price <= 0:
-                exclude("missing_bar")
-                continue
-            gross = (exit_price / entry_price - 1.0) * 100.0
-            labels.append({
+                reason = "insufficient_horizon"
+            else:
+                exit_day = calendar[end_index]
+                exit_bar = bars.get(exit_day)
+                reason = _exit_exclusion(exit_bar)
+                if reason is None:
+                    exit_price = _num(_attr(exit_bar, "open"))
+                    if exit_price is None or exit_price <= 0:
+                        reason = "missing_bar"
+                    else:
+                        gross = (exit_price / entry_price - 1.0) * 100.0
+                        labels.append({
+                            "code": str(code),
+                            "trade_date": day,
+                            "horizon": int(horizon),
+                            "value": gross - float(cost_bps) / 100.0,
+                            "entry_date": entry_day,
+                            "exit_date": exit_day,
+                            "entry_price": entry_price,
+                            "exit_price": exit_price,
+                        })
+                        continue
+            exclude(reason)
+            exclusion_items.append({
                 "code": str(code),
                 "trade_date": day,
                 "horizon": int(horizon),
-                "value": gross - float(cost_bps) / 100.0,
-                "entry_date": entry_day,
-                "exit_date": exit_day,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
+                "reason": reason,
             })
 
     return {
@@ -209,6 +231,7 @@ def build_tradable_labels(
         "exclusions": exclusions,
         "cost_bps": float(cost_bps),
         "reason": None if labels else "no_tradable_labels",
+        "exclusion_items": exclusion_items,
     }
 
 

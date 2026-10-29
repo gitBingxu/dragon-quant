@@ -229,6 +229,24 @@ def block_bootstrap_t(values: Sequence[float], blocks: Sequence,
     return observed / error
 
 
+def wilson_interval(hits: int, n: int, *, z: float = 1.96) -> Optional[list[float]]:
+    """Wilson 95% 描述性区间（``hits/n``）；``n<=0`` → ``None``。
+
+    区间只用于描述命中率的抽样不确定性，不用于「是否达标」的决策；
+    同日多只、相邻 horizon 重叠都会让区间偏窄（调用方须标注 caveat）。
+    """
+    n = int(n)
+    if n <= 0:
+        return None
+    p = min(1.0, max(0.0, float(hits) / n))
+    z_squared = z * z
+    denominator = 1.0 + z_squared / n
+    center = (p + z_squared / (2.0 * n)) / denominator
+    half = (z * math.sqrt(p * (1.0 - p) / n + z_squared / (4.0 * n * n))
+            / denominator)
+    return [max(0.0, center - half), min(1.0, center + half)]
+
+
 def percentile_rank(values: Sequence[float], value: float) -> Optional[float]:
     """``value`` 在 ``values`` 中的百分位（0-100，mid-rank 口径）。
 

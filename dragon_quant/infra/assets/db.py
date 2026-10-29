@@ -729,6 +729,52 @@ def list_auction_asset_dates(*, db_path=None) -> list[str]:
     return _list_dates("auction_assets", db_path=db_path)
 
 
+def _list_snapshot_dates(table: str, *, source: str, date_from=None,
+                         date_to=None, db_path=None) -> list[str]:
+    """区间内某来源有快照的日期（升序去重）；只读、不建库、无 DDL。
+
+    读路径 ``_ensure_schema(migrate=False)`` 不补列；库文件不存在时返回 ``[]``。
+    """
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        clauses = ["source = ?"]
+        params: list = [source]
+        if date_from is not None:
+            clauses.append("trade_date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            clauses.append("trade_date <= ?")
+            params.append(date_to)
+        rows = _row_list(
+            conn,
+            f"SELECT DISTINCT trade_date FROM {table} WHERE {' AND '.join(clauses)} "
+            "ORDER BY trade_date",
+            tuple(params),
+        )
+    finally:
+        conn.close()
+    return [row[0] for row in rows]
+
+
+def list_prep_snapshot_dates(date_from=None, date_to=None, *, source: str = "v2",
+                             db_path=None) -> list[str]:
+    """``prep_snapshots`` 区间内快照日期（决策回测只读枚举）。"""
+    return _list_snapshot_dates("prep_snapshots", source=source,
+                                date_from=date_from, date_to=date_to,
+                                db_path=db_path)
+
+
+def list_auction_snapshot_dates(date_from=None, date_to=None, *,
+                                source: str = "v2", db_path=None) -> list[str]:
+    """``auction_snapshots`` 区间内快照日期（决策回测只读枚举）。"""
+    return _list_snapshot_dates("auction_snapshots", source=source,
+                                date_from=date_from, date_to=date_to,
+                                db_path=db_path)
+
+
 def _watermarks(table: str, size_expr: str, *, db_path=None) -> dict[str, str]:
     conn = _connect(create=False, path=db_path)
     if conn is None:

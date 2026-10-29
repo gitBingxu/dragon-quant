@@ -92,7 +92,7 @@ npx dragon-quant-skills uninstall
 - 安装成功不依赖 Python CLI：Python/CLI 缺失或版本过低只给警告；`doctor` 才会失败并给修复命令。
 - 版本关系：npm 的 `MAJOR.MINOR` 跟随 Python 包，`PATCH` 可独立；兼容性以 skill frontmatter 的 `metadata.min-cli-version` 为准。
 - 兼容通道：`npx skills add gitBingxu/dragon-quant --skill dragon-quant -a claude-code`（不校验 Python CLI 版本）；或手工 `cp -r skills/dragon-quant .claude/skills/`（无 manifest、无升级/卸载保护，`doctor` 会标为 foreign）。
-- 写安全：`scan`/`prep`/`auction`/`review`/`review-account`/`buy`/`sell`/`factor build`/`factor fin sync` 都会写库；`storage clear`/`assets push`/`assets pull --apply`/`backfill-dragons --prune` 属破坏性或外发操作，执行前必须确认，T2 操作先 dry-run。
+- 写安全：`scan`/`prep`/`auction`/`review`/`review-account`/`buy`/`sell`/`factor build`/`factor fin sync` 都会写库（`auction` 命中当日快照时本次只读，`--force` 才写库）；`storage clear`/`assets push`/`assets pull --apply`/`backfill-dragons --prune` 属破坏性或外发操作，执行前必须确认，T2 操作先 dry-run。
 - 安装或升级后，在 Claude Code 运行 `/reload-skills` 或重启会话。远端 `npx skills add owner/repo` 与 Windows 路径本期未实测，见方案残余风险。
 
 ## 快速开始
@@ -218,26 +218,31 @@ dragon-quant prep --json                      # 输出完整复盘 JSON（默认
 ### `auction` — 采集集合竞价盘口与强度快照
 
 ```bash
-dragon-quant auction                        # 优先 T-1 prep 推荐（strong/light），空则回退
-dragon-quant auction --days 5               # 仅 legacy/回退路径的回溯交易日数
-dragon-quant auction --pool legacy          # 强制旧口径：最近 N 日 dragons 并集
+dragon-quant auction                        # 优先当日已存快照；无快照再走 T-1 prep 推荐
+dragon-quant auction --force                # 忽略快照缓存，重新采集并替换快照
+dragon-quant auction --days 5               # 未命中时仅 legacy/回退路径的回溯交易日数
+dragon-quant auction --pool legacy          # 未命中时强制旧口径：最近 N 日 dragons 并集
 dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
 dragon-quant auction --json                 # 输出完整 JSON（默认人读摘要）
 ```
 
-候选池默认取**严格 T-1 盘后复盘快照**中 eligible（真龙 + `min_score`）且 `verdict != ignore` 的标的（strong/light/unrated/缺 verdict 保留；推荐集为空则回退），与 `buy` / `review-account` 共用同一池语义（`collect_candidates_ex`），保证「竞价采的 code = 次日策略可能买的 code」。T-1 快照缺失/读取异常/无资格/推荐集为空时，自动回退最近 N 个有龙头数据的交易日 `dragons_v2` 并集（`--days` 在该路径生效），并在输出中回显 `pool_source="legacy"` 与 `fallback_reason`（`no_snapshot` / `snapshot_read_error` / `empty_snapshot` / `no_eligible` / `all_ignored` / `calendar`）；回退池不再应用 `ignore` 出池，P 仍按快照 verdict 标注。只有 legacy 也为空时才正常结束（exit 0）且不发起任何行情/盘口请求。
+**快照优先（务必注意）**：普通 `auction` **永远优先返回当日最新已存快照**（只读：零采集、零评分、零业务写入）；**想更新数据必须加 `--force`**，想按当前算法重算已存资产用 `--recompute DATE`。命中时 `--pool` / `--days` 不求值，输出 `mode="snapshot"` / `from_cache=true` / `pool_source="snapshot"` / `snapshot_skipped="cache_hit"`，人读标题标「快照｜来自缓存」。`--force` 与 `--recompute` 互斥（argparse exit 2）。
 
-确定候选后先**整批**获取行情（TDX 主、tencent 兜底，禁止逐股请求），再逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db/auction_assets`（`items_json` 盘口明细 + `quote_json` 行情快照，键 `trade_date+code`，同日重复采集幂等覆盖）。随后逐股评分、整批排名，并以单事务整日替换 `auction_snapshots`（`source="v2"`）。
+**未命中快照时**，候选池默认取**严格 T-1 盘后复盘快照**中 eligible（真龙 + `min_score`）且 `verdict != ignore` 的标的（strong/light/unrated/缺 verdict 保留；推荐集为空则回退），与 `buy` / `review-account` 共用同一池语义（`collect_candidates_ex`），保证「竞价采的 code = 次日策略可能买的 code」。T-1 快照缺失/读取异常/无资格/推荐集为空时，自动回退最近 N 个有龙头数据的交易日 `dragons_v2` 并集（`--days` 在该路径生效），并在输出中回显 `pool_source="legacy"` 与 `fallback_reason`（`no_snapshot` / `snapshot_read_error` / `empty_snapshot` / `no_eligible` / `all_ignored` / `calendar`）；回退池不再应用 `ignore` 出池，P 仍按快照 verdict 标注。只有 legacy 也为空时才正常结束（exit 0）且不发起任何行情/盘口请求。
+
+**未命中（或 `--force`）时**确定候选后先**整批**获取行情（TDX 主、tencent 兜底，禁止逐股请求），再逐一拉取**当日**集合竞价盘口（TDX `get_auction`，仅当日 9:25 后可用、盘后仍可拉取、无历史回看），落库到 `assets.db/auction_assets`（`items_json` 盘口明细 + `quote_json` 行情快照，键 `trade_date+code`，同日重复采集幂等覆盖）。随后逐股评分、整批排名，并以单事务整日替换 `auction_snapshots`（`source="v2"`）。
 
 默认输出人读摘要：标题（日期、参与只数、池来源；有回退时附 `fallback_reason`）+ 逐只「排名/代码/名称/等级/强度/方向/关键证据/数据状态」（未验证前缀 `?`、否决前缀 `-`，否决原因与未验证标记可叠加）+ 汇总（强/中/弱；否决；不可用；失败）+ 一行 `validation_status=baseline_unvalidated` 说明。空池、采集层全失败、评分层全失败、候选全为空盘口分别给出单行提示。加 `--json` 输出完整 JSON：`trade_date`（竞价所属交易日 = 当日）/ `pool_source` / `fallback_reason` / `prep_snapshot_date` / `recommended_count` / `days_ignored` / `lookback_dates` / `candidate_codes` / `saved_count` / `saved`（含每只盘口条数）/ `empty`（当日无竞价数据的 code，如停牌）/ `failed`（逐 code 隔离，含 `stage`）/ `quote`（`source` 为实际生效来源 `tdx`/`tencent`/`none`，含 `matched`/`missing`/`degraded`/`reason`）/ `scored_count` / `snapshot_saved_count` / `snapshot_ok` / `snapshot_skipped` / `snapshot_error` / `snapshots`（每只判定摘要：旧 8 键 + `data_quality_status` / `risk_event_codes` / `rank_reason` / `validation_status` / `config_version` / `evidence_summary`）/ `strategy_context`（版本化 `auction_sc_v1`，见下）。空池时额外输出 `pool_empty` / `ignore_reason_count` / `ignore_reason_samples` / `prep_degraded`，`strategy_context.positions=[]`。行情缺失时快照仍会写入，但该股 `data_quality.status="unavailable"`、`strength/level=null`、`is_weak=false`（数据不足不是看空），并在 `quote.degraded` 与 stderr 告警中显式标注。默认模式的错误写 stderr 并以非零码退出；`--json` 模式错误保持原 JSON error 到 stdout，退出码语义不变。
 
+命中快照时 `--json` 沿用采集键序，并在 `source` 后插入 `from_cache=true`；`mode="snapshot"`、`pool_source="snapshot"`、`saved_count=0`、`scored_count=candidate_codes=可用快照数`、`snapshot_saved_count=0`、`snapshot_ok=true`、`snapshot_skipped="cache_hit"`，`quote` 为全零报告；`failed` 只含损坏/空壳快照行（`stage="snapshot"`），部分损坏时 `ok=false` 但退出码仍为 0。`snapshots` 与 `strategy_context` 均为已存 `analysis_json` 的只读投影，不重算强度、不伪造 prep 血缘。
+
 `auction_snapshots.analysis_json` 升为 **v2**：旧顶层键（`version/code/is_weak/strength/direction/level/dims/reject_reason/unverified/rank`）全部保留，`version="2"`，新增 `rank_reason` / `pre_veto_strength` / `validation_status` / `config_version` / `config_hash` / `semantics` / `data_quality` / `risk_events` / `raw_factors` / `evidence` / `reference_prices` / `windows` / `actions`。`strength`、`level`、`dims.*.score`、`rank` 允许为 `null`（数据不足），不再用 0/50 冒充。阈值与权重是**待验证基线**，不构成买卖建议、不承诺胜率。
 
-`strategy_context`（`auction_sc_v1`）：`collect` 覆盖候选池 ∪ 已存资产 ∪ `empty` ∪ `failed`（池内缺口用 `unknown`），`recompute` 只覆盖已存资产 ∪ `skipped_empty` ∪ `failed`；`positions[]` 逐只带 `status`（`scored`/`vetoed`/`unavailable`/`empty`/`failed`/`unknown`）、`data_quality`、`risk_event_codes`、`dim_contributions`、`actions[]`（仅 `observe`/`await_confirmation`/`flag_risk`/`request_data` 四类条件化动作，不含买卖指令）与 `as_of`（由 `trade_date` 推导，`--recompute` 可复现）。
+`strategy_context`（`auction_sc_v1`）：`collect` 覆盖候选池 ∪ 已存资产 ∪ `empty` ∪ `failed`（池内缺口用 `unknown`），`recompute` 只覆盖已存资产 ∪ `skipped_empty` ∪ `failed`，快照命中只覆盖已存快照（`pool.source="snapshot"`、`coverage="assets_only"`、`snapshot_config_versions` 暴露已存配置血缘；旧 schema 降级 `snapshot_legacy_schema`，不补默认分）；`positions[]` 逐只带 `status`（`scored`/`vetoed`/`unavailable`/`empty`/`failed`/`unknown`）、`data_quality`、`risk_event_codes`、`dim_contributions`、`actions[]`（仅 `observe`/`await_confirmation`/`flag_risk`/`request_data` 四类条件化动作，不含买卖指令）与 `as_of`（由 `trade_date` 推导，`--recompute` 可复现）。
 
 `--recompute DATE` 不触网：只读该日 `auction_assets`（`items` + `quote`）与只读历史末点匹配量（`auction_assets` 前 5 个交易日，量比用）重算并覆盖 `auction_snapshots`；`DATE` 支持 `YYYYMMDD` / `YYYY-MM-DD` / `YYYY/MM/DD`，输出统一 `YYYY-MM-DD`。默认输出与采集模式相同的人读摘要（标题标注「重算」），加 `--json` 输出完整 JSON。无原始资产、全部 `items` 为空或全部评分失败时以非零码退出；未来日期拒绝。空结果不会删除既有快照。
 
-适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史；算法升级后用 `--recompute` 重放历史日。
+适合每日 9:25 后（或盘后）定时跑一次，逐日积累龙头竞价盘口历史；同一交易日重复运行返回已存快照（不会自动刷新），需要重采加 `--force`；算法升级后用 `--recompute` 重放历史日。
 
 ### `assets` — 数据资产云端同步
 

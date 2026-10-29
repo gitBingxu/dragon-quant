@@ -100,6 +100,8 @@
 
 **`--json` 顶层**：旧键（`ok`/`mode`/`trade_date`/`source`/`pool_source`/`fallback_reason`/`candidate_codes`/`saved`/`empty`/`failed`/`quote`/`quote_missing`/`scored_count`/`snapshots`/`snapshot_saved_count` 等）全部保留，末尾新增 `strategy_context`（`auction_sc_v1`）。
 
+**快照命中（`mode="snapshot"`）**：普通 `auction` 当日已有可用快照时直接只读返回，标题为「快照｜来自缓存」。`--json` 在 `source` 后多一个 `from_cache=true`，`pool_source="snapshot"`，`saved_count=0`、`scored_count=candidate_codes=可用快照数`、`snapshot_saved_count=0`、`snapshot_ok=true`、`snapshot_skipped="cache_hit"`；`failed` 只含损坏快照行（`stage="snapshot"`），部分损坏时 `ok=false` 但 exit 0。`pool` 为 `{"source":"snapshot","coverage":"assets_only","snapshot_config_versions":[...]}`，不重算强度、不伪造 prep 血缘。**普通 auction 永远优先最新快照，想更新必须 `--force`；想按当前算法重算已存资产用 `--recompute DATE`。**
+
 - `pool_source=prep`：候选来自严格 T-1 的复盘推荐；`pool_source=legacy` 表示回退到最近若干交易日的龙头并集。
 - `fallback_reason`：`no_snapshot` / `snapshot_read_error` / `calendar` / `empty_snapshot` / `no_eligible` / `all_ignored` 等。回退时这批候选不是今天的盘前重点，解读要降权。
 - `data_quality.status`：`ok`（五维完整）/ `degraded`（可评价但缺非必要输入，`rank=null`，`rank_reason=partial_data`）/ `unavailable`（必要输入缺失，`strength/level=null`，**不是看空**）。稳定原因码见 `data_quality.reason_codes`。

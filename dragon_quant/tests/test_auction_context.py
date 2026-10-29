@@ -93,5 +93,75 @@ class TestActionsAndDisclaimers(unittest.TestCase):
         self.assertLessEqual(len(evidence_summary(verdict).split()), 3)
 
 
+class TestSnapshotProjection(unittest.TestCase):
+    """已存 payload 投影与裁决对象投影必须逐字段一致。"""
+
+    def test_payload_projection_matches_verdict_projection(self):
+        from dragon_quant.review_account.auction.context import (
+            build_strategy_context_from_snapshots,
+        )
+        from dragon_quant.review_account.auction.serialize import (
+            verdict_to_payload,
+        )
+
+        verdict = evaluate("600001", real_sample_shape(), quote(code="600001"))
+        verdict.name = "甲"
+        names = {"600001": "甲"}
+        expected = build_strategy_context(
+            "2026-10-29", mode="recompute", evaluations=[verdict], names=names)
+        payload = verdict_to_payload(verdict)
+        actual = build_strategy_context_from_snapshots(
+            "2026-10-29", {"600001": payload}, names=names)
+
+        self.assertEqual(actual["positions"], expected["positions"])
+
+    def test_legacy_schema_is_explicitly_degraded(self):
+        from dragon_quant.review_account.auction.context import (
+            build_strategy_context_from_snapshots, position_from_payload,
+        )
+
+        payload = {"code": "600001", "version": "1", "is_weak": False,
+                   "strength": 66.0, "direction": "bull", "level": "中",
+                   "dims": {}, "reject_reason": None, "unverified": False,
+                   "rank": 1}
+        position = position_from_payload(payload)
+        self.assertEqual(position["status"], "unavailable")
+        self.assertEqual(position["strength"], 66.0)
+        self.assertEqual(position["data_quality"]["status"], "unavailable")
+        self.assertEqual(position["data_quality"]["reason_codes"],
+                         ["snapshot_legacy_schema"])
+        self.assertEqual(position["unknown_reason"], "snapshot_legacy_schema")
+
+        context = build_strategy_context_from_snapshots(
+            "2026-10-29", {"600001": payload})
+        self.assertEqual(context["pool"]["source"], "snapshot")
+        self.assertEqual(context["pool"]["coverage"], "assets_only")
+        self.assertEqual(context["pool"]["snapshot_config_versions"], [])
+        self.assertNotIn("prep_snapshot_date", context["pool"])
+
+    def test_corrupt_rows_and_config_lineage_are_visible(self):
+        from dragon_quant.review_account.auction.context import (
+            build_strategy_context_from_snapshots,
+        )
+        from dragon_quant.review_account.auction.serialize import (
+            verdict_to_payload,
+        )
+
+        verdict = evaluate("600001", real_sample_shape(), quote(code="600001"))
+        payload = verdict_to_payload(verdict)
+        context = build_strategy_context_from_snapshots(
+            "2026-10-29", {"600001": payload},
+            failed=[{"code": "600009", "stage": "snapshot",
+                     "error": "JSONDecodeError: bad"}])
+        positions = {item["code"]: item for item in context["positions"]}
+        self.assertEqual(positions["600009"]["status"], "failed")
+        self.assertEqual(positions["600009"]["unknown_reason"],
+                         "snapshot_corrupt")
+        self.assertEqual(context["pool"]["candidate_codes"], 2)
+        self.assertEqual(context["pool"]["snapshot_config_versions"],
+                         ["auction_v2_baseline"])
+        self.assertEqual(context["summary"]["failed"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

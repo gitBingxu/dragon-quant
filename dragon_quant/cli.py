@@ -329,16 +329,18 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p = sub.add_parser(
         "auction",
         help="采集最近 N 日龙头的当日集合竞价盘口（TDX），或重算已存快照",
-        usage="dragon-quant auction [--pool prep|legacy] [--days N] [--json] | "
+        usage="dragon-quant auction [--pool prep|legacy] [--days N] [--force] [--json] | "
               "dragon-quant auction --recompute DATE [--json]",
-        description="默认读取严格 T-1 的 prep 快照，采集 verdict∈{strong,light} 的推荐标的；"
-                    "推荐集为空/快照缺失时回退最近 N 个交易日的龙头并集。落库原始资产"
-                    "（assets.db/auction_assets）并计算强度快照（auction_snapshots）。"
-                    "默认输出人读摘要（参与标的强弱 + 汇总）；--json 输出完整 JSON。"
-                    "使用 --recompute 时不触网，用已存原始资产重算指定交易日快照。",
+        description="默认先只读当日已存快照（命中即零采集/零评分/零写入）；无快照或"
+                    "全部损坏时读取严格 T-1 的 prep 快照并采集 verdict∈{strong,light} 的"
+                    "推荐标的。落库原始资产（assets.db/auction_assets）并计算强度快照"
+                    "（auction_snapshots）。--force 绕过快照缓存重新采集；"
+                    "--recompute 不触网，用已存原始资产重算。默认输出人读摘要；"
+                    "--json 输出完整 JSON。",
         epilog="""Examples:
-  dragon-quant auction                        # 优先 prep 推荐，空则回退 legacy
-  dragon-quant auction --pool legacy          # 强制旧口径
+  dragon-quant auction                        # 优先已存快照，其次 prep 推荐
+  dragon-quant auction --force                # 忽略快照缓存，重新采集并替换
+  dragon-quant auction --pool legacy          # 未命中时强制旧口径
   dragon-quant auction --days 5               # 仅 legacy/回退路径生效
   dragon-quant auction --recompute 20261020   # 用已存原始资产重算（不触网）
   dragon-quant auction --json                 # 输出完整 JSON
@@ -348,8 +350,11 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                            help="候选池来源：prep=盘后复盘推荐（默认），legacy=最近 N 日龙头并集")
     auction_p.add_argument("--days", type=int, default=None,
                            help="legacy/回退路径取最近 N 个有龙头数据的交易日（默认 5）")
-    auction_p.add_argument("--recompute", metavar="DATE", default=None,
-                           help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
+    auction_mode = auction_p.add_mutually_exclusive_group()
+    auction_mode.add_argument("--force", action="store_true",
+                              help="忽略当日已存快照，强制重新采集/评分并替换快照")
+    auction_mode.add_argument("--recompute", metavar="DATE", default=None,
+                              help="不触网，用已存原始资产重算该日竞价快照 (YYYYMMDD / YYYY-MM-DD)")
     auction_p.add_argument("--json", dest="json", action="store_true",
                            help="输出完整 JSON（默认只展示参与竞价判断的标的强弱与汇总）")
 

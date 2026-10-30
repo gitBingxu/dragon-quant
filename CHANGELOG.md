@@ -12,9 +12,13 @@
 
 ## [Unreleased]
 
+### Added
+- **裸 `install` 交互式 Agent 多选**：`npx dragon-quant-skills install` 在 stdin/stdout/stderr 均为终端、未显式给 `--agent`、未加 `--json` 时弹出六 harness 菜单（默认 `claude-code`，不含 `agents` 别名）；`↑`/`↓` 环绕移动、空格切换、`a` 全选/清空、Enter 确认（空选择停留提示）、`q`/`Ctrl+C` 取消 exit 0 零写入。菜单只写 stderr；`--agent` / `--json` / 任一标准流重定向、`doctor`、`uninstall` 完全跳过并沿用原默认。新增零依赖 `lib/agent-select.mjs`（readline 流适配 + 纯 reducer），`main(argv, io)` 支持注入测试流，选择结果仍走 `expandAgents`，JSON 结构与 manifest schema 不变。`package.json` 与 `skill-version` 升至 `1.2.0`，`min-cli-version` 保持 `0.7.4`；本次不发布 npm，Python 版本不变。
+
 ### Changed
 - **Agent Skill 收敛为交易日助手**：默认命令面从 15 个顶层命令收敛为七类白名单（个股行情、扫描与真龙、盘后复盘、集合竞价、龙头回测、账户回测、因子入库与读回）；未开放能力统一走固定话术 + issue 链接，不再以命令、路由或否定示例出现。新增 `references/reports.md`（prep 九段 / auction 七段模板），`operations.md` 固定单能力/每日复合、UI 生命周期与因子三组静态名单，`safety.md` 仅保留 T0/T1。
 - **npm Skill 元数据对齐**：`package.json`、`skill-version`、`min-cli-version` 同步至 `0.7.4`（本次不发布 npm，Python 版本不变）。
+- **Agent Skill 多 Agent 安装目标**：安装器新增 `codex` / `openclaw` / `hermes` / `deepseek` / `pi` 五个 harness，保留 `claude-code`（默认）与 `agents` 兼容别名；`--agent a,b` 多选与 `all`（原位置展开六个真实 harness，不含别名）；按官方矩阵实现项目级 / 用户级路径、三个官方 env 覆盖（`OPENCLAW_STATE_DIR` / `DSH_HOME` / `PI_CODING_AGENT_DIR`，仅 global）、`--target-dir` 基准与按目标 reload / trust 提示；install / uninstall 增加包根 OpenClaw 自托管预检，`--force` 不可绕过。`package.json` 与 `skill-version` 升至 `1.1.0`，`min-cli-version` 保持 `0.7.4`；本次不发布 npm，Python 版本不变。
 
 ## [0.7.4] - 2026-10-30
 

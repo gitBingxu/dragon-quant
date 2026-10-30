@@ -142,3 +142,78 @@ test("symlinked install fails with an actionable non-force fix", { skip: process
   assert.doesNotMatch(integrity.fix, /--force/);
   assert.match(integrity.fix, /symlink|remove/i);
 });
+
+// --- Target-aware hints (Task 3) ---
+
+function reloadDetail(report) {
+  return report.checks.find((c) => c.id === "reload.hint").detail;
+}
+
+test("reload hint keeps Claude reload text for claude-code", () => {
+  const { skillDir } = makeInstall();
+  const detail = reloadDetail(run({ targets: [target(skillDir)] }));
+  assert.match(detail, /reload-skills/);
+});
+
+test("reload hint for codex does not claim Claude precedence", () => {
+  const missing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dq-doc-codex-")), "dragon-quant");
+  const detail = reloadDetail(run({ targets: [target(missing, "project", "codex")] }));
+  assert.doesNotMatch(detail, /Enterprise/);
+  assert.match(detail, /Codex/);
+});
+
+test("reload hint for hermes project names the actual trust path", () => {
+  const missing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dq-doc-hermes-")), "dragon-quant");
+  const projectRoot = path.resolve("/repo/hermes-project");
+  const detail = reloadDetail(run({
+    targets: [target(missing, "project", "hermes")],
+    projectRoot,
+  }));
+  assert.ok(detail.includes(`hermes skills trust ${projectRoot}`), detail);
+});
+
+test("reload hint for pi mentions /reload", () => {
+  const missing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dq-doc-pi-")), "dragon-quant");
+  const detail = reloadDetail(run({ targets: [target(missing, "project", "pi")] }));
+  assert.match(detail, /\/reload/);
+});
+
+test("reload hint for deepseek says skills are auto-discovered", () => {
+  const missing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "dq-doc-dsh-")), "dragon-quant");
+  const detail = reloadDetail(run({ targets: [target(missing, "project", "deepseek")] }));
+  assert.match(detail, /自动发现/);
+});
+
+test("reload hint dedupes identical hints from repeated targets", () => {
+  const { skillDir } = makeInstall();
+  const detail = reloadDetail(run({ targets: [target(skillDir), target(skillDir)] }));
+  const occurrences = detail.split("/reload-skills").length - 1;
+  assert.equal(occurrences, 1, detail);
+});
+
+test("scope.shadowing for codex avoids Claude precedence text", () => {
+  const a = makeInstall("proj");
+  const b = makeInstall("glob");
+  const report = run({ targets: [target(a.skillDir, "project", "codex"), target(b.skillDir, "global", "codex")] });
+  const shadow = report.checks.find((c) => c.id === "scope.shadowing");
+  assert.equal(shadow.status, "warn");
+  assert.doesNotMatch(shadow.detail, /Enterprise/);
+  assert.match(shadow.detail, /同名/);
+});
+
+test("scope.shadowing for claude-code keeps the precedence text", () => {
+  const a = makeInstall("proj");
+  const b = makeInstall("glob");
+  const report = run({ targets: [target(a.skillDir, "project"), target(b.skillDir, "global")] });
+  const shadow = report.checks.find((c) => c.id === "scope.shadowing");
+  assert.match(shadow.detail, /Enterprise/);
+});
+
+test("scope.shadowing uses generic wording for targets without a shared root", () => {
+  const a = makeInstall("proj");
+  const b = makeInstall("glob");
+  const report = run({ targets: [target(a.skillDir, "project", "pi"), target(b.skillDir, "global", "pi")] });
+  const shadow = report.checks.find((c) => c.id === "scope.shadowing");
+  assert.doesNotMatch(shadow.detail, /Enterprise/);
+  assert.match(shadow.detail, /all-scopes/);
+});

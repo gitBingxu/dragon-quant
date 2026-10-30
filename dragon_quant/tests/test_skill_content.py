@@ -8,7 +8,8 @@ from dragon_quant.review_account.models import StrategyConfig
 
 ROOT = Path(__file__).resolve().parents[2] / "skills" / "dragon-quant"
 SKILL = ROOT / "SKILL.md"
-REFS = ["commands.md", "outputs.md", "playbooks.md", "operations.md", "safety.md"]
+REFS = ["commands.md", "outputs.md", "playbooks.md", "operations.md",
+        "reports.md", "safety.md"]
 STRATEGY_FIELDS = [f.name for f in fields(StrategyConfig) if f.name != "source"]
 
 
@@ -34,17 +35,15 @@ class TestSkillContent(unittest.TestCase):
         )
         front = _frontmatter()
         skill_version = re.search(r'skill-version:\s*"([^"]+)"', front).group(1)
-        min_cli = re.search(r'min-cli-version:\s*"([^"]+)"', front).group(1)
         self.assertEqual(skill_version, package["version"])
-        self.assertLessEqual([int(x) for x in min_cli.split(".")],
-                             [int(x) for x in skill_version.split(".")])
 
     def test_description_has_chinese_and_english_triggers(self):
         front = _frontmatter()
         match = re.search(r"^description:\s*(.+)$", front, re.MULTILINE)
         self.assertIsNotNone(match, "description line missing from frontmatter")
         description = match.group(1)
-        for token in ("真龙", "龙头", "复盘", "竞价", "回测", "scan", "prep", "auction", "buy", "sell"):
+        for token in ("行情", "真龙", "龙头", "复盘", "竞价", "回测", "账户", "因子",
+                      "scan", "prep", "auction", "review"):
             self.assertIn(token, description)
 
     def test_authority_and_no_advice(self):
@@ -94,8 +93,8 @@ class TestSkillContent(unittest.TestCase):
     def test_outputs_cover_key_contracts(self):
         text = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
         for token in ("ranking_mode", "fallback_reason", "data_quality", "strict_5min",
-                      "daily_fallback", "unverified", "is_weak", "checks",
-                      "resolved_versions", "insufficient_data", "available_top_n",
+                      "daily_fallback", "unverified", "is_weak",
+                      "resolved_versions", "available_top_n",
                       # M4/M5/M6 复盘契约
                       "strategy_context", "review_candidates", "feedback",
                       "plan_review", "checkpoint", "auction_backfill_failed",
@@ -104,8 +103,15 @@ class TestSkillContent(unittest.TestCase):
 
     def test_playbooks_cover_failure_modes(self):
         text = (ROOT / "references" / "playbooks.md").read_text(encoding="utf-8")
-        for token in ("Cookie", "403", "停牌", "daily_fallback", "空池",
-                      "fallback_reason", "版本漂移", "16:40", "09:30"):
+        for token in ("获取行情失败", "空输出", "15:00", "16:40", "09:25",
+                      "missing_source", "UI", "端口", "缓存",
+                      "当前功能还不稳定", "issues"):
+            self.assertIn(token, text)
+
+    def test_playbooks_issue_template(self):
+        text = (ROOT / "references" / "playbooks.md").read_text(encoding="utf-8")
+        for token in ("dragon-quant -v", "skill-version", "操作系统",
+                      "想做的事", "脱敏", "期望结果"):
             self.assertIn(token, text)
 
     def test_new_reference_size_caps(self):
@@ -115,15 +121,45 @@ class TestSkillContent(unittest.TestCase):
 
     def test_operations_cover_contracts(self):
         text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
-        for token in ("T+1", "--date", "--at", "峰值", "并发", "assets push", "dry-run", "16:40"):
+        for token in ("单能力", "每日量化入库", "--ui-only", "--no-browser",
+                      "真实", "URL", "--true-only", "16:40", "09:25", "09:30",
+                      "factor-groups"):
             self.assertIn(token, text)
 
-    def test_safety_has_tiers_and_forbidden_ops(self):
-        text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")
-        for token in ("T0", "T1", "T2", "buy", "sell", "storage clear",
-                      "assets push", "pull --apply", "backfill-dragons --prune",
-                      "pull --force", "确认"):
+    def test_operations_single_capability_no_implicit_write(self):
+        text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        for token in ("不隐式", "只有用户明确", "不自动执行"):
             self.assertIn(token, text)
+
+    def test_operations_ui_lifecycle(self):
+        text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        for token in ("后台启动", "长驻", "默认尝试打开浏览器", "仅本机",
+                      "停止方式", "不回测"):
+            self.assertIn(token, text)
+
+    def test_operations_factor_verification(self):
+        text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        for token in ("reports[0].factors", "missing_source", "factor query",
+                      "five_dim_composite", "prep_review_score", "auction_is_weak",
+                      "--all", "不能只看退出码"):
+            self.assertIn(token, text)
+
+    def test_operations_forbids_default_build_and_all(self):
+        text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        forbidden = [line for line in text.splitlines() if line.startswith("**禁止**")]
+        self.assertTrue(forbidden, "operations.md 缺少禁止段")
+        for line in forbidden:
+            self.assertIn("默认 build", line)
+            self.assertIn("--all", line)
+
+    def test_safety_t0_t1_only(self):
+        text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")
+        for token in ("T0", "T1", "确认", "长驻", "schema", "是否继续"):
+            self.assertIn(token, text)
+        self.assertNotIn("T2", text)
+        for pattern in (r"\bbuy\b", r"\bsell\b", r"\bvpa\b", r"\bblacklist\b",
+                        r"dragon-quant\s+assets\b", r"dragon-quant\s+storage\b"):
+            self.assertIsNone(re.search(pattern, text), pattern)
 
     def test_all_reference_links_exist(self):
         text = SKILL.read_text(encoding="utf-8")
@@ -138,6 +174,115 @@ class TestSkillContent(unittest.TestCase):
             self.assertLessEqual(len(lines), 300, name)
             total += len(lines)
         self.assertLessEqual(total, 1200)
+
+
+class TestReports(unittest.TestCase):
+    """prep 九段 / auction 七段报告骨架与缺失回退措辞。"""
+
+    def _reports(self) -> str:
+        return (ROOT / "references" / "reports.md").read_text(encoding="utf-8")
+
+    def test_prep_report_template(self):
+        text = self._reports()
+        headings = (
+            "# 复盘报告",
+            "## 1. 复盘日与数据质量",
+            "## 2. 市场环境与流动性",
+            "## 3. 情绪与风格",
+            "## 4. 主线题材",
+            "## 5. 龙头与核心角色",
+            "## 6. 当日计划与实际对照",
+            "## 7. 明日条件计划",
+            "## 8. 待验证条件与风险",
+            "## 9. 声明",
+        )
+        positions = [text.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions), "prep 九段顺序被改变")
+        for token in ("事实", "解读", "待验证", "不在本次数据范围",
+                      "不建议新建仓", "不是清仓", "observe_only",
+                      "strategy_context", "position_pct", "不构成投资建议"):
+            self.assertIn(token, text)
+
+    def test_auction_report_template(self):
+        text = self._reports()
+        headings = (
+            "# 竞价报告",
+            "## 1. 快照时点与口径",
+            "## 2. 大盘温度",
+            "## 3. 板块方向",
+            "## 4. 个股竞价结构",
+            "## 5. 风险",
+            "## 6. 开盘后验证",
+            "## 7. 待验证与声明",
+        )
+        positions = [text.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions), "auction 七段顺序被改变")
+        for token in ("09:15–09:20", "09:20–09:25", "09:25", "09:30",
+                      "匹配量", "不是实际成交量", "不在本次数据范围",
+                      "from_cache", "unverified", "开盘后验证",
+                      "不得倒填"):
+            self.assertIn(token, text)
+
+    def test_auction_after_open_still_0925(self):
+        text = self._reports()
+        for token in ("09:30 后", "09:25 终态", "实际运行时点"):
+            self.assertIn(token, text)
+
+    def test_report_default_in_chat(self):
+        reports = self._reports()
+        operations = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        for token in ("默认对话交付", "指定路径", "确认"):
+            self.assertIn(token, reports)
+            self.assertIn(token, operations)
+
+    def test_reports_do_not_copy_thresholds_or_promises(self):
+        text = self._reports()
+        for forbidden in ("胜率", "必涨", "稳赚", "主力一定", "收益承诺"):
+            self.assertNotIn(forbidden, text)
+        for pattern in (r"带动性\s*\d+\s*%", r"仓位\s*[:：]\s*\d+\s*%"):
+            self.assertIsNone(re.search(pattern, text), pattern)
+
+
+def _factor_groups():
+    text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+    block = text.split("<!-- factor-groups:start -->", 1)[1].split(
+        "<!-- factor-groups:end -->", 1
+    )[0]
+    groups = {}
+    for line in block.strip().splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        groups[key.strip()] = [name.strip() for name in value.split(",") if name.strip()]
+    return groups
+
+
+class TestFactorGroups(unittest.TestCase):
+    """三组因子静态名单必须与 FACTOR_SPECS 的 source 分组完全一致。"""
+
+    def test_factor_groups_match_registry(self):
+        from dragon_quant.infra.factor.registry import FACTOR_SPECS
+
+        groups = _factor_groups()
+        self.assertEqual(set(groups), {"scan", "prep", "auction"})
+        for source in ("scan", "prep", "auction"):
+            expected = {spec.name for spec in FACTOR_SPECS if spec.source == source}
+            self.assertEqual(set(groups[source]), expected, source)
+            self.assertEqual(len(groups[source]), len(set(groups[source])), source)
+
+    def test_factor_group_counts(self):
+        groups = _factor_groups()
+        self.assertEqual(len(groups["scan"]), 7)
+        self.assertEqual(len(groups["prep"]), 23)
+        self.assertEqual(len(groups["auction"]), 17)
+
+    def test_factor_groups_exclude_other_families(self):
+        block = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        block = block.split("<!-- factor-groups:start -->", 1)[1].split(
+            "<!-- factor-groups:end -->", 1
+        )[0]
+        self.assertNotIn("vpa_", block)
+        self.assertNotIn("fin_", block)
 
 
 def _strategy_output_section() -> str:

@@ -1,15 +1,15 @@
-# outputs — 输出解读
+# outputs — 字段语义
 
 **何时读我**：需要向用户解释人读输出、`--json` 顶层字段、错误 JSON 或降级字段时。
 
 ## 通用表达顺序
 
-1. **结论**：有没有信号 / 是否建议执行 / 是否降级。
+1. **结论**：有没有数据 / 是否降级 / 是否可继续。
 2. **关键字段**：交易日、池来源、排序模式、数据质量、否决或回退原因。
-3. **风险**：降级、未验证、停牌、兜底、版本漂移。
-4. **下一步**：需要确认的写操作，或需要修复的前置条件。
+3. **风险**：降级、未验证、停牌、兜底。
+4. **待验证**：下一时点如何确认或证伪。
 
-不倾倒完整 JSON，不把错误当空数据，不把“未验证”说成“已验证”。
+不倾倒完整 JSON，不把错误当空数据，不把“未验证”说成“已验证”，不把缺失当 0。
 
 ## prep
 
@@ -17,11 +17,10 @@
 
 **怎么解释**：
 
-- 前四行与逐只清单是既有口径，逐字不变；后追加的复盘摘要才是新的复盘分视图。
-- 仓位与等级来自盘后复盘快照，**仅供人工参考，不参与下单**；真正下单看 `buy`。
+- 仓位与等级来自盘后复盘快照，**仅供人工参考，不参与下单**；真正下单动作不属本 Skill 开放范围。
 - 清单里 `strong` 是强烈建议、`light` 是轻仓博弈、`ignore` 是忽略（后面通常跟一句原因）、`unrated` 是未评级；`verdict` 只用于展示，不自动过滤回测候选池。
-- **语义防混**：旧 `sentiment.position_pct` 是「市场参考仓位」（0–1 小数）；`review_candidates[].position_pct` 是「单票建议仓位」（占总资产百分比）。二者同名不同义，解释时必须写全称，禁止简写成「仓位」。
-- 单票建议仓位是三态：`null` 表示数据或置信不足、`0` 表示明确不参与、`>0` 表示可准备建仓；`reason_code` 解释 `0` / `null` 的原因，`gate_trace` 是闸门顺序留痕。**0 只表示不建议新建仓，不表示应清仓**（持仓处置仍由 `sell` 规则决定）。
+- **语义防混**：旧 `sentiment.position_pct` 是「市场参考仓位」（0–1 小数）；`review_candidates[].position_pct` 是「单票建议仓位」（占总资产百分比）。二者同名不同义，解释时必须写全称。
+- 单票建议仓位三态：`null` 表示数据或置信不足、`0` 表示明确不参与、`>0` 表示可准备建仓；`reason_code` 解释 `0` / `null` 的原因，`gate_trace` 是闸门顺序留痕。**0 只表示不建议新建仓，不表示应清仓**。
 - 单票仓位彼此独立，**不可相加为可执行组合**；`review.portfolio.warning="sum_exceeds_100"` 时要在报告首段提示，且不给出「优先买哪只」的结论。
 - 「无参与复盘标的」不等于市场没有涨停，也可能是数据降级导致候选为空；要看理由中的降级信息。
 
@@ -34,7 +33,7 @@
 - `review`：配置版本/哈希、市场状态与分项、主线、锚、组合告警与 `degraded`。
 - `review_candidates[]`：角色、六维 `dimensions` / `contributions` / `missing_dims`、`review_score` / `review_grade` / `confidence`、`eligibility`、三态 `position_pct`、`reason_code`、`gate_trace`、`legacy` 只读证据。
 - `strategy_context`：`context_version="sc_v1"` 的 Agent 只读视图；`positions[]` 收录**全部**详细池标的（含 `position=0/null` 与原因），`market` / `mainlines` / `portfolio` / `data_quality` / `enums` / `disclaimer` 均来自 `review` 投影，不产生新数值。
-- `feedback`：T+1 盘后反馈，仅在存在 T-1 计划时出现。`items[].state` 四态 `confirmed` / `weakened` / `invalidated` / `unknown`；`unknown` 必须带稳定 `unknown_reason`（`auction_backfill_failed` 表示竞价补采失败，不等于看空）；`checkpoint` 为 `auction+close` 或 `close_only`。反馈是评估证据，不是买卖指令。
+- `feedback`：T+1 盘后反馈，仅在存在 T-1 计划时出现。`items[].state` 四态 `confirmed` / `weakened` / `invalidated` / `unknown`；`unknown` 必须带稳定 `unknown_reason`（`auction_backfill_failed` 表示竞价补采失败，不等于看空）；`checkpoint` 为 `auction+close` 或 `close_only`。反馈是评估证据，不是交易指令。
 - `plan_review`：计划 vs 实际执行的复盘。`planned_action` / `planned_position` / `feedback_state` / `actual_entry_price` / `actual_position` / `outcome_pct`；`actual_*` 为 `null` 表示未成交或执行数据缺失（`execution_known=false`），**不得编造成交价/仓位**。`attribution` 只做归因计数，不据此改写策略。
 - `dragon_source`：五日窗口血缘；`window_days=0` 表示不可用、`1` 表示旧单日口径、`5` 表示当前窗口。
 
@@ -66,7 +65,7 @@
 
 - **必须逐只覆盖全部 `positions[]`**，包括单票建议仓位 `0` / `null` 的标的；不得只列可买清单。
 - 每只写：代码/名称、`role`（`null` → 「未识别角色/诊断标的」）、`review_score`（`null` → 「分数缺失」并给 `missing_dims`）、`review_grade`、`confidence`、`eligibility`（`eligible` / `not_qualified` / `unknown`）。
-- 单票建议仓位三态：`>0`「单票建议仓位 X%」；`0`「单票建议仓位 0，不建议新建仓」；`null`「单票建议仓位无法给出（数据或置信不足）」。**`position_pct=0` 不是清仓**，持仓处置由 `sell` 规则决定。
+- 单票建议仓位三态：`>0`「单票建议仓位 X%」；`0`「单票建议仓位 0，不建议新建仓」；`null`「单票建议仓位无法给出（数据或置信不足）」。**`position_pct=0` 不是清仓**。
 - `reason_code` 按 `enums.reason_code` 原值引用：`data_insufficient` 数据不足 / `hard_risk` 硬风险 / `suspended` 停牌 / `illiquid` 流动性不足 / `not_mainline` 非主线 / `score_below_floor` 分数不足 / `grade_no_position` 档位无仓位 / `confidence_insufficient` 置信不足 / `position_below_min_unit` 低于最小单位 / `compute_error` 计算错误。
 - `position_basis[]` 可选引用（`factor` / `value` 原值），不自行重算；`warnings[]` 有则转述。
 - 不按 `review_score` 排「优先买哪只」，不给出「先买 A 再买 B」的顺序。
@@ -78,7 +77,7 @@
 - 按 `conditions[]` 说明四态：
   - **正反馈 `confirmed`**：开盘缺口与竞价量比达到 `expected` 给出的 `gap_low` / `ratio_low`，且在 `seal_by` 前封板或收盘强势 → 动作 `execute_plan` / `execute_partial`。
   - **转弱 `weakened`**：缺口或量比未达标但尚未触发取消条件 → 动作 `downgrade_half` / `wait_pullback`（降档半仓，或只等回踩）。
-  - **负反馈 `invalidated`**：深度低开、收盘跌破前收、炸板次数达到条件、或主线跌出前列 → 动作 `cancel_entry` / `exit_via_sell_rules`（取消建仓；已有持仓交给 `sell` 规则）。
+  - **负反馈 `invalidated`**：深度低开、收盘跌破前收、炸板次数达到条件、或主线跌出前列 → 动作 `cancel_entry` / `exit_via_sell_rules`（取消建仓；已有持仓交给策略规则）。
   - **未知 `unknown`**：竞价或 T+1 行情缺失、`expected` 缺失 → 动作只有 `observe_only`，**不新建仓**；必须说明是「数据不足」，不是看空。
 - 未到判定时点（竞价前 / 收盘前）写「尚未判定（wait），不新建仓」，不得预判为 `confirmed`。
 - `expected=null` 且 `unknown_reason="expectations_unavailable"` 时，只能「观察，不新建仓」。
@@ -90,7 +89,7 @@
 - `portfolio.warning="sum_exceeds_100"` 时在报告开头提示「合计超过 100%，不能同时按此建仓」，仍不给优先级。
 - 原文引用 `disclaimer`；明确「阈值为待验证基线、不构成投资建议、不承诺收益」。
 
-**回退**：`strategy_context` 缺失或 `context_version` 不认识时，只输出旧摘要（四行 + 逐只清单）并说明「没有结构化策略上下文，无法给出条件化明日策略」；不得拼凑阈值、仓位或买卖动作。修复路径见 `references/playbooks.md`。
+**回退**：`strategy_context` 缺失或 `context_version` 不认识时，只输出旧摘要（四行 + 逐只清单）并说明「没有结构化策略上下文，无法给出条件化明日策略」；不得拼凑阈值、仓位或动作。修复路径见 `references/playbooks.md`。
 
 **禁止**：把评分权重/阈值抄进叙述；把 `sentiment.position_pct`（市场参考仓位）当单票仓位；把 `0` 说成清仓；把 `unknown` 说成中性；做组合加总归一或推荐优先买入顺序。
 
@@ -100,7 +99,7 @@
 
 **`--json` 顶层**：旧键（`ok`/`mode`/`trade_date`/`source`/`pool_source`/`fallback_reason`/`candidate_codes`/`saved`/`empty`/`failed`/`quote`/`quote_missing`/`scored_count`/`snapshots`/`snapshot_saved_count` 等）全部保留，末尾新增 `strategy_context`（`auction_sc_v1`）。
 
-**快照命中（`mode="snapshot"`）**：普通 `auction` 当日已有可用快照时直接只读返回，标题为「快照｜来自缓存」。`--json` 在 `source` 后多一个 `from_cache=true`，`pool_source="snapshot"`，`saved_count=0`、`scored_count=candidate_codes=可用快照数`、`snapshot_saved_count=0`、`snapshot_ok=true`、`snapshot_skipped="cache_hit"`；`failed` 只含损坏快照行（`stage="snapshot"`），部分损坏时 `ok=false` 但 exit 0。`pool` 为 `{"source":"snapshot","coverage":"assets_only","snapshot_config_versions":[...]}`，不重算强度、不伪造 prep 血缘。**普通 auction 永远优先最新快照，想更新必须 `--force`；想按当前算法重算已存资产用 `--recompute DATE`。**
+**快照命中（`mode="snapshot"`）**：当日已有可用快照时直接只读返回，标题为「快照｜来自缓存」。`--json` 在 `source` 后多一个 `from_cache=true`，`pool_source="snapshot"`，`saved_count=0`、`scored_count=candidate_codes=可用快照数`、`snapshot_saved_count=0`、`snapshot_ok=true`、`snapshot_skipped="cache_hit"`；`failed` 只含损坏快照行（`stage="snapshot"`），部分损坏时 `ok=false` 但 exit 0。**重点：不重算强度、不伪造 prep 血缘；普通 auction 永远优先最新快照，想更新必须 `--force`；想按当前算法重算已存资产用 `--recompute DATE`。**
 
 - `pool_source=prep`：候选来自严格 T-1 的复盘推荐；`pool_source=legacy` 表示回退到最近若干交易日的龙头并集。
 - `fallback_reason`：`no_snapshot` / `snapshot_read_error` / `calendar` / `empty_snapshot` / `no_eligible` / `all_ignored` 等。回退时这批候选不是今天的盘前重点，解读要降权。
@@ -111,35 +110,12 @@
 - `empty` 是“没有盘口”，`failed` 是“采集失败”，都不是“弱”。`ok=true` 也不等于有数据。
 
 **盘中预案（`strategy_context.positions[]`）**：
+
 - 只读 `positions[]` 与其中 `actions[]`；上下文缺失时只输出旧摘要，并说明「没有结构化策略上下文，无法给出条件化盘中预案」。
 - `status` 区分：`scored`（可评价）/ `vetoed`（真实风险）/ `unavailable`、`empty`、`failed`、`unknown`（数据不足，不是看空）；`data_quality.status="degraded"` 表示可评价但不完整（`rank=null`），不能与 `unavailable` 混为一谈。
 - `actions[]` 只有 `observe` / `await_confirmation` / `flag_risk` / `request_data` 四类；每条必须带 `requires`，09:30 后的检查点必须 `requires="post_open"` 且文本是条件句（「若…则观察…」），不得写成已发生事实。
-- 预案最多 4 条，必须是 `actions[]` 的原文或等价改写。禁止承诺胜率、禁止输出买入/卖出/加仓/减仓/清仓/目标价，禁止把 `validation_status=baseline_unvalidated` 省略。
+- 预案最多 4 条，必须是 `actions[]` 的原文或等价改写。禁止承诺收益或给出交易指令，禁止省略 `validation_status=baseline_unvalidated`。
 - 若用户同时要求对照昨日计划，可**另行只读** T-1 `prep` 的 `strategy_context.positions[].expectations` 并排展示；auction 输出不嵌入也不重算 prep 预期，缺失就写「无 T-1 预期」，不得补造阈值。
-
-## buy
-
-**看到什么**：`action`、`buys[]`、`details[]`，首行还会显示建议仓位（仅参考）。
-
-**`--json` 关键字段**：
-
-- `details[].checks`：四类买点诊断，每项含 `rule`、`label`、`window`、`status`、`selected`、`reason`。
-- `status` 枚举：`passed` / `failed` / `pending` / `window_closed` / `unavailable` / `skipped`。`pending` 是还没到窗口，`window_closed` 是窗口已过，`unavailable` 是数据不足，`skipped` 是前置条件不满足；不要把后三者说成“买点失败”。
-- `ranking_mode`：`auction` / `auction_unverified` / `prep_only` / `legacy`，表示择优依据。
-- `fallback_reason`：候选池回退原因。
-- `data_quality`：`strict_5min` / `mixed` / `daily_fallback`。
-- `forced`、`vetoed_signal`、`buy_eval_skipped`：强制模式、被否决但本可买入的信号、买点未评估的原因。
-
-## sell
-
-**看到什么**：人读输出，有卖出则逐条列出代码/名称/成交价/持有天数/原因，`partial` 表示减半仓；没有卖出则提示持仓暂无卖出信号。
-
-**怎么解释**：
-
-- `sell` 没有 JSON；不要臆造字段。
-- 当天买入的仓位受 T+1 限制，不会出现在卖出建议里。
-- `forced` 只表示强制回放，仍不会用收盘价伪造成交；日K兜底日的保守近似要说明。
-- 没有卖出信号不等于没有持仓；必要时提示用户查看持仓来源。
 
 ## review-account
 
@@ -149,7 +125,9 @@
 
 - `data_quality` 三态：`strict_5min`（严格盘中撮合）、`mixed`（混合）、`daily_fallback`（日K兜底）。
 - 同时看 `fallback_days`、`suspended_days`、`unavailable_days`、`data_degraded`。
+- `ranking_mode`：`auction` / `auction_unverified` / `prep_only` / `legacy`，表示择优依据；回退池不是当日盘前推荐。
 - 兜底成交价是保守近似，不等于真实可成交价；停牌标的冻结，不评估买卖。
+- 清仓后窗口指标是事后评估，不参与交易决策，可能越出回测区间。
 
 ## dragons / scan --date
 
@@ -157,44 +135,17 @@
 
 **怎么解释**：
 
-- 要“某天有哪些真龙”，优先 `dragons`；要全部候选与否决原因，用 `scan --date`。
+- 要“某天有哪些真龙”，优先 `dragons --true-only`；要全部候选与否决原因，用 `scan --date`。
 - `scan --date` 只接受 `YYYYMMDD`；格式错误只写 stderr 但仍以 0 退出，不能只看退出码。
 - 错误 JSON 中 `available_top_n` 表示该日实际可用的 top 口径，按提示调整 `--top` 重试；“无记录”和“top 不匹配”要分开说。
 
-## assets
+## factor build / query
 
-**看到什么**：本次推送/拉取/校验的摘要与失败列表。
+**看到什么**：`build` 的人读摘要或 `--json` 顶层 `ok/mode/dates/build_ids/reports/warnings`；`query` 的表格或 JSON（带 `resolved_versions`）。
 
-- `status`：缺失、不一致、drift、体积；`dates_drift` 只是本地行数更多的弱信号，退出码仍为 0。
-- `verify`：默认校验 manifest，`--deep` 才下载内容；`mismatched[]` 才是定性失败。
-- `push`：`pushed`/`skipped`/`blobs`/`manifests`；`skipped` 不是失败；`--dry-run` 的计数为 0 是正常现象，要看 `summary.dates[]`。
-- `pull`：默认只输出计划；`--apply` 才写。主库 `--force` 禁用，恢复用 `--target-dir`。
-- 退出码：0 成功/无差异/仅 drift；1 部分失败/冲突/收缩被拒；2 配置、网络、manifest 不可读或参数错误。
-
-## factor
-
-**看到什么**：`query` 的表格或 JSON，`status` 的构建状态，`eval` 的指标报告。
-
-- `query` 输出会带 `resolved_versions`；同名多版本不会混成多行。
-- `eval` 的 `insufficient_data` 是有效结论（exit 0），不是失败；**历史不足不得说成「因子有效」**。
-- 因子缺失表示“无行”，不等于 0 或中性分。
-- `build` 报告里的 `warnings`、`unverified_rows`、`missing_source` 要如实转述。
-- `prep_review_*`（复盘分因子族）默认关、不参与选股模型排序（因子排序开关仍只读五维/vpa）；`prep_feedback_state` 的 `available_at` 属 close 阶段，不要当成盘中实时信号。影子/评估结论只在跑满影子期后讨论，当前一律按 `insufficient_data` 处理。
-
-### `factor decision-review`（`dr_v1`）
-
-**看到什么**：`groups[]` 里每个组在每个 horizon 的 `observations/valid/coverage/up/down/flat/direction_hit_rate/quality`、`spreads` 差值、`snapshots` 覆盖计数与 `warnings`。
-
-- 只需看组级命中/覆盖/`quality`；`quality` 只表示**样本充足度**（`days`/`valid` 是否达 `min_days`/`min_group_samples`），不代表结论稳健。
-- **不要把 `wilson95` 当显著性检验**：同日多只与相邻 horizon 重叠会让区间偏窄，`wilson_caveat=date_correlated_descriptive_only` 是固定提示。
-- 方向按**扣除 `cost_bps`（默认 13bp）后的净收益**判定；`flat` = 净收益恰为 0（保本），计入分母但永不算命中。`gross_return_pct` 只在 `--include-samples` 的逐样本账本里供审计。
-- `spreads[].value` 是两侧组均值净收益之差；任一侧无样本 → `null`（`-`）。
-- `status=insufficient_data`（含 `no_snapshot_in_range` / `calendar_unavailable`）是有效结论（exit 0）；**不得**据此宣称策略有效。prep `position_pct=0` 只表示不建议新建仓，不等于看空；auction 分母只含已持久化快照。
-
-## storage
-
-**看到什么**：`status` 显示数据根目录、数据库体积、缓存/结果/日志占用；`size` 显示目录占用；`clear` 显示各类清理数量。
-
-- `storage clear` 不删除 `.db` 文件，但会删缓存、结果、日志以及日志表行。
-- 日志清理计数是“文件数 + 日志表行数”，不要当纯文件数。
-- 删除后数据库文件体积可能不变（未 checkpoint/vacuum），不能用“文件大小没变”推断“没删掉”。
+- `build` 的逐因子状态：`reports[0].factors[<name>].status` 可为 `ok` / `empty` / `missing_source` / `error`；**exit 0 不等于全部成功**，必须逐条核对。
+- `missing_source` 是源不可用或配置 fail-closed，**不等于 0**；`empty` 是源可用但当日无值。
+- `warnings`：`no_scan_for_date` 对 prep/auction-only 组是预期，对 scan 组是失败信号。
+- `query` 输出会带 `resolved_versions`；同名多版本不会混成多行；`values.rows == 0` 表示无行，不等于 0 分或中性。
+- 代表因子：`five_dim_composite`（scan）、`prep_review_score`（prep）、`auction_is_weak`（auction，数据不足时可合法无行）；`auction_strength` 仅在数据质量 `ok` 时作为二次抽查。
+- `prep_review_score` 属复盘分因子族；`prep_feedback_state` 的可用阶段是 T+1 盘后（`close`），当日无 T-1 计划时合法无行，不要当失败。

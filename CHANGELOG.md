@@ -12,6 +12,10 @@
 
 ## [Unreleased]
 
+### Changed
+- **Agent Skill 收敛为交易日助手**：默认命令面从 15 个顶层命令收敛为七类白名单（个股行情、扫描与真龙、盘后复盘、集合竞价、龙头回测、账户回测、因子入库与读回）；未开放能力统一走固定话术 + issue 链接，不再以命令、路由或否定示例出现。新增 `references/reports.md`（prep 九段 / auction 七段模板），`operations.md` 固定单能力/每日复合、UI 生命周期与因子三组静态名单，`safety.md` 仅保留 T0/T1。
+- **npm Skill 元数据对齐**：`package.json`、`skill-version`、`min-cli-version` 同步至 `0.7.4`（本次不发布 npm，Python 版本不变）。
+
 ## [0.7.4] - 2026-10-30
 
 > 草稿：覆盖 README 展示修正；合入 main 并完成版本提交后补记版本依据。

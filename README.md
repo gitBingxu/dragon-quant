@@ -19,6 +19,7 @@
 
 - [稳定性说明](#稳定性说明)
 - [快速使用](#快速使用)
+- [Agent Skill](#agent-skill)
 - [龙头扫描](#龙头扫描)
 - [龙头回测](#龙头回测)
 - [设计哲学](#设计哲学)
@@ -38,7 +39,7 @@
 | `prep` 盘后复盘 | 快速迭代中 | 2026 年 12 月初 |
 | `auction` 集合竞价强度判断 | 快速迭代中 | 2026 年 12 月初 |
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
-| `agent-skill` 盘前预案复盘回测等 skills | 快速迭代中 | 2026 年 12 月中 |
+| `agent-skill` Agent 交易日助手 | 快速迭代中 | 2026 年 12 月中 |
 
 ## 快速使用
 
@@ -55,6 +56,23 @@ dragon-quant review --ui
 ```
 
 只需查看已有回测结果时，运行 `dragon-quant review --ui-only`。
+
+## Agent Skill
+
+仓库内置单主 Agent Skill，让 Claude Code 等 Agent 按「交易日助手」定位使用 dragon-quant：
+
+```bash
+npx dragon-quant-skills install    # 写入项目 .claude/skills/dragon-quant
+npx dragon-quant-skills doctor     # 检查安装完整性、CLI 版本与遮蔽
+```
+
+Agent 可用的能力限定为七类：个股行情、扫描与真龙、盘后复盘、集合竞价、龙头回测、账户回测、因子入库与读回。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
+
+仓库内 Skill 版本可能高于 npm registry 已发布版本；安装后用 `npx dragon-quant-skills doctor` 核对实际安装的 Skill 版本、来源与最低 CLI 版本，不要假定 `npx` 拉到的就是仓库中的最新内容。
+
+不在白名单内的能力统一回复：
+
+> 当前功能还不稳定，暂未对 Agent 开放。你可以到 https://github.com/gitBingxu/dragon-quant/issues 反馈需求或问题。
 
 ## 龙头扫描
 

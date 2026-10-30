@@ -23,7 +23,7 @@
 - **未开放话术**：Skill 正文统一使用固定话术「当前功能还不稳定，暂未对 Agent 开放。你可以到 https://github.com/gitBingxu/dragon-quant/issues 反馈需求或问题。」，不列被排除命令名；行为场景与 P0 判定由 main 编排。
 - **兼容通道**：`npx skills add gitBingxu/dragon-quant` 与手工复制均不校验 CLI 版本、无 manifest；安装器会把无 manifest 的目录判为 `foreign`，不静默覆盖。远端通用安装与 Windows 路径本期未实测。
 - **测试**：`npm test` 跑 Node 全量；`.venv/bin/python -m pytest dragon_quant/tests/test_skill_package.py dragon_quant/tests/test_skill_content.py dragon_quant/tests/test_skill_routes.py` 跑内容/路由对齐。`test/packaging.test.mjs` 做 `npm pack` 白名单与本地 tarball `npm exec` E2E（隔离 HOME/目标目录）。
-- **发布**：npm 包 `dragon-quant-skills` 已发布，可通过 `npx dragon-quant-skills install` 安装；官方 registry 与 npmmirror 的仓库外 dry-run 已实测。未配置 provenance/Trusted Publishing，不自动提交 git。方案与残余风险见 `docs/solutions/2026-10-24-agent-skills-design.md`。
+- **发布**：维护者运行 `scripts/publish-skill.sh [--dry-run]` 发布当前 `package.json` 版本；脚本自动定位仓库根目录，隐藏输入 access token，用权限 0600 的临时 npmrc 并在退出时清理，不写长期 npm 配置。token 需具备发布权限；Automation token 可避免交互 OTP。`test/publish-skill.test.mjs` 用 fake npm 验证任意目录调用、参数、空 token 拒绝与临时配置清理，不触网。npm 包 `dragon-quant-skills` 已发布，可通过 `npx dragon-quant-skills install` 安装；未配置 provenance/Trusted Publishing，不自动提交 git。方案与残余风险见 `docs/solutions/2026-10-24-agent-skills-design.md`。
 
 ## Web UI 前端构建
 

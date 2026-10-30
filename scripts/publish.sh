@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 
 usage() {
@@ -19,6 +22,9 @@ done
 
 [[ -z "${VERSION:-}" || -z "${PASSWD:-}" ]] && usage
 
+# ─── 后续版本写入 / git / 构建 / CHANGELOG 均以仓库根为工作目录 ───
+cd "${REPO_ROOT}"
+
 # ─── 校验版本号格式 ───
 if ! python3 -c "import re; assert re.match(r'^\d+\.\d+\.\d+$', '$VERSION')" 2>/dev/null; then
   echo -e "${RED}错误: 版本号格式错误 (期望 x.y.z，实际: $VERSION)${NC}"
@@ -26,9 +32,9 @@ if ! python3 -c "import re; assert re.match(r'^\d+\.\d+\.\d+$', '$VERSION')" 2>/
 fi
 
 # ─── 解密 PyPI token ───
-TOKEN=$(openssl enc -aes-256-cbc -pbkdf2 -d -in publish_token.enc -pass pass:"${PASSWD}" 2>/dev/null)
+TOKEN=$(openssl enc -aes-256-cbc -pbkdf2 -d -in "${SCRIPT_DIR}/publish_token.enc" -pass pass:"${PASSWD}" 2>/dev/null)
 if [[ -z "${TOKEN:-}" ]]; then
-  echo -e "${RED}错误: 解密失败（密码错误或 publish_token.enc 不存在）${NC}"
+  echo -e "${RED}错误: 解密失败（密码错误或 scripts/publish_token.enc 不存在）${NC}"
   exit 1
 fi
 

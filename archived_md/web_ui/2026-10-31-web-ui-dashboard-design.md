@@ -7,7 +7,7 @@
 > 本文只补 main 未覆盖的执行细节：API 全量定义、backend 模块结构、CLI 集成、前端结构、错误处理、测试策略、文档同步、分期边界、风险与 Mermaid 图。
 > 不写生产代码；阶段 3 按 §15 的顺序实施。
 
-> **后续变更（2026-10-31，dashboard v2 收敛 + 三态主题）**：本方案的「面板 source 上下文」（§8.4 及 §6.6 中「v1 由面板筛选进入」）已被 [`dashboard v2 收敛 + 三态主题`](../../docs/solutions/2026-10-31-dashboard-v2-theme-design.md) 取代：dashboard 前端固定 v2，删除顶部「数据体系」选择器，旧 `?source=v1` 深链忽略 query 按 v2 渲染；后端 v1 API / 表 / `--source v1` CLI 全部保留。历史正文保留不重写。
+> **后续变更（2026-10-31，dashboard v2 收敛 + 三态主题）**：本方案的「面板 source 上下文」（§8.4 及 §6.6 中「v1 由面板筛选进入」）已被 [`dashboard v2 收敛 + 三态主题`](2026-10-31-dashboard-v2-theme-design.md) 取代：dashboard 前端固定 v2，删除顶部「数据体系」选择器，旧 `?source=v1` 深链忽略 query 按 v2 渲染；后端 v1 API / 表 / `--source v1` CLI 全部保留。历史正文保留不重写。
 
 ## 0. 结论摘要
 

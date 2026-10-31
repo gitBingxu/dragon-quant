@@ -125,6 +125,7 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-10-31 | dashboard 前端固定 v2 + 三态主题 + 发布前前端构建 | [2026-10-31-dashboard-v2-theme-design.md](web_ui/2026-10-31-dashboard-v2-theme-design.md) | `docs/solutions/2026-10-31-dashboard-v2-theme-design.md` |
 | 2026-10-31 | web_ui FastAPI 重构技术方案（issue #24，dashboard 命令 / `[web]` extra / P0 五页 / Kraken 终端风前端） | [2026-10-31-web-ui-dashboard-design.md](web_ui/2026-10-31-web-ui-dashboard-design.md) | `docs/superpowers/specs/2026-10-31-web-ui-dashboard-design.md` |
 | 2026-10-31 | FastAPI + uvicorn + 运行期自装调研（版本选型 / SPA 托管 / 端口与 SIGTERM 契约 / pip extra 三环境行为） | [2026-10-31-fastapi-web-ui-research.md](web_ui/2026-10-31-fastapi-web-ui-research.md) | `docs/superpowers/specs/2026-10-31-fastapi-web-ui-research.md` |
 

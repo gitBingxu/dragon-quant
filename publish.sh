@@ -32,6 +32,12 @@ if [[ -z "${TOKEN:-}" ]]; then
   exit 1
 fi
 
+# ─── 重建前端产物（dist 必须随发布提交）───
+# 必须在版本写入与任何 git add/commit/tag/push 之前完成；失败即由 set -e 停止。
+# 不自动 npm install/ci：发布机需已安装 web_ui/frontend 的 devDependencies。
+echo -e "${GREEN}==> 1/8 重建前端产物${NC}"
+npm --prefix web_ui/frontend run build
+
 # ─── 自动写入版本号 ───
 echo -e "${GREEN}==> 写入版本号: ${VERSION}${NC}"
 
@@ -40,27 +46,27 @@ sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/" dragon_quant/_v
 
 
 # ─── 发布流程 ───
-echo -e "${GREEN}==> 1/7 提交代码${NC}"
+echo -e "${GREEN}==> 2/8 提交代码${NC}"
 git add .
 git commit -m "🔖 bump: ${VERSION}"
 
-echo -e "${GREEN}==> 2/7 打标签${NC}"
+echo -e "${GREEN}==> 3/8 打标签${NC}"
 git tag "v${VERSION}"
 
-echo -e "${GREEN}==> 3/7 推送代码和标签${NC}"
+echo -e "${GREEN}==> 4/8 推送代码和标签${NC}"
 git push && git push --tags
 
-echo -e "${GREEN}==> 4/7 构建${NC}"
+echo -e "${GREEN}==> 5/8 构建${NC}"
 rm -rf dist && python3 -m build
 
-echo -e "${GREEN}==> 5/7 检查${NC}"
+echo -e "${GREEN}==> 6/8 检查${NC}"
 twine check dist/*
 
-echo -e "${GREEN}==> 6/7 上传 PyPI${NC}"
+echo -e "${GREEN}==> 7/8 上传 PyPI${NC}"
 twine upload -u __token__ -p "${TOKEN}" dist/*
 
-# ─── 7/7 发布 GitHub Release（release notes 取自 CHANGELOG.md 对应版本段）───
-echo -e "${GREEN}==> 7/7 发布 GitHub Release${NC}"
+# ─── 8/8 发布 GitHub Release（release notes 取自 CHANGELOG.md 对应版本段）───
+echo -e "${GREEN}==> 8/8 发布 GitHub Release${NC}"
 NOTES_FILE=$(mktemp)
 trap 'rm -f "$NOTES_FILE"' EXIT
 

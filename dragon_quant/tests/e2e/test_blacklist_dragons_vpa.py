@@ -75,7 +75,7 @@ def _dragon_row(code: str, trade_date: str, name: str, rank: int,
         "market_cap": 1000000000.0,
         "concepts_json": json.dumps(["测试", f"概念{rank}"], ensure_ascii=False),
         "report_text": f"报告{code}", "is_true_dragon": 1 if true else 0,
-        "version": "0.7.2", "created_at": f"{trade_date} 15:30:00",
+        "version": "0.7.4", "created_at": f"{trade_date} 15:30:00",
         "buy_date": None, "buy_price": None, "max_return_5d": None,
         "max_drawdown_5d": None, "max_return_hold_days": None,
         "review_status": "pending", "source": "v2",
@@ -259,7 +259,9 @@ def test_v1_vpa_success_renders_report_and_persists_row():
         assert floats_close(row["health_score"], expected["health_score"], rel=0, abs_tol=1e-12)
         assert row["signal"] == expected["signal"]
         assert row["summary"] == expected["summary"]
-        assert row["version"] == "0.7.2"
+        from dragon_quant._version import __version__
+
+        assert row["version"] == __version__
         assert isinstance(row["created_at"], str)
 
         factors = json.loads(row["factors_json"])

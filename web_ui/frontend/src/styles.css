@@ -1,0 +1,558 @@
+@import "tailwindcss";
+
+/* ── Kraken 暗色金融终端 token ───────────────────────────────────────────
+   背景 #0B0E14 · 面板 #131722 · 品牌紫 #8C6FF0 · 文字 #E6E8F0 / #8B90A0。
+   A 股语义：涨/收益=红，跌/回撤=绿（与品牌紫严格区分）。
+   对比度（#131722 背景）：ink 14.6:1 · ink-2 5.6:1 · brand 4.8:1
+   · up 5.0:1 · down 5.9:1 —— 均过 WCAG AA 正文。
+
+   主题策略：@theme 的 --color-* 是 dark 默认值（生成工具类）；浅色只在
+   @layer base 覆盖同名变量。⚠ 禁止对主题化颜色使用 Tailwind 斜杠透明度
+   （如 bg-white/5、border-critical/35）：构建期会固化成字面量，不随
+   [data-theme=light] 变化。需要 alpha 时用显式 -soft / -line / -focus
+   token，或在 CSS 里 color-mix()。 */
+@theme {
+  --color-void: #0b0e14;
+  --color-panel: #131722;
+  --color-panel-2: #171c29;
+  --color-panel-3: #1d2333;
+
+  --color-hairline: rgba(255, 255, 255, 0.07);
+  --color-hairline-2: rgba(255, 255, 255, 0.12);
+
+  --color-ink: #e6e8f0;
+  --color-ink-2: #8b90a0;
+  --color-ink-3: #6e7488;
+
+  --color-brand: #8c6ff0;
+  --color-brand-bright: #a28aff;
+  --color-brand-soft: rgba(140, 111, 240, 0.14);
+
+  --color-up: #ef4e5e;
+  --color-up-soft: rgba(239, 78, 94, 0.14);
+  --color-down: #26a87a;
+  --color-down-soft: rgba(38, 168, 122, 0.14);
+  --color-warn: #f0b429;
+  --color-warn-soft: rgba(240, 180, 41, 0.14);
+  --color-info: #4a9eff;
+  --color-info-soft: rgba(74, 158, 255, 0.14);
+  --color-critical: #e5484d;
+  --color-critical-soft: rgba(229, 72, 77, 0.14);
+
+  /* 表面 / 交互（替代 bg-white/… 与 bg-black/… 的语义表面） */
+  --color-raise: rgba(255, 255, 255, 0.015);
+  --color-raise-strong: rgba(255, 255, 255, 0.035);
+  --color-hover: rgba(255, 255, 255, 0.05);
+  --color-hover-strong: rgba(255, 255, 255, 0.08);
+  --color-header: rgba(11, 14, 20, 0.82);
+  --color-input: #0f131d;
+  --color-scrim: rgba(0, 0, 0, 0.65);
+  /* 语义色（组合描边 / 文本），避免斜杠透明度 */
+  --color-critical-text: #ff9093;
+  --color-critical-line: rgba(229, 72, 77, 0.35);
+  --color-warn-line: rgba(240, 180, 41, 0.35);
+  --color-brand-focus: rgba(140, 111, 240, 0.35);
+
+  --font-sans: -apple-system, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@layer base {
+  /* CSS-only 变量：仅组件内部使用，不生成工具类。 */
+  :root {
+    --color-halo: rgba(255, 255, 255, 0.06);
+    --color-selection: rgba(140, 111, 240, 0.35);
+    --color-selection-text: #ffffff;
+    --color-scrollbar: rgba(255, 255, 255, 0.12);
+    --color-scrollbar-hover: rgba(255, 255, 255, 0.2);
+    --color-switch-off: rgba(255, 255, 255, 0.12);
+    --color-switch-thumb: #ffffff;
+    --color-on-brand: #ffffff;
+
+    --app-glow-1: rgba(140, 111, 240, 0.1);
+    --app-glow-2: rgba(74, 158, 255, 0.06);
+    --panel-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0) 140px);
+    --shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 18px 44px -28px rgba(0, 0, 0, 0.9);
+    --shadow-overlay: 0 30px 80px -24px rgba(0, 0, 0, 0.95);
+    --shadow-primary: 0 6px 18px -10px rgba(140, 111, 240, 0.9);
+    --date-icon-filter: invert(0.72);
+    --spin-opacity: 0.35;
+  }
+
+  /* 浅色覆盖：只覆盖颜色/阴影，不改布局、字体或几何。 */
+  [data-theme="light"] {
+    /* 表面 */
+    --color-void: #f4f6fb;
+    --color-panel: #ffffff;
+    --color-panel-2: #f7f8fc;
+    --color-panel-3: #eef1f8;
+    --color-header: rgba(244, 246, 251, 0.82);
+    --color-input: #ffffff;
+    --color-scrim: rgba(16, 24, 40, 0.38);
+
+    /* 描边 / 文字 */
+    --color-hairline: rgba(16, 24, 40, 0.1);
+    --color-hairline-2: rgba(16, 24, 40, 0.18);
+    --color-ink: #101828;
+    --color-ink-2: #475467;
+    --color-ink-3: #667085;
+
+    /* 品牌 / 涨跌 / 状态（色相不变，只调明度以满足 AA） */
+    --color-brand: #6d4bd8;
+    --color-brand-bright: #5b3bc4;
+    --color-brand-soft: rgba(109, 75, 216, 0.1);
+    --color-up: #c42434;
+    --color-up-soft: rgba(196, 36, 52, 0.1);
+    --color-down: #0e7a5a;
+    --color-down-soft: rgba(14, 122, 90, 0.1);
+    --color-warn: #8a5a00;
+    --color-warn-soft: rgba(138, 90, 0, 0.12);
+    --color-info: #1d63c9;
+    --color-info-soft: rgba(29, 99, 201, 0.1);
+    --color-critical: #c62828;
+    --color-critical-soft: rgba(198, 40, 40, 0.1);
+    --color-critical-text: #b42318;
+
+    /* 交互 / 组合线 */
+    --color-raise: rgba(16, 24, 40, 0.03);
+    --color-raise-strong: rgba(16, 24, 40, 0.06);
+    --color-hover: rgba(16, 24, 40, 0.05);
+    --color-hover-strong: rgba(16, 24, 40, 0.08);
+    --color-brand-focus: rgba(109, 75, 216, 0.3);
+    --color-critical-line: rgba(198, 40, 40, 0.3);
+    --color-warn-line: rgba(138, 90, 0, 0.3);
+    --color-halo: rgba(16, 24, 40, 0.1);
+
+    /* CSS-only */
+    --color-selection: rgba(109, 75, 216, 0.18);
+    --color-selection-text: #101828;
+    --color-scrollbar: rgba(16, 24, 40, 0.16);
+    --color-scrollbar-hover: rgba(16, 24, 40, 0.26);
+    --color-switch-off: rgba(16, 24, 40, 0.18);
+    --color-switch-thumb: #ffffff;
+    --color-on-brand: #ffffff;
+    --app-glow-1: rgba(109, 75, 216, 0.06);
+    --app-glow-2: rgba(29, 99, 201, 0.05);
+    --panel-sheen: linear-gradient(180deg, rgba(16, 24, 40, 0.02), rgba(16, 24, 40, 0) 140px);
+    --shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 12px 32px -24px rgba(16, 24, 40, 0.28);
+    --shadow-overlay: 0 24px 64px -24px rgba(16, 24, 40, 0.3);
+    --shadow-primary: 0 6px 18px -10px rgba(109, 75, 216, 0.35);
+    --date-icon-filter: none;
+    --spin-opacity: 0.55;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-void);
+    background-image:
+      radial-gradient(980px 520px at 92% -12%, var(--app-glow-1), transparent 62%),
+      radial-gradient(720px 420px at -8% -6%, var(--app-glow-2), transparent 56%);
+    background-attachment: fixed;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--color-selection);
+    color: var(--color-selection-text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-scrollbar);
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-scrollbar-hover);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: var(--date-icon-filter);
+    cursor: pointer;
+    opacity: 0.8;
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    opacity: var(--spin-opacity);
+  }
+}
+
+@layer components {
+  /* 面板：1px 描边 + 顶部分层高光 + 深阴影 */
+  .panel {
+    background: var(--panel-sheen), var(--color-panel);
+    border: 1px solid var(--color-hairline);
+    border-radius: 12px;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .panel-desc {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--color-ink-2);
+  }
+
+  .panel-body {
+    padding: 16px 18px;
+  }
+
+  /* 按钮 */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      opacity 140ms ease;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--color-brand);
+    color: var(--color-on-brand);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), var(--shadow-primary);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-brand-bright);
+  }
+  .btn-ghost {
+    background: var(--color-raise-strong);
+    border-color: var(--color-hairline);
+    color: var(--color-ink);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--color-hover-strong);
+    border-color: var(--color-hairline-2);
+  }
+  .btn-subtle {
+    background: transparent;
+    color: var(--color-ink-2);
+  }
+  .btn-subtle:hover:not(:disabled) {
+    background: var(--color-hover);
+    color: var(--color-ink);
+  }
+  .btn-danger {
+    background: var(--color-critical-soft);
+    border-color: var(--color-critical-line);
+    color: var(--color-critical-text);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--color-critical) 22%, transparent);
+  }
+  .btn-sm {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 12px;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--color-ink-2);
+    cursor: pointer;
+    transition:
+      background 140ms ease,
+      color 140ms ease;
+  }
+  .icon-btn:hover {
+    background: var(--color-hover-strong);
+    color: var(--color-ink);
+  }
+
+  /* 表单 */
+  .input,
+  .select {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 8px;
+    background: var(--color-input);
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 13px;
+    transition:
+      border-color 140ms ease,
+      box-shadow 140ms ease;
+  }
+  .input::placeholder {
+    color: var(--color-ink-3);
+  }
+  .input:hover,
+  .select:hover {
+    border-color: var(--color-hairline-2);
+  }
+  .input:focus,
+  .select:focus {
+    outline: none;
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand) 16%, transparent);
+  }
+  .select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 30px;
+    cursor: pointer;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .field-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-2);
+  }
+
+  /* 数据表 */
+  .dt-wrap {
+    width: 100%;
+    overflow: auto;
+  }
+  .dt {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+  .dt th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--color-hairline);
+    background: var(--color-panel-2);
+    color: var(--color-ink-2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .dt td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--color-hairline);
+    vertical-align: middle;
+  }
+  .dt tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .dt tbody tr {
+    transition: background 120ms ease;
+  }
+  .dt tbody tr:hover {
+    background: var(--color-hover);
+  }
+  .dt tbody tr[data-clickable="true"] {
+    cursor: pointer;
+  }
+  .dt tbody tr[data-clickable="true"]:hover {
+    background: color-mix(in oklab, var(--color-brand) 8%, transparent);
+  }
+
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+  }
+
+  /* 分段控件 */
+  .seg {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 9px;
+    background: var(--color-raise-strong);
+  }
+  .seg-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 7px;
+    color: var(--color-ink-2);
+    font-size: 12px;
+    font-weight: 500;
+    transition:
+      background 140ms ease,
+      color 140ms ease;
+  }
+  .seg-item:hover {
+    color: var(--color-ink);
+  }
+  .seg-item[data-active="true"] {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-bright);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-brand) 35%, transparent);
+  }
+
+  /* 开关 */
+  .switch {
+    position: relative;
+    width: 34px;
+    height: 20px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--color-switch-off);
+    cursor: pointer;
+    transition: background 140ms ease;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-switch-thumb);
+    transition: transform 140ms ease;
+  }
+  .switch[data-on="true"] {
+    background: var(--color-brand);
+  }
+  .switch[data-on="true"]::after {
+    transform: translateX(14px);
+  }
+
+  .meter {
+    position: relative;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--color-hover-strong);
+  }
+  .meter > span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px;
+  }
+
+  /* Badge：颜色语义集中在 CSS，浅色随 token 覆盖；布局类仍留在 TSX。 */
+  .badge-neutral {
+    border-color: var(--color-hairline-2);
+    background: var(--color-hover);
+    color: var(--color-ink-2);
+  }
+  .badge-brand {
+    border-color: color-mix(in oklab, var(--color-brand) 35%, transparent);
+    background: var(--color-brand-soft);
+    color: var(--color-brand-bright);
+  }
+  .badge-up {
+    border-color: color-mix(in oklab, var(--color-up) 35%, transparent);
+    background: var(--color-up-soft);
+    color: var(--color-up);
+  }
+  .badge-down {
+    border-color: color-mix(in oklab, var(--color-down) 35%, transparent);
+    background: var(--color-down-soft);
+    color: var(--color-down);
+  }
+  .badge-warn {
+    border-color: color-mix(in oklab, var(--color-warn) 35%, transparent);
+    background: var(--color-warn-soft);
+    color: var(--color-warn);
+  }
+  .badge-info {
+    border-color: color-mix(in oklab, var(--color-info) 35%, transparent);
+    background: var(--color-info-soft);
+    color: var(--color-info);
+  }
+  .badge-critical {
+    border-color: var(--color-critical-line);
+    background: var(--color-critical-soft);
+    color: var(--color-critical-text);
+  }
+  .badge-outline {
+    border-color: var(--color-hairline-2);
+    background: transparent;
+    color: var(--color-ink-2);
+  }
+
+  /* 错误条：布局类（间距 / 圆角 / flex）保留在 TSX。 */
+  .alert-critical {
+    border: 1px solid var(--color-critical-line);
+    background: var(--color-critical-soft);
+    color: var(--color-critical-text);
+  }
+}

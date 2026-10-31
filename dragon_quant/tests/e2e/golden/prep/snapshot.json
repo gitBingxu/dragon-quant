@@ -241,35 +241,35 @@
         "scan_id": "v2_20260907_5",
         "status": "ok",
         "trade_date": "2026-09-07",
-        "version": "0.7.2"
+        "version": "0.7.4"
       },
       {
         "count": 2,
         "scan_id": "v2_20260908_5",
         "status": "ok",
         "trade_date": "2026-09-08",
-        "version": "0.7.2"
+        "version": "0.7.4"
       },
       {
         "count": 1,
         "scan_id": "v2_20260909_5",
         "status": "ok",
         "trade_date": "2026-09-09",
-        "version": "0.7.2"
+        "version": "0.7.4"
       },
       {
         "count": 1,
         "scan_id": "v2_20260910_5",
         "status": "ok",
         "trade_date": "2026-09-10",
-        "version": "0.7.2"
+        "version": "0.7.4"
       },
       {
         "count": 2,
         "scan_id": "v2_20260911_5",
         "status": "ok",
         "trade_date": "2026-09-11",
-        "version": "0.7.2"
+        "version": "0.7.4"
       }
     ],
     "scan_id": null,

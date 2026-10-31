@@ -93,7 +93,7 @@ dragon_quant/
 ├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
 
 # 同级仓库包（不是 dragon_quant 的子包）
-web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine / stdlib HTTPServer；web_ui.start_server）
+web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static）+ frontend/src/{pages,api,lib,router,theme} + dist（入库）
 ```
 
 ## 命令导航与入口事实
@@ -102,7 +102,7 @@ web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine /
 > 每个顶层命令的实现在 `commands/<name>.py` 的 `handle(args, services)`（buy/sell 共用
 > `commands/buy_sell.py` 的 `handle_buy`/`handle_sell`）。测试与脚本应直接走
 > `commands.dispatch` 或命令模块的公共 helper，不存在第二个转发层。真实导航链是
-> `cli → commands → feature 门面 → feature 用例 → 实现`；`app.py`（Composition Root）只是
+> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 16 个（含 `dashboard`，长驻、只读面板）；`app.py`（Composition Root）只是
 > commands 按需调用的装配支路，不在链上多一跳。
 
 > **入口事实（实测）**：`python -m dragon_quant`（不带子命令）与 `-h` 一样**打印帮助并 exit 0**，
@@ -121,7 +121,7 @@ web_ui/                          # 回测结果 Web UI（Vite+React+TS+Mantine /
 > `infra.assets.main.run`；`infra.factor.maintenance.plan_purge/apply_purge`（`assets purge-derived`，命令层取锁）；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；
 > `infra.storage.main`（`init_db`/`DataCache`/`StorageManager`）与 `scan.storage.main`
 > （扫描/龙头/日志/黑名单持久化）为文档化公共契约，`infra/storage`、`scan/storage` 的
-> `__init__.py` 不做急切重导出；`web_ui.start_server`。
+> `__init__.py` 不做急切重导出；`web_ui.start_dashboard`（新入口）/ `web_ui.start_server`（deprecated 薄壳）。
 
 ## 刻意保留的兼容例外
 

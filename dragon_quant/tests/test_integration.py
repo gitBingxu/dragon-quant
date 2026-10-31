@@ -122,12 +122,19 @@ class TestReviewAccountIntegration(IntegrationBase):
         self.assertAlmostEqual(result["final_equity"], 99495.199)
         self.assertEqual(result["win_rate"], 0.0)
 
+    @staticmethod
+    def _web_client(account):
+        from fastapi.testclient import TestClient
+
+        from web_ui.backend import deps
+        from web_ui.backend.app import create_app
+        from web_ui.backend.settings import DashboardSettings
+
+        app = create_app(DashboardSettings())
+        app.dependency_overrides[deps.account_repository] = lambda: account
+        return TestClient(app, base_url="http://127.0.0.1")
+
     def test_positions_api_includes_stats_and_nullable_old_columns(self):
-        from web_ui.server import ReviewHandler
-        handler = object.__new__(ReviewHandler)
-        captured = {}
-        handler._send_json = lambda payload, status=200: captured.update(
-            payload=payload, status=status)
         fake_db = MagicMock()
         fake_db.query_review_account_positions.return_value = [{
             "code": "600001", "name": "样本", "entry_date": "2026-09-04",
@@ -140,9 +147,10 @@ class TestReviewAccountIntegration(IntegrationBase):
             "post_exit_window_days": None,
         }]
         fake_db.get_review_account_run.return_value = {"initial_cash": 100000.0}
-        with patch("web_ui.server._get_account_store", return_value=fake_db):
-            handler._serve_api_account_positions({"run_id": ["1"]})
-        payload = captured["payload"]
+        client = self._web_client(fake_db)
+        response = client.get("/api/account/positions?run_id=1")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
         self.assertEqual(len(payload["data"]), 1)
         self.assertIsNone(payload["data"][0]["post_exit_max_return"])
         stats = payload["stats"]
@@ -154,17 +162,13 @@ class TestReviewAccountIntegration(IntegrationBase):
         self.assertAlmostEqual(stats["rows"][-1]["win_rate"], 100.0)
 
     def test_positions_api_handles_missing_run(self):
-        from web_ui.server import ReviewHandler
-        handler = object.__new__(ReviewHandler)
-        captured = {}
-        handler._send_json = lambda payload, status=200: captured.update(
-            payload=payload, status=status)
         fake_db = MagicMock()
         fake_db.query_review_account_positions.return_value = []
         fake_db.get_review_account_run.return_value = None
-        with patch("web_ui.server._get_account_store", return_value=fake_db):
-            handler._serve_api_account_positions({"run_id": ["999"]})
-        payload = captured["payload"]
+        client = self._web_client(fake_db)
+        response = client.get("/api/account/positions?run_id=999")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
         self.assertEqual(payload["data"], [])
         self.assertEqual(payload["stats"]["initial_cash"], 0.0)
         self.assertEqual(payload["stats"]["total_trades"], 0)

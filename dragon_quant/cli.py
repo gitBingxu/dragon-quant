@@ -8,6 +8,7 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
   dragon-quant review [--date DATE] [--top N] [--force]
   dragon-quant dragons [--date DATE] [--true-only]
+  dragon-quant dashboard [--port PORT] [--no-browser] [--yes]
   dragon-quant storage {status,size,clear} [options]
 """
 
@@ -84,6 +85,7 @@ def main():
   dragon-quant data kline --code 600172 --days 20
   dragon-quant review --ui-only --source v2
   dragon-quant review-account --from 20260501 --to 20260601 --ui
+  dragon-quant dashboard --no-browser --port 9000
 
 Use \"dragon-quant <command> -h\" for command-specific help.
 """,
@@ -839,6 +841,26 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     clear_p.add_argument("--results", action="store_true", help="清理结果")
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
     clear_p.add_argument("--days", type=int, default=None, help="保留最近N天")
+
+    # dashboard 子命令（本地 Web 仪表盘：龙头 / 扫描 / 因子 / 复盘 / 账户）
+    dashboard_p = sub.add_parser(
+        "dashboard",
+        help="启动本地 Web 仪表盘（龙头/扫描/因子/复盘/账户）",
+        usage="dragon-quant dashboard [--port PORT] [--no-browser] [--yes]",
+        description="启动 127.0.0.1 上的可视化面板。首次使用时若未安装可选依赖 [web]，"
+                    "会询问是否自动安装 fastapi/uvicorn；--yes 跳过询问。",
+        epilog="""Examples:
+  dragon-quant dashboard
+  dragon-quant dashboard --port 9000 --no-browser
+  dragon-quant dashboard --yes
+""",
+    )
+    dashboard_p.add_argument("--port", type=int, default=None,
+                             help="监听端口 (默认 8765；被占用时自动改用系统分配端口)")
+    dashboard_p.add_argument("--no-browser", action="store_true",
+                             help="不自动打开浏览器")
+    dashboard_p.add_argument("--yes", action="store_true",
+                             help="[web] 未安装时直接安装，不再询问（等同 DQ_WEB_AUTO_INSTALL=1）")
 
     argv = sys.argv[1:]
     if argv and argv[0] == "scan_v2":

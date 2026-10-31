@@ -33,7 +33,7 @@ code.
 | `fixtures/` | Synthetic per-scenario JSON plus `seed_builders.py` / `factor_builders.py` (no production data) |
 | `golden/` | Reviewed output/DB snapshots consumed by the tests |
 | `test_*.py` | One module per command family; every case is a real CLI subprocess |
-| `coverage-map.json` | Machine-checkable map: 51 parser nodes / 15 top-level commands / hidden alias / invocation facts / independent entries → real tests |
+| `coverage-map.json` | Machine-checkable map: 54 parser nodes / 16 top-level commands / hidden alias / invocation facts / independent entries → real tests |
 | `test_coverage_map.py` | Audit that enforces the map (and rejects unexplained skips) |
 
 ## Run
@@ -58,8 +58,8 @@ volume, real-data sentinel unchanged, and no external call.
 
 ## Coverage map
 
-`coverage-map.json` embeds the stage-1 `parser_dump.json` snapshot (51 nodes,
-15 top-level commands) and maps each node to one or more real test functions.
+`coverage-map.json` embeds the stage-1 `parser_dump.json` snapshot (54 nodes,
+16 top-level commands) and maps each node to one or more real test functions.
 It also pins:
 
 - the hidden `scan_v2` compatibility alias (and G1 keeping it out of help);

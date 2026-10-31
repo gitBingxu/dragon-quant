@@ -34,6 +34,8 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 ## Web UI 指标联动
 
+> 面板由 `dashboard` 命令承载（`review --ui` / `--ui-only` 为 deprecated 别名，转发同一安装与端口策略）；`/api/dragons` 契约不变；账户页为 `/account`。
+
 **口径筛选（查询上下文）**：`GET /api/dragons` 支持 `review_caliber=strict|loose`（缺省 / 非法值 → v2 为 `strict`、v1 为 `loose`；`source=v1` 强制宽松）。一个口径同时决定收益 / 回撤范围筛选、状态筛选的 `derived_status`、排序物理列、表格列与卡片指标；响应仍是 `{data, count, summary}`，**不新增键、不回显口径**，默认 strict 下逐值等价改造前。行内始终返回宽松字段与 `strict_*` 全套，前端只做逻辑字段 → 物理字段选择。
 
 **`derived_status` 规则**：v1 恒取 `dragons_v1.review_status`；v2 strict 优先严格侧表状态，缺行时 `pending` / `error` / 其余 `pending_recompute`；v2 loose 直接取 `dragons_v2.review_status`（`completed` / `pending` / `no_entry` / `error`）。因此宽松模式不存在 `pending_recompute`、`cannot_evaluate` 只在严格模式出现；「宽松 completed、严格缺行」的行在宽松模式显示 `completed`，`strict_*` 列仍为 `null`。

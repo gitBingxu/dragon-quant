@@ -31,6 +31,7 @@ TOP_LEVEL_COMMANDS = (
     "sell",
     "vpa",
     "storage",
+    "dashboard",
 )
 
 
@@ -63,9 +64,11 @@ def test_g1_help_lists_every_top_level_command_and_hides_scan_v2(sandbox):
 def test_g2_version_matches_package_version(sandbox):
     long_flag = runner().run_cli(["--version"], sandbox=sandbox)
     short_flag = runner().run_cli(["-v"], sandbox=sandbox)
+    from dragon_quant._version import __version__
+
     for result in (long_flag, short_flag):
         assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "dragon-quant 0.7.2"
+        assert result.stdout.strip() == f"dragon-quant {__version__}"
 
 
 def test_g3_unknown_command_exits_two_with_usage(sandbox):

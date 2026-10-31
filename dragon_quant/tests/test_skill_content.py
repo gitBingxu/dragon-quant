@@ -9,7 +9,7 @@ from dragon_quant.review_account.models import StrategyConfig
 ROOT = Path(__file__).resolve().parents[2] / "skills" / "dragon-quant"
 SKILL = ROOT / "SKILL.md"
 REFS = ["commands.md", "outputs.md", "playbooks.md", "operations.md",
-        "reports.md", "safety.md"]
+        "reports.md", "safety.md", "premarket.md", "evidence.md"]
 STRATEGY_FIELDS = [f.name for f in fields(StrategyConfig) if f.name != "source"]
 
 
@@ -43,7 +43,7 @@ class TestSkillContent(unittest.TestCase):
         self.assertIsNotNone(match, "description line missing from frontmatter")
         description = match.group(1)
         for token in ("行情", "真龙", "龙头", "复盘", "竞价", "回测", "账户", "因子",
-                      "scan", "prep", "auction", "review"):
+                      "盘前", "scan", "prep", "auction", "review"):
             self.assertIn(token, description)
 
     def test_authority_and_no_advice(self):
@@ -359,3 +359,94 @@ class TestSkillTomorrowStrategy(unittest.TestCase):
         for token in ("strategy_context", "sc_v1", "旧摘要", "不拼凑",
                       "expectations_unavailable"):
             self.assertIn(token, text)
+
+
+class TestPremarketSkill(unittest.TestCase):
+    """盘前预案：八类白名单、T0、八段模板、三锚/四态、外部证据与体量。"""
+
+    def _premarket(self) -> str:
+        return (ROOT / "references" / "premarket.md").read_text(encoding="utf-8")
+
+    def _evidence(self) -> str:
+        return (ROOT / "references" / "evidence.md").read_text(encoding="utf-8")
+
+    def test_skill_declares_eight_capabilities_and_premarket_route(self):
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("八类", text)
+        self.assertIn("盘前预案", text)
+        self.assertIn("premarket", text)
+        self.assertIn("T0", text)
+        self.assertIn("references/premarket.md", text)
+        self.assertIn("references/evidence.md", text)
+        self.assertIn("不写库", text)
+        self.assertIn("不触网", text)
+
+    def test_premarket_template_has_eight_fixed_sections(self):
+        text = self._premarket()
+        headings = (
+            "# 盘前预案",
+            "## 1. 信息截止与覆盖",
+            "## 2. 市场与账户总闸门",
+            "## 3. 三类锚与四种情景",
+            "## 4. 主线与角色复核",
+            "## 5. 候选逐只条件表",
+            "## 6. 组合与执行约束",
+            "## 7. 开盘后验证时间表",
+            "## 8. 无法交易与盘后归因",
+            "## 附录：外部证据清单",
+            "## 声明",
+        )
+        positions = [text.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions), "盘前八段顺序被改变")
+
+    def test_premarket_template_separates_fact_assumption_action(self):
+        text = self._premarket()
+        for token in ("事实", "工作假设", "行动", "待验证/证伪",
+                      "信息截止", "T0", "cache", "trading_day",
+                      "三锚", "短线", "趋势", "情绪",
+                      "normal", "超预期", "低于预期", "无法判断",
+                      "confirmed", "weakened", "invalidated", "unknown",
+                      "allowed_actions", "action_ceiling", "observe_only",
+                      "wait", "no_new_position", "position_pct",
+                      "不是清仓", "expectations_unavailable", "gap_high",
+                      "追价警戒", "现有 sell 规则", "09:25", "09:30",
+                      "不得倒填", "不自动交易", "不构成投资建议"):
+            self.assertIn(token, text)
+
+    def test_premarket_actions_are_intersection_not_new_rules(self):
+        text = self._premarket()
+        for token in ("交集", "资格", "position_basis", "veto",
+                      "data_quality", "账户闸门", "不新增评分",
+                      "不发明买点"):
+            self.assertIn(token, text)
+        for forbidden in ("先买 A 再买 B", "优先买入顺序", "胜率", "必涨"):
+            self.assertNotIn(forbidden, text)
+
+    def test_evidence_hierarchy_and_time_fields(self):
+        text = self._evidence()
+        for token in ("官方原文", "交易所", "公司公告", "官方行情", "媒体",
+                      "第三方", "社交", "source_level", "url",
+                      "event_time", "publish_time", "effective_time",
+                      "first_seen", "retrieved_at", "verification_status",
+                      "official_original", "media_unverified", "social_lead",
+                      "login_required", "去重", "冲突", "更正", "降级",
+                      "登录", "不逆向", "不伪造", "时区", "口径"):
+            self.assertIn(token, text)
+
+    def test_evidence_media_cannot_hard_veto_and_missing_only_lowers_coverage(self):
+        text = self._evidence()
+        for token in ("不得直接硬否决", "只降低情景覆盖", "不填中性",
+                      "不当作利好", "未核原文", "覆盖率"):
+            self.assertIn(token, text)
+
+    def test_premarket_and_evidence_size_caps(self):
+        for name in ("premarket.md", "evidence.md"):
+            lines = (ROOT / "references" / name).read_text(
+                encoding="utf-8").splitlines()
+            self.assertLessEqual(len(lines), 300, name)
+
+    def test_outputs_and_reports_point_to_premarket_owner(self):
+        outputs = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
+        reports = (ROOT / "references" / "reports.md").read_text(encoding="utf-8")
+        self.assertIn("references/premarket.md", outputs)
+        self.assertIn("references/premarket.md", reports)

@@ -2,6 +2,8 @@
 
 **何时读我**：需要向用户解释人读输出、`--json` 顶层字段、错误 JSON 或降级字段时。
 
+**盘前字段语义**（`premarket_sc_v1`）由 `references/premarket.md` 拥有；本文只保留 prep / auction / factor 字段，不复制盘前正文。
+
 ## 通用表达顺序
 
 1. **结论**：有没有数据 / 是否降级 / 是否可继续。

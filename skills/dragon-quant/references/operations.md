@@ -17,11 +17,13 @@
 
 ## 次日盘前 session（交易日 ≥09:25）
 
-1. `dragon-quant auction --json`；09:25 前不运行，说明数据尚未形成。
-2. 按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
-3. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
+1. `dragon-quant premarket --json`（T0 只读）：拿到 T-1 计划 + T 日竞价 + 结构化降级，按 `references/premarket.md` 八段模板起草。
+2. 09:25 前 `auction.state=not_ready` 时先出无竞价版；09:25 后重跑 `premarket` 读取终态。
+3. 只有用户明确要求时，才运行 `dragon-quant auction --json`（T1，会写 assets.db）；09:25 前不运行，说明数据尚未形成。
+4. 按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
+5. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
 
-## 七类 workflow
+## 八类 workflow
 
 ### 1. 个股行情
 
@@ -70,6 +72,13 @@
 3. 执行 `review-account --from D1 --to D2 [--capital N]`；校验终端摘要、`ranking_mode`、回退天数、停牌跳过、`data_degraded`、`run_id`。
 4. 阶段 2：后台 `review-account --ui-only`；只开已有面板时跳过回测。
 5. 答疑只解释摘要与数据质量三态、兜底成交价近似、停牌冻结、候选池回退；不复制策略参数数值，不承诺收益。
+
+### 8. 盘前预案
+
+1. 运行 `premarket --json`（T0）；先核对 `data_quality`、`prep.strictness`、`proven_gap`、`auction.state`、`cache=unknown`。
+2. 09:25 前只出无竞价版；`auction.state=missing/not_ready/corrupt` 不等于看空，候选行动上限降为 `observe_only`。
+3. 外部证据按 `references/evidence.md` 采集；缺失只降情景覆盖，不填中性、不硬否决。
+4. 按 `references/premarket.md` 八段模板交付；不自动运行 `auction`、不自动交易、不写用户文件。
 
 ## UI 生命周期
 

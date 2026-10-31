@@ -19,6 +19,7 @@
 | data | quote/kline/minute/batch-quote | T0 | 触网只读；失败字符串不等于成功 |
 | prep | --date --recompute --force --json | T1 | 写 assets.db；当日需 16:40 后 |
 | auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后 |
+| premarket | --date --json | T0 | 只读；不写库；缺数据降级 exit0；不触网 |
 | review | --date --top | T1 | 回写回测字段；failed>0 如实报告 |
 | review | --ui-only --port --no-browser | T0 | 只启动回测面板，长驻，不回测 |
 | review-account | --from --to --capital | T1 | 写账户回测表；默认策略与 v2 |

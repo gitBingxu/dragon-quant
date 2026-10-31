@@ -47,6 +47,7 @@ EXPECTED_MODULE_DOCS = {
     "review.md",
     "trading.md",
     "prep-auction.md",
+    "premarket.md",
     "assets.md",
     "factor.md",
     "development.md",

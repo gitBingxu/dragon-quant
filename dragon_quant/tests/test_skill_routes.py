@@ -16,6 +16,7 @@ ALLOWED_TOP = {
     "review",
     "prep",
     "auction",
+    "premarket",
     "factor",
     "review-account",
 }
@@ -157,6 +158,18 @@ class TestSkillRoutes(unittest.TestCase):
             self.assertIsNone(
                 re.search(rf"dragon-quant\s+factor\s+{re.escape(sub)}\b", blob), sub
             )
+
+    def test_premarket_route_is_read_only(self):
+        rows = [route for route in _routes()
+                if route["command"] == "dragon-quant premarket"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["write_class"], "T0")
+        for flag in ("--date", "--json"):
+            self.assertIn(flag, rows[0]["key_flags"])
+        self.assertIn("只读", rows[0]["notes"])
+        safety = {row["command"]: row for row in _safety()}
+        self.assertIn("premarket", safety)
+        self.assertEqual(safety["premarket"]["tier"], "T0")
 
     def test_hidden_alias_and_v1_absent(self):
         blob = _skill_blob()

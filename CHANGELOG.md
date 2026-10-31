@@ -13,7 +13,13 @@
 ## [Unreleased]
 
 ### Added
-- **裸 `install` 交互式 Agent 多选**：`npx dragon-quant-skills install` 在 stdin/stdout/stderr 均为终端、未显式给 `--agent`、未加 `--json` 时弹出六 harness 菜单（默认 `claude-code`，不含 `agents` 别名）；`↑`/`↓` 环绕移动、空格切换、`a` 全选/清空、Enter 确认（空选择停留提示）、`q`/`Ctrl+C` 取消 exit 0 零写入。菜单只写 stderr；`--agent` / `--json` / 任一标准流重定向、`doctor`、`uninstall` 完全跳过并沿用原默认。新增零依赖 `lib/agent-select.mjs`（readline 流适配 + 纯 reducer），`main(argv, io)` 支持注入测试流，选择结果仍走 `expandAgents`，JSON 结构与 manifest schema 不变。`package.json` 与 `skill-version` 升至 `1.2.0`，`min-cli-version` 保持 `0.7.4`；本次不发布 npm，Python 版本不变。
+- **只读盘前预案 `premarket`**：新增 T0 顶层命令 `dragon-quant premarket [--date D] [--json]`，只读 `assets.db`（`mode=ro`、零 DDL、零 WAL/SHM sidecar、无 provider / 网络 / 重算 / 新表），完整嵌入严格早于 T 的最近 `prep_snapshots.result_json` 与 T 日 `auction_snapshots.analysis_json` + 存储 meta；输出 `premarket_sc_v1`（五个时点分离、`strictness=latest_strictly_before` + `proven_gap`、三锚投影、候选 join、行动上限、数据质量）。缺 prep / 缺竞价 / 损坏 / 未到 09:25 / 周末 / 旧 schema / 配置混合均结构化降级并 exit 0；参数错误 exit 2、运行错误 exit 1。
+- **Agent Skill 第八类「盘前预案」**：新增 `references/premarket.md`（八段固定模板、事实/工作假设/行动分栏、三锚/四态、候选条件表、行动交集）与 `references/evidence.md`（官方原文优先的信源分级、event/publish/effective/first_seen/retrieved 时点、去重/冲突/更正/降级/登录边界）；`commands.md` / `safety.md` / `operations.md` / `reports.md` / `outputs.md` 同步，白名单从七类升八类。
+- **裸 `install` 交互式 Agent 多选**：`npx dragon-quant-skills install` 在 stdin/stdout/stderr 均为终端、未显式给 `--agent`、未加 `--json` 时弹出六 harness 菜单（默认 `claude-code`，不含 `agents` 别名）；`↑`/`↓` 环绕移动、空格切换、`a` 全选/清空、Enter 确认（空选择停留提示）、`q`/`Ctrl+C` 取消 exit 0 零写入。菜单只写 stderr；`--agent` / `--json` / 任一标准流重定向、`doctor`、`uninstall` 完全跳过并沿用原默认。新增零依赖 `lib/agent-select.mjs`（readline 流适配 + 纯 reducer），`main(argv, io)` 支持注入测试流，选择结果仍走 `expandAgents`，JSON 结构与 manifest schema 不变。
+
+### Changed
+- **版本**：Python `0.8.0`；npm / Skill `1.3.0`；`metadata.min-cli-version` `0.8.0`。E2E coverage-map 同步为 54 个 parser 节点 / 16 个顶层命令，新增 `golden/premarket/context.json`，旧 golden 不变。
+- **存储只读 API**：`get_previous_prep_snapshot` / `list_auction_snapshots` / `dragons_mirror.list_dragon_trade_dates` 增加向后兼容的 `readonly=True` 路径（`_connect_readonly`，`busy_timeout=5000`，跳过 schema 建表）；默认行为不变。
 
 ### Changed
 - **Agent Skill 收敛为交易日助手**：默认命令面从 15 个顶层命令收敛为七类白名单（个股行情、扫描与真龙、盘后复盘、集合竞价、龙头回测、账户回测、因子入库与读回）；未开放能力统一走固定话术 + issue 链接，不再以命令、路由或否定示例出现。新增 `references/reports.md`（prep 九段 / auction 七段模板），`operations.md` 固定单能力/每日复合、UI 生命周期与因子三组静态名单，`safety.md` 仅保留 T0/T1。

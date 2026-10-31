@@ -18,6 +18,7 @@
 | 回测面板 | dragon-quant review --ui-only | --ui-only --port --no-browser | T0 | url | 不回测；长驻；URL 取自启动日志 |
 | 盘后复盘 | dragon-quant prep | --date --recompute --force --json | T1 | human/json | 当日 ≥16:40；--force 不绕门禁 |
 | 集合竞价 | dragon-quant auction | --force --recompute --json | T1 | human/json | 当日 ≥09:25；命中快照本次只读；无 --date |
+| 盘前预案 | dragon-quant premarket | --date --json | T0 | human/json | 只读；不写库；缺数据降级 exit0；不触网 |
 | 因子构建 | dragon-quant factor build | --date --only --json | T1 | human/json | 只允许三组固定名单；禁止默认 build |
 | 因子读回 | dragon-quant factor query | --date --name --json | T0 | human/json | 仅入库核对与代表因子读回 |
 | 账户回测 | dragon-quant review-account | --from --to --capital | T1 | human | 默认策略与 v2；不传 --config |

@@ -93,7 +93,7 @@ dragon_quant/
 ├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
 
 # 同级仓库包（不是 dragon_quant 的子包）
-web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static）+ frontend/src/{pages,api,lib,router} + dist（入库）
+web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static）+ frontend/src/{pages,api,lib,router,theme} + dist（入库）
 ```
 
 ## 命令导航与入口事实

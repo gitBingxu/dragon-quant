@@ -31,6 +31,8 @@
 
 **数据访问**：`web_ui` 内零 `sqlite3`、零自建连接、零建表写表；只经 `deps.py` 调用既有只读仓储（白名单见技术方案 §5.2）。`assets.db` 读函数一律 `create=False`，缺失返回空态；首次 `/api/dragons` 与今天一致幂等建 `dragon.db` schema（不违反 B1：只约束 import / `-h`）。
 
+**前端 v2 与三态主题**：dashboard 前端固定 v2——旧 `?source=v1` 深链忽略 query、按 v2 渲染，页面与 `api/*` 不再产生 v1 请求（后端 v1 API / 表 / `--source v1` 完全保留）。主题为 system / light / dark 三态，偏好存 `localStorage["dq.theme"]`；`index.html` 的 head 内联同步脚本在首次绘制前设置 `html[data-theme]` / `color-scheme` / meta theme-color，避免闪烁。浅色只覆盖 `@theme` 语义 token（`[data-theme=light]`），不改布局、字体或红涨绿跌语义。**主题化颜色禁止使用 Tailwind 斜杠透明度**（如 `bg-white/5`、`border-critical/35`）：构建期会固化成字面量，不随 `[data-theme=light]` 变化；需要 alpha 时用显式 `-soft` / `-line` / `-focus` token 或 CSS `color-mix()`。`dragon_quant/tests/test_web_frontend_theme.py` 是零依赖构建契约测试，守护 dist 主题脚本、浅色 token、v1 文案清理与资产引用；改前端后必须 `npm run build`，让 `web_ui/dist` 与源码同批更新。发布时 `publish.sh` 会在写入版本号与任何 git add/commit/tag/push 之前先执行 `npm --prefix web_ui/frontend run build`，确保 dist 进入发布提交；发布机需有 Node/npm 且已安装前端 devDependencies（脚本不自动 npm install/ci）。
+
 **依赖**：`[project.optional-dependencies]` 的 `web = fastapi>=0.162 / uvicorn>=0.54`（裸 uvicorn），`dev` 额外含 `httpx` 供 `TestClient`。基础安装仍只有 playwright/tmdx。`import web_ui` / `web_ui.backend` / `web_ui.backend.serve` 零 fastapi import、零目录副作用。
 
 ## 测试与 E2E 细则

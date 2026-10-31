@@ -10,12 +10,10 @@ import { DimBars } from "./DimBars";
 
 export function DragonDetailDrawer({
   selected,
-  source,
   caliber,
   onClose,
 }: {
   selected: { date: string; code: string } | null;
-  source: "v1" | "v2";
   caliber: ReviewCaliber;
   onClose: () => void;
 }) {
@@ -29,7 +27,7 @@ export function DragonDetailDrawer({
     setLoading(true);
     setDetail(null);
     setError(null);
-    fetchDragonDetail(selected.date, selected.code, source, caliber)
+    fetchDragonDetail(selected.date, selected.code, caliber)
       .then((payload) => {
         if (active) setDetail(payload);
       })
@@ -42,7 +40,7 @@ export function DragonDetailDrawer({
     return () => {
       active = false;
     };
-  }, [selected, source, caliber]);
+  }, [selected, caliber]);
 
   return (
     <Drawer
@@ -67,7 +65,7 @@ export function DragonDetailDrawer({
       }
     >
       {error ? (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-critical/35 bg-critical-soft px-3 py-2 text-[12.5px] text-[#ff9093]">
+        <div className="alert-critical mb-4 flex items-center gap-2 rounded-lg px-3 py-2 text-[12.5px]">
           <IconAlert size={15} />
           {error}
         </div>
@@ -86,13 +84,12 @@ function DetailBody({ detail }: { detail: DragonDetail }) {
           {detail.is_true_dragon ? "真龙" : "非真龙"}
         </Badge>
         <Badge tone="outline">{detail.caliber === "strict" ? "严格口径" : "宽松口径"}</Badge>
-        <Badge tone="neutral">source {detail.source}</Badge>
         {detail.is_true_dragon === false && detail.reject_reason ? (
           <Badge tone="warn">已否决</Badge>
         ) : null}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border border-hairline bg-white/[0.015] px-3.5 py-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border border-hairline bg-raise px-3.5 py-3 sm:grid-cols-4">
         <Meta label="入选日" value={detail.trade_date} mono />
         <Meta label="排名" value={detail.rank ?? "—"} mono />
         <Meta label="连板" value={detail.board_count ?? "—"} mono />
@@ -127,7 +124,7 @@ function DetailBody({ detail }: { detail: DragonDetail }) {
       </div>
 
       {detail.reject_reason ? (
-        <div className="rounded-lg border border-warn/35 bg-warn-soft px-3.5 py-2.5">
+        <div className="rounded-lg border border-warn-line bg-warn-soft px-3.5 py-2.5">
           <div className="mb-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-warn">
             否决原因
           </div>
@@ -152,7 +149,7 @@ function DetailBody({ detail }: { detail: DragonDetail }) {
       </div>
 
       {detail.report_text ? (
-        <details className="rounded-lg border border-hairline bg-white/[0.015]">
+        <details className="rounded-lg border border-hairline bg-raise">
           <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[12px] font-medium text-ink-2 transition-colors hover:text-ink">
             扫描报告原文
           </summary>

@@ -1,5 +1,8 @@
 // 账户回测 API 类型与 fetch 封装（字段对齐 dragon_quant/review_account/storage.py）。
 
+// 前端固定 v2：请求层补 source，页面不感知数据版本。
+const ACCOUNT_SOURCE = "v2" as const;
+
 export interface AccountRun {
   id: number;
   source: "v1" | "v2";
@@ -18,7 +21,6 @@ export interface AccountRun {
 }
 
 export interface CreateAccountRunInput {
-  source?: "v1" | "v2";
   name: string;
   date_from: string;
   date_to: string;
@@ -115,10 +117,8 @@ export interface AccountPositionStats {
   rows: EntryReasonStatRow[];
 }
 
-export async function fetchAccountRuns(
-  source: "v1" | "v2" = "v2"
-): Promise<{ data: AccountRun[]; count: number }> {
-  const params = new URLSearchParams({ source });
+export async function fetchAccountRuns(): Promise<{ data: AccountRun[]; count: number }> {
+  const params = new URLSearchParams({ source: ACCOUNT_SOURCE });
   const res = await fetch("/api/account/runs?" + params.toString());
   if (!res.ok) throw new Error(`account runs ${res.status}`);
   return res.json();
@@ -130,7 +130,7 @@ export async function createAccountRun(
   const res = await fetch("/api/account/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, source: ACCOUNT_SOURCE }),
   });
   if (!res.ok) {
     let message = `account run create ${res.status}`;

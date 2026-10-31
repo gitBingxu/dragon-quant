@@ -1,5 +1,6 @@
 import React from "react";
-import { Link, navigate, usePathname, useSearchParams } from "./router";
+import { Link, usePathname } from "./router";
+import { ThemeToggle } from "./components/ThemeToggle";
 import {
   IconCalendar,
   IconGrid,
@@ -39,20 +40,10 @@ const NAV = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const search = useSearchParams();
-  const source = search.get("source") === "v1" ? "v1" : "v2";
-
-  const changeSource = (next: "v1" | "v2") => {
-    if (next === source) return;
-    const params = new URLSearchParams(window.location.search);
-    params.set("source", next);
-    const query = params.toString();
-    navigate(`${pathname}${query ? `?${query}` : ""}`);
-  };
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-hairline bg-[rgba(11,14,20,0.82)] backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-hairline bg-header backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4 sm:px-6">
           <Link to="/" className="flex shrink-0 items-center gap-2.5 no-underline">
             <BrandMark size={28} />
@@ -76,8 +67,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   to={item.to}
                   className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-[12.5px] font-medium no-underline transition-colors ${
                     active
-                      ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand/30"
-                      : "text-ink-2 hover:bg-white/5 hover:text-ink"
+                      ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand-focus"
+                      : "text-ink-2 hover:bg-hover hover:text-ink"
                   }`}
                 >
                   <Icon size={15} />
@@ -88,27 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden font-mono text-[9.5px] uppercase tracking-[0.16em] text-ink-3 md:inline">
-              数据体系
-            </span>
-            <div className="seg" role="group" aria-label="数据体系">
-              <button
-                type="button"
-                className="seg-item"
-                data-active={source === "v2" ? "true" : "false"}
-                onClick={() => changeSource("v2")}
-              >
-                v2 五维
-              </button>
-              <button
-                type="button"
-                className="seg-item"
-                data-active={source === "v1" ? "true" : "false"}
-                onClick={() => changeSource("v1")}
-              >
-                v1 历史
-              </button>
-            </div>
+            <ThemeToggle />
           </div>
         </div>
       </header>

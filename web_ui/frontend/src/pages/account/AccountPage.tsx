@@ -18,7 +18,6 @@ import {
 import { PageHeader } from "../../components/PageHeader";
 import { IconPlus } from "../../components/icons";
 import { IconAlert } from "../../components/icons-extra";
-import { useSearchParams } from "../../router";
 import { AccountStats } from "./AccountStats";
 import { EntryReasonStats } from "./EntryReasonStats";
 import { EquityCurve } from "./EquityCurve";
@@ -48,9 +47,6 @@ function clearDetail(
 }
 
 export function AccountPage() {
-  const search = useSearchParams();
-  const source: "v1" | "v2" = search.get("source") === "v1" ? "v1" : "v2";
-
   const [runs, setRuns] = useState<AccountRun[]>([]);
   const [runId, setRunId] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<AccountSnapshot[]>([]);
@@ -70,8 +66,8 @@ export function AccountPage() {
   );
   const latest = snapshots[snapshots.length - 1] ?? null;
 
-  const loadRuns = useCallback(async (src: "v1" | "v2", preferred: number | null = null) => {
-    const resp = await fetchAccountRuns(src);
+  const loadRuns = useCallback(async (preferred: number | null = null) => {
+    const resp = await fetchAccountRuns();
     const data = resp.data || [];
     setRuns(data);
     setRunId((current) => {
@@ -84,12 +80,12 @@ export function AccountPage() {
   useEffect(() => {
     setRunId(null);
     setError(null);
-    loadRuns(source).catch((exc) => {
+    loadRuns().catch((exc) => {
       setRuns([]);
       setRunId(null);
       setError(exc instanceof Error ? exc.message : String(exc));
     });
-  }, [source, loadRuns]);
+  }, [loadRuns]);
 
   useEffect(() => {
     if (!runId) {
@@ -144,13 +140,13 @@ export function AccountPage() {
     try {
       await deleteAccountRun(deleteTarget.id);
       setDeleteTarget(null);
-      await loadRuns(source);
+      await loadRuns();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
       setDeleting(false);
     }
-  }, [deleteTarget, loadRuns, source]);
+  }, [deleteTarget, loadRuns]);
 
   return (
     <>
@@ -177,7 +173,7 @@ export function AccountPage() {
       />
 
       {error ? (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-critical/35 bg-critical-soft px-3.5 py-2.5 text-[12.5px] text-[#ff9093]">
+        <div className="alert-critical mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-[12.5px]">
           <IconAlert size={15} />
           加载失败：{error}
         </div>
@@ -185,10 +181,9 @@ export function AccountPage() {
 
       <CreateRunModal
         open={createOpen}
-        source={source}
         onClose={() => setCreateOpen(false)}
         onCreated={(run) => {
-          loadRuns(run.source, run.id).catch(() => {
+          loadRuns(run.id).catch(() => {
             setRuns([run]);
             setRunId(run.id);
           });

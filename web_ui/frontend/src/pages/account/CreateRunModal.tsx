@@ -6,12 +6,10 @@ import { defaultDateRange, defaultRunName } from "../../lib/format";
 
 export function CreateRunModal({
   open,
-  source,
   onClose,
   onCreated,
 }: {
   open: boolean;
-  source: "v1" | "v2";
   onClose: () => void;
   onCreated: (run: AccountRun) => void;
 }) {
@@ -52,7 +50,6 @@ export function CreateRunModal({
     setError(null);
     try {
       const resp = await createAccountRun({
-        source,
         name: cleanName,
         date_from: dateFrom,
         date_to: dateTo,
@@ -72,7 +69,7 @@ export function CreateRunModal({
       open={open}
       onClose={onClose}
       title="生成回测记录"
-      description={`数据来源：${source === "v2" ? "五维识别" : "v1 历史"} · 生成后自动选中`}
+      description="数据来源：五维识别 · 生成后自动选中"
       footer={
         <>
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
@@ -86,7 +83,7 @@ export function CreateRunModal({
     >
       <div className="grid gap-3.5">
         {error ? (
-          <div className="flex items-center gap-2 rounded-lg border border-critical/35 bg-critical-soft px-3 py-2 text-[12.5px] text-[#ff9093]">
+          <div className="alert-critical flex items-center gap-2 rounded-lg px-3 py-2 text-[12.5px]">
             <IconAlert size={14} />
             {error}
           </div>

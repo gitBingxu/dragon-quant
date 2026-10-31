@@ -198,7 +198,7 @@ export function EquityPlot({
             x2={hover.x}
             y1={geom.equity.top}
             y2={geom.drawdown.bottom}
-            stroke="rgba(255,255,255,0.22)"
+            stroke="var(--color-hairline-2)"
             strokeWidth="1"
           />
           <circle

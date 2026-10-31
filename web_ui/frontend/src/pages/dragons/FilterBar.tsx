@@ -42,8 +42,7 @@ const CALIBER_OPTIONS = [
 
 export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props) {
   const [advOpen, setAdvOpen] = useState(false);
-  const source = filters.source ?? "v2";
-  const caliber = effectiveCaliber(source, filters.review_caliber);
+  const caliber = effectiveCaliber(filters.review_caliber);
   const statusOptions = caliber === "loose" ? STATUS_OPTIONS_LOOSE : STATUS_OPTIONS_STRICT;
 
   const onCaliberChange = (value: string) => {
@@ -72,7 +71,6 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
           value={caliber}
           options={CALIBER_OPTIONS}
           onChange={onCaliberChange}
-          disabled={source === "v1"}
         />
         <TextField
           label="入选起"
@@ -134,11 +132,6 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
           更多筛选
           {advOpen ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
         </button>
-        {source === "v1" ? (
-          <span className="ml-auto text-[11.5px] text-ink-2">
-            v1 历史固定旧口径（首个非一字板日最低价买入），不可切换。
-          </span>
-        ) : null}
       </div>
 
       {advOpen ? (

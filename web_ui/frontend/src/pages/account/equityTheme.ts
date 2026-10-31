@@ -4,8 +4,8 @@ import type { SegmentTone } from "../../lib/chart";
 
 export const BENCH_COLOR = "var(--color-ink-2)";
 export const DD_COLOR = "var(--color-down)";
-export const GRID = "rgba(255,255,255,0.06)";
-export const AXIS = "rgba(255,255,255,0.14)";
+export const GRID = "var(--color-hairline)";
+export const AXIS = "var(--color-hairline-2)";
 
 export function segmentColor(tone: SegmentTone): string {
   if (tone === "up") return "var(--color-up)";

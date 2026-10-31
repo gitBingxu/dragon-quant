@@ -107,8 +107,8 @@ function PageButton({
       onClick={() => onClick(page)}
       className={`num grid h-7 min-w-7 place-items-center rounded-md px-1.5 text-[12px] transition-colors ${
         active
-          ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand/35"
-          : "text-ink-2 hover:bg-white/5 hover:text-ink"
+          ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand-focus"
+          : "text-ink-2 hover:bg-hover hover:text-ink"
       }`}
       aria-current={active ? "page" : undefined}
     >

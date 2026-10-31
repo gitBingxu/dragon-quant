@@ -43,7 +43,7 @@ export function EquityTooltip({
         height={height}
         rx={8}
         fill="var(--color-panel-2)"
-        stroke="rgba(255,255,255,0.12)"
+        stroke="var(--color-hairline-2)"
       />
       <text
         x={x + 12}

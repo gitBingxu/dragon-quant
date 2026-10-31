@@ -14,7 +14,7 @@ export function CurrentPosition({ latest }: { latest: AccountSnapshot | null }) 
     >
       {!hasPosition ? (
         <div className="flex flex-col items-center gap-2 py-8 text-center">
-          <div className="grid h-10 w-10 place-items-center rounded-xl border border-hairline bg-white/[0.03] text-ink-2">
+          <div className="grid h-10 w-10 place-items-center rounded-xl border border-hairline bg-raise-strong text-ink-2">
             <IconWallet size={19} />
           </div>
           <div className="text-[13px] text-ink">空仓</div>
@@ -29,7 +29,7 @@ export function CurrentPosition({ latest }: { latest: AccountSnapshot | null }) 
             </div>
             <Badge tone="brand">持仓中</Badge>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border border-hairline bg-white/[0.015] px-3.5 py-3">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border border-hairline bg-raise px-3.5 py-3">
             <Metric label="数量" value={latest!.position_qty} />
             <Metric label="成本" value={fmtNum(latest!.position_cost)} />
             <Metric label="市价" value={fmtNum(latest!.position_market_price)} />

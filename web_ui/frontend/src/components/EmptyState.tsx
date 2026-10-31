@@ -14,7 +14,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-      <div className="grid h-11 w-11 place-items-center rounded-xl border border-hairline bg-white/[0.03] text-ink-2">
+      <div className="grid h-11 w-11 place-items-center rounded-xl border border-hairline bg-raise-strong text-ink-2">
         {icon ?? <IconLayers size={20} />}
       </div>
       <div>

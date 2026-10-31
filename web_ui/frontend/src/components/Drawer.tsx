@@ -35,10 +35,13 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-scrim backdrop-blur-[2px]"
         onClick={onClose}
       />
-      <aside className="absolute inset-y-0 right-0 flex w-full max-w-[620px] flex-col border-l border-hairline bg-panel shadow-[-24px_0_60px_-30px_rgba(0,0,0,0.9)]">
+      <aside
+        className="absolute inset-y-0 right-0 flex w-full max-w-[620px] flex-col border-l border-hairline bg-panel"
+        style={{ boxShadow: "var(--shadow-overlay)" }}
+      >
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
           <div className="min-w-0">
             <div className="text-[15px] font-semibold text-ink">{title}</div>

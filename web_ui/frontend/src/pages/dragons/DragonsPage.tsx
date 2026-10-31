@@ -6,31 +6,22 @@ import {
   type ReviewCaliber,
   type Summary,
 } from "../../api/dragons";
-import { useSearchParams } from "../../router";
 import { PageHeader } from "../../components/PageHeader";
 import { IconAlert } from "../../components/icons-extra";
 import { effectiveCaliber, resolveSortField } from "../../lib/caliber";
 import { SummaryCards } from "./SummaryCards";
 import { RecentDragons } from "./RecentDragons";
-import { FilterBar, STRICT_ONLY_STATUSES } from "./FilterBar";
+import { FilterBar } from "./FilterBar";
 import { DragonTable } from "./DragonTable";
 import { DragonDetailDrawer } from "./DragonDetailDrawer";
 
+/** 前端固定 v2；页面不再读取 ?source query（旧 v1 深链按 v2 渲染）。 */
 const DEFAULT_FILTERS: DragonFilters = {
-  source: "v2",
   review_caliber: "strict",
   status: "completed",
   sort_by: "composite_score",
   sort_dir: "desc",
 };
-
-function initialFilters(source: "v1" | "v2"): DragonFilters {
-  return {
-    ...DEFAULT_FILTERS,
-    source,
-    review_caliber: source === "v1" ? "loose" : "strict",
-  };
-}
 
 interface SortState {
   by: string;
@@ -38,11 +29,8 @@ interface SortState {
 }
 
 export function DragonsPage() {
-  const search = useSearchParams();
-  const urlSource: "v1" | "v2" = search.get("source") === "v1" ? "v1" : "v2";
-
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [filters, setFilters] = useState<DragonFilters>(() => initialFilters(urlSource));
+  const [filters, setFilters] = useState<DragonFilters>(DEFAULT_FILTERS);
   const [rawData, setRawData] = useState<Dragon[]>([]);
   const [sort, setSort] = useState<SortState>({ by: "composite_score", dir: "desc" });
   const [responseCaliber, setResponseCaliber] = useState<ReviewCaliber>("strict");
@@ -60,7 +48,7 @@ export function DragonsPage() {
       if (seq !== requestSeq.current) return;
       setRawData(resp.data || []);
       setSummary(resp.summary);
-      setResponseCaliber(effectiveCaliber(next.source ?? "v2", next.review_caliber));
+      setResponseCaliber(effectiveCaliber(next.review_caliber));
       setSort({ by: next.sort_by, dir: next.sort_dir as "asc" | "desc" });
       setError(null);
     } catch (exc) {
@@ -74,26 +62,8 @@ export function DragonsPage() {
   useEffect(() => {
     if (initialised.current) return;
     initialised.current = true;
-    load(initialFilters(urlSource));
-  }, [load, urlSource]);
-
-  const filtersRef = useRef(filters);
-  filtersRef.current = filters;
-  useEffect(() => {
-    const current = filtersRef.current;
-    if (current.source === urlSource) return;
-    const next: DragonFilters = {
-      ...current,
-      source: urlSource,
-      review_caliber: urlSource === "v1" ? "loose" : "strict",
-      status:
-        urlSource === "v1" && STRICT_ONLY_STATUSES.has(current.status ?? "")
-          ? ""
-          : current.status,
-    };
-    setFilters(next);
-    load(next);
-  }, [urlSource, load]);
+    load(DEFAULT_FILTERS);
+  }, [load]);
 
   const onChange = useCallback((patch: Partial<DragonFilters>) => {
     setFilters((prev) => ({ ...prev, ...patch }));
@@ -104,15 +74,10 @@ export function DragonsPage() {
   }, [filters, load]);
 
   const onReset = useCallback(() => {
-    const next: DragonFilters = {
-      ...DEFAULT_FILTERS,
-      source: urlSource,
-      review_caliber: urlSource === "v1" ? "loose" : "strict",
-      status: "",
-    };
+    const next: DragonFilters = { ...DEFAULT_FILTERS, status: "" };
     setFilters(next);
     load(next);
-  }, [urlSource, load]);
+  }, [load]);
 
   const onSort = useCallback((by: string) => {
     setSort((prev) => ({
@@ -149,7 +114,7 @@ export function DragonsPage() {
       />
 
       {error ? (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-critical/35 bg-critical-soft px-3.5 py-2.5 text-[12.5px] text-[#ff9093]">
+        <div className="alert-critical mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-[12.5px]">
           <IconAlert size={15} />
           加载失败：{error}
         </div>
@@ -158,7 +123,6 @@ export function DragonsPage() {
       <div className="grid gap-3">
         <SummaryCards summary={summary} caliber={responseCaliber} />
         <RecentDragons
-          source={urlSource}
           caliber={responseCaliber}
           onSelect={(date, code) => setSelected({ date, code })}
         />
@@ -180,7 +144,6 @@ export function DragonsPage() {
 
       <DragonDetailDrawer
         selected={selected}
-        source={urlSource}
         caliber={responseCaliber}
         onClose={() => setSelected(null)}
       />

@@ -10,11 +10,9 @@ import { IconClock } from "../../components/icons-extra";
 import { fmtNum } from "../../lib/format";
 
 export function RecentDragons({
-  source,
   caliber,
   onSelect,
 }: {
-  source: "v1" | "v2";
   caliber: ReviewCaliber;
   onSelect: (date: string, code: string) => void;
 }) {
@@ -24,7 +22,7 @@ export function RecentDragons({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetchDragonTradeDates(source, 5)
+    fetchDragonTradeDates(5)
       .then((payload) => {
         if (active) setDates(payload.data);
       })
@@ -37,7 +35,7 @@ export function RecentDragons({
     return () => {
       active = false;
     };
-  }, [source]);
+  }, []);
 
   return (
     <Section
@@ -61,7 +59,7 @@ export function RecentDragons({
           {dates.map((entry) => (
             <div
               key={entry.trade_date}
-              className="rounded-lg border border-hairline bg-white/[0.015] p-2.5"
+              className="rounded-lg border border-hairline bg-raise p-2.5"
             >
               <div className="mb-1.5 flex items-center justify-between px-1">
                 <span className="num text-[12px] text-ink">{entry.trade_date}</span>

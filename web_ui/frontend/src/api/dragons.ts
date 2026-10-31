@@ -1,5 +1,8 @@
 import { getJson, qs } from "./client";
 
+// ─── 前端固定 v2：旧 ?source=v1 深链忽略 query，页面不产生 v1 请求 ─────────
+export const DRAGON_SOURCE = "v2" as const;
+
 export interface DragonPreview {
   code: string;
   name: string;
@@ -53,16 +56,16 @@ export interface DragonDetail {
   reject_reason: string | null;
 }
 
-export function fetchDragonTradeDates(source: string, limit = 10) {
+export function fetchDragonTradeDates(limit = 5) {
   return getJson<{ data: DragonDateEntry[]; count: number }>(
-    `/api/dragons/trade-dates${qs({ source, limit })}`
+    `/api/dragons/trade-dates${qs({ source: DRAGON_SOURCE, limit })}`
   );
 }
 
-export function fetchDragonDetail(tradeDate: string, code: string, source: string, caliber?: string) {
+export function fetchDragonDetail(tradeDate: string, code: string, caliber?: string) {
   return getJson<DragonDetail>(
     `/api/dragons/${encodeURIComponent(tradeDate)}/${encodeURIComponent(code)}` +
-      qs({ source, caliber })
+      qs({ source: DRAGON_SOURCE, caliber })
   );
 }
 
@@ -140,7 +143,6 @@ export interface Summary {
 }
 
 export interface DragonFilters {
-  source?: "v1" | "v2";
   review_caliber?: ReviewCaliber;
   code?: string;
   name?: string;
@@ -163,8 +165,8 @@ export async function fetchDragons(
   filters: DragonFilters
 ): Promise<{ data: Dragon[]; count: number; summary: Summary }> {
   const params = new URLSearchParams();
+  params.set("source", DRAGON_SOURCE);
   const keys: (keyof DragonFilters)[] = [
-    "source",
     "review_caliber",
     "code",
     "name",

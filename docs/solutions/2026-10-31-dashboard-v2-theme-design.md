@@ -661,6 +661,7 @@ Badge 的 8 个 tone 从 TSX 长类名迁到 CSS 颜色类（布局类保留在 
 | 文件 | 改动 |
 |------|------|
 | `web_ui/dist/**` | `npm run build` 重新生成；旧 hash 资产由 `emptyOutDir` 清理；必须与源码同 commit |
+| `publish.sh` | 在写入版本号与任何 git add/commit/tag/push 之前执行 `npm --prefix web_ui/frontend run build`，确保 dist 进入发布提交；失败由 `set -e` 停止；不自动 npm install/ci |
 | `docs/agent/development.md` | Web UI 段新增「三态主题 / v2 固定 / 斜杠透明度禁令 / 构建契约测试」 |
 | `docs/agent/architecture.md` | 目录树 `frontend/src/...` 增加 `theme/` |
 | `README.md` | dashboard 快速使用处加一行主题说明 |
@@ -856,6 +857,7 @@ cd /Users/bing/Repo/dragon-quant
 - 每次改 `web_ui/frontend/**` 后必须 `npm run build`；`web_ui/dist/index.html` 与 `dist/assets/*` 同 commit。
 - 契约测试只看 dist；源码改了不 build 会直接失败，避免「源码/产物脱节」。
 - 不手工编辑 dist。
+- 发布走 `publish.sh` 时，脚本在写入版本号与任何 git add/commit/tag/push 之前先执行 `npm --prefix web_ui/frontend run build`，保证 dist 进入发布提交；发布机需有 Node/npm 且已安装 `web_ui/frontend` 的 devDependencies（脚本不自动 npm install/ci，缺失时原生命令直接失败）。
 
 ---
 

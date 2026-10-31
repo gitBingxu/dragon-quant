@@ -26,7 +26,7 @@ export function SnapshotSection({ snapshot }: { snapshot: PrepSnapshotView }) {
         />
       </div>
 
-      <div className="rounded-lg border border-hairline bg-white/[0.015] px-3.5 py-3">
+      <div className="rounded-lg border border-hairline bg-raise px-3.5 py-3">
         <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-ink-2">
           数据块
         </div>
@@ -53,7 +53,7 @@ export function SnapshotSection({ snapshot }: { snapshot: PrepSnapshotView }) {
           return (
             <details
               key={block.key}
-              className="overflow-hidden rounded-lg border border-hairline bg-white/[0.012]"
+              className="overflow-hidden rounded-lg border border-hairline bg-raise"
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-2.5">
                 <span className="text-[12px] font-medium text-ink-2">{block.label}</span>

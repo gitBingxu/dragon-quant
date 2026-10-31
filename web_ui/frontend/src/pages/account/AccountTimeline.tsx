@@ -90,12 +90,12 @@ function TimelineItem({
       <span className="relative flex justify-center pt-1.5">
         <span
           className="h-2.5 w-2.5 rounded-full"
-          style={{ background: meta.color, boxShadow: "0 0 0 4px rgba(255,255,255,0.06)" }}
+          style={{ background: meta.color, boxShadow: "0 0 0 4px var(--color-halo)" }}
         />
       </span>
       <div
         className={`rounded-lg border px-3.5 py-2.5 ${
-          isIdle ? "border-hairline bg-white/[0.012]" : "border-hairline bg-panel-2/60"
+          isIdle ? "border-hairline bg-raise" : "border-hairline bg-panel-2"
         }`}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">

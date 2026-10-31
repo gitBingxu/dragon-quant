@@ -36,12 +36,8 @@ export const CALIBER_FIELD: Record<
   },
 };
 
-/** 与后端 resolve_caliber 同规则：v1 恒 loose，v2 仅显式 loose 才宽松。 */
-export function effectiveCaliber(
-  source: "v1" | "v2",
-  caliber?: ReviewCaliber
-): ReviewCaliber {
-  if (source === "v1") return "loose";
+/** 前端固定 v2：仅显式 loose 才宽松，其余按严格口径。 */
+export function effectiveCaliber(caliber?: ReviewCaliber): ReviewCaliber {
   return caliber === "loose" ? "loose" : "strict";
 }
 

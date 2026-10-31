@@ -10,24 +10,21 @@ export function SummaryCards({
   caliber: ReviewCaliber;
 }) {
   const s = summary;
-  const isV1 = s?.source === "v1";
   const isStrict = caliber === "strict";
 
   const avgReturn = isStrict ? s?.avg_return_strict : s?.avg_return;
-  const looseRate = isV1 ? s?.win_rate : s?.win_rate_loose;
-  const looseN = isV1 ? s?.completed : s?.win_rate_loose_n;
-  const strictRate = isV1 ? null : s?.win_rate_strict;
-  const strictN = isV1 ? 0 : s?.win_rate_strict_n;
+  const looseRate = s?.win_rate_loose;
+  const looseN = s?.win_rate_loose_n;
+  const strictRate = s?.win_rate_strict;
+  const strictN = s?.win_rate_strict_n;
   const bestName = isStrict ? s?.best_stock_name_strict : s?.best_stock_name;
   const bestCode = isStrict ? s?.best_stock_code_strict : s?.best_stock_code;
   const bestReturn = isStrict ? s?.best_return_strict : s?.best_return;
 
   const pendingSub =
-    isV1 || !s || !isStrict
-      ? undefined
-      : `待重算 ${s.pending_recompute} · 失败 ${s.failed_recompute}`;
+    !s || !isStrict ? undefined : `待重算 ${s.pending_recompute} · 失败 ${s.failed_recompute}`;
 
-  const caliberLabel = isV1 ? "旧口径" : isStrict ? "严格口径" : "宽松口径";
+  const caliberLabel = isStrict ? "严格口径" : "宽松口径";
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
@@ -56,10 +53,8 @@ export function SummaryCards({
         label="严格胜率"
         value={strictRate != null ? `${strictRate.toFixed(1)}%` : "—"}
         sub={
-          isV1
-            ? "v1 无严格口径"
-            : `n=${strictN}` +
-              ((s?.cannot_evaluate ?? 0) > 0 ? ` · 无法评估 ${s?.cannot_evaluate}` : "")
+          `n=${strictN}` +
+          ((s?.cannot_evaluate ?? 0) > 0 ? ` · 无法评估 ${s?.cannot_evaluate}` : "")
         }
         hint="入选次日按照开盘价买入"
         tone="neutral"

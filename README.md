@@ -60,7 +60,8 @@ dragon-quant dashboard --yes
 ```
 
 `pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
-已弃用，仍可用但会提示改用 `dashboard`。
+已弃用，仍可用但会提示改用 `dashboard`。面板顶部可切换主题（跟随系统 / 浅色 / 深色），
+偏好保存在当前浏览器；界面固定 v2 五维，旧 `?source=v1` 链接按 v2 展示。
 
 ## 龙头扫描
 

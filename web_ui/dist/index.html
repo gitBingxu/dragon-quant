@@ -4,11 +4,44 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0B0E14" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <!--
+      首屏主题 bootstrap：经典同步脚本，必须在首次绘制前设置 data-theme，
+      避免手动深/浅偏好或系统浅色时闪一帧错误主题。
+      存储键/合法值必须与 src/theme/theme.ts 保持一致（双处契约，
+      test_web_frontend_theme.py 守护）。全 try/catch；无 matchMedia 时为 dark。
+    -->
+    <script>
+      (function () {
+        var KEY = "dq.theme";
+        var root = document.documentElement;
+        var pref = "system";
+        try {
+          var stored = window.localStorage && window.localStorage.getItem(KEY);
+          if (stored === "light" || stored === "dark" || stored === "system") pref = stored;
+        } catch (e) {}
+        var resolved = pref;
+        if (pref === "system") {
+          try {
+            resolved =
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          } catch (e) {
+            resolved = "dark";
+          }
+        }
+        root.dataset.theme = resolved;
+        root.style.colorScheme = resolved;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", resolved === "light" ? "#F4F6FB" : "#0B0E14");
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Dragon Quant · 龙头量化终端</title>
-    <script type="module" crossorigin src="/assets/index-CwJ4EDG6.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-PLm8FM-b.css">
+    <script type="module" crossorigin src="/assets/index-C6Z2qeHE.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-arJqK7lh.css">
   </head>
   <body>
     <div id="root"></div>

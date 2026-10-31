@@ -48,7 +48,8 @@ export function RunPicker({
 
       {open ? (
         <div
-          className="absolute right-0 z-30 mt-1.5 max-h-[320px] w-full min-w-[320px] overflow-auto rounded-lg border border-hairline bg-panel-2 p-1 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)]"
+          className="absolute right-0 z-30 mt-1.5 max-h-[320px] w-full min-w-[320px] overflow-auto rounded-lg border border-hairline bg-panel-2 p-1"
+          style={{ boxShadow: "var(--shadow-overlay)" }}
           role="listbox"
         >
           {runs.length === 0 ? (
@@ -65,7 +66,7 @@ export function RunPicker({
                   type="button"
                   role="option"
                   aria-selected={run.id === runId}
-                  className="min-w-0 flex-1 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/5"
+                  className="min-w-0 flex-1 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-hover"
                   onClick={() => {
                     onSelect(run.id);
                     setOpen(false);
@@ -82,7 +83,7 @@ export function RunPicker({
                 </button>
                 <button
                   type="button"
-                  className="icon-btn h-7 w-7 hover:bg-critical-soft hover:text-[#ff9093]"
+                  className="icon-btn h-7 w-7 hover:bg-critical-soft hover:text-critical-text"
                   aria-label={`删除记录 ${run.id}`}
                   title="删除该记录"
                   onClick={(event) => {

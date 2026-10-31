@@ -36,10 +36,10 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim backdrop-blur-[2px]" onClick={onClose} />
       <div
-        className="relative w-full rounded-xl border border-hairline bg-panel shadow-[0_30px_80px_-24px_rgba(0,0,0,0.95)]"
-        style={{ maxWidth: width }}
+        className="relative w-full rounded-xl border border-hairline bg-panel"
+        style={{ maxWidth: width, boxShadow: "var(--shadow-overlay)" }}
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
           <div>

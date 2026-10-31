@@ -52,7 +52,7 @@ export function DayValues({ day }: { day: FactorDayView }) {
         />
       </div>
 
-      <div className="rounded-lg border border-hairline bg-white/[0.015] px-3.5 py-3">
+      <div className="rounded-lg border border-hairline bg-raise px-3.5 py-3">
         <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-ink-2">
           resolved_versions
         </div>

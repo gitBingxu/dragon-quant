@@ -12,8 +12,16 @@ const SUMMARY_META: Record<string, { label: string; color: string; tone: StatTon
   medium: { label: "中", color: "var(--color-brand)", tone: "brand" },
   weak: { label: "弱", color: "var(--color-ink-3)", tone: "muted" },
   vetoed: { label: "否决", color: "var(--color-warn)", tone: "warn" },
-  unavailable: { label: "不可用", color: "rgba(139,144,160,0.5)", tone: "muted" },
-  unknown: { label: "未知", color: "rgba(139,144,160,0.3)", tone: "muted" },
+  unavailable: {
+    label: "不可用",
+    color: "color-mix(in oklab, var(--color-ink-3) 50%, transparent)",
+    tone: "muted",
+  },
+  unknown: {
+    label: "未知",
+    color: "color-mix(in oklab, var(--color-ink-3) 30%, transparent)",
+    tone: "muted",
+  },
 };
 
 const COLUMNS: Column<AuctionRow>[] = [
@@ -83,7 +91,7 @@ export function AuctionSection({ auction }: { auction: AuctionDayView }) {
       </div>
 
       {total > 0 ? (
-        <div className="rounded-lg border border-hairline bg-white/[0.015] px-3.5 py-3">
+        <div className="rounded-lg border border-hairline bg-raise px-3.5 py-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-ink-2">
               竞价强度分布

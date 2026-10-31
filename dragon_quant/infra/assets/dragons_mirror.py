@@ -240,9 +240,26 @@ def get_dragons_by_date(trade_date: str, top_n: int = 5,
     ]
 
 
-def list_dragon_trade_dates(source: str = "v2") -> list[str]:
-    """镜像中有候选记录的交易日（升序）。"""
+def list_dragon_trade_dates(source: str = "v2", *,
+                            readonly: bool = False) -> list[str]:
+    """镜像中有候选记录的交易日（升序）。
+
+    ``readonly=True`` 走 ``assets_db._connect_readonly``（``mode=ro``、零 DDL、
+    零 sidecar）；库不存在返回 ``[]``，缺表等 ``sqlite3.Error`` 由调用方捕获。
+    """
     _require_v2(source)
+    if readonly:
+        conn = assets_db._connect_readonly()
+        if conn is None:
+            return []
+        try:
+            rows = conn.execute(
+                f"SELECT DISTINCT trade_date FROM {MIRROR_TABLE} "
+                "ORDER BY trade_date ASC"
+            ).fetchall()
+        finally:
+            conn.close()
+        return [r[0] for r in rows]
     conn = _mirror_conn(create=False)
     if conn is None:
         return []

@@ -223,7 +223,7 @@ def test_n6_missing_and_too_low_cli(sandbox):
     assert low_doctor.returncode == 1
     low_checks = {check["id"]: check for check in _payload(low_doctor)["checks"]}
     assert low_checks["cli.version"]["status"] == "fail"
-    assert ">= 0.7.4" in low_checks["cli.version"]["detail"]
+    assert ">= 0.8.0" in low_checks["cli.version"]["detail"]
 
 
 def test_n7_low_node_version_exits_two(sandbox):

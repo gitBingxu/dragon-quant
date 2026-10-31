@@ -259,7 +259,7 @@ def test_v1_vpa_success_renders_report_and_persists_row():
         assert floats_close(row["health_score"], expected["health_score"], rel=0, abs_tol=1e-12)
         assert row["signal"] == expected["signal"]
         assert row["summary"] == expected["summary"]
-        assert row["version"] == "0.7.2"
+        assert row["version"] == "0.8.0"
         assert isinstance(row["created_at"], str)
 
         factors = json.loads(row["factors_json"])

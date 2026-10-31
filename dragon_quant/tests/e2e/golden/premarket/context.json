@@ -1,0 +1,1017 @@
+{
+  "ok": true,
+  "context_version": "premarket_sc_v1",
+  "generated_by": "premarket",
+  "source": "v2",
+  "trade_date": "2026-10-30",
+  "run_at": "2026-10-30T09:26:00+08:00",
+  "info_cutoff": "2026-10-30T09:26:00+08:00",
+  "trading_day_verified": false,
+  "compatibility": {
+    "premarket": "premarket_sc_v1",
+    "prep_schema": "0.8",
+    "prep_supported": true,
+    "auction_schemas": [
+      "2"
+    ],
+    "auction_supported": true
+  },
+  "as_of": {
+    "prep_frozen_at": "2026-10-29T16:40:00+08:00",
+    "auction_as_of": "2026-10-30T09:25:00+08:00",
+    "auction_ready_at": "2026-10-30T09:25:00+08:00"
+  },
+  "prep": {
+    "available": true,
+    "state": "ready",
+    "trade_date": "2026-10-29",
+    "strictness": "latest_strictly_before",
+    "proven_gap": null,
+    "age_calendar_days": 1,
+    "created_at": "2026-10-29 16:52:11",
+    "frozen_at": "2026-10-29T16:40:00+08:00",
+    "frozen_at_reason": null,
+    "schema_version": "0.8",
+    "schema_supported": true,
+    "review_available": true,
+    "review_config": {
+      "config_version": "review_baseline_v1",
+      "config_hash": "cfg-hash",
+      "review_version": "review_v1"
+    },
+    "result": {
+      "trade_date": "2026-10-29",
+      "version": "0.8",
+      "sentiment": {
+        "up_cnt": 2100,
+        "down_cnt": 950,
+        "limit_up_cnt": 62,
+        "limit_down_cnt": 3,
+        "broken_rate": 0.016,
+        "yesterday_premium_pct": 5.67,
+        "promotion_rate": 0.667,
+        "max_board_height": 4
+      },
+      "main_boards": [],
+      "macro": {
+        "available": false
+      },
+      "candidates": [
+        {
+          "code": "600001",
+          "name": "股票600001",
+          "facts": {
+            "limit_up_type": "换手板",
+            "open_num": 0
+          }
+        },
+        {
+          "code": "600002",
+          "name": "股票600002",
+          "facts": {
+            "limit_up_type": "T字板",
+            "open_num": 2
+          }
+        }
+      ],
+      "dragon_source": {
+        "window_days": 5,
+        "dates": []
+      },
+      "review": {
+        "enabled": true,
+        "review_version": "review_v1",
+        "config_version": "review_baseline_v1",
+        "config_hash": "cfg-hash",
+        "market": {
+          "state": "strong",
+          "score": 72.0,
+          "coeff": 1.0,
+          "evidence": [
+            "涨停 62 家"
+          ],
+          "unknown_reason": null
+        },
+        "mainlines": [
+          {
+            "board_name": "机器人",
+            "state": "strengthening",
+            "role_map": {
+              "leader": "600001",
+              "vanguard": "600002"
+            }
+          }
+        ],
+        "anchors": {
+          "positive": [
+            {
+              "code": "600001",
+              "reason": "市场最高 4 板"
+            }
+          ],
+          "negative": [
+            {
+              "code": "600010",
+              "reason": "昨日涨停今日 -8.0%"
+            }
+          ],
+          "risk": {
+            "limit_down_cnt": 3,
+            "broken_rate": 0.016
+          }
+        },
+        "portfolio": {
+          "sum_pct": 4.0,
+          "warning": null
+        },
+        "degraded": []
+      },
+      "review_candidates": [
+        {
+          "code": "600001",
+          "name": "股票600001",
+          "role": "leader",
+          "mainline": {
+            "board_name": "机器人",
+            "rank": 1,
+            "state": "strengthening"
+          },
+          "review_score": 70.3,
+          "review_grade": "B",
+          "confidence": 0.7,
+          "risk_level": "low",
+          "eligibility": "eligible",
+          "position_pct": 0.04,
+          "position_basis": [
+            "factor",
+            "value"
+          ],
+          "reason_code": null,
+          "gate_trace": [
+            {
+              "gate": "G1_hard_risk",
+              "evaluated": true,
+              "passed": true,
+              "reason_code": null,
+              "detail": "risk_level=low"
+            }
+          ],
+          "warnings": [],
+          "expectations": {
+            "gap_low": -0.02,
+            "gap_high": 0.04,
+            "ratio_low": 0.8,
+            "seal_by": "10:00"
+          }
+        },
+        {
+          "code": "600002",
+          "name": "股票600002",
+          "role": "vanguard",
+          "mainline": {
+            "board_name": "机器人",
+            "rank": 1,
+            "state": "strengthening"
+          },
+          "review_score": 70.3,
+          "review_grade": "B",
+          "confidence": 0.7,
+          "risk_level": "low",
+          "eligibility": "eligible",
+          "position_pct": 0.0,
+          "position_basis": [
+            "factor",
+            "value"
+          ],
+          "reason_code": null,
+          "gate_trace": [
+            {
+              "gate": "G1_hard_risk",
+              "evaluated": true,
+              "passed": true,
+              "reason_code": null,
+              "detail": "risk_level=low"
+            }
+          ],
+          "warnings": [],
+          "expectations": {
+            "gap_low": -0.02,
+            "gap_high": 0.04,
+            "ratio_low": 0.8,
+            "seal_by": "10:00"
+          }
+        }
+      ],
+      "strategy_context": {
+        "context_version": "sc_v1",
+        "trade_date": "2026-10-29",
+        "frozen_at": "2026-10-29T16:40:00+08:00",
+        "positions": [],
+        "feedback_plans": [
+          {
+            "code": "600001",
+            "role": "leader",
+            "position_pct": 0.04,
+            "expected": {
+              "gap_low": -0.02,
+              "gap_high": 0.04,
+              "ratio_low": 0.8,
+              "seal_by": "10:00"
+            },
+            "conditions": [
+              {
+                "state": "confirmed",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "execute_plan",
+                  "execute_partial"
+                ]
+              },
+              {
+                "state": "weakened",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "downgrade_half",
+                  "wait_pullback"
+                ]
+              },
+              {
+                "state": "invalidated",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "cancel_entry",
+                  "exit_via_sell_rules"
+                ]
+              },
+              {
+                "state": "unknown",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "observe_only"
+                ]
+              }
+            ],
+            "allowed_actions": [
+              "execute_plan",
+              "execute_partial"
+            ],
+            "unknown_reason": null
+          },
+          {
+            "code": "600002",
+            "role": "leader",
+            "position_pct": 0.04,
+            "expected": {
+              "gap_low": -0.02,
+              "gap_high": 0.04,
+              "ratio_low": 0.8,
+              "seal_by": "10:00"
+            },
+            "conditions": [
+              {
+                "state": "confirmed",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "execute_plan",
+                  "execute_partial"
+                ]
+              },
+              {
+                "state": "weakened",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "downgrade_half",
+                  "wait_pullback"
+                ]
+              },
+              {
+                "state": "invalidated",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "cancel_entry",
+                  "exit_via_sell_rules"
+                ]
+              },
+              {
+                "state": "unknown",
+                "requires": [
+                  "condition"
+                ],
+                "allowed_actions": [
+                  "observe_only"
+                ]
+              }
+            ],
+            "allowed_actions": [
+              "execute_plan",
+              "execute_partial"
+            ],
+            "unknown_reason": null
+          }
+        ]
+      }
+    }
+  },
+  "auction": {
+    "available": true,
+    "state": "ready",
+    "trade_date": "2026-10-30",
+    "as_of": "2026-10-30T09:25:00+08:00",
+    "ready_at": "2026-10-30T09:25:00+08:00",
+    "row_count": 3,
+    "pre_ready_rows_present": false,
+    "corrupt_codes": [],
+    "legacy_schema_codes": [],
+    "created_at": {
+      "min": "2026-10-30 09:26:01",
+      "max": "2026-10-30 09:26:05"
+    },
+    "config": {
+      "config_versions": [
+        "auction_v2_baseline"
+      ],
+      "config_hashes": [
+        "auction-hash"
+      ],
+      "semantics_versions": [
+        "auction_semantics_v1"
+      ],
+      "validation_status": [
+        "baseline_unvalidated"
+      ],
+      "mixed": false
+    },
+    "cache": {
+      "status": "unknown",
+      "reason": "not_persisted_in_snapshot"
+    },
+    "pool": {
+      "available": true,
+      "source": "derived_from_prep_review_candidates",
+      "rule": "eligibility==eligible AND position_pct>0",
+      "prep_trade_date": "2026-10-29",
+      "eligible_codes": [
+        "600001"
+      ],
+      "snapshot_codes": [
+        "600001",
+        "600002",
+        "600099"
+      ],
+      "missing_codes": [],
+      "extra_codes": [
+        "600099"
+      ],
+      "reconstructed": true,
+      "fallback_observed": null,
+      "note": "extra_codes 只说明快照含非 T-1 推荐 code，不据此判定 auction 回退"
+    },
+    "positions": [
+      {
+        "code": "600001",
+        "name": "股票600001",
+        "planned": true,
+        "usable": true,
+        "created_at": "2026-10-30 09:26:01",
+        "error": null,
+        "analysis": {
+          "code": "600001",
+          "version": "2",
+          "is_weak": false,
+          "strength": 69.9,
+          "level": "中",
+          "direction": "neutral",
+          "rank": 1,
+          "dims": {},
+          "reject_reason": null,
+          "unverified": false,
+          "rank_reason": null,
+          "pre_veto_strength": 69.9,
+          "validation_status": "baseline_unvalidated",
+          "config_version": "auction_v2_baseline",
+          "config_hash": "auction-hash",
+          "semantics": {
+            "semantics_version": "auction_semantics_v1"
+          },
+          "data_quality": {
+            "status": "ok",
+            "completeness": 1.0,
+            "reason_codes": [],
+            "reasons": []
+          },
+          "risk_events": [],
+          "raw_factors": {
+            "official_open_gap_pct": 4.0,
+            "auction_turnover_pct": 6.56
+          },
+          "evidence": {
+            "last_time": "09:25:00",
+            "official_open_px": 10.4
+          },
+          "reference_prices": {
+            "prev_close": 10.0,
+            "official_open": 10.4
+          },
+          "windows": {
+            "core": [
+              "09:20:00",
+              "09:25:00"
+            ]
+          },
+          "actions": [
+            {
+              "kind": "await_confirmation",
+              "requires": "post_open",
+              "text": "若…则观察…"
+            }
+          ]
+        }
+      },
+      {
+        "code": "600002",
+        "name": "股票600002",
+        "planned": true,
+        "usable": true,
+        "created_at": "2026-10-30 09:26:04",
+        "error": null,
+        "analysis": {
+          "code": "600002",
+          "version": "2",
+          "is_weak": false,
+          "strength": 69.9,
+          "level": "中",
+          "direction": "neutral",
+          "rank": 1,
+          "dims": {},
+          "reject_reason": null,
+          "unverified": false,
+          "rank_reason": null,
+          "pre_veto_strength": 69.9,
+          "validation_status": "baseline_unvalidated",
+          "config_version": "auction_v2_baseline",
+          "config_hash": "auction-hash",
+          "semantics": {
+            "semantics_version": "auction_semantics_v1"
+          },
+          "data_quality": {
+            "status": "ok",
+            "completeness": 1.0,
+            "reason_codes": [],
+            "reasons": []
+          },
+          "risk_events": [],
+          "raw_factors": {
+            "official_open_gap_pct": 4.0,
+            "auction_turnover_pct": 6.56
+          },
+          "evidence": {
+            "last_time": "09:25:00",
+            "official_open_px": 10.4
+          },
+          "reference_prices": {
+            "prev_close": 10.0,
+            "official_open": 10.4
+          },
+          "windows": {
+            "core": [
+              "09:20:00",
+              "09:25:00"
+            ]
+          },
+          "actions": [
+            {
+              "kind": "await_confirmation",
+              "requires": "post_open",
+              "text": "若…则观察…"
+            }
+          ]
+        }
+      },
+      {
+        "code": "600099",
+        "name": "",
+        "planned": false,
+        "usable": true,
+        "created_at": "2026-10-30 09:26:05",
+        "error": null,
+        "analysis": {
+          "code": "600099",
+          "version": "2",
+          "is_weak": false,
+          "strength": 69.9,
+          "level": "中",
+          "direction": "neutral",
+          "rank": 1,
+          "dims": {},
+          "reject_reason": null,
+          "unverified": false,
+          "rank_reason": null,
+          "pre_veto_strength": 69.9,
+          "validation_status": "baseline_unvalidated",
+          "config_version": "auction_v2_baseline",
+          "config_hash": "auction-hash",
+          "semantics": {
+            "semantics_version": "auction_semantics_v1"
+          },
+          "data_quality": {
+            "status": "ok",
+            "completeness": 1.0,
+            "reason_codes": [],
+            "reasons": []
+          },
+          "risk_events": [],
+          "raw_factors": {
+            "official_open_gap_pct": 4.0,
+            "auction_turnover_pct": 6.56
+          },
+          "evidence": {
+            "last_time": "09:25:00",
+            "official_open_px": 10.4
+          },
+          "reference_prices": {
+            "prev_close": 10.0,
+            "official_open": 10.4
+          },
+          "windows": {
+            "core": [
+              "09:20:00",
+              "09:25:00"
+            ]
+          },
+          "actions": [
+            {
+              "kind": "await_confirmation",
+              "requires": "post_open",
+              "text": "若…则观察…"
+            }
+          ]
+        }
+      }
+    ],
+    "unplanned_codes": [
+      "600099"
+    ]
+  },
+  "gates": {
+    "data": {
+      "status": "ok",
+      "reasons": []
+    },
+    "hard_risk": {
+      "status": "external_required",
+      "prep_known": [
+        {
+          "code": "600001",
+          "name": "股票600001",
+          "risk_level": "low",
+          "risk_announcement": null,
+          "warnings": []
+        },
+        {
+          "code": "600002",
+          "name": "股票600002",
+          "risk_level": "low",
+          "risk_announcement": null,
+          "warnings": []
+        }
+      ],
+      "overnight_external": "agent_evidence_required"
+    },
+    "account": {
+      "status": "unknown",
+      "reason": "not_provided_by_cli",
+      "requires": [
+        "existing_positions",
+        "risk_budget",
+        "max_position"
+      ]
+    }
+  },
+  "market": {
+    "state": "strong",
+    "score": 72.0,
+    "coeff": 1.0,
+    "anchors": {
+      "limit_down_cnt": 3,
+      "broken_rate": 0.016
+    },
+    "evidence": [
+      "涨停 62 家"
+    ],
+    "unknown_reason": null
+  },
+  "anchors": {
+    "method": "prep_review_projection_v1",
+    "scope": "candidate_and_mainline_scope_not_full_market",
+    "dedupe": "one_card_per_code; short_term > trend > sentiment",
+    "short_term": {
+      "mainline_leaders": [
+        {
+          "board_name": "机器人",
+          "code": "600001",
+          "role": "leader"
+        },
+        {
+          "board_name": "机器人",
+          "code": "600002",
+          "role": "vanguard"
+        }
+      ],
+      "positive": [
+        {
+          "code": "600001",
+          "reason": "市场最高 4 板"
+        }
+      ],
+      "negative": [
+        {
+          "code": "600010",
+          "reason": "昨日涨停今日 -8.0%"
+        }
+      ]
+    },
+    "trend": {
+      "index": null,
+      "index_missing_reason": "not_in_snapshot",
+      "mainstay": [],
+      "capacity": []
+    },
+    "sentiment": {
+      "positive": [
+        {
+          "code": "600001",
+          "reason": "市场最高 4 板"
+        }
+      ],
+      "negative": [
+        {
+          "code": "600010",
+          "reason": "昨日涨停今日 -8.0%"
+        }
+      ],
+      "breadth": {
+        "as_of": "2026-10-29",
+        "up_cnt": 2100,
+        "down_cnt": 950,
+        "limit_up_cnt": 62,
+        "limit_down_cnt": 3,
+        "broken_rate": 0.016,
+        "yesterday_premium_pct": 5.67,
+        "promotion_rate": 0.667,
+        "max_board_height": 4
+      }
+    }
+  },
+  "portfolio": {
+    "sum_pct": 4.0,
+    "warning": null,
+    "same_mainline_counts": {
+      "机器人": 2
+    }
+  },
+  "candidates": [
+    {
+      "code": "600001",
+      "name": "股票600001",
+      "order": 1,
+      "mainline": {
+        "board_name": "机器人",
+        "rank": 1,
+        "state": "strengthening"
+      },
+      "role": "leader",
+      "prep": {
+        "source_trade_date": "2026-10-29",
+        "eligibility": "eligible",
+        "position_pct": 0.04,
+        "position_basis": [
+          "factor",
+          "value"
+        ],
+        "reason_code": null,
+        "review_score": 70.3,
+        "review_grade": "B",
+        "confidence": 0.7,
+        "risk_level": "low",
+        "gate_trace": [
+          {
+            "gate": "G1_hard_risk",
+            "evaluated": true,
+            "passed": true,
+            "reason_code": null,
+            "detail": "risk_level=low"
+          }
+        ],
+        "warnings": [],
+        "facts": {
+          "limit_up_type": "换手板",
+          "open_num": 0
+        },
+        "expectations": {
+          "gap_low": -0.02,
+          "gap_high": 0.04,
+          "ratio_low": 0.8,
+          "seal_by": "10:00"
+        },
+        "allowed_actions_by_state": {
+          "confirmed": [
+            "execute_plan",
+            "execute_partial"
+          ],
+          "weakened": [
+            "downgrade_half",
+            "wait_pullback"
+          ],
+          "invalidated": [
+            "cancel_entry",
+            "exit_via_sell_rules"
+          ],
+          "unknown": [
+            "observe_only"
+          ]
+        },
+        "default_allowed_actions": [
+          "execute_plan",
+          "execute_partial"
+        ]
+      },
+      "auction": {
+        "present": true,
+        "status": "scored",
+        "strength": 69.9,
+        "level": "中",
+        "direction": "neutral",
+        "rank": 1,
+        "is_weak": false,
+        "reject_reason": null,
+        "data_quality": {
+          "status": "ok",
+          "completeness": 1.0,
+          "reason_codes": []
+        },
+        "risk_event_codes": [],
+        "evidence": {
+          "last_time": "09:25:00",
+          "official_open_px": 10.4,
+          "last_indicative_price": null,
+          "last_matched_lots": null,
+          "final_unmatched_lots_signed": null
+        },
+        "raw_factors": {
+          "official_open_gap_pct": 4.0,
+          "auction_turnover_pct": 6.56,
+          "volume_ratio_5d": null,
+          "final_unmatched_matched_ratio": null,
+          "post20_price_return_pct": null,
+          "tail_matched_acceleration": null,
+          "final_unmatched_lots_signed": null
+        },
+        "reference_prices": {
+          "prev_close": 10.0,
+          "official_open": 10.4,
+          "last_indicative": null
+        },
+        "windows": {
+          "core": [
+            "09:20:00",
+            "09:25:00"
+          ]
+        },
+        "actions": [
+          {
+            "kind": "await_confirmation",
+            "requires": "post_open",
+            "text": "若…则观察…"
+          }
+        ],
+        "unknown_reason": null,
+        "created_at": "2026-10-30 09:26:01"
+      },
+      "action_ceiling": {
+        "status": "wait",
+        "allowed_now": [
+          "wait"
+        ],
+        "blocked_by": [],
+        "after_verification": {
+          "confirmed": [
+            "execute_plan",
+            "execute_partial"
+          ],
+          "weakened": [
+            "downgrade_half",
+            "wait_pullback"
+          ],
+          "invalidated": [
+            "cancel_entry",
+            "exit_via_sell_rules"
+          ],
+          "unknown": [
+            "observe_only"
+          ]
+        },
+        "requires": [
+          "open_verification",
+          "external_evidence_check",
+          "account_gate"
+        ],
+        "position_exit": "existing_sell_rules_only"
+      },
+      "execution_constraints": {
+        "limit_up_type": "换手板",
+        "one_line_board": false,
+        "open_num": 0,
+        "prev_close": 10.0,
+        "official_open": 10.4,
+        "gap_pct": 4.0,
+        "slippage_estimate": null,
+        "t_plus_1": true
+      }
+    },
+    {
+      "code": "600002",
+      "name": "股票600002",
+      "order": 2,
+      "mainline": {
+        "board_name": "机器人",
+        "rank": 1,
+        "state": "strengthening"
+      },
+      "role": "vanguard",
+      "prep": {
+        "source_trade_date": "2026-10-29",
+        "eligibility": "eligible",
+        "position_pct": 0.0,
+        "position_basis": [
+          "factor",
+          "value"
+        ],
+        "reason_code": null,
+        "review_score": 70.3,
+        "review_grade": "B",
+        "confidence": 0.7,
+        "risk_level": "low",
+        "gate_trace": [
+          {
+            "gate": "G1_hard_risk",
+            "evaluated": true,
+            "passed": true,
+            "reason_code": null,
+            "detail": "risk_level=low"
+          }
+        ],
+        "warnings": [],
+        "facts": {
+          "limit_up_type": "T字板",
+          "open_num": 2
+        },
+        "expectations": {
+          "gap_low": -0.02,
+          "gap_high": 0.04,
+          "ratio_low": 0.8,
+          "seal_by": "10:00"
+        },
+        "allowed_actions_by_state": {
+          "confirmed": [
+            "execute_plan",
+            "execute_partial"
+          ],
+          "weakened": [
+            "downgrade_half",
+            "wait_pullback"
+          ],
+          "invalidated": [
+            "cancel_entry",
+            "exit_via_sell_rules"
+          ],
+          "unknown": [
+            "observe_only"
+          ]
+        },
+        "default_allowed_actions": [
+          "execute_plan",
+          "execute_partial"
+        ]
+      },
+      "auction": {
+        "present": true,
+        "status": "scored",
+        "strength": 69.9,
+        "level": "中",
+        "direction": "neutral",
+        "rank": 1,
+        "is_weak": false,
+        "reject_reason": null,
+        "data_quality": {
+          "status": "ok",
+          "completeness": 1.0,
+          "reason_codes": []
+        },
+        "risk_event_codes": [],
+        "evidence": {
+          "last_time": "09:25:00",
+          "official_open_px": 10.4,
+          "last_indicative_price": null,
+          "last_matched_lots": null,
+          "final_unmatched_lots_signed": null
+        },
+        "raw_factors": {
+          "official_open_gap_pct": 4.0,
+          "auction_turnover_pct": 6.56,
+          "volume_ratio_5d": null,
+          "final_unmatched_matched_ratio": null,
+          "post20_price_return_pct": null,
+          "tail_matched_acceleration": null,
+          "final_unmatched_lots_signed": null
+        },
+        "reference_prices": {
+          "prev_close": 10.0,
+          "official_open": 10.4,
+          "last_indicative": null
+        },
+        "windows": {
+          "core": [
+            "09:20:00",
+            "09:25:00"
+          ]
+        },
+        "actions": [
+          {
+            "kind": "await_confirmation",
+            "requires": "post_open",
+            "text": "若…则观察…"
+          }
+        ],
+        "unknown_reason": null,
+        "created_at": "2026-10-30 09:26:04"
+      },
+      "action_ceiling": {
+        "status": "no_new_position",
+        "allowed_now": [
+          "observe_only"
+        ],
+        "blocked_by": [
+          "position_pct_zero"
+        ],
+        "after_verification": {
+          "confirmed": [
+            "observe_only"
+          ],
+          "weakened": [
+            "observe_only"
+          ],
+          "invalidated": [
+            "observe_only"
+          ],
+          "unknown": [
+            "observe_only"
+          ]
+        },
+        "requires": [],
+        "position_exit": "existing_sell_rules_only"
+      },
+      "execution_constraints": {
+        "limit_up_type": "T字板",
+        "one_line_board": false,
+        "open_num": 2,
+        "prev_close": 10.0,
+        "official_open": 10.4,
+        "gap_pct": 4.0,
+        "slippage_estimate": null,
+        "t_plus_1": true
+      }
+    }
+  ],
+  "data_quality": {
+    "status": "ok",
+    "plan_usable": true,
+    "auction_usable": true,
+    "degraded": [],
+    "coverage": {
+      "prep_rows": 1,
+      "auction_rows": 3,
+      "expected_pool_codes": 1,
+      "snapshot_codes": 3,
+      "candidates": 2
+    },
+    "notes": [
+      "cache_status_unknown：auction_snapshots 未持久化 from_cache",
+      "trading_day_unverified：离线无交易日历"
+    ]
+  },
+  "disclaimer": "只读盘前上下文，不构成投资建议；阈值为待验证基线，不承诺收益。"
+}

@@ -117,6 +117,8 @@ COMMANDS: dict[str, LazyCommand] = {
         "dragon_quant.commands.prep", needs_providers=_prep_providers),
     "auction": LazyCommand(
         "dragon_quant.commands.auction", needs_providers=_auction_providers),
+    "premarket": LazyCommand(
+        "dragon_quant.commands.premarket", needs_providers=_never_providers),
     "assets": LazyCommand(
         "dragon_quant.commands.assets", needs_providers=_never_providers),
     "factor": LazyCommand(

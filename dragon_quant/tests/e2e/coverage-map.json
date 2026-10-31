@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (53), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (54), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 53,
-    "top_level_count": 15,
+    "node_count": 54,
+    "top_level_count": 16,
     "nodes": [
       {
         "command": "scan",
@@ -247,6 +247,15 @@
           "--days",
           "--force",
           "--recompute",
+          "--json"
+        ]
+      },
+      {
+        "command": "premarket",
+        "flags": [
+          "-h",
+          "--help",
+          "--date",
           "--json"
         ]
       },
@@ -1025,6 +1034,19 @@
           "dragon_quant/tests/e2e/test_assets.py::test_as19_purge_derived_dry_run_and_apply_temp_db"
         ],
         "notes": "默认 dry-run；--apply 必须叠加 --yes；仅临时库验证"
+      },
+      "premarket": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm1_full_context_matches_reviewed_golden",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm2_missing_prep_degrades_exit_zero",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm3_missing_auction_degrades_exit_zero",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm4_corrupt_rows_are_structured_exit_zero",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm5_before_0925_not_ready_then_ready",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm6_invalid_and_future_dates_exit_two",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm7_empty_root_reads_without_writes",
+          "dragon_quant/tests/e2e/test_premarket.py::test_pm8_help_creates_nothing"
+        ],
+        "notes": "T0 read-only premarket: full snapshot golden, structured degradation, runtime clock gate, exit codes, B1."
       }
     },
     "hidden_aliases": {
@@ -1285,7 +1307,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_52_nodes_and_15_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_54_nodes_and_16_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",

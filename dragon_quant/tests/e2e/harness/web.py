@@ -151,7 +151,9 @@ class WebServer:
                 payload: object | None = None,
                 timeout: float = 15.0) -> WebResponse:
         body: bytes | None = None
-        headers = {"Accept": "application/json"}
+        # 浏览器优先 Accept text/html：SPA fallback 只在 HTML 请求上生效，
+        # 与生产浏览器行为一致；API 路径的 JSON 响应与 Accept 无关。
+        headers = {"Accept": "text/html,application/json;q=0.9"}
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"

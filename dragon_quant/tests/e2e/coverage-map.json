@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (53), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (54), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 53,
-    "top_level_count": 15,
+    "node_count": 54,
+    "top_level_count": 16,
     "nodes": [
       {
         "command": "scan",
@@ -555,6 +555,16 @@
           "--yes",
           "--json"
         ]
+      },
+      {
+        "command": "dashboard",
+        "flags": [
+          "-h",
+          "--help",
+          "--port",
+          "--no-browser",
+          "--yes"
+        ]
       }
     ]
   },
@@ -1025,6 +1035,16 @@
           "dragon_quant/tests/e2e/test_assets.py::test_as19_purge_derived_dry_run_and_apply_temp_db"
         ],
         "notes": "默认 dry-run；--apply 必须叠加 --yes；仅临时库验证"
+      },
+      "dashboard": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d3_yes_pip_failure_exits_with_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d4_static_cache_headers",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke"
+        ]
       }
     },
     "hidden_aliases": {
@@ -1086,7 +1106,13 @@
           "dragon_quant/tests/e2e/test_web_api.py::test_w9_review_caliber_switch",
           "dragon_quant/tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
           "dragon_quant/tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
-          "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series"
+          "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d3_yes_pip_failure_exits_with_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d4_static_cache_headers",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke"
         ],
         "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path."
       },
@@ -1285,7 +1311,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_52_nodes_and_15_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_54_nodes_and_16_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",
@@ -1294,6 +1320,14 @@
           "dragon_quant/tests/e2e/test_coverage_map.py::test_lock_packaging_and_ui_cross_cutting_notes_are_explicit"
         ],
         "notes": "The audit module itself is mapped here so no dragon_quant/tests/e2e test function is silently unmapped; it reads only stdlib JSON/AST and never launches a business process."
+      },
+      "dashboard_command": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint"
+        ],
+        "notes": "dashboard 自装引导 + 端口 + SIGTERM；D2 非 TTY 不执行 pip，D3 由 procguard 拒绝子进程等价安装失败。"
       }
     }
   },

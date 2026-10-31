@@ -25,6 +25,7 @@
 | review | --ui-only | T0 | 只读启动 Web UI，长驻 |
 | review-account | --from --to --capital --strategy --config --ui | T1 | 写账户回测表 |
 | review-account | --ui-only | T0 | 只读启动 Web UI，长驻 |
+| dashboard | --port --no-browser --yes | T0 | 长驻；首次可能安装 [web] 并初始化/校验 schema |
 | dragons | --date --true-only | T0 | 只读 JSON |
 | prep | --date --recompute --force --json | T1 | 写 assets.db；当日需 16:40 后 |
 | auction | --pool --days --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读，--force 才重采；当日需 09:25 后 |

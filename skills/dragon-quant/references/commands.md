@@ -20,6 +20,7 @@
 | 龙头回测 UI | dragon-quant review --ui-only | --ui-only --port --no-browser | T0 | human | 长驻；可能初始化/校验 schema |
 | 账户回测 | dragon-quant review-account | --from --to --capital --config | T1 | human | 写账户表；终端无 JSON |
 | 账户回测 UI | dragon-quant review-account --ui-only | --ui-only --port --no-browser | T0 | human | 长驻；可能初始化/校验 schema |
+| Web 仪表盘 | dragon-quant dashboard | --port --no-browser --yes | T0 | human | 长驻；首次可能安装 [web] 并初始化/校验 schema |
 | 资产状态 | dragon-quant assets status | --profile --all --orphans | T0 | human/json | 网络读；drift 是弱信号 |
 | 资产校验 | dragon-quant assets verify | --profile --from --to --samples --deep --md5 | T0 | human/json | --deep 会下载校验 |
 | 资产拉取预演 | dragon-quant assets pull | --profile --from --to --pick | T0 | human/json | 默认 dry-run，不加 --apply 不写 |

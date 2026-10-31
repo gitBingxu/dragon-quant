@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import errno
 import sys
 
+from dragon_quant.commands.dashboard import ensure_web_extra, is_addr_in_use
+
 DEFAULT_UI_PORT = 8765
-_WINDOWS_ADDR_IN_USE = 10048
+# 兼容旧测试：``review._is_addr_in_use`` 仍是同一判定函数的别名。
+_is_addr_in_use = is_addr_in_use
 
-
-def _is_addr_in_use(exc: OSError) -> bool:
-    """``exc`` 是否为端口占用（POSIX ``EADDRINUSE`` 或 Windows ``winerror=10048``）。"""
-    return (
-        getattr(exc, "errno", None) == errno.EADDRINUSE
-        or getattr(exc, "winerror", None) == _WINDOWS_ADDR_IN_USE
-    )
+_DEPRECATION = "review: --ui/--ui-only 已弃用，请改用 dragon-quant dashboard（后续版本将移除）"
 
 
 def handle(args, services):
@@ -57,12 +53,15 @@ def handle(args, services):
 
 
 def _start_ui(args):
-    """启动 Web UI 服务器。
+    """启动 Web UI（deprecated 别名，转发 dashboard 语义）。
 
     未显式给 ``--port`` 时默认 :data:`DEFAULT_UI_PORT`；该端口被占用时警告
     一次并仅重试一次 ``port=0``（由 OS 分配）。显式端口被占用时报错退出，
     不静默换端口。非端口占用错误（如 ``EACCES``）原样抛出。
     """
+    ensure_web_extra(auto=False)
+    print(_DEPRECATION, file=sys.stderr)
+
     from web_ui.server import start_server
 
     requested = getattr(args, "port", None)

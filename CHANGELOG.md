@@ -12,6 +12,17 @@
 
 ## [Unreleased]
 
+### Added
+- `dashboard` 命令 + P0 五页（总览 / 扫描 / 因子 / 复盘 / 账户）与只读 FastAPI 后端。
+- `[web]` 可选 extra（fastapi + uvicorn）；首次调用 `dashboard` 交互式安装，非 TTY / 失败降级为手动指令。
+
+### Changed
+- `web_ui` 后端由 stdlib `http.server` 重写为 FastAPI；`web_ui.start_server` 降级为 deprecated 薄壳，`review --ui` / `review-account --ui` 仅保留为弃用别名。
+- 前端新增极简 pathname 路由与 AppShell，`vite base` 改为 `/` 以支持 `/scans/<id>` 深链。
+
+### Fixed
+- E2E `test_g2_version_matches_package_version` 改为从 `dragon_quant._version` 读取版本，不再硬编码。
+
 ## [0.7.4] - 2026-10-30
 
 > 草稿：覆盖 README 展示修正；合入 main 并完成版本提交后补记版本依据。

@@ -38,6 +38,7 @@
 | `prep` 盘后复盘 | 快速迭代中 | 2026 年 12 月初 |
 | `auction` 集合竞价强度判断 | 快速迭代中 | 2026 年 12 月初 |
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
+| `dashboard` 可视化面板（龙头/扫描/因子/复盘/账户） | 快速迭代中 | 2026 年 12 月中 |
 | `agent-skill` 盘前预案复盘回测等 skills | 快速迭代中 | 2026 年 12 月中 |
 
 ## 快速使用
@@ -50,11 +51,16 @@ pipx install dragon-quant
 # 当日收盘后扫描龙头
 dragon-quant scan --top 5
 
-# 回测扫描结果并打开面板
-dragon-quant review --ui
+# 启动本地可视化面板（龙头/扫描/因子/复盘/账户）
+dragon-quant dashboard
+
+# 不自动打开浏览器 / 首次安装 [web] 时不询问
+dragon-quant dashboard --no-browser
+dragon-quant dashboard --yes
 ```
 
-只需查看已有回测结果时，运行 `dragon-quant review --ui-only`。
+`pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
+已弃用，仍可用但会提示改用 `dashboard`。
 
 ## 龙头扫描
 
@@ -99,7 +105,7 @@ dragon_quant/
 ├── vpa/             # 量价分析
 ├── infra/           # 行情数据源、SQLite、缓存、因子与资产同步
 └── tests/           # 单元、集成与离线 E2E 测试
-web_ui/              # 回测与账户可视化面板
+web_ui/              # 可视化面板（FastAPI + React，dist 入库）
 assets/              # 图标与 README 截图
 docs/                # 模块与开发文档
 archived_md/         # 已落地的调研与技术方案

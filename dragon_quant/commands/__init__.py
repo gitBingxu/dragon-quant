@@ -109,6 +109,8 @@ COMMANDS: dict[str, LazyCommand] = {
                            needs_providers=_never_providers),
     "storage": LazyCommand("dragon_quant.commands.storage",
                            needs_providers=_never_providers),
+    "dashboard": LazyCommand("dragon_quant.commands.dashboard",
+                             needs_providers=_never_providers),
     "vpa": LazyCommand("dragon_quant.commands.vpa"),
     "review-account": LazyCommand(
         "dragon_quant.commands.review_account",

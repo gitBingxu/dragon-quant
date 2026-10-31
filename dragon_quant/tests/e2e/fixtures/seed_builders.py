@@ -256,7 +256,7 @@ def dragon_row(trade_date: str, code: str, name: str, rank: int,
         "market_cap": 1_000_000_000.0,
         "concepts_json": json.dumps(concepts, ensure_ascii=False),
         "report_text": f"{name} report", "is_true_dragon": 1,
-        "version": "0.7.2", "created_at": f"{trade_date} 15:30:00",
+        "version": "0.7.4", "created_at": f"{trade_date} 15:30:00",
         "buy_date": None, "buy_price": None, "max_return_5d": None,
         "max_drawdown_5d": None, "max_return_hold_days": None,
         "review_status": "pending", "source": "v2",
@@ -537,3 +537,139 @@ def auction_snapshots_seed(rows: list[dict]) -> dict:
         "primary_key": ["trade_date", "code", "source"],
         "rows": rows,
     }}}
+
+
+# ─── scan tables (D5 dashboard smoke) ──────────────────────────────────────
+
+SCAN_COLUMNS = {
+    "id": "TEXT NOT NULL", "scan_date": "TEXT NOT NULL", "elapsed_s": "REAL",
+    "top_n": "INTEGER", "candidates_n": "INTEGER", "workers": "INTEGER",
+    "raw_output": "TEXT", "source": "TEXT", "created_at": "TEXT",
+}
+
+SCAN_STOCK_COLUMNS = {
+    "scan_id": "TEXT NOT NULL", "code": "TEXT NOT NULL", "name": "TEXT",
+    "rank": "INTEGER", "composite_score": "REAL", "board_count": "INTEGER",
+    "concepts_json": "TEXT", "dim_drive": "REAL", "dim_anti_drop": "REAL",
+    "dim_leadership": "REAL", "dim_absorption": "REAL",
+    "dim_liquidity": "REAL", "is_true_dragon": "INTEGER",
+    "reject_reason": "TEXT", "report_text": "TEXT", "open_px": "REAL",
+    "close_px": "REAL", "high_px": "REAL", "low_px": "REAL", "pct": "REAL",
+    "turnover_rate": "REAL", "amount": "REAL", "market_cap": "REAL",
+    "source": "TEXT",
+}
+
+
+def scan_db_seed(scan_id: str = "v2_20260911_5",
+                 scan_date: str = "2026-09-11") -> dict:
+    scan_row = {
+        "id": scan_id, "scan_date": scan_date, "elapsed_s": 1.5, "top_n": 5,
+        "candidates_n": 2, "workers": 2, "raw_output": None, "source": "v2",
+        "created_at": f"{scan_date} 15:30:00",
+    }
+    stock_rows = [
+        {"scan_id": scan_id, "code": "600001", "name": "龙头A", "rank": 1,
+         "composite_score": 88.0, "board_count": 2,
+         "concepts_json": json.dumps(["AI算力"], ensure_ascii=False),
+         "dim_drive": 90.0, "dim_anti_drop": 75.0, "dim_leadership": 80.0,
+         "dim_absorption": 49.0, "dim_liquidity": 55.0, "is_true_dragon": 1,
+         "reject_reason": None, "report_text": "r", "open_px": 10.0,
+         "close_px": 11.0, "high_px": 11.0, "low_px": 10.0, "pct": 10.0,
+         "turnover_rate": 8.0, "amount": 100_000_000.0,
+         "market_cap": 1_000_000_000.0, "source": "v2"},
+        {"scan_id": scan_id, "code": "600002", "name": "跟风B", "rank": 2,
+         "composite_score": 70.0, "board_count": 1,
+         "concepts_json": json.dumps(["机器人"], ensure_ascii=False),
+         "dim_drive": 60.0, "dim_anti_drop": 75.0, "dim_leadership": 50.0,
+         "dim_absorption": 49.0, "dim_liquidity": 55.0, "is_true_dragon": 0,
+         "reject_reason": "未达门槛", "report_text": "", "open_px": 10.0,
+         "close_px": 10.5, "high_px": 10.6, "low_px": 9.9, "pct": 5.0,
+         "turnover_rate": 5.0, "amount": 80_000_000.0,
+         "market_cap": 800_000_000.0, "source": "v2"},
+    ]
+    return {"tables": {
+        "scans_v2": {"columns": SCAN_COLUMNS, "primary_key": ["id"],
+                     "rows": [scan_row]},
+        "scan_stocks_v2": {"columns": SCAN_STOCK_COLUMNS,
+                           "primary_key": ["scan_id", "code"],
+                           "rows": stock_rows},
+    }}
+
+
+# ─── factor tables (D5 dashboard smoke) ────────────────────────────────────
+
+FACTOR_VALUE_COLUMNS = {
+    "trade_date": "TEXT NOT NULL", "code": "TEXT NOT NULL",
+    "factor_name": "TEXT NOT NULL", "factor_version": "TEXT NOT NULL",
+    "value": "REAL NOT NULL", "available_at": "TEXT NOT NULL",
+    "source": "TEXT NOT NULL", "source_scan_id": "TEXT",
+    "source_meta_json": "TEXT", "computed_at": "TEXT",
+}
+
+FACTOR_REGISTRY_COLUMNS = {
+    "factor_name": "TEXT NOT NULL", "factor_version": "TEXT NOT NULL",
+    "label": "TEXT", "frequency": "TEXT NOT NULL", "source": "TEXT NOT NULL",
+    "depends_on_json": "TEXT", "lookback": "INTEGER", "direction": "TEXT NOT NULL",
+    "unit": "TEXT", "available_phase": "TEXT NOT NULL",
+    "pit_rule": "TEXT NOT NULL", "scope_json": "TEXT", "params_json": "TEXT",
+    "default_enabled": "INTEGER", "valid_from": "TEXT", "deprecated_at": "TEXT",
+    "owner": "TEXT", "description": "TEXT", "spec_hash": "TEXT NOT NULL",
+    "created_at": "TEXT",
+}
+
+FACTOR_BUILD_RUN_COLUMNS = {
+    "id": "INTEGER", "trade_date": "TEXT NOT NULL", "started_at": "TEXT",
+    "finished_at": "TEXT", "report_json": "TEXT NOT NULL", "created_at": "TEXT",
+}
+
+
+def factor_db_seed(trade_date: str = "2026-09-11") -> dict:
+    report = {
+        "ok": True,
+        "scan": {"scan_id": f"v2_{trade_date.replace('-', '')}_5", "top_n": 5,
+                 "created_at": f"{trade_date} 15:30:00", "candidates": 2},
+        "warnings": [],
+        "factors": {"five_dim_composite": {
+            "status": "ok", "rows": 2, "coverage": 1.0, "warnings": [],
+        }},
+    }
+    return {"tables": {
+        "factor_values": {
+            "columns": FACTOR_VALUE_COLUMNS,
+            "primary_key": ["trade_date", "code", "factor_name", "factor_version"],
+            "rows": [
+                {"trade_date": trade_date, "code": code,
+                 "factor_name": "five_dim_composite", "factor_version": "1.0",
+                 "value": value, "available_at": f"{trade_date} 15:31:00",
+                 "source": "scan", "source_scan_id": f"v2_{trade_date.replace('-', '')}_5",
+                 "source_meta_json": None, "computed_at": f"{trade_date} 15:32:00"}
+                for code, value in (("600001", 88.0), ("600002", 70.0))
+            ],
+        },
+        "factor_registry": {
+            "columns": FACTOR_REGISTRY_COLUMNS,
+            "primary_key": ["factor_name", "factor_version"],
+            "rows": [{
+                "factor_name": "five_dim_composite",
+                "factor_version": "1.0", "label": "五维综合",
+                "frequency": "1d", "source": "scan", "depends_on_json": "[]",
+                "lookback": 0, "direction": "higher_better", "unit": "score",
+                "available_phase": "post_close", "pit_rule": "after_close",
+                "scope_json": "[]", "params_json": "{}", "default_enabled": 1,
+                "valid_from": None, "deprecated_at": None, "owner": None,
+                "description": None, "spec_hash": "h",
+                "created_at": f"{trade_date} 15:32:00",
+            }],
+        },
+        "factor_build_runs": {
+            "columns": FACTOR_BUILD_RUN_COLUMNS,
+            "primary_key": ["id"],
+            "rows": [{
+                "id": 1, "trade_date": trade_date,
+                "started_at": f"{trade_date} 15:30:00",
+                "finished_at": f"{trade_date} 15:32:00",
+                "report_json": json.dumps(report, ensure_ascii=False),
+                "created_at": f"{trade_date} 15:32:00",
+            }],
+        },
+    }}

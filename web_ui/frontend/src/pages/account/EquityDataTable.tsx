@@ -20,6 +20,16 @@ const COLUMNS: Column<Row>[] = [
     render: (row) => <span className="num text-ink">{fmtMoney(row.snapshot.total_equity)}</span>,
   },
   {
+    key: "daily",
+    header: "当日收益",
+    align: "right",
+    render: (row) => (
+      <span className={`num ${pnlClass(row.snapshot.daily_return)}`}>
+        {fmtPct(row.snapshot.daily_return)}
+      </span>
+    ),
+  },
+  {
     key: "return",
     header: "累计收益",
     align: "right",

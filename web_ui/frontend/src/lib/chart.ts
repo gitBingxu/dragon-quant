@@ -20,6 +20,13 @@ export interface ChartGeometry {
   drawdown: PaneRect;
 }
 
+export type SegmentTone = "up" | "down" | "flat";
+
+export interface EquitySegment {
+  path: string;
+  tone: SegmentTone;
+}
+
 export interface ChartPoint {
   index: number;
   x: number;
@@ -33,6 +40,7 @@ export interface ChartPoint {
 export interface BuiltChart {
   points: ChartPoint[];
   equityPath: string;
+  equitySegments: EquitySegment[];
   benchmarkPath: string;
   equityArea: string;
   drawdownPath: string;
@@ -101,6 +109,18 @@ export function buildEquityChart(
   return {
     points: chartPoints,
     equityPath: linePath(chartPoints, "equityY"),
+    // 逐日方向分段：涨红、跌绿、持平中性（通达信/同花顺分时惯例）。
+    equitySegments: chartPoints.slice(1).map((point, index) => {
+      const previous = chartPoints[index];
+      const delta = point.data.total_equity - previous.data.total_equity;
+      const tone: SegmentTone = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+      return {
+        path: `M ${previous.x.toFixed(1)} ${previous.equityY.toFixed(1)} L ${point.x.toFixed(
+          1
+        )} ${point.equityY.toFixed(1)}`,
+        tone,
+      };
+    }),
     benchmarkPath: optionalLinePath(chartPoints, "benchmarkY"),
     equityArea: areaPath(chartPoints, "equityY", geom.equity.bottom),
     drawdownPath: linePath(chartPoints, "drawdownY"),

@@ -2,12 +2,32 @@ import React from "react";
 import { Link, navigate, usePathname, useSearchParams } from "./router";
 import {
   IconCalendar,
-  IconDragon,
   IconGrid,
   IconRadar,
   IconSigma,
   IconWallet,
 } from "./components/icons";
+
+/** README 品牌图标（assets/icon.svg）：红渐变圆角方块 + 白色 K 线蜡烛。 */
+function BrandMark({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true">
+      <defs>
+        <linearGradient id="dq-brand" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#D93A32" />
+          <stop offset="100%" stopColor="#AE201E" />
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="112" fill="url(#dq-brand)" />
+      <g transform="translate(100,105)">
+        <line x1="50" y1="174" x2="50" y2="336" stroke="#FFFFFF" strokeWidth="9" strokeLinecap="round" />
+        <rect x="0" y="200" width="100" height="110" rx="16" fill="#FFFFFF" />
+        <rect x="106" y="76" width="100" height="28" rx="14" fill="#FFFFFF" />
+        <rect x="212" y="-34" width="100" height="28" rx="14" fill="#FFFFFF" />
+      </g>
+    </svg>
+  );
+}
 
 const NAV = [
   { to: "/", label: "总览", icon: IconGrid, match: (p: string) => p === "/" },
@@ -35,9 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 border-b border-hairline bg-[rgba(11,14,20,0.82)] backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4 sm:px-6">
           <Link to="/" className="flex shrink-0 items-center gap-2.5 no-underline">
-            <span className="grid h-8 w-8 place-items-center rounded-[9px] bg-gradient-to-br from-brand-bright to-[#6f4fe0] text-white shadow-[0_6px_18px_-8px_rgba(140,111,240,0.9)]">
-              <IconDragon size={18} strokeWidth={1.9} />
-            </span>
+            <BrandMark size={28} />
             <span className="hidden flex-col leading-none sm:flex">
               <span className="text-[13px] font-semibold tracking-[0.02em] text-ink">
                 DRAGON QUANT

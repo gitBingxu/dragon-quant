@@ -1,18 +1,19 @@
 import type { AuctionDayView } from "../../api/assets";
 import { Badge } from "../../components/Badge";
 import { DataTable, type Column } from "../../components/DataTable";
-import { StatCard } from "../../components/StatCard";
+import { StatCard, type StatTone } from "../../components/StatCard";
 import { fmtNum } from "../../lib/format";
 
 type AuctionRow = AuctionDayView["snapshots"][number];
 
-const SUMMARY_META: Record<string, { label: string; color: string }> = {
-  strong: { label: "强", color: "var(--color-up)" },
-  medium: { label: "中", color: "var(--color-warn)" },
-  weak: { label: "弱", color: "var(--color-down)" },
-  vetoed: { label: "否决", color: "var(--color-critical)" },
-  unavailable: { label: "不可用", color: "var(--color-ink-3)" },
-  unknown: { label: "未知", color: "var(--color-ink-3)" },
+// 强度档不是收益语义：使用品牌紫→中性灰的强度梯度，避免与红涨/绿跌混淆。
+const SUMMARY_META: Record<string, { label: string; color: string; tone: StatTone }> = {
+  strong: { label: "强", color: "var(--color-brand-bright)", tone: "brand" },
+  medium: { label: "中", color: "var(--color-brand)", tone: "brand" },
+  weak: { label: "弱", color: "var(--color-ink-3)", tone: "muted" },
+  vetoed: { label: "否决", color: "var(--color-warn)", tone: "warn" },
+  unavailable: { label: "不可用", color: "rgba(139,144,160,0.5)", tone: "muted" },
+  unknown: { label: "未知", color: "rgba(139,144,160,0.3)", tone: "muted" },
 };
 
 const COLUMNS: Column<AuctionRow>[] = [
@@ -33,7 +34,7 @@ const COLUMNS: Column<AuctionRow>[] = [
     render: (row) => {
       if (!row.level) return <span className="text-ink-3">—</span>;
       const tone =
-        row.level === "强" ? "up" : row.level === "中" ? "warn" : row.level === "弱" ? "down" : "neutral";
+        row.level === "强" ? "brand" : row.level === "中" ? "info" : "neutral";
       return <Badge tone={tone}>{row.level}</Badge>;
     },
   },
@@ -76,7 +77,7 @@ export function AuctionSection({ auction }: { auction: AuctionDayView }) {
             key={key}
             label={`${meta.label}档`}
             value={auction.summary[key] ?? 0}
-            tone={key === "strong" ? "up" : key === "weak" ? "down" : key === "medium" ? "warn" : "neutral"}
+            tone={meta.tone}
           />
         ))}
       </div>

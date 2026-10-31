@@ -15,7 +15,7 @@ const COLUMNS: Column<AssetRow>[] = [
     key: "present",
     header: "存在",
     render: (row) => (
-      <span className={row.present ? "text-down" : "text-ink-3"}>{row.present ? "✓" : "—"}</span>
+      <span className={row.present ? "text-brand-bright" : "text-ink-3"}>{row.present ? "✓" : "—"}</span>
     ),
   },
   {

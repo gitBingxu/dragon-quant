@@ -1,7 +1,7 @@
 import type { BuiltChart, ChartGeometry, ChartPoint } from "../../lib/chart";
 import { fmtPct } from "../../lib/format";
 import { EquityTooltip } from "./EquityTooltip";
-import { AXIS, BENCH_COLOR, DD_COLOR, EQUITY_COLOR, GRID } from "./equityTheme";
+import { AXIS, BENCH_COLOR, DD_COLOR, GRID, segmentColor } from "./equityTheme";
 
 /** 刻度用两位小数的「万」，避免 9.95万/10.0万 这类重复标签。 */
 function fmtEquityTick(value: number): string {
@@ -25,6 +25,9 @@ export function EquityPlot({
   onMouseLeave: () => void;
 }) {
   const last = chart.last;
+  const lastTone = chart.equitySegments[chart.equitySegments.length - 1]?.tone ?? "flat";
+  const hoverTone =
+    hover && hover.index > 0 ? chart.equitySegments[hover.index - 1]?.tone ?? "flat" : "flat";
   return (
     <svg
       viewBox={`0 0 ${geom.width} ${geom.height}`}
@@ -38,8 +41,8 @@ export function EquityPlot({
     >
       <defs>
         <linearGradient id="equity-wash" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={EQUITY_COLOR} stopOpacity="0.22" />
-          <stop offset="100%" stopColor={EQUITY_COLOR} stopOpacity="0.02" />
+          <stop offset="0%" stopColor="var(--color-ink)" stopOpacity="0.07" />
+          <stop offset="100%" stopColor="var(--color-ink)" stopOpacity="0.01" />
         </linearGradient>
         <linearGradient id="drawdown-wash" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor={DD_COLOR} stopOpacity="0.04" />
@@ -123,7 +126,7 @@ export function EquityPlot({
         </text>
       ))}
 
-      <path d={chart.equityArea} fill="url(#equity-wash)" />
+      <path d={chart.equityArea} fill="url(#equity-wash)" data-series="equity-area" />
       <path
         d={chart.benchmarkPath}
         fill="none"
@@ -131,16 +134,22 @@ export function EquityPlot({
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
+        data-series="benchmark"
       />
-      <path
-        d={chart.equityPath}
-        fill="none"
-        stroke={EQUITY_COLOR}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d={chart.drawdownArea} fill="url(#drawdown-wash)" />
+      {chart.equitySegments.map((segment, index) => (
+        <path
+          key={`equity-segment-${index}`}
+          d={segment.path}
+          fill="none"
+          stroke={segmentColor(segment.tone)}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          data-series="equity"
+          data-tone={segment.tone}
+        />
+      ))}
+      <path d={chart.drawdownArea} fill="url(#drawdown-wash)" data-series="drawdown-area" />
       <path
         d={chart.drawdownPath}
         fill="none"
@@ -148,6 +157,7 @@ export function EquityPlot({
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
+        data-series="drawdown"
       />
 
       {last ? (
@@ -156,7 +166,7 @@ export function EquityPlot({
             cx={last.x}
             cy={last.equityY}
             r="3.5"
-            fill={EQUITY_COLOR}
+            fill={segmentColor(lastTone)}
             stroke="var(--color-panel)"
             strokeWidth="2"
           />
@@ -195,7 +205,7 @@ export function EquityPlot({
             cx={hover.x}
             cy={hover.equityY}
             r="4.5"
-            fill={EQUITY_COLOR}
+            fill={segmentColor(hoverTone)}
             stroke="var(--color-panel)"
             strokeWidth="2"
           />

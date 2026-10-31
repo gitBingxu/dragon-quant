@@ -50,7 +50,7 @@ export function EntryReasonStats({ stats }: { stats: AccountPositionStats | null
                           <span
                             style={{
                               width: `${Math.max(0, Math.min(100, row.win_rate ?? 0))}%`,
-                              background: "linear-gradient(90deg, var(--color-brand), var(--color-brand-bright))",
+                              background: "var(--color-ink-2)",
                             }}
                           />
                         </div>

@@ -121,6 +121,13 @@
 |------|------|------|--------|
 | 2026-10-27 | 现有检查范围类型错误清零（Pyright 627→0，TypedDict / overload / TypeGuard） | [2026-10-27-type-error-remediation-design.md](type_quality/2026-10-27-type-error-remediation-design.md) | `docs/solutions/2026-10-27-type-error-remediation-design.md` |
 
+## web_ui/
+
+| 日期 | 主题 | 文件 | 原路径 |
+|------|------|------|--------|
+| 2026-10-31 | web_ui FastAPI 重构技术方案（issue #24，dashboard 命令 / `[web]` extra / P0 五页 / Kraken 终端风前端） | [2026-10-31-web-ui-dashboard-design.md](web_ui/2026-10-31-web-ui-dashboard-design.md) | `docs/superpowers/specs/2026-10-31-web-ui-dashboard-design.md` |
+| 2026-10-31 | FastAPI + uvicorn + 运行期自装调研（版本选型 / SPA 托管 / 端口与 SIGTERM 契约 / pip extra 三环境行为） | [2026-10-31-fastapi-web-ui-research.md](web_ui/2026-10-31-fastapi-web-ui-research.md) | `docs/superpowers/specs/2026-10-31-fastapi-web-ui-research.md` |
+
 ## 根目录
 
 | 日期 | 主题 | 文件 | 原路径 |

@@ -21,7 +21,7 @@
 
 ## Web UI 架构与 `dashboard`
 
-源码 `web_ui/frontend/`（Vite+React+TS+Mantine），产物 `web_ui/dist/`（已入库并随 wheel 分发）。运行期只需 Python，**不需要 Node**；改前端时才需 `npm run build`（`tsc --noEmit && vite build`，`base: "/"` 支持 `/scans/<id>` 深链刷新）。
+源码 `web_ui/frontend/`（Vite+React+TS+Tailwind CSS v4，构建期依赖；运行期仅 react/react-dom），产物 `web_ui/dist/`（已入库并随 wheel 分发）。运行期只需 Python，**不需要 Node**；改前端时才需 `npm run build`（`tsc --noEmit && vite build`，`base: "/"` 支持 `/scans/<id>` 深链刷新）。
 
 **三层结构**：`web_ui/backend/` 是 FastAPI 应用（`app.create_app` 工厂 / `serve.start_dashboard` 预绑定 socket + uvicorn / `routers/*` / `deps.py` 只读仓储适配 / `static.py` SPA + Cache-Control）；`web_ui/frontend/` 是源码；`web_ui/dist/` 是构建产物。`web_ui.start_dashboard` 是 **deprecated 薄壳**，内部委托 `start_dashboard`，保留旧签名供 `python -m web_ui.server` 与 `review --ui*` / `review-account --ui*` 过渡。
 

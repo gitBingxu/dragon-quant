@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AccountPosition } from "../../api/legacy";
+import type { AccountPosition } from "../../api/account";
 import { Badge } from "../../components/Badge";
 import { DataTable, type Column } from "../../components/DataTable";
 import { Pagination } from "../../components/Pagination";

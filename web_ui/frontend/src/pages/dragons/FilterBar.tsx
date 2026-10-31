@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DragonFilters, ReviewCaliber } from "../../api/legacy";
+import type { DragonFilters, ReviewCaliber } from "../../api/dragons";
 import { Section } from "../../components/Section";
 import { Select, TextField } from "../../components/Select";
 import {

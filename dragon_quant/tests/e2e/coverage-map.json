@@ -1321,6 +1321,12 @@
         ],
         "notes": "The audit module itself is mapped here so no dragon_quant/tests/e2e test function is silently unmapped; it reads only stdlib JSON/AST and never launches a business process."
       },
+      "web_spa_fallback": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_web_api.py::test_w1b_spa_fallback_for_dashboard_routes"
+        ],
+        "notes": "W1b: /scans /factors /prep 与带筛选 query 的深链在浏览器 Accept 下均回退到 index.html；复用 W1 的 sandbox/seed 与 Web 服务基建。"
+      },
       "dashboard_command": {
         "tests": [
           "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",

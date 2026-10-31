@@ -14,7 +14,7 @@ import {
   type AccountSnapshot,
   type AccountTimelineEvent,
   type AccountTrade,
-} from "../../api/legacy";
+} from "../../api/account";
 import { PageHeader } from "../../components/PageHeader";
 import { IconPlus } from "../../components/icons";
 import { IconAlert } from "../../components/icons-extra";

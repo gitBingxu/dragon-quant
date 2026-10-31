@@ -1,4 +1,4 @@
-import type { ReviewCaliber, Summary } from "../../api/legacy";
+import type { ReviewCaliber, Summary } from "../../api/dragons";
 import { StatCard } from "../../components/StatCard";
 import { fmtPct, pnlClass, pnlStatTone } from "../../lib/format";
 

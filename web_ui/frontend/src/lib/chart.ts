@@ -1,4 +1,4 @@
-import type { AccountBenchmarkPoint, AccountSnapshot } from "../api/legacy";
+import type { AccountBenchmarkPoint, AccountSnapshot } from "../api/account";
 
 // 图表几何纯函数（零 React 依赖）。上下两块共享 x 轴：
 // 上：总权益 vs 上证；下：回撤（绿）。绝不做双 y 轴。

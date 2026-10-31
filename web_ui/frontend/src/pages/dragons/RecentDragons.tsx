@@ -3,7 +3,7 @@ import {
   fetchDragonTradeDates,
   type DragonDateEntry,
 } from "../../api/dragons";
-import type { ReviewCaliber } from "../../api/legacy";
+import type { ReviewCaliber } from "../../api/dragons";
 import { EmptyState } from "../../components/EmptyState";
 import { Section } from "../../components/Section";
 import { IconClock } from "../../components/icons-extra";

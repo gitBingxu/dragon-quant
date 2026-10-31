@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Dragon, ReviewCaliber } from "../../api/legacy";
+import type { Dragon, ReviewCaliber } from "../../api/dragons";
 import { Badge } from "../../components/Badge";
 import { DataTable, type Column, type SortState } from "../../components/DataTable";
 import { Pagination } from "../../components/Pagination";

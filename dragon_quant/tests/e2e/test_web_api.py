@@ -653,3 +653,35 @@ def test_ra7_review_account_ui_only_needs_no_backtest():
         assert "账户级回测" not in server.stdout
         assert server.returncode is not None
         assert port_is_free(server.port)
+
+
+# ─── W1b: dashboard SPA fallback for deep-link routes ──────────────────────
+
+
+def test_w1b_spa_fallback_for_dashboard_routes():
+    """``/scans`` ``/factors`` ``/prep`` must serve index.html on browser Accept.
+
+    The harness request helper sends ``Accept: text/html,application/json;q=0.9``
+    (the production browser shape), so a 200 + identical index body proves the
+    SPA fallback — not a JSON API fallback — handles these top-level routes.
+    """
+
+    index_html = DIST_INDEX.read_bytes()
+    with sandbox("m1f1-spa-dashboard") as box:
+        seed_dragons(box, web_dragon_rows())
+        with web_server(box, server_command(REVIEW_UI, 0)) as server:
+            for path in ("/scans", "/factors", "/prep"):
+                page = server.request("GET", path)
+                assert page.status == 200, path
+                assert page.body == index_html, path
+                assert page.headers["content-type"].startswith("text/html"), path
+
+            # Query-string deep links are client-side state; the server still
+            # must fall back to the same index document.
+            deep = server.request(
+                "GET",
+                "/factors?date=2026-09-11&factor=five_dim_composite&code=600001",
+            )
+            assert deep.status == 200
+            assert deep.body == index_html
+            assert deep.headers["content-type"].startswith("text/html")

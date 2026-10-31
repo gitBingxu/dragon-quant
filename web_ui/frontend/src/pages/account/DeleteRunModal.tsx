@@ -1,4 +1,4 @@
-import type { AccountRun } from "../../api/legacy";
+import type { AccountRun } from "../../api/account";
 import { Modal } from "../../components/Modal";
 import { IconTrash } from "../../components/icons";
 

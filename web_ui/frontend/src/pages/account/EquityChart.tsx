@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { AccountBenchmarkPoint, AccountSnapshot } from "../../api/legacy";
+import type { AccountBenchmarkPoint, AccountSnapshot } from "../../api/account";
 import { buildEquityChart, chartGeometry, nearestIndex } from "../../lib/chart";
 import { fmtMoney, fmtPct } from "../../lib/format";
 import { useElementSize } from "../../lib/hooks";

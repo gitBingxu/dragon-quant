@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { AccountRun } from "../../api/legacy";
+import type { AccountRun } from "../../api/account";
 import { IconChevronDown, IconTrash } from "../../components/icons";
 import { fmtPct, pnlClass, runReturnLabel } from "../../lib/format";
 import { useClickOutside } from "../../lib/hooks";

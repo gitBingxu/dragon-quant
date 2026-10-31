@@ -3,7 +3,7 @@
 // 服务端 /api/dragons 已按所选口径完成筛选、排序与派生状态；前端只在渲染
 // 与客户端排序时把「逻辑字段」映射到行内对应字段，不写 if strict/loose 分支。
 
-import type { Dragon, ReviewCaliber } from "../api/legacy";
+import type { Dragon, ReviewCaliber } from "../api/dragons";
 
 /** 逻辑字段键：两种口径共用，渲染/排序时经 CALIBER_FIELD 取物理列。 */
 export type CaliberField =

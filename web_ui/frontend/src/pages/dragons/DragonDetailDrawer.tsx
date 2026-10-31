@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { fetchDragonDetail, type DragonDetail, type ReviewFields } from "../../api/dragons";
-import type { ReviewCaliber } from "../../api/legacy";
+import type { ReviewCaliber } from "../../api/dragons";
 import { Badge } from "../../components/Badge";
 import { Drawer } from "../../components/Drawer";
 import { IconAlert } from "../../components/icons-extra";

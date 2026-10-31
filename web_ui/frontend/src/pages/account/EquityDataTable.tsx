@@ -1,4 +1,4 @@
-import type { AccountBenchmarkPoint, AccountSnapshot } from "../../api/legacy";
+import type { AccountBenchmarkPoint, AccountSnapshot } from "../../api/account";
 import { DataTable, type Column } from "../../components/DataTable";
 import { fmtMoney, fmtPct, pnlClass } from "../../lib/format";
 

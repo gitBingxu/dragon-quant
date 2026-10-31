@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchFactorRuns,
   fetchFactors,
@@ -14,19 +14,82 @@ import { EmptyState } from "../../components/EmptyState";
 import { IconSearch } from "../../components/icons";
 import { IconAlert, IconDatabase } from "../../components/icons-extra";
 import { formatDateInput } from "../../lib/format";
+import { navigate, useSearchParams } from "../../router";
 import { RegistryTable } from "./RegistryTable";
 import { DayValues } from "./DayValues";
 import { BuildAudit } from "./BuildAudit";
 
+const today = () => formatDateInput(new Date());
+
 export function FactorsPage() {
+  const search = useSearchParams();
+  const urlDate = search.get("date") ?? "";
+  const urlFactor = search.get("factor") ?? "";
+  const urlCode = search.get("code") ?? "";
+
   const [factors, setFactors] = useState<FactorSpecView[]>([]);
-  const [selected, setSelected] = useState<string>("");
-  const [tradeDate, setTradeDate] = useState(() => formatDateInput(new Date()));
-  const [code, setCode] = useState("");
+  const [selected, setSelected] = useState(urlFactor);
+  const [tradeDate, setTradeDate] = useState(urlDate || today());
+  const [code, setCode] = useState(urlCode);
   const [day, setDay] = useState<FactorDayView | null>(null);
   const [runs, setRuns] = useState<FactorRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [querying, setQuerying] = useState(false);
+
+  // 已发起的查询签名 + 本页写回 URL 的 search，用于避免同步时重复请求。
+  const lastRequested = useRef("");
+  const selfWritten = useRef("");
+  const requestSeq = useRef(0);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+
+  const runQuery = useCallback(
+    async (date: string, name: string, codeText: string) => {
+      const seq = ++requestSeq.current;
+      lastRequested.current = `${date}|${name}|${codeText}`;
+      setQuerying(true);
+      setError(null);
+      try {
+        const params: { tradeDate: string; name?: string; code?: string } = {
+          tradeDate: date,
+        };
+        if (name) params.name = name;
+        if (codeText) params.code = codeText;
+        const [values, runList] = await Promise.all([
+          fetchFactorValues(params),
+          fetchFactorRuns({ tradeDate: date, limit: 20 }),
+        ]);
+        if (seq !== requestSeq.current) return;
+        setDay(values);
+        setRuns(runList.data);
+      } catch (exc) {
+        if (seq !== requestSeq.current) return;
+        setDay(null);
+        setRuns([]);
+        setError(exc instanceof Error ? exc.message : String(exc));
+      } finally {
+        if (seq === requestSeq.current) setQuerying(false);
+      }
+    },
+    []
+  );
+
+  const writeUrl = useCallback(
+    (date: string, name: string, codeText: string, replace: boolean) => {
+      const params = new URLSearchParams(window.location.search);
+      const put = (key: string, value: string) => {
+        if (value) params.set(key, value);
+        else params.delete(key);
+      };
+      put("date", date);
+      put("factor", name);
+      put("code", codeText);
+      const query = params.toString();
+      selfWritten.current = query ? `?${query}` : "";
+      navigate(`${window.location.pathname}${query ? `?${query}` : ""}`, { replace });
+    },
+    []
+  );
 
   useEffect(() => {
     fetchFactors()
@@ -37,27 +100,46 @@ export function FactorsPage() {
       .catch((exc: unknown) => setError(exc instanceof Error ? exc.message : String(exc)));
   }, []);
 
-  const query = useCallback(async () => {
-    setQuerying(true);
-    setError(null);
-    try {
-      const params: { tradeDate: string; name?: string; code?: string } = { tradeDate };
-      if (selected) params.name = selected;
-      if (code.trim()) params.code = code.trim();
-      const [values, runList] = await Promise.all([
-        fetchFactorValues(params),
-        fetchFactorRuns({ tradeDate, limit: 20 }),
-      ]);
-      setDay(values);
-      setRuns(runList.data);
-    } catch (exc) {
+  // URL → 状态：直链打开与浏览器后退/前进；本页写回 URL 时跳过，避免重复请求。
+  useEffect(() => {
+    const signature = `${urlDate}|${urlFactor}|${urlCode}`;
+    const self = window.location.search === selfWritten.current;
+    if (self) return;
+    if (signature === "||") {
+      setTradeDate(today());
+      setCode("");
       setDay(null);
       setRuns([]);
-      setError(exc instanceof Error ? exc.message : String(exc));
-    } finally {
-      setQuerying(false);
+      lastRequested.current = "";
+      return;
     }
-  }, [tradeDate, selected, code]);
+    if (signature === lastRequested.current) return;
+    const nextDate = urlDate || today();
+    const nextFactor = urlFactor || selectedRef.current;
+    const nextCode = urlCode;
+    setTradeDate(nextDate);
+    setSelected(nextFactor);
+    setCode(nextCode);
+    void runQuery(nextDate, nextFactor, nextCode);
+  }, [urlDate, urlFactor, urlCode, runQuery]);
+
+  const handleDate = (value: string) => {
+    setTradeDate(value);
+  };
+
+  const handleFactor = (value: string) => {
+    setSelected(value);
+  };
+
+  const handleCode = (value: string) => {
+    setCode(value);
+  };
+
+  const handleQuery = () => {
+    const codeText = code.trim();
+    writeUrl(tradeDate, selected, codeText, false);
+    void runQuery(tradeDate, selected, codeText);
+  };
 
   return (
     <>
@@ -83,7 +165,7 @@ export function FactorsPage() {
       <div className="grid gap-3">
         <Section
           title="查询"
-          description="按交易日 + 因子（可选代码）读取 PIT 因子值与 build 审计"
+          description="按交易日 + 因子（可选代码）读取 PIT 因子值与 build 审计；筛选条件写入 URL 可直链分享"
           bodyClassName="px-4 py-3.5 sm:px-[18px]"
         >
           <div className="grid grid-cols-2 items-end gap-3 md:grid-cols-4">
@@ -91,8 +173,8 @@ export function FactorsPage() {
               label="交易日"
               type="date"
               value={tradeDate}
-              onChange={setTradeDate}
-              onEnter={query}
+              onChange={handleDate}
+              onEnter={handleQuery}
             />
             <Select
               label="因子"
@@ -102,19 +184,19 @@ export function FactorsPage() {
                   ? factors.map((factor) => ({ value: factor.name, label: factor.name }))
                   : [{ value: "", label: "无可用因子" }]
               }
-              onChange={setSelected}
+              onChange={handleFactor}
             />
             <TextField
               label="代码（可选）"
               value={code}
               placeholder="600001"
-              onChange={setCode}
-              onEnter={query}
+              onChange={handleCode}
+              onEnter={handleQuery}
             />
             <button
               type="button"
               className="btn btn-primary"
-              onClick={query}
+              onClick={handleQuery}
               disabled={querying}
             >
               <IconSearch size={14} />
@@ -128,7 +210,11 @@ export function FactorsPage() {
           description="代码版本 vs DB 版本；点击行切换查询因子"
           bodyClassName="p-0"
         >
-          <RegistryTable factors={factors} selected={selected} onSelect={setSelected} />
+          <RegistryTable
+            factors={factors}
+            selected={selected}
+            onSelect={(name) => setSelected(name)}
+          />
         </Section>
 
         {day ? (

@@ -5,7 +5,7 @@ import {
   type DragonFilters,
   type ReviewCaliber,
   type Summary,
-} from "../../api/legacy";
+} from "../../api/dragons";
 import { useSearchParams } from "../../router";
 import { PageHeader } from "../../components/PageHeader";
 import { IconAlert } from "../../components/icons-extra";

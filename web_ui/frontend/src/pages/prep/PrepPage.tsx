@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchAuctionDates,
   fetchAuctionDay,
@@ -15,6 +15,7 @@ import { Section } from "../../components/Section";
 import { Select } from "../../components/Select";
 import { IconCalendar } from "../../components/icons";
 import { IconAlert } from "../../components/icons-extra";
+import { navigate, useSearchParams } from "../../router";
 import { WatermarkSection } from "./WatermarkSection";
 import { SnapshotSection } from "./SnapshotSection";
 import { AuctionSection } from "./AuctionSection";
@@ -29,13 +30,20 @@ async function fetchAuctionDatesSafe(): Promise<string[]> {
 }
 
 export function PrepPage() {
+  const search = useSearchParams();
+  const urlDate = search.get("date") ?? "";
+
   const [dates, setDates] = useState<string[]>([]);
-  const [date, setDate] = useState<string>("");
+  const [snapshotDates, setSnapshotDates] = useState<string[]>([]);
+  const [datesLoaded, setDatesLoaded] = useState(false);
+  const [date, setDate] = useState(urlDate);
   const [watermark, setWatermark] = useState<PrepWatermark | null>(null);
   const [snapshot, setSnapshot] = useState<PrepSnapshotView | null>(null);
   const [auction, setAuction] = useState<AuctionDayView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [dayLoading, setDayLoading] = useState(false);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const selfWritten = useRef("");
 
   useEffect(() => {
     let active = true;
@@ -46,57 +54,98 @@ export function PrepPage() {
           new Set([...prep.asset_dates, ...prep.snapshot_dates, ...auctionDates])
         ).sort();
         setDates(union);
-        if (union.length > 0) setDate(union[union.length - 1]);
+        setSnapshotDates(prep.snapshot_dates);
+        // 仅在没有 URL 日期时回落到最新交易日。
+        if (!urlDate && union.length > 0) setDate(union[union.length - 1]);
       })
       .catch((exc: unknown) => {
         if (active) setError(exc instanceof Error ? exc.message : String(exc));
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setDatesLoaded(true);
       });
     return () => {
       active = false;
     };
   }, []);
 
+  // URL → 状态：直链打开与浏览器后退/前进；本页写回 URL 时跳过。
+  useEffect(() => {
+    if (window.location.search === selfWritten.current) return;
+    if (urlDate && urlDate !== date) setDate(urlDate);
+  }, [urlDate, date]);
+
+  // 资产水位与竞价：按所选日期请求。
   useEffect(() => {
     if (!date) return;
     let active = true;
     setError(null);
-    setLoading(true);
-    Promise.all([
-      fetchPrepWatermark(date),
-      fetchPrepSnapshot(date).catch(() => null),
-      fetchAuctionDay(date).catch(() => null),
-    ])
-      .then(([water, snap, auctionDay]) => {
+    setDayLoading(true);
+    Promise.all([fetchPrepWatermark(date), fetchAuctionDay(date).catch(() => null)])
+      .then(([water, auctionDay]) => {
         if (!active) return;
         setWatermark(water);
-        setSnapshot(snap);
         setAuction(auctionDay);
       })
       .catch((exc: unknown) => {
         if (active) {
           setWatermark(null);
-          setSnapshot(null);
           setAuction(null);
           setError(exc instanceof Error ? exc.message : String(exc));
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setDayLoading(false);
       });
     return () => {
       active = false;
     };
   }, [date]);
 
+  // 快照详情仅在快照日期列表包含该日时请求，避免预期 404。
+  const snapshotKey = snapshotDates.join("|");
+  useEffect(() => {
+    if (!date || !snapshotDates.includes(date)) {
+      setSnapshot(null);
+      setSnapshotLoading(false);
+      return;
+    }
+    let active = true;
+    setSnapshot(null);
+    setSnapshotLoading(true);
+    fetchPrepSnapshot(date)
+      .then((payload) => {
+        if (active) setSnapshot(payload);
+      })
+      .catch(() => {
+        if (active) setSnapshot(null);
+      })
+      .finally(() => {
+        if (active) setSnapshotLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [date, snapshotKey]);
+
+  const changeDate = (next: string) => {
+    setDate(next);
+    const params = new URLSearchParams(window.location.search);
+    params.set("date", next);
+    const query = params.toString();
+    selfWritten.current = `?${query}`;
+    navigate(`${window.location.pathname}?${query}`);
+  };
+
+  const snapshotSettled =
+    Boolean(date) && datesLoaded && !snapshotLoading && snapshot === null;
+
   return (
     <>
       <PageHeader
         eyebrow="PREP · 盘后复盘"
         title="盘后复盘 / 集合竞价"
-        description="只读 assets.db（create=False，绝不建库）。资产水位、复盘快照块与竞价强度分布按交易日聚合。"
+        description="只读 assets.db（create=False，绝不建库）。资产水位、复盘快照块与竞价强度分布按交易日聚合；交易日写入 URL 可直链分享。"
         actions={
           <span className="inline-flex items-center gap-1.5 text-[12px] text-ink-2">
             <IconCalendar size={14} />
@@ -120,8 +169,8 @@ export function PrepPage() {
         >
           {dates.length === 0 ? (
             <EmptyState
-              title={loading ? "正在读取交易日…" : "未找到 assets.db 数据"}
-              description={loading ? undefined : "请先运行 dragon-quant prep 生成复盘资产。"}
+              title={datesLoaded ? "未找到 assets.db 数据" : "正在读取交易日…"}
+              description={datesLoaded ? "请先运行 dragon-quant prep 生成复盘资产。" : undefined}
               icon={<IconCalendar size={20} />}
             />
           ) : (
@@ -130,7 +179,7 @@ export function PrepPage() {
                 label="交易日"
                 value={date}
                 options={dates.map((item) => ({ value: item, label: item }))}
-                onChange={setDate}
+                onChange={changeDate}
                 width={220}
               />
               <div className="pb-1.5 font-mono text-[11px] text-ink-3">
@@ -158,6 +207,13 @@ export function PrepPage() {
           >
             <SnapshotSection snapshot={snapshot} />
           </Section>
+        ) : snapshotSettled ? (
+          <Section title="复盘快照" description="该日快照不可用">
+            <EmptyState
+              title="该日无复盘快照"
+              description="prep 未生成快照，或该日快照缺失；资产水位与竞价数据仍可查看。"
+            />
+          </Section>
         ) : null}
 
         {auction ? (
@@ -168,6 +224,10 @@ export function PrepPage() {
           >
             <AuctionSection auction={auction} />
           </Section>
+        ) : null}
+
+        {dayLoading && !watermark ? (
+          <div className="text-[12px] text-ink-3">正在加载该日资产与竞价数据…</div>
         ) : null}
       </div>
     </>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { AccountPosition, AccountTimelineEvent } from "../../api/legacy";
+import type { AccountPosition, AccountTimelineEvent } from "../../api/account";
 import { Badge } from "../../components/Badge";
 import { EmptyState } from "../../components/EmptyState";
 import { Pagination } from "../../components/Pagination";

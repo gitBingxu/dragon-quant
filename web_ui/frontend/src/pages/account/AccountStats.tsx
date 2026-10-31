@@ -1,4 +1,4 @@
-import type { AccountRun, AccountSnapshot } from "../../api/legacy";
+import type { AccountRun, AccountSnapshot } from "../../api/account";
 import { StatCard } from "../../components/StatCard";
 import { fmtMoney, fmtPct, pnlStatTone } from "../../lib/format";
 

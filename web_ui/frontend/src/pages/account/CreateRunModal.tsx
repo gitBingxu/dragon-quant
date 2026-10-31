@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createAccountRun, type AccountRun } from "../../api/legacy";
+import { createAccountRun, type AccountRun } from "../../api/account";
 import { Modal } from "../../components/Modal";
 import { IconAlert } from "../../components/icons-extra";
 import { defaultDateRange, defaultRunName } from "../../lib/format";

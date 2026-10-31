@@ -1,4 +1,4 @@
-import type { AccountSnapshot } from "../../api/legacy";
+import type { AccountSnapshot } from "../../api/account";
 import { Badge } from "../../components/Badge";
 import { Section } from "../../components/Section";
 import { IconWallet } from "../../components/icons";

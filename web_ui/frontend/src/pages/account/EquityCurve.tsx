@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AccountBenchmarkPoint, AccountSnapshot } from "../../api/legacy";
+import type { AccountBenchmarkPoint, AccountSnapshot } from "../../api/account";
 import { EmptyState } from "../../components/EmptyState";
 import { Section } from "../../components/Section";
 import { fmtMoney, fmtPct } from "../../lib/format";

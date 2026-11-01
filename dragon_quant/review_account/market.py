@@ -32,9 +32,17 @@ def _snapshot_version(value) -> Optional[float]:
 
 
 def _review_decision_branch(snap: dict, day: str, ctx: dict,
-                            snapshot_date: Optional[str]
+                            snapshot_date: Optional[str],
+                            *,
+                            include_all_review_candidates: bool = False,
                             ) -> tuple[list[dict], dict[str, dict], bool]:
-    """0.8 分支：``eligible ∧ position>0`` 为唯一候选集合。
+    """0.8 分支：默认 ``eligible ∧ position>0``；auction 可传 ``True`` 取主集合全部。
+
+    ``include_all_review_candidates=True`` 时池 = ``review_candidates`` 中所有
+    ``code`` 为非空字符串的条目（含 ``position_pct=0/null``、
+    ``eligibility=not_qualified/unknown``），**不含** ``project_candidates`` 为
+    ``review_max_codes`` 截断补齐的 raw-only 行。``recommended_count`` 两种模式下
+    都表示 prep 实际推荐只数（``eligible ∧ position>0``），与池大小解耦。
 
     返回 ``(pool, verdict_map, has_review_decision)``。**有效决策的空池不回落
     legacy**：``has_review_decision=True`` 时调用方必须尊重空池（第二套算法
@@ -54,18 +62,31 @@ def _review_decision_branch(snap: dict, day: str, ctx: dict,
     views = project_candidates(review_candidates, raw, day)
     views = [view for view in views if isinstance(view, dict) and view.get("code")]
     verdict_map = {view["code"]: view for view in views}
-    pool = [view for view in views if is_review_eligible(view)]
+    recommended = [view for view in views if is_review_eligible(view)]
     ctx["pool_source"] = "prep"
-    ctx["recommended_count"] = len(pool)
-    ctx["filtered_ignore"] = sum(
-        1 for item in review_candidates
-        if isinstance(item, dict) and item.get("position_pct") == 0)
-    ctx["ignore_reasons"] = [
-        view.get("ignore_reason") for view in views
-        if not is_review_eligible(view) and view.get("ignore_reason")
-    ]
+    ctx["recommended_count"] = len(recommended)
+    if include_all_review_candidates:
+        # 主集合判定与 project_candidates 同源：非空字符串 code；raw-only 补齐行
+        # 不在 review_candidates 中，因此被排除。
+        codes = {item.get("code") for item in review_candidates
+                 if isinstance(item, dict)
+                 and isinstance(item.get("code"), str) and item["code"]}
+        pool = [view for view in views if view.get("code") in codes]
+        ctx["filtered_ignore"] = 0        # 完整池没有剔除
+        ctx["ignore_reasons"] = []
+    else:
+        pool = recommended
+        ctx["filtered_ignore"] = sum(
+            1 for item in review_candidates
+            if isinstance(item, dict) and item.get("position_pct") == 0)
+        ctx["ignore_reasons"] = [
+            view.get("ignore_reason") for view in views
+            if not is_review_eligible(view) and view.get("ignore_reason")
+        ]
     if pool:
         ctx["fallback_reason"] = None
+    elif include_all_review_candidates:
+        ctx["fallback_reason"] = "no_eligible"   # 无有效 code 条目可采
     elif any(isinstance(item, dict) and item.get("eligibility") == "eligible"
              for item in review_candidates):
         ctx["fallback_reason"] = "all_ignored"
@@ -178,7 +199,9 @@ def _default_auction_loader(day: str, source: str = "v2") -> list[dict]:
 
 
 def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
-                          auction_loader=None, factor_loader=None) -> tuple[list[dict], dict]:
+                          auction_loader=None, factor_loader=None, *,
+                          include_all_review_candidates: bool = False
+                          ) -> tuple[list[dict], dict]:
     """候选池 + P/A 三值注解 + 上下文（排序模式/回退原因/降级）。
 
     池语义（与 auction 采集池共用）：
@@ -187,6 +210,11 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
     - 快照有候选但推荐集（strong/light）为空 → **D7 回退 legacy**，回退池不再应用
       ignore 出池；P 仍按快照 verdict 标注（ignore→False、无该 code→None）；
     - 旧快照完全不含 verdict → 使用快照候选、P 全 Unknown（C7）。
+
+    ``include_all_review_candidates`` 只影响 0.8 分支：``True``（仅 ``auction``
+    传）时池 = ``review_candidates`` 主集合全部有效 code，含 ``position_pct=0/null``
+    与 ``eligibility=not_qualified/unknown``；``recommended_count`` 仍是 prep 实际
+    推荐只数。0.7 及更早、legacy 回退、pool 注解、排序、因子注解均不受影响。
 
     因子注解（P2）：``factor_ranking_enabled`` 关闭 → 零读取（``factor_mode="off"``）；
     开启 → ``infra.factor.decision.annotate_pool`` 按**每只候选自己的 trade_date** 读因子值，
@@ -247,9 +275,11 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
                 degraded or sentiment.get("factor_errors"))
     version = _snapshot_version(snap.get("version")) if isinstance(snap, dict) else None
     if version is not None and version >= _REVIEW_SNAPSHOT_VERSION:
-        # 0.8：新六维 review 是唯一权威；候选集合 = eligible ∧ position>0。
+        # 0.8：新六维 review 是唯一权威；默认集合 = eligible ∧ position>0，
+        # auction 由 include_all_review_candidates 取主集合全部。
         pool, verdict_map, review_decision = _review_decision_branch(
-            snap, day, ctx, snapshot_date)
+            snap, day, ctx, snapshot_date,
+            include_all_review_candidates=include_all_review_candidates)
         ctx["review_decision"] = review_decision
     elif isinstance(snap, dict) and isinstance(snap.get("candidates"), list) and snap["candidates"]:
         raw = [c for c in snap["candidates"] if isinstance(c, dict) and c.get("code")]

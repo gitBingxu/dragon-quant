@@ -313,8 +313,12 @@ def run_auction(*, pool: str = "prep", days=None, services=None,
             from dragon_quant.review_account.models import StrategyConfig
             cfg = StrategyConfig(source=source, candidate_lookback_days=lookback)
             try:
+                # T 日竞价需要 prep 全池（含 position 0/null、not_qualified/unknown），
+                # 不按 prep 资格/仓位过滤；recommended_count 仍由共享函数按 prep
+                # 实际推荐只数给出。
                 candidates, ctx = collect_candidates_ex(
-                    calendar, trade_date, cfg, candidate_loader(source))
+                    calendar, trade_date, cfg, candidate_loader(source),
+                    include_all_review_candidates=True)
             except Exception as exc:
                 candidates = []
                 ctx = {**ctx, "fallback_reason": "candidate_pool_error",

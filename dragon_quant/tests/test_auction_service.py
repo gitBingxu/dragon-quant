@@ -78,6 +78,30 @@ def _snapshot(codes=(("600001", "甲"), ("600002", "乙"))):
     ]}
 
 
+def _review_snapshot():
+    """0.8 快照：1 只推荐 + 2 只不进推荐集合的详细池标的。"""
+    return {
+        "version": "0.8",
+        "candidates": [
+            {"code": code, "name": name, "facts": {"in_pool_today": True}}
+            for code, name in (("600001", "甲"), ("600002", "乙"),
+                               ("600003", "丙"))
+        ],
+        "review_candidates": [
+            {"code": "600001", "name": "甲", "review_score": 75.0,
+             "review_grade": "B", "eligibility": "eligible",
+             "position_pct": 4.0, "reason_code": None, "gate_trace": []},
+            {"code": "600002", "name": "乙", "review_score": 70.0,
+             "review_grade": "B", "eligibility": "eligible",
+             "position_pct": 0.0, "reason_code": "illiquid", "gate_trace": []},
+            {"code": "600003", "name": "丙", "review_score": 60.0,
+             "review_grade": "D", "eligibility": "not_qualified",
+             "position_pct": 0.0, "reason_code": "not_mainline",
+             "gate_trace": []},
+        ],
+    }
+
+
 def _asset(code: str, *, name=None, items=None, quote="default"):
     from dragon_quant.review_account.auction.serialize import quote_to_payload
 
@@ -249,6 +273,23 @@ class TestCollectContract(unittest.TestCase):
         self.assertEqual(harness.calls["quotes"], ["tdx"])
         self.assertEqual(set(harness.calls["replaced"]), {"600001", "600002"})
         self.assertEqual(outcome.render_names, {"600001": "甲", "600002": "乙"})
+
+    def test_review_full_pool_collects_every_review_candidate(self):
+        """T10：0.8 全池采集，键序与 recommended_count 语义不变。"""
+        with _CollectHarness(self, snapshot=_review_snapshot()) as harness:
+            outcome = run_auction(services=_services(), today=DAY)
+
+        self.assertEqual(outcome.exit_code, 0)
+        self.assertEqual(list(outcome.payload), COLLECT_KEYS)
+        self.assertEqual(outcome.payload["pool_source"], "prep")
+        self.assertIsNone(outcome.payload["fallback_reason"])
+        # 池大小 = 全部有效 code；推荐只数仍是 eligible ∧ position>0
+        self.assertEqual(outcome.payload["candidate_codes"], 3)
+        self.assertEqual(outcome.payload["recommended_count"], 1)
+        self.assertEqual(outcome.payload["saved_count"], 3)
+        self.assertEqual(outcome.payload["scored_count"], 3)
+        self.assertEqual(harness.calls["auction"],
+                         ["600001", "600002", "600003"])
 
     def test_missing_services_uses_the_runtime_provider_factory(self):
         tdx = object()

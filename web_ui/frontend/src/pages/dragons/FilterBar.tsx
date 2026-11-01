@@ -114,26 +114,6 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
         />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        <button type="button" className="btn btn-primary" onClick={onSearch}>
-          <IconSearch size={14} />
-          查询
-        </button>
-        <button type="button" className="btn btn-ghost" onClick={onReset}>
-          <IconRefresh size={14} />
-          重置
-        </button>
-        <button
-          type="button"
-          className="btn btn-subtle"
-          onClick={() => setAdvOpen((prev) => !prev)}
-        >
-          <IconSliders size={14} />
-          更多筛选
-          {advOpen ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-        </button>
-      </div>
-
       {advOpen ? (
         <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 border-t border-hairline pt-3 md:grid-cols-4 xl:grid-cols-7">
           <TextField
@@ -186,6 +166,27 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
           />
         </div>
       ) : null}
+
+      {/* 操作行始终在区块最底部：展开更多筛选后，查询/重置/收起仍在下方可达。 */}
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" className="btn btn-primary" onClick={onSearch}>
+          <IconSearch size={14} />
+          查询
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={onReset}>
+          <IconRefresh size={14} />
+          重置
+        </button>
+        <button
+          type="button"
+          className="btn btn-subtle"
+          onClick={() => setAdvOpen((prev) => !prev)}
+        >
+          <IconSliders size={14} />
+          更多筛选
+          {advOpen ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+        </button>
+      </div>
     </Section>
   );
 }

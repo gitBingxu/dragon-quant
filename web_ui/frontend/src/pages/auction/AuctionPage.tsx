@@ -17,7 +17,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { Section } from "../../components/Section";
 import { StatCard } from "../../components/StatCard";
 import { IconAlert } from "../../components/icons-extra";
-import { fmtNum, pnlClass } from "../../lib/format";
+import { fmtNum, fmtPct, pnlClass, pnlStatTone } from "../../lib/format";
 import {
   CALENDAR_BASIS_LABELS,
   COLLECTION_STATUS_LABELS,
@@ -123,6 +123,27 @@ function outcomeMap(effect: AuctionEffect | null) {
   return map;
 }
 
+const OUTCOME_HORIZONS = [1, 3, 5] as const;
+
+type OutcomeItems = ReturnType<typeof outcomeMap> extends Map<string, infer T> ? T : never;
+
+function OutcomeCell({ items, horizon }: { items: OutcomeItems | undefined; horizon: number }) {
+  const item = items?.find((entry) => entry.horizon === horizon);
+  if (!item || item.pct == null) {
+    return (
+      <span
+        className="text-caption text-ink-3"
+        title={item?.reason ? reasonLabel(item.reason) : undefined}
+      >
+        待评估
+      </span>
+    );
+  }
+  return (
+    <span className={`num text-body ${pnlClass(item.pct)}`}>{fmtNum(item.pct, 2)}%</span>
+  );
+}
+
 function ResultsSection({
   day,
   effect,
@@ -223,8 +244,17 @@ function ResultsSection({
           </Badge>
         ),
       },
+      ...OUTCOME_HORIZONS.map<Column<AuctionSnapshotRow>>((horizon) => ({
+        key: `t${horizon}`,
+        header: `T+${horizon}`,
+        align: "right",
+        width: 64,
+        render: (row) => (
+          <OutcomeCell items={outcomes.get(row.code)} horizon={horizon} />
+        ),
+      })),
     ],
-    []
+    [outcomes]
   );
 
   if (day.count === 0) {
@@ -232,37 +262,17 @@ function ResultsSection({
   }
 
   return (
-    <div className="grid gap-2">
+    <div>
       <div className="overflow-hidden rounded-lg border border-hairline">
-        <DataTable columns={columns} rows={day.snapshots} rowKey={(row) => row.code} minWidth={1200} />
+        <DataTable
+          columns={columns}
+          rows={day.snapshots}
+          rowKey={(row) => row.code}
+          minWidth={1320}
+        />
       </div>
-      <div className="grid gap-1.5">
-        {day.snapshots.map((row) => {
-          const list = outcomes.get(row.code) ?? [];
-          return (
-            <details key={`outcome-${row.code}`} className="rounded-md border border-hairline bg-raise">
-              <summary className="cursor-pointer list-none px-3 py-2 text-body text-ink-2">
-                {row.code} {row.name ?? ""} · 后续 1/3/5 日（本地日 K）
-              </summary>
-              <div className="flex flex-wrap gap-3 border-t border-hairline px-3 py-2">
-                {list.length === 0 ? (
-                  <span className="text-body text-ink-3">待评估：无本地日 K 或不相交</span>
-                ) : (
-                  list.map((item) => (
-                    <span key={`${row.code}-${item.horizon}`} className="text-body text-ink-2">
-                      {item.horizon} 日{" "}
-                      {item.pct == null ? (
-                        <span className="text-ink-3">待评估（{item.reason ?? "无样本"}）</span>
-                      ) : (
-                        <span className={`num ${pnlClass(item.pct)}`}>{fmtNum(item.pct, 2)}%</span>
-                      )}
-                    </span>
-                  ))
-                )}
-              </div>
-            </details>
-          );
-        })}
+      <div className="mt-1.5 text-caption text-ink-3">
+        T+1、T+3、T+5 为本地日 K 净收益（已扣 13bp 成本）；缺数据或未来交易日未到一律「待评估」。
       </div>
     </div>
   );
@@ -292,14 +302,23 @@ function EffectSection({ effect, loading }: { effect: AuctionEffect | null; load
         <div className="text-caption text-warning">· {limitUpCaveat}</div>
       ) : null}
 
+      <div className="grid gap-3 sm:grid-cols-3">
+        {effect.horizons.map((horizon) => (
+          <StatCard
+            key={`spread-${horizon.horizon}`}
+            label={`强弱差 T+${horizon.horizon}`}
+            value={horizon.spread == null ? "—" : fmtPct(horizon.spread)}
+            tone={pnlStatTone(horizon.spread)}
+            sub="强 − 弱均值差（本地日 K）"
+          />
+        ))}
+      </div>
+
       <div className="grid gap-2">
         {effect.horizons.map((horizon) => (
           <div key={horizon.horizon} className="grid gap-1.5">
             <div className="flex flex-wrap items-center gap-2 text-body">
               <span className="font-medium text-ink">{horizon.horizon} 日</span>
-              <span className="text-caption text-ink-2">
-                强弱差 {horizon.spread == null ? "—" : `${fmtNum(horizon.spread, 2)}%`}
-              </span>
             </div>
             <div className="overflow-x-auto">
               <table className="dt" style={{ minWidth: 720 }}>
@@ -369,14 +388,16 @@ function EffectSection({ effect, loading }: { effect: AuctionEffect | null; load
             ))}
           </ul>
           {effect.warnings.length ? (
-            <details className="text-ink-3">
-              <summary className="cursor-pointer">技术告警 ({effect.warnings.length})</summary>
-              <ul className="mt-1 grid gap-0.5 font-mono">
+            <CollapsibleSection
+              title={`技术告警 (${effect.warnings.length})`}
+              defaultOpen={false}
+            >
+              <ul className="grid gap-0.5 font-mono text-ink-3">
                 {effect.warnings.map((item, index) => (
                   <li key={`${item}-${index}`}>· {item}</li>
                 ))}
               </ul>
-            </details>
+            </CollapsibleSection>
           ) : null}
         </div>
       </CollapsibleSection>
@@ -559,7 +580,7 @@ export function AuctionPage() {
           {day ? <RunSection day={day} /> : <div className="text-body text-ink-3">正在读取该日竞价数据…</div>}
         </Section>
 
-        <Section title="竞价结果" description="强度/方向/关键证据/质量；行展开 1/3/5 日后续">
+        <Section title="竞价结果" description="强度/方向/关键证据/质量；T+1、T+3、T+5 净收益并入主表">
           {day ? <ResultsSection day={day} effect={effect} /> : <div className="text-body text-ink-3">—</div>}
         </Section>
 

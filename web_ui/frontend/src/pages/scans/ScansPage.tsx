@@ -10,6 +10,7 @@ import { IconAlert } from "../../components/icons-extra";
 import { fmtNum } from "../../lib/format";
 import { SCAN_STATUS_LABELS } from "../../lib/labels";
 import { Link, navigate } from "../../router";
+import { ScanHealthBand } from "./ScanHealthBand";
 
 function statusTone(status: ScanStatus): "normal" | "warning" | "outline" {
   if (status === "completed") return "normal";
@@ -142,6 +143,8 @@ export function ScansPage() {
           加载失败：{error}
         </div>
       ) : null}
+
+      <ScanHealthBand rows={rows} />
 
       <Section
         title="扫描记录"

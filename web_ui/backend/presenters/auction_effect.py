@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping, Sequence
 
 from dragon_quant.infra.factor.decision_review import (
@@ -22,6 +21,8 @@ from dragon_quant.infra.factor.decision_review import (
     run_decision_review,
 )
 
+from .local_market import LOCAL_CAVEATS, LocalStockDailyMarket, shift_day
+
 WINDOW_DEFAULT = 20
 WINDOW_MAX = 60
 # 单日上限 60 只不适用于窗口并集；硬上限 300，超限按最近出现优先截断。
@@ -30,36 +31,6 @@ BAR_LOOKBACK_DAYS = 120
 BAR_LOOKAHEAD_DAYS = 30
 SNAPSHOT_LOOKBACK_DAYS = 180
 ALLOWED_HORIZONS = (1, 3, 5)
-
-LOCAL_CAVEATS = (
-    "行情只读本地日 K；打开页面不联网，缺数据一律「待评估」",
-    "本地日 K 缺涨停标记，一字板可能未被剔除，收益可能高估",
-    "成交额低于 2 亿的样本按既有规则剔除，小盘股样本可能偏少",
-    "交易日按本地日 K 推断，非交易所日历；周末/节假日缺口不是异常",
-)
-
-
-def _shift(day: str, days: int) -> str:
-    return (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=days)).strftime(
-        "%Y-%m-%d")
-
-
-class LocalStockDailyMarket:
-    """预加载日 K 的只读行情适配器（Adapter）。
-
-    刻意**不提供** ``calendar()``：``decision_review`` 会退化为
-    ``calendar_basis="bars_union"`` 并给出 ``calendar_fallback`` 告警。
-    """
-
-    def __init__(self, rows: Mapping[str, list] | None = None) -> None:
-        self._rows = {str(code): list(bars or [])
-                      for code, bars in (rows or {}).items()}
-
-    def daily(self, code: str, start: str | None = None) -> list:
-        return list(self._rows.get(str(code), []))
-
-    def codes(self) -> list[str]:
-        return sorted(self._rows)
 
 
 class _CachingWindowStore:
@@ -190,7 +161,7 @@ def run_auction_effect(
 
     window = max(1, min(WINDOW_MAX, int(window or WINDOW_DEFAULT)))
     requested = sorted({int(h) for h in (horizons or DEFAULT_HORIZONS)})
-    lookback_start = _shift(trade_date, -SNAPSHOT_LOOKBACK_DAYS)
+    lookback_start = shift_day(trade_date, -SNAPSHOT_LOOKBACK_DAYS)
     dates = sorted({str(day) for day in
                     store.snapshot_dates(lookback_start, trade_date)})[-window:]
 
@@ -214,8 +185,8 @@ def run_auction_effect(
     selected_codes = sorted({str(row.get("code")) for row in selected_rows
                              if isinstance(row, Mapping) and row.get("code")})
 
-    bar_from = _shift(trade_date, -BAR_LOOKBACK_DAYS)
-    bar_to = _shift(trade_date, BAR_LOOKAHEAD_DAYS)
+    bar_from = shift_day(trade_date, -BAR_LOOKBACK_DAYS)
+    bar_to = shift_day(trade_date, BAR_LOOKAHEAD_DAYS)
     loaded = load_bars(codes, bar_from, bar_to) or {}
     bars = dict(loaded.get("rows") or {})
     bars_truncated = bool(loaded.get("truncated"))

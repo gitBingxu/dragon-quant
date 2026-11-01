@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  fetchPlanFollowup,
   fetchPrepCalendar,
   fetchPrepSnapshot,
   fetchPrepWatermark,
   fetchReviewContext,
+  type PlanFollowup,
   type PrepCalendar,
   type PrepSnapshotView,
   type PrepWatermark,
@@ -20,8 +22,15 @@ import { CandidateList } from "./CandidateList";
 import { MainlineTable } from "./MainlineTable";
 import { MarketStrip } from "./MarketStrip";
 import { PlanReviewSection } from "./PlanReviewSection";
+import { PrepSummaryBand } from "./PrepSummaryBand";
 import { RunOverview } from "./RunOverview";
-import { buildCandidateViews, buildMainlineRows, buildMarketView, buildRunInfo } from "./prepModel";
+import {
+  buildAnomalies,
+  buildCandidateViews,
+  buildMainlineRows,
+  buildMarketView,
+  buildRunInfo,
+} from "./prepModel";
 
 function normalizeIso(value: string): string {
   const text = (value || "").trim();
@@ -45,6 +54,9 @@ export function PrepPage() {
   const [watermark, setWatermark] = useState<PrepWatermark | null>(null);
   const [snapshot, setSnapshot] = useState<PrepSnapshotView | null>(null);
   const [context, setContext] = useState<ReviewContext | null>(null);
+  const [followup, setFollowup] = useState<PlanFollowup | null>(null);
+  const [followupLoading, setFollowupLoading] = useState(false);
+  const [followupFailed, setFollowupFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -87,6 +99,8 @@ export function PrepPage() {
     setLoading(true);
     setSnapshot(null);
     setContext(null);
+    setFollowup(null);
+    setFollowupFailed(false);
     fetchPrepWatermark(date)
       .then(async (water) => {
         if (!active) return;
@@ -113,6 +127,36 @@ export function PrepPage() {
     };
   }, [date]);
 
+  // 二级请求：仅当该日有计划（plan_effect.available）才读计划日后续收益，
+  // 无计划的日子不白读计划日快照；失败不阻塞页面其他区块。
+  useEffect(() => {
+    if (!date || !context || context.trade_date !== date
+        || !context.plan_effect?.available) {
+      setFollowup(null);
+      setFollowupLoading(false);
+      setFollowupFailed(false);
+      return;
+    }
+    let active = true;
+    setFollowupLoading(true);
+    setFollowupFailed(false);
+    fetchPlanFollowup(date)
+      .then((payload) => {
+        if (active) setFollowup(payload);
+      })
+      .catch(() => {
+        if (!active) return;
+        setFollowup(null);
+        setFollowupFailed(true);
+      })
+      .finally(() => {
+        if (active) setFollowupLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [date, context]);
+
   const changeDate = (next: string) => {
     setDate(next);
     const query = `date=${encodeURIComponent(next)}`;
@@ -125,6 +169,9 @@ export function PrepPage() {
   const mainlines = snapshot ? buildMainlineRows(snapshot, context) : [];
   const candidates = snapshot ? buildCandidateViews(snapshot) : [];
   const runInfo = snapshot ? buildRunInfo(snapshot) : null;
+  const anomalies = watermark
+    ? buildAnomalies(watermark, runInfo, context, snapshot)
+    : [];
 
   return (
     <>
@@ -149,6 +196,18 @@ export function PrepPage() {
       ) : null}
 
       <div className="grid gap-3">
+        {/* 结论带：资产齐备度 / 运行异常 / T+1 成效 / 空仓验证 */}
+        {watermark ? (
+          <PrepSummaryBand
+            watermark={watermark}
+            anomalyCount={anomalies.length}
+            context={context}
+            followup={followup}
+            followupLoading={followupLoading}
+            followupFailed={followupFailed}
+          />
+        ) : null}
+
         <Section title="运行概况" description="当日应有资产与采集记录；异常折叠在下方">
           {watermark ? (
             <RunOverview
@@ -167,7 +226,12 @@ export function PrepPage() {
 
         <Section title="上次计划复盘 / 成效" description="回看上一交易日的计划与次日的实际表现">
           {snapshot ? (
-            <PlanReviewSection context={context} snapshot={snapshot} candidates={candidates} />
+            <PlanReviewSection
+              context={context}
+              snapshot={snapshot}
+              candidates={candidates}
+              followup={followup}
+            />
           ) : (
             <EmptyState title="该日无复盘快照" description="无快照则不评估计划成效；不补算、不编造。" />
           )}

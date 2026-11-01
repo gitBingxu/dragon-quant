@@ -119,10 +119,35 @@ export interface MarketSide {
   position_pct: number | null;
 }
 
+export type VerificationConclusion = "correct" | "wrong" | "neutral" | "not_evaluable";
+export type PlanAdvice = "empty" | "hold";
+
+export interface VerificationEvidence {
+  prev_state: string | null;
+  current_state: string | null;
+  prev_score: number | null;
+  current_score: number | null;
+  score_change: number | null;
+  limit_up_cnt: number | null;
+  limit_down_cnt: number | null;
+  broken_rate: number | null;
+  yesterday_premium_pct: number | null;
+}
+
+export interface MarketVerification {
+  conclusion: VerificationConclusion;
+  reason: string | null;
+  advice: PlanAdvice | null;
+  prev_trade_date: string | null;
+  current_trade_date: string | null;
+  evidence: VerificationEvidence;
+}
+
 export interface MarketComparison {
   prev: MarketSide;
   current: MarketSide;
   score_change: number | null;
+  verification: MarketVerification;
 }
 
 export interface MainlineDelta {
@@ -192,6 +217,60 @@ export interface ReviewContext {
   plan_names: PlanName[];
   plan_effect: PlanEffect;
   degraded: string[];
+}
+
+export interface PlanFollowupCell {
+  entry_date: string | null;
+  exit_date: string | null;
+  net_return_pct: number | null;
+  outcome: "up" | "down" | "flat" | null;
+  exclusion_reason: string | null;
+}
+
+export interface PlanFollowupRow {
+  code: string;
+  name: string | null;
+  group: "recommended" | "not_recommended" | "data_insufficient";
+  score: number | null;
+  level: string | null;
+  horizons: Record<string, PlanFollowupCell | undefined>;
+}
+
+export interface PlanFollowupGroup {
+  group: PlanFollowupRow["group"];
+  label: string;
+  valid: number;
+  excluded: number;
+  mean_net_return_pct: number | null;
+  median_net_return_pct: number | null;
+}
+
+export interface PlanFollowupHorizon {
+  horizon: number;
+  groups: PlanFollowupGroup[];
+  spread: number | null;
+}
+
+export interface PlanFollowup {
+  status: "ok" | "insufficient_data";
+  reason: string | null;
+  trade_date: string;
+  plan_date: string | null;
+  plan_date_source: "plan_review" | "previous_snapshot" | null;
+  data_source: "local_stock_daily";
+  cost_bps: number;
+  horizons: number[];
+  rows: PlanFollowupRow[];
+  summary: PlanFollowupHorizon[];
+  local_coverage: {
+    plan_codes: number;
+    loaded_codes: number;
+    codes_with_bars: number;
+    bar_dates: number;
+    truncated: boolean;
+  };
+  warnings: string[];
+  caveats: string[];
 }
 
 // ─── auction ───────────────────────────────────────────────────────────────
@@ -343,6 +422,12 @@ export function fetchPrepSnapshot(tradeDate: string, slim = true) {
 export function fetchReviewContext(tradeDate: string) {
   return getJson<ReviewContext>(
     `/api/prep/${encodeURIComponent(tradeDate)}/review-context`
+  );
+}
+
+export function fetchPlanFollowup(tradeDate: string, horizons = "1,3,5") {
+  return getJson<PlanFollowup>(
+    `/api/prep/${encodeURIComponent(tradeDate)}/plan-followup${qs({ horizons })}`
   );
 }
 

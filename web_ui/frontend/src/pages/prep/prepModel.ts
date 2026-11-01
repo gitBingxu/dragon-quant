@@ -8,7 +8,15 @@
  * `high_num` 只消费服务端 `derived`（已解码 + 需重算标记），前端不再把原始
  * 打包值当板数渲染。
  */
-import type { PrepSnapshotView, ReviewContext } from "../../api/assets";
+import type {
+  NoTradeItem,
+  PlanFollowup,
+  PlanFollowupRow,
+  PrepSnapshotView,
+  PrepWatermark,
+  ReviewContext,
+} from "../../api/assets";
+import { UNKNOWN_REASON_LABELS, labelOf } from "../../lib/labels";
 
 type Dict = Record<string, unknown>;
 
@@ -364,4 +372,130 @@ export function positionLabel(value: number | null): string {
 export function display(value: string | number | null | undefined): string {
   if (value == null || value === "") return "—";
   return String(value);
+}
+
+// ─── 运行异常（RunOverview / PrepSummaryBand 共用，避免两处各算一遍） ────
+
+export interface Anomaly {
+  level: "danger" | "warning";
+  text: string;
+}
+
+export function buildAnomalies(
+  watermark: PrepWatermark,
+  runInfo: RunInfo | null,
+  context: ReviewContext | null,
+  snapshot: PrepSnapshotView | null
+): Anomaly[] {
+  const items: Anomaly[] = [];
+  for (const row of watermark.assets) {
+    if (row.status === "error" || row.status === "unavailable") {
+      items.push({
+        level: "danger",
+        text: `${row.asset_type} 采集异常${row.error ? `：${row.error}` : ""}`,
+      });
+    } else if (row.status === "empty_suspicious") {
+      items.push({ level: "warning", text: `${row.asset_type} 空态可疑` });
+    } else if (row.expected && !row.present) {
+      items.push({ level: "warning", text: `缺少当日应有资产 ${row.asset_type}` });
+    }
+  }
+  for (const reason of runInfo?.degraded ?? []) {
+    items.push({
+      level: "warning",
+      text: `复盘降级：${labelOf(UNKNOWN_REASON_LABELS, reason, reason)}`,
+    });
+  }
+  const planEffect = context?.plan_effect;
+  for (const reason of planEffect?.degraded ?? []) {
+    items.push({ level: "warning", text: `成效降级：${reason}` });
+  }
+  if (context?.prev_meta_error) {
+    items.push({ level: "warning", text: `前日快照损坏：${context.prev_meta_error}` });
+  }
+  const feedback = snapshot?.feedback;
+  if (feedback && Array.isArray((feedback as Record<string, unknown>).degraded)) {
+    for (const reason of (feedback as Record<string, unknown>).degraded as string[]) {
+      items.push({ level: "warning", text: `反馈降级：${reason}` });
+    }
+  }
+  return items;
+}
+
+// ─── 否决股成效（T+1/3/5，按 code join，不重算收益） ─────────────────────
+
+export const FOLLOWUP_HORIZONS = ["1", "3", "5"] as const;
+
+export interface NoTradeOutcome {
+  code: string;
+  name: string | null;
+  judgement: NoTradeItem["judgement"];
+  outcomePct: number | null;
+  cells: Record<string, { pct: number | null; reason: string | null }>;
+  /** 计划日快照里没有该股样本 → 全部「待评估 · 计划日无该股样本」。 */
+  sampleMissing: boolean;
+}
+
+export function buildNoTradeOutcomes(
+  noTrade: NoTradeItem[],
+  followup: PlanFollowup | null
+): NoTradeOutcome[] {
+  const byCode = new Map<string, PlanFollowupRow>();
+  for (const row of followup?.rows ?? []) byCode.set(row.code, row);
+  return noTrade.map((item) => {
+    const sample = byCode.get(item.code) ?? null;
+    const cells: NoTradeOutcome["cells"] = {};
+    for (const horizon of FOLLOWUP_HORIZONS) {
+      const cell = sample?.horizons?.[horizon];
+      cells[horizon] = {
+        pct: cell?.net_return_pct ?? null,
+        reason: cell?.exclusion_reason ?? null,
+      };
+    }
+    return {
+      code: item.code,
+      name: sample?.name ?? item.name,
+      judgement: item.judgement,
+      outcomePct: item.outcome_pct,
+      cells,
+      sampleMissing: sample == null,
+    };
+  });
+}
+
+// ─── 结论带 KPI（T+1 概览；单日样本只描述，不下策略结论） ───────────────
+
+export interface FollowupKpis {
+  recommendedPct: number | null;
+  rejectedPct: number | null;
+  spreadPct: number | null;
+  validSamples: number;
+  totalSamples: number;
+  /** 各组有效样本数（均值旁展示 n，避免把总样本数当组样本数）。 */
+  recommendedN: number;
+  rejectedN: number;
+}
+
+export function buildFollowupKpis(followup: PlanFollowup | null): FollowupKpis {
+  const horizon =
+    followup?.summary?.find((item) => item.horizon === 1) ?? null;
+  const groupOf = (key: string) =>
+    horizon?.groups.find((group) => group.group === key) ?? null;
+  const recommended = groupOf("recommended");
+  const rejected = groupOf("not_recommended");
+  const recommendedN = recommended?.valid ?? 0;
+  const rejectedN = rejected?.valid ?? 0;
+  return {
+    recommendedPct: recommended?.mean_net_return_pct ?? null,
+    rejectedPct: rejected?.mean_net_return_pct ?? null,
+    spreadPct: horizon?.spread ?? null,
+    validSamples: recommendedN + rejectedN,
+    totalSamples:
+      (recommended?.valid ?? 0) +
+      (recommended?.excluded ?? 0) +
+      (rejected?.valid ?? 0) +
+      (rejected?.excluded ?? 0),
+    recommendedN,
+    rejectedN,
+  };
 }

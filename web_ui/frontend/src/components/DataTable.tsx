@@ -29,6 +29,7 @@ export function DataTable<T>({
   sort,
   onSort,
   onRowClick,
+  rowClassName,
   empty,
   minWidth = 0,
   maxHeight,
@@ -39,6 +40,8 @@ export function DataTable<T>({
   sort?: SortState;
   onSort?: (key: string) => void;
   onRowClick?: (row: T) => void;
+  /** 可选行样式（向后兼容，缺省 undefined）。 */
+  rowClassName?: (row: T, index: number) => string | undefined;
   empty?: ReactNode;
   minWidth?: number;
   maxHeight?: number;
@@ -105,6 +108,7 @@ export function DataTable<T>({
               <tr
                 key={rowKey(row, index)}
                 data-clickable={onRowClick ? "true" : undefined}
+                className={rowClassName?.(row, index)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((column) => (

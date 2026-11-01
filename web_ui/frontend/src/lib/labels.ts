@@ -50,7 +50,52 @@ export const JUDGEMENT_LABELS: Record<string, string> = {
 export const GROUP_LABELS: Record<string, string> = {
   recommended: "推荐",
   not_recommended: "明确不推荐",
+  data_insufficient: "数据不足",
   unknown: "数据不足",
+};
+
+/** 空仓验证结论（产品判定，不是策略有效性结论）。 */
+export const VERIFICATION_CONCLUSION_LABELS: Record<string, string> = {
+  correct: "验证正确",
+  wrong: "验证错误",
+  neutral: "中性",
+  not_evaluable: "待评估",
+};
+
+export const PLAN_ADVICE_LABELS: Record<string, string> = {
+  empty: "前日建议空仓",
+  hold: "前日建议持仓",
+};
+
+export const VERIFICATION_REASON_LABELS: Record<string, string> = {
+  current_snapshot_missing: "评估日无快照",
+  no_prev_snapshot: "无前日快照",
+  prev_position_missing: "前日快照缺仓位建议",
+  temperature_missing: "温度缺分，无法比较",
+  temperature_basis_mismatch: "两侧温度口径不同源",
+  state_missing: "市场状态不可判",
+  limit_counts_missing: "缺涨跌停家数",
+};
+
+export const PLAN_FOLLOWUP_REASON_LABELS: Record<string, string> = {
+  snapshot_missing: "评估日无快照",
+  no_plan: "无 T-1 计划",
+  plan_snapshot_missing: "计划日快照缺失",
+  plan_snapshot_corrupt: "计划日快照损坏",
+  plan_snapshot_unsupported: "计划日快照版本过旧",
+  plan_samples_missing: "计划日无候选样本",
+  local_bars_missing: "本地日 K 缺失",
+  insufficient_samples: "样本不足",
+};
+
+export const EXCLUSION_REASON_LABELS: Record<string, string> = {
+  missing_bar: "缺本地日 K",
+  suspended: "停牌",
+  insufficient_horizon: "未来交易日未到",
+  unfillable_one_word: "一字板未成交",
+  illiquid: "成交额过低",
+  no_entry_day: "无介入日",
+  unmapped_label: "无法映射收益",
 };
 
 export const ASSET_CATEGORY_LABELS: Record<string, string> = {

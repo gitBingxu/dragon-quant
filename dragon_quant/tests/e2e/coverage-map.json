@@ -1117,9 +1117,10 @@
           "dragon_quant/tests/e2e/test_dashboard.py::test_d7_recent_cards_use_raw_scan_true_dragons",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d8_prep_calendar_review_context_and_missing_day",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d9_scan_runtime_states_and_logs",
-          "dragon_quant/tests/e2e/test_dashboard.py::test_d10_auction_calendar_day_and_local_effect"
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d10_auction_calendar_day_and_local_effect",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d11_prep_plan_followup_local_returns"
         ],
-        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network. D11 covers prep plan-followup (plan-day samples, local daily bars, 1/3/5 net returns, invalid params) and the same-day market verification."
       },
       "npm": {
         "tests": [

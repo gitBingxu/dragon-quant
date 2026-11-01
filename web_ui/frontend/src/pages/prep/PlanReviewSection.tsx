@@ -1,22 +1,37 @@
-import type { PrepSnapshotView, ReviewContext } from "../../api/assets";
-import { Badge } from "../../components/Badge";
+import type {
+  MarketVerification,
+  PlanFollowup,
+  PrepSnapshotView,
+  ReviewContext,
+} from "../../api/assets";
+import { Badge, type BadgeTone } from "../../components/Badge";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { DataTable, type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
 import { fmtNum, pnlClass } from "../../lib/format";
 import {
   CHECKPOINT_LABELS,
+  EXCLUSION_REASON_LABELS,
   FEEDBACK_STATE_LABELS,
   GROUP_LABELS,
   JUDGEMENT_LABELS,
   MARKET_STATE_LABELS,
+  PLAN_ADVICE_LABELS,
   PLANNED_ACTION_LABELS,
+  VERIFICATION_CONCLUSION_LABELS,
+  VERIFICATION_REASON_LABELS,
   labelOf,
 } from "../../lib/labels";
-import { display, positionLabel, type CandidateView } from "./prepModel";
+import {
+  FOLLOWUP_HORIZONS,
+  buildNoTradeOutcomes,
+  display,
+  positionLabel,
+  type CandidateView,
+  type NoTradeOutcome,
+} from "./prepModel";
 
 type PlanItem = NonNullable<ReviewContext["plan_effect"]["items"][number]>;
-type NoTrade = ReviewContext["plan_effect"]["no_trade"][number];
 
 const ITEM_COLUMNS: Column<PlanItem>[] = [
   {
@@ -161,37 +176,188 @@ function MarketCompare({ context }: { context: ReviewContext }) {
   );
 }
 
-function NoTradeList({ items }: { items: NoTrade[] }) {
+const VERIFICATION_TONE: Record<string, BadgeTone> = {
+  correct: "positive",
+  wrong: "warning",
+  neutral: "muted",
+  not_evaluable: "outline",
+};
+
+function fmtScore(value: number | null): string {
+  return value == null ? "—" : value.toFixed(1);
+}
+
+function fmtRatio(value: number | null): string {
+  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+function fmtSigned(value: number | null): string {
+  if (value == null) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}`;
+}
+
+function verificationTitle(verification: MarketVerification): string {
+  const evidence = verification.evidence;
+  if (verification.conclusion === "not_evaluable") {
+    return labelOf(VERIFICATION_REASON_LABELS, verification.reason, "待评估");
+  }
+  const advice = verification.advice
+    ? labelOf(PLAN_ADVICE_LABELS, verification.advice)
+    : "前日建议未知";
+  const change = evidence.score_change;
+  const direction =
+    change == null ? "温度不可比" : change > 0 ? "温度上升" : change < 0 ? "温度下降" : "温度持平";
+  const state = `市场 ${labelOf(MARKET_STATE_LABELS, evidence.prev_state)} → ${labelOf(
+    MARKET_STATE_LABELS,
+    evidence.current_state
+  )}`;
+  const suffix =
+    verification.conclusion === "correct"
+      ? "与建议方向一致"
+      : verification.conclusion === "wrong"
+        ? "与建议相反"
+        : "未达明确方向";
+  return `${advice}，次日${direction} ${change == null ? "" : fmtSigned(change)} · ${state} → ${suffix}`;
+}
+
+function VerificationCard({ verification }: { verification: MarketVerification }) {
+  const evidence = verification.evidence;
+  const tone = VERIFICATION_TONE[verification.conclusion] ?? "outline";
+  return (
+    <div className="rounded-md border border-hairline px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 text-body">
+        <Badge tone={tone}>
+          {labelOf(VERIFICATION_CONCLUSION_LABELS, verification.conclusion, "待评估")}
+        </Badge>
+        <span className="text-ink">{verificationTitle(verification)}</span>
+      </div>
+      <div className="mt-1 text-caption text-ink-2">
+        依据：温度 {fmtScore(evidence.prev_score)} → {fmtScore(evidence.current_score)} · 涨停{" "}
+        {display(evidence.limit_up_cnt)} / 跌停 {display(evidence.limit_down_cnt)} · 炸板率{" "}
+        {fmtRatio(evidence.broken_rate)} · 昨日涨停溢价{" "}
+        {evidence.yesterday_premium_pct == null
+          ? "—"
+          : `${fmtSigned(evidence.yesterday_premium_pct)}%`}
+      </div>
+      <div className="mt-0.5 text-caption text-ink-3">
+        口径：仅陈述次日是否按建议方向兑现，不是策略有效性结论。
+      </div>
+    </div>
+  );
+}
+
+function buildOutcomeColumns(
+  followup: PlanFollowup | null
+): Column<NoTradeOutcome>[] {
+  return [
+  {
+    key: "code",
+    header: "代码",
+    render: (row) => <span className="font-mono text-body text-ink">{row.code}</span>,
+  },
+  {
+    key: "name",
+    header: "名称",
+    render: (row) => <span className="text-body text-ink">{row.name ?? "—"}</span>,
+  },
+  {
+    key: "judgement",
+    header: "次日判定",
+    render: (row) => (
+      <Badge
+        tone={
+          row.judgement === "correct_avoidance"
+            ? "positive"
+            : row.judgement === "missed_opportunity"
+              ? "warning"
+              : "muted"
+        }
+      >
+        {labelOf(JUDGEMENT_LABELS, row.judgement)}
+      </Badge>
+    ),
+  },
+  {
+    key: "outcome",
+    header: "当日开→收",
+    align: "right",
+    render: (row) =>
+      row.outcomePct == null ? (
+        <span className="text-caption text-ink-3">待评估</span>
+      ) : (
+        <span className={`num text-body ${pnlClass(row.outcomePct)}`}>
+          {fmtNum(row.outcomePct, 2)}%
+        </span>
+      ),
+  },
+  ...FOLLOWUP_HORIZONS.map<Column<NoTradeOutcome>>((horizon) => ({
+    key: `h${horizon}`,
+    header: `T+${horizon}`,
+    align: "right",
+    width: 72,
+    render: (row) => {
+      const cell = row.cells[horizon];
+      if (!cell || cell.pct == null) {
+        return (
+          <span
+            className="text-caption text-ink-3"
+            title={cell?.reason ? labelOf(EXCLUSION_REASON_LABELS, cell.reason, cell.reason) : undefined}
+          >
+            待评估
+          </span>
+        );
+      }
+      return (
+        <span className={`num text-body ${pnlClass(cell.pct)}`}>
+          {fmtNum(cell.pct, 2)}%
+        </span>
+      );
+    },
+  })),
+  {
+    key: "note",
+    header: "说明",
+    render: (row) => (
+      <span className="text-caption text-ink-3">
+        {row.sampleMissing
+          ? followup
+            ? "计划日无该股样本"
+            : "成效未读取"
+          : "—"}
+      </span>
+    ),
+  },
+  ];
+}
+
+function NoTradeTable({
+  items,
+  followup,
+}: {
+  items: NoTradeOutcome[];
+  followup: PlanFollowup | null;
+}) {
   if (!items.length) {
     return <div className="text-body text-ink-3">无否决股记录。</div>;
   }
+  const horizonCaveat = followup?.caveats.find((item) => item.includes("T+3/T+5"));
   return (
     <div className="grid gap-1.5">
-      {items.map((item) => (
-        <div key={`${item.code}-${item.judgement}`} className="flex flex-wrap items-center gap-2 text-body">
-          <Badge
-            tone={
-              item.judgement === "correct_avoidance"
-                ? "positive"
-                : item.judgement === "missed_opportunity"
-                  ? "warning"
-                  : "muted"
-            }
-          >
-            {labelOf(JUDGEMENT_LABELS, item.judgement)}
-          </Badge>
-          <span className="font-mono text-ink-3">{item.code}</span>
-          <span className="text-ink">{item.name ?? "—"}</span>
-          <span className="text-ink-2">
-            当日开→收{" "}
-            {item.outcome_pct == null ? (
-              <span className="text-ink-3">待评估</span>
-            ) : (
-              <span className={pnlClass(item.outcome_pct)}>{fmtNum(item.outcome_pct, 2)}%</span>
-            )}
-          </span>
-        </div>
-      ))}
+      <div className="overflow-hidden rounded-lg border border-hairline">
+        <DataTable
+          columns={buildOutcomeColumns(followup)}
+          rows={items}
+          rowKey={(row) => `${row.code}-${row.judgement}`}
+          minWidth={860}
+          empty="无否决股记录。"
+        />
+      </div>
+      <div className="flex flex-wrap gap-2 text-caption text-ink-3">
+        <span>
+          「次日判定」为 T+1 口径；T+1、T+3、T+5 为可观察净收益，二者可能不一致。
+        </span>
+        {horizonCaveat ? <span>· {horizonCaveat}</span> : null}
+      </div>
     </div>
   );
 }
@@ -231,15 +397,17 @@ function FeedbackDetails({ snapshot, candidates }: { snapshot: PrepSnapshotView 
   );
 }
 
-/** 上次计划复盘 / 成效：只陈述事实，不新增「空仓正确」阈值。 */
+/** 上次计划复盘 / 成效：判定结论只在后端产生，前端只渲染。 */
 export function PlanReviewSection({
   context,
   snapshot,
   candidates,
+  followup,
 }: {
   context: ReviewContext | null;
   snapshot: PrepSnapshotView | null;
   candidates: CandidateView[];
+  followup: PlanFollowup | null;
 }) {
   const effect = context?.plan_effect;
   if (!context) {
@@ -254,6 +422,8 @@ export function PlanReviewSection({
     );
   }
 
+  const noTradeOutcomes = buildNoTradeOutcomes(effect.no_trade, followup);
+
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center gap-2 text-caption text-ink-2">
@@ -264,6 +434,11 @@ export function PlanReviewSection({
           <Badge tone="muted">{labelOf(CHECKPOINT_LABELS, effect.checkpoint)}</Badge>
         ) : null}
         <span>「当日开盘到收盘」为计划日当日表现，不是次日收益。</span>
+      </div>
+
+      <div className="grid gap-2">
+        <div className="text-body font-medium text-ink">空仓验证</div>
+        <VerificationCard verification={effect.market.verification} />
       </div>
 
       <div className="grid gap-2">
@@ -299,11 +474,14 @@ export function PlanReviewSection({
             </div>
           ))}
         </div>
+        <div className="text-caption text-ink-3">
+          以上均值仅描述计划日当日开→收表现，非策略结论。
+        </div>
       </div>
 
       <div className="grid gap-2">
         <div className="text-body font-medium text-ink">否决股 / 未交易</div>
-        <NoTradeList items={effect.no_trade} />
+        <NoTradeTable items={noTradeOutcomes} followup={followup} />
       </div>
 
       <CollapsibleSection title="次日反馈明细" defaultOpen={false}>

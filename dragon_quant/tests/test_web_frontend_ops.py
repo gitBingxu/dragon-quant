@@ -300,3 +300,99 @@ def test_dist_assets_referenced_by_index() -> None:
     assert "/assets/" in html
     assert any(path.is_file() for path in DIST_ASSETS.glob("*.js"))
     assert any(path.is_file() for path in DIST_ASSETS.glob("*.css"))
+
+
+# ─── 7. 核心问题直答（2026-11-01 增量） ───────────────────────────────────
+
+
+CORE_QUESTION_FILES = (
+    "components/MiniBar.tsx",
+    "components/DataTable.tsx",
+    "pages/scans/ScanHealthBand.tsx",
+    "pages/scans/ScansPage.tsx",
+    "pages/scans/ScanDetailPage.tsx",
+    "pages/prep/PrepSummaryBand.tsx",
+    "pages/prep/PrepPage.tsx",
+    "pages/prep/PlanReviewSection.tsx",
+    "pages/prep/RunOverview.tsx",
+    "pages/prep/prepModel.ts",
+    "pages/auction/AuctionPage.tsx",
+    "lib/labels.ts",
+    "api/assets.ts",
+)
+
+
+def test_prep_plan_followup_sections() -> None:
+    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
+    for token in ("PrepSummaryBand", "fetchPlanFollowup", "结论"):
+        assert token in page, f"PrepPage 缺少 {token!r}"
+
+    plan = _read(SRC / "pages" / "prep" / "PlanReviewSection.tsx")
+    for token in ("空仓验证", "否决股", "T+1", "T+3", "T+5", "verification"):
+        assert token in plan, f"PlanReviewSection 缺少 {token!r}"
+
+    model = _read(SRC / "pages" / "prep" / "prepModel.ts")
+    for token in ("buildNoTradeOutcomes", "buildFollowupKpis", "buildAnomalies",
+                  "recommendedN", "rejectedN"):
+        assert token in model, f"prepModel 缺少 {token!r}"
+
+    band = _read(SRC / "pages" / "prep" / "PrepSummaryBand.tsx")
+    assert "recommendedN" in band and "rejectedN" in band, (
+        "结论带的 n 必须是各组有效样本数，不是总和")
+
+    api = _read(SRC / "api" / "assets.ts")
+    assert "fetchPlanFollowup" in api and "PlanFollowup" in api
+    assert "MarketVerification" in api and "VerificationConclusion" in api
+
+
+def test_verification_labels_exist() -> None:
+    labels = _read(SRC / "lib" / "labels.ts")
+    for token in ("验证正确", "验证错误", "中性", "待评估"):
+        assert token in labels, f"labels.ts 缺少验证标签 {token!r}"
+    for token in ("VERIFICATION_CONCLUSION_LABELS", "VERIFICATION_REASON_LABELS",
+                  "EXCLUSION_REASON_LABELS", "PLAN_ADVICE_LABELS"):
+        assert token in labels, f"labels.ts 缺少映射 {token!r}"
+
+
+def test_scan_health_band() -> None:
+    band = _read(SRC / "pages" / "scans" / "ScanHealthBand.tsx")
+    for token in ("created_at", "距今", "scan_date", "error_n", "true_dragon_n",
+                  "candidates_n", "扫描健康"):
+        assert token in band, f"ScanHealthBand 缺少 {token!r}"
+    listing = _read(SRC / "pages" / "scans" / "ScansPage.tsx")
+    assert "ScanHealthBand" in listing
+    detail = _read(SRC / "pages" / "scans" / "ScanDetailPage.tsx")
+    for token in ("MiniBar", "真龙", "rowClassName", "错误摘要"):
+        assert token in detail, f"ScanDetailPage 缺少 {token!r}"
+
+
+def test_auction_density() -> None:
+    page = _read(SRC / "pages" / "auction" / "AuctionPage.tsx")
+    assert "<details" not in page, "逐股折叠块应已删除（技术告警改用 CollapsibleSection）"
+    for token in ("T+1", "T+3", "T+5", "强弱差", "outcomes.get(row.code)"):
+        assert token in page, f"AuctionPage 缺少 {token!r}"
+    assert page.count("OutcomeCell") >= 2, "T+1/3/5 三列应复用 OutcomeCell"
+
+
+def test_new_components_have_no_slash_alpha() -> None:
+    pattern = re.compile(
+        r"(?:bg|text|border|ring|from|to)-"
+        r"(?:white|black|brand|up|down|danger|warning|normal|positive|"
+        r"hairline|raise|ink)/"
+    )
+    offenders: list[str] = []
+    for name in CORE_QUESTION_FILES:
+        text = _read(SRC / name)
+        for match in pattern.finditer(text):
+            offenders.append(f"{name}: {match.group(0)}")
+    assert offenders == [], f"主题色禁止 Tailwind 斜杠透明度: {offenders[:5]}"
+
+    mini = _read(SRC / "components" / "MiniBar.tsx")
+    assert "aria-hidden" in mini and "title=" in mini
+    assert "bg-brand" in mini and "bg-raise-strong" in mini
+
+
+def test_dist_contains_core_question_copy() -> None:
+    js = _dist_js()
+    for token in ("空仓验证", "否决股", "扫描健康", "距今", "T+1", "强弱差"):
+        assert token in js, f"dist JS 缺少核心问题文案: {token!r}"

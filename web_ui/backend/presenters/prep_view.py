@@ -77,12 +77,16 @@ UNKNOWN_REASON_LABELS = {
 
 _PACKED_EVIDENCE = re.compile(r"最高\s*(\d+)\s*板")
 
+# 市场状态四态（空仓验证只在四态内判定 direction）。
+VERIFICATION_STATES = frozenset({"strong", "neutral", "weak", "ice"})
+
 __all__ = [
     "ASSET_CATEGORIES",
     "ASSET_TYPES",
     "LEGAL_EMPTY",
     "STATE_LABELS",
     "UNKNOWN_REASON_LABELS",
+    "VERIFICATION_STATES",
     "build_asset_rows",
     "build_calendar",
     "build_review_context",
@@ -631,6 +635,158 @@ def _market_side(snapshot: Mapping[str, Any] | None, trade_date: str | None) -> 
     }
 
 
+def _temperature(snapshot: Mapping[str, Any] | None) -> tuple[float | None, str | None, str | None]:
+    """返回 ``(score, state, basis)``；``basis`` 标明温度取自哪个字段。
+
+    既有 ``market.score_change`` 直接取 ``review.market.score_change``，但当某日
+    无 ``review.market`` 时 ``_market_side`` 会回退 ``sentiment.temperature_score``。
+    验证必须**同源比较**，否则「温度下降」可能是口径漂移。
+    """
+
+    if not isinstance(snapshot, Mapping):
+        return None, None, None
+    review = _as_dict(snapshot.get("review")) or {}
+    market = _as_dict(review.get("market")) or {}
+    sentiment = _as_dict(snapshot.get("sentiment")) or {}
+    score = _num(market.get("score"))
+    if score is not None:
+        return score, _text(market.get("state")), "review"
+    score = _num(sentiment.get("temperature_score"))
+    return score, _text(market.get("state")), (
+        "sentiment" if score is not None else None)
+
+
+def _market_inputs(snapshot: Mapping[str, Any] | None) -> dict:
+    """原始市场指标：``review.market.inputs`` 优先，旧快照回退 ``sentiment``。"""
+
+    data = snapshot if isinstance(snapshot, Mapping) else {}
+    review = _as_dict(data.get("review")) or {}
+    market = _as_dict(review.get("market")) or {}
+    inputs = _as_dict(market.get("inputs")) or {}
+    sentiment = _as_dict(data.get("sentiment")) or {}
+
+    def pick(key: str) -> float | None:
+        value = _num(inputs.get(key))
+        return value if value is not None else _num(sentiment.get(key))
+
+    return {
+        "limit_up_cnt": pick("limit_up_cnt"),
+        "limit_down_cnt": pick("limit_down_cnt"),
+        "broken_rate": pick("broken_rate"),
+        "yesterday_premium_pct": pick("yesterday_premium_pct"),
+    }
+
+
+def _classify_verification(
+    *,
+    advice: str | None,
+    change: float | None,
+    state: str | None,
+    limit_up_cnt: float | None,
+    limit_down_cnt: float | None,
+) -> tuple[str, str | None]:
+    """空仓验证规则表（方案 §5.4 唯一实现，Strategy）。
+
+    这是用户批准的**产品判定**：只回答「次日是否按建议方向兑现」，不是策略
+    有效性结论。规则集中在此，改口径只改这一处。
+    """
+
+    if advice is None:
+        return "not_evaluable", "prev_position_missing"
+    if change is None:
+        return "not_evaluable", "temperature_missing"
+    if change == 0:
+        return "neutral", None
+
+    counts_known = limit_up_cnt is not None and limit_down_cnt is not None
+    state_known = state in VERIFICATION_STATES
+
+    if advice == "empty":
+        if change < 0 and (state in ("weak", "ice")
+                           or (counts_known and limit_down_cnt >= limit_up_cnt)):
+            return "correct", None
+        if change > 0 and state == "strong":
+            return "wrong", None
+        # 温度下降但状态不够弱：必须靠跌停家数才能确认，缺则不可评估。
+        if change < 0 and state in ("neutral", "strong") and not counts_known:
+            return "not_evaluable", "limit_counts_missing"
+        if change > 0 and not state_known:
+            return "not_evaluable", "state_missing"
+        return "neutral", None
+
+    if advice == "hold":
+        if change > 0 and state in ("strong", "neutral"):
+            return "correct", None
+        if change < 0 and state in ("weak", "ice"):
+            return "wrong", None
+        if not state_known:
+            return "not_evaluable", "state_missing"
+        return "neutral", None
+
+    return "not_evaluable", "prev_position_missing"
+
+
+def _build_verification(
+    *,
+    trade_date: str,
+    current: Mapping[str, Any] | None,
+    prev: Mapping[str, Any] | None,
+    prev_meta: Mapping[str, Any],
+) -> dict:
+    """前日市场建议 vs 今日实际：结论 key + 依据数字（恒存在）。"""
+
+    meta = prev_meta if isinstance(prev_meta, Mapping) else {}
+    prev_date = _text(meta.get("trade_date"))
+    prev_score, prev_state, prev_basis = _temperature(prev)
+    current_score, current_state, current_basis = _temperature(current)
+    inputs = _market_inputs(current)
+    prev_sentiment = _as_dict((prev or {}).get("sentiment")) or {}
+    prev_pct = _num(prev_sentiment.get("position_pct"))
+    advice = None if prev_pct is None else ("empty" if prev_pct == 0 else "hold")
+
+    evidence = {
+        "prev_state": prev_state,
+        "current_state": current_state,
+        "prev_score": prev_score,
+        "current_score": current_score,
+        "score_change": None,
+        "limit_up_cnt": inputs["limit_up_cnt"],
+        "limit_down_cnt": inputs["limit_down_cnt"],
+        "broken_rate": inputs["broken_rate"],
+        "yesterday_premium_pct": inputs["yesterday_premium_pct"],
+    }
+    result = {
+        "conclusion": "not_evaluable",
+        "reason": None,
+        "advice": advice,
+        "prev_trade_date": prev_date,
+        "current_trade_date": trade_date,
+        "evidence": evidence,
+    }
+    if not isinstance(current, Mapping):
+        return {**result, "reason": "current_snapshot_missing"}
+    if not isinstance(prev, Mapping):
+        return {**result, "reason": "no_prev_snapshot"}
+    if prev_pct is None:
+        return {**result, "reason": "prev_position_missing"}
+    if (prev_score is None or current_score is None
+            or prev_basis is None or current_basis is None):
+        return {**result, "reason": "temperature_missing"}
+    if prev_basis != current_basis:
+        return {**result, "reason": "temperature_basis_mismatch"}
+
+    change = round(current_score - prev_score, 10)
+    evidence["score_change"] = change
+    conclusion, reason = _classify_verification(
+        advice=advice,
+        change=change,
+        state=current_state,
+        limit_up_cnt=inputs["limit_up_cnt"],
+        limit_down_cnt=inputs["limit_down_cnt"],
+    )
+    return {**result, "conclusion": conclusion, "reason": reason}
+
+
 def _plan_groups(items: list[dict]) -> list[dict]:
     buckets = {
         "recommended": [item for item in items
@@ -672,6 +828,10 @@ def _build_plan_effect(
         "prev": prev_side,
         "current": current_side,
         "score_change": _num(market.get("score_change")),
+        # 语义不同：上面是快照给的 score_change；下面为同源温度差 + 结论 key。
+        "verification": _build_verification(
+            trade_date=trade_date, current=current, prev=prev,
+            prev_meta=prev_meta),
     }
     empty = {
         "available": False,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   fetchScan,
   fetchScanLogs,
@@ -9,6 +9,7 @@ import {
 } from "../../api/scans";
 import { Badge } from "../../components/Badge";
 import { DataTable, type Column } from "../../components/DataTable";
+import { MiniBar } from "../../components/MiniBar";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { Section } from "../../components/Section";
@@ -62,7 +63,12 @@ const COLUMNS: Column<ScanStock>[] = [
     key: dim.key,
     header: dim.label,
     align: "right",
-    render: (row) => <span className="num text-body text-ink-2">{fmtNum(row.dims[dim.key], 1)}</span>,
+    render: (row) => (
+      <span className="inline-flex items-center justify-end gap-1.5">
+        <span className="num text-body text-ink-2">{fmtNum(row.dims[dim.key], 1)}</span>
+        <MiniBar value={row.dims[dim.key]} label={dim.label} />
+      </span>
+    ),
   })),
   {
     key: "true",
@@ -174,6 +180,13 @@ export function ScanDetailPage({ scanId }: { scanId: string }) {
   const total = logs?.total ?? 0;
   const pageEnd = Math.min(offset + PAGE_SIZE, total);
 
+  // 稳定分区：真龙在前，其余保持服务端顺序；「排名」列仍显示实际排名。
+  const orderedRows = useMemo(() => {
+    const dragons = rows.filter((row) => row.is_true_dragon === true);
+    if (!dragons.length) return rows;
+    return [...dragons, ...rows.filter((row) => row.is_true_dragon !== true)];
+  }, [rows]);
+
   return (
     <>
       <Link
@@ -205,6 +218,14 @@ export function ScanDetailPage({ scanId }: { scanId: string }) {
         <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
           <IconAlert size={16} />
           加载失败：{error}
+        </div>
+      ) : null}
+
+      {scan && scan.error_n != null && scan.error_n > 0 ? (
+        <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
+          <IconAlert size={16} />
+          本次扫描记录 {scan.error_n} 条错误，下方「错误摘要」可查看阶段与 API 失败
+          {logs?.summary ? `（API 失败 ${logs.summary.api_error}）` : ""}
         </div>
       ) : null}
 
@@ -253,6 +274,44 @@ export function ScanDetailPage({ scanId }: { scanId: string }) {
             <div className="text-body text-ink-2">该次扫描没有保存日志（日志可能已被清理）。</div>
           ) : (
             <div className="text-body text-ink-3">正在读取日志摘要…</div>
+          )}
+        </Section>
+
+        {/* 结果优先：当日榜单在日志上方；日志是排查用的支持信息。 */}
+        <Section
+          title="当日榜单"
+          description="rank 为空的排最后，再按综合分降序"
+          bodyClassName="p-0"
+          right={
+            <div className="flex items-center gap-3">
+              <Switch checked={trueOnly} onChange={setTrueOnly} label="只看真龙" />
+              <span className="text-caption text-ink-2">
+                共 <span className="num text-ink">{rows.length}</span> 只
+              </span>
+            </div>
+          }
+        >
+          {rows.length === 0 && !loading ? (
+            <EmptyState
+              title={trueOnly ? "没有真龙记录" : "该扫描没有股票记录"}
+              description={trueOnly ? "关闭「只看真龙」查看全部候选。" : undefined}
+            />
+          ) : (
+            <div>
+              <DataTable
+                columns={COLUMNS}
+                rows={orderedRows}
+                rowKey={(row) => row.code}
+                rowClassName={(row) =>
+                  row.is_true_dragon === true ? "bg-brand-soft" : undefined
+                }
+                minWidth={1080}
+                empty={loading ? "正在加载…" : "暂无数据"}
+              />
+              <div className="border-t border-hairline px-4 py-2 text-caption text-ink-3">
+                真龙行已置顶并高亮；「排名」列仍显示实际排名。
+              </div>
+            </div>
           )}
         </Section>
 
@@ -326,35 +385,6 @@ export function ScanDetailPage({ scanId }: { scanId: string }) {
                 </tbody>
               </table>
             </div>
-          )}
-        </Section>
-
-        <Section
-          title="当日榜单"
-          description="rank 为空的排最后，再按综合分降序"
-          bodyClassName="p-0"
-          right={
-            <div className="flex items-center gap-3">
-              <Switch checked={trueOnly} onChange={setTrueOnly} label="只看真龙" />
-              <span className="text-caption text-ink-2">
-                共 <span className="num text-ink">{rows.length}</span> 只
-              </span>
-            </div>
-          }
-        >
-          {rows.length === 0 && !loading ? (
-            <EmptyState
-              title={trueOnly ? "没有真龙记录" : "该扫描没有股票记录"}
-              description={trueOnly ? "关闭「只看真龙」查看全部候选。" : undefined}
-            />
-          ) : (
-            <DataTable
-              columns={COLUMNS}
-              rows={rows}
-              rowKey={(row) => row.code}
-              minWidth={1080}
-              empty={loading ? "正在加载…" : "暂无数据"}
-            />
           )}
         </Section>
       </div>

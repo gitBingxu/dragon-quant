@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dragon_quant.infra.clock import FixedClock
@@ -1334,3 +1335,166 @@ def test_assets_router_never_references_providers():
     for token in ("kline_provider", "infra.provider", "XueqiuProvider",
                   "TdxProvider", "requests", "urllib"):
         assert token not in source, f"assets router 不应出现 {token!r}"
+
+
+# ─── prep plan-followup / 空仓验证（方案 §9.2） ────────────────────────────
+
+PLAN_FOLLOWUP_BAR_DATES = ["2026-09-11", "2026-09-14", "2026-09-15",
+                           "2026-09-16", "2026-09-17", "2026-09-18"]
+
+
+def _plan_snapshot(day: str) -> dict:
+    return {
+        "trade_date": day, "version": "0.8",
+        "review": {"market": {
+            "state": "strong" if day == "2026-09-11" else "neutral",
+            "score": 80.0 if day == "2026-09-11" else 70.0,
+            "score_change": 5.0,
+            "inputs": {"limit_up_cnt": 88, "limit_down_cnt": 3,
+                       "broken_rate": 0.183, "yesterday_premium_pct": 2.4},
+        }},
+        "sentiment": {"position_pct": 0.5},
+        "review_candidates": [
+            {"code": "600001", "name": "龙头A", "review_score": 88.0,
+             "review_grade": "强", "position_pct": 20,
+             "eligibility": "eligible"},
+            {"code": "600002", "name": "跟风B", "review_score": 62.5,
+             "review_grade": "一般", "position_pct": 0},
+        ],
+        "plan_review": {"plan_date": "2026-09-10", "eval_date": "2026-09-11",
+                        "items": [], "no_trade": []},
+        "feedback": {"checkpoint": "T1_open", "items": [], "degraded": []},
+    }
+
+
+class FakePrepAssets(FakeAssets):
+    def get_prep_snapshot(self, trade_date, source="v2", with_meta=False):
+        if trade_date not in ("2026-09-10", "2026-09-11"):
+            return (None, {"created_at": None}) if with_meta else None
+        payload = _plan_snapshot(trade_date)
+        if with_meta:
+            return dict(payload), {"created_at": f"{trade_date} 17:00:00"}
+        return dict(payload)
+
+    def get_previous_prep_snapshot(self, before_date, source="v2"):
+        if before_date <= "2026-09-10":
+            return None, {"trade_date": None, "created_at": None, "error": None}
+        return _plan_snapshot("2026-09-10"), {
+            "trade_date": "2026-09-10", "created_at": "2026-09-10 17:00:00",
+            "error": None}
+
+
+class FakePrepStore:
+    def __init__(self, days):
+        self.days = days
+
+    def snapshot_dates(self, date_from, date_to):
+        return sorted(day for day in self.days if date_from <= day <= date_to)
+
+    def load(self, day):
+        return dict(self.days[day]), {"created_at": f"{day} 16:45:00"}
+
+
+class FakePrepDecisionStoreModule:
+    def __init__(self, days):
+        self.days = days
+        self.sources: list[str] = []
+
+    def build_store(self, source):
+        self.sources.append(source)
+        return FakePrepStore(self.days)
+
+
+def _plan_bars() -> dict:
+    rows = {
+        "600001": [
+            {"date": day, "open": 10.1 + index * 0.1, "high": 11.0,
+             "low": 10.0, "close": 10.5, "volume": 1000.0,
+             "amount": 500_000_000.0}
+            for index, day in enumerate(PLAN_FOLLOWUP_BAR_DATES)
+        ],
+        "600002": [
+            {"date": day, "open": 10.0, "high": 10.0, "low": 10.0,
+             "close": 10.0, "volume": 1000.0, "amount": 500_000_000.0}
+            for day in PLAN_FOLLOWUP_BAR_DATES
+        ],
+    }
+    return {"rows": rows, "truncated": False,
+            "bar_dates": list(PLAN_FOLLOWUP_BAR_DATES), "codes": sorted(rows)}
+
+
+def test_prep_plan_followup_ok_path_and_store_source():
+    store = FakePrepDecisionStoreModule(
+        {"2026-09-10": _plan_snapshot("2026-09-10")})
+    client = make_client(
+        assets_repository=FakePrepAssets(),
+        decision_review_store=store,
+        local_bars_loader=_bars_loader(_plan_bars()),
+    )
+    response = client.get("/api/prep/20260911/plan-followup")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["reason"] is None
+    assert body["trade_date"] == "2026-09-11"
+    assert body["plan_date"] == "2026-09-10"
+    assert body["plan_date_source"] == "plan_review"
+    assert body["data_source"] == "local_stock_daily"
+    assert body["horizons"] == [1, 3, 5]
+    assert store.sources == ["prep"]
+
+    rows = {row["code"]: row for row in body["rows"]}
+    assert set(rows) == {"600001", "600002"}
+    assert rows["600001"]["group"] == "recommended"
+    assert rows["600002"]["group"] == "not_recommended"
+    assert rows["600001"]["horizons"]["1"]["net_return_pct"] == pytest.approx(0.8601, abs=1e-3)
+    assert rows["600001"]["horizons"]["1"]["outcome"] == "up"
+    assert rows["600002"]["horizons"]["1"]["net_return_pct"] == pytest.approx(-0.13, abs=1e-6)
+    groups = {group["group"]: group for group in body["summary"][0]["groups"]}
+    assert groups["recommended"]["valid"] == 1
+    assert groups["not_recommended"]["valid"] == 1
+    assert body["summary"][0]["spread"] == pytest.approx(0.9901, abs=1e-3)
+    assert body["local_coverage"]["plan_codes"] == 2
+    assert any("13bp" in caveat for caveat in body["caveats"])
+
+
+def test_prep_plan_followup_no_plan_and_missing_snapshot():
+    client = make_client(assets_repository=FakeAssets())
+    no_plan = client.get("/api/prep/20260911/plan-followup")
+    assert no_plan.status_code == 200
+    assert no_plan.json()["status"] == "insufficient_data"
+    assert no_plan.json()["reason"] == "no_plan"
+    assert no_plan.json()["rows"] == []
+
+    missing = client.get("/api/prep/20200101/plan-followup")
+    assert missing.status_code == 200
+    assert missing.json()["reason"] == "snapshot_missing"
+
+
+def test_prep_plan_followup_invalid_params():
+    client = make_client(assets_repository=FakePrepAssets())
+    assert client.get(
+        "/api/prep/20260911/plan-followup?horizons=2").status_code == 400
+    assert client.get(
+        "/api/prep/20260911/plan-followup?horizons=").status_code == 400
+    assert client.get(
+        "/api/prep/not-a-date/plan-followup").status_code == 400
+
+
+def test_review_context_market_verification_shape():
+    client = make_client(assets_repository=FakePrepAssets())
+    context = client.get("/api/prep/20260911/review-context").json()
+    market = context["plan_effect"]["market"]
+    verification = market["verification"]
+    assert verification["conclusion"] == "correct"
+    assert verification["advice"] == "hold"
+    assert verification["prev_trade_date"] == "2026-09-10"
+    assert verification["current_trade_date"] == "2026-09-11"
+    evidence = verification["evidence"]
+    assert evidence["prev_score"] == 70.0
+    assert evidence["current_score"] == 80.0
+    assert evidence["score_change"] == 10.0
+    assert evidence["limit_up_cnt"] == 88
+    assert evidence["limit_down_cnt"] == 3
+    # 既有 score_change 语义不变（来自 review.market.score_change）。
+    assert market["score_change"] == 5.0

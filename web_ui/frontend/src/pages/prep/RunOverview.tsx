@@ -3,8 +3,7 @@ import { Badge } from "../../components/Badge";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { EmptyState } from "../../components/EmptyState";
 import { StatCard } from "../../components/StatCard";
-import { UNKNOWN_REASON_LABELS, labelOf } from "../../lib/labels";
-import type { RunInfo } from "./prepModel";
+import { buildAnomalies, type RunInfo } from "./prepModel";
 
 /** 运行概况 + 运行异常（异常折叠在概况下方，不混进成效主表）。 */
 export function RunOverview({
@@ -85,7 +84,7 @@ export function RunOverview({
 
       <CollapsibleSection
         title={`运行异常 ${anomalies.length ? `(${anomalies.length})` : ""}`}
-        defaultOpen={false}
+        defaultOpen={anomalies.length > 0 && anomalies.length <= 5}
       >
         {anomalies.length === 0 ? (
           <EmptyState title="无运行异常" description="资产完备、快照与复盘上下文均可用。" />
@@ -106,45 +105,3 @@ export function RunOverview({
   );
 }
 
-interface Anomaly {
-  level: "danger" | "warning";
-  text: string;
-}
-
-function buildAnomalies(
-  watermark: PrepWatermark,
-  runInfo: RunInfo | null,
-  context: ReviewContext | null,
-  snapshot: PrepSnapshotView | null
-): Anomaly[] {
-  const items: Anomaly[] = [];
-  for (const row of watermark.assets) {
-    if (row.status === "error" || row.status === "unavailable") {
-      items.push({
-        level: "danger",
-        text: `${row.asset_type} 采集异常${row.error ? `：${row.error}` : ""}`,
-      });
-    } else if (row.status === "empty_suspicious") {
-      items.push({ level: "warning", text: `${row.asset_type} 空态可疑` });
-    } else if (row.expected && !row.present) {
-      items.push({ level: "warning", text: `缺少当日应有资产 ${row.asset_type}` });
-    }
-  }
-  for (const reason of runInfo?.degraded ?? []) {
-    items.push({ level: "warning", text: `复盘降级：${labelOf(UNKNOWN_REASON_LABELS, reason, reason)}` });
-  }
-  const planEffect = context?.plan_effect;
-  for (const reason of planEffect?.degraded ?? []) {
-    items.push({ level: "warning", text: `成效降级：${reason}` });
-  }
-  if (context?.prev_meta_error) {
-    items.push({ level: "warning", text: `前日快照损坏：${context.prev_meta_error}` });
-  }
-  const feedback = snapshot?.feedback;
-  if (feedback && Array.isArray((feedback as Record<string, unknown>).degraded)) {
-    for (const reason of (feedback as Record<string, unknown>).degraded as string[]) {
-      items.push({ level: "warning", text: `反馈降级：${reason}` });
-    }
-  }
-  return items;
-}

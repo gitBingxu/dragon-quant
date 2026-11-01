@@ -17,6 +17,8 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 from dragon_quant.tests.e2e.fixtures import seed_builders as sb
 from dragon_quant.tests.e2e.harness.seed import seed_db
 from dragon_quant.tests.e2e.harness.sandbox import EnvSandbox
@@ -368,11 +370,11 @@ PREP_ALL = PREP_CORE + PREP_SAME_DAY + ["stock_daily"] + PREP_AUX
 
 
 def _stock_daily_payload(day: str, code: str = "600001") -> dict:
+    bar_days = ["2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15",
+                "2026-09-16", "2026-09-17", "2026-09-18"]
     bars = []
     price = 10.0
-    for offset, bar_day in enumerate(
-            ["2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15",
-             "2026-09-16", "2026-09-17", "2026-09-18"]):
+    for offset, bar_day in enumerate(bar_days):
         bars.append({
             "date": bar_day, "open": price + offset * 0.1,
             "high": price + offset * 0.1 + 0.2,
@@ -380,7 +382,12 @@ def _stock_daily_payload(day: str, code: str = "600001") -> dict:
             "close": price + offset * 0.1 + 0.05,
             "volume": 1000.0, "amount": 500_000_000.0,
         })
-    return {"as_of": day, "trade_date": day, "rows": {code: bars}}
+    flat = [
+        {"date": bar_day, "open": 10.0, "high": 10.0, "low": 10.0,
+         "close": 10.0, "volume": 1000.0, "amount": 500_000_000.0}
+        for bar_day in bar_days
+    ]
+    return {"as_of": day, "trade_date": day, "rows": {code: bars, "600002": flat}}
 
 
 def _prep_assets_for(day: str, *, omit: tuple[str, ...] = (),
@@ -423,6 +430,13 @@ def _prev_snapshot_result() -> dict:
             "degraded": [],
         },
         "sentiment": {"position_pct": 0.5, "position_advice": "谨慎"},
+        "review_candidates": [
+            {"code": "600001", "name": "龙头A", "review_score": 88.0,
+             "review_grade": "强", "position_pct": 20,
+             "eligibility": "eligible"},
+            {"code": "600002", "name": "跟风B", "review_score": 62.5,
+             "review_grade": "一般", "position_pct": 0},
+        ],
         "strategy_context": {
             "positions": [{"code": "600002", "name": "跟风B"}],
         },
@@ -696,3 +710,57 @@ def test_d10_auction_calendar_day_and_local_effect():
             bad = server.request(
                 "GET", "/api/auction/20260911/effect?horizons=2")
             assert bad.status == 400
+
+
+# ─── D11：计划日被否 / 推荐股 T+1/3/5 净收益（方案 §9.4） ─────────────────
+
+
+def test_d11_prep_plan_followup_local_returns():
+    with sandbox("dashboard-d11") as box:
+        _seed_prep_ops(box)
+        with start_dashboard(box) as server:
+            followup = server.request(
+                "GET", "/api/prep/20260911/plan-followup").json()
+            assert followup["status"] == "ok"
+            assert followup["plan_date"] == "2026-09-10"
+            assert followup["plan_date_source"] == "plan_review"
+            assert followup["data_source"] == "local_stock_daily"
+            assert followup["horizons"] == [1, 3, 5]
+
+            rows = {row["code"]: row for row in followup["rows"]}
+            assert rows["600001"]["group"] == "recommended"
+            assert rows["600002"]["group"] == "not_recommended"
+            assert rows["600001"]["horizons"]["1"]["entry_date"] == "2026-09-11"
+            for horizon, expected in (("1", 0.86), ("3", 2.84), ("5", 4.82)):
+                cell = rows["600001"]["horizons"][horizon]
+                assert cell["net_return_pct"] == pytest.approx(
+                    expected, abs=1e-3)
+                assert cell["outcome"] == "up"
+            for horizon in ("1", "3", "5"):
+                cell = rows["600002"]["horizons"][horizon]
+                assert cell["net_return_pct"] == pytest.approx(
+                    -0.13, abs=1e-6)
+                assert cell["outcome"] == "down"
+
+            horizon_1 = followup["summary"][0]
+            groups = {group["group"]: group for group in horizon_1["groups"]}
+            assert groups["recommended"]["valid"] == 1
+            assert groups["not_recommended"]["valid"] == 1
+            assert horizon_1["spread"] == pytest.approx(0.99, abs=1e-3)
+
+            assert followup["local_coverage"]["plan_codes"] == 2
+            assert any("13bp" in caveat for caveat in followup["caveats"])
+
+            bad_horizon = server.request(
+                "GET", "/api/prep/20260911/plan-followup?horizons=2")
+            assert bad_horizon.status == 400
+            bad_date = server.request(
+                "GET", "/api/prep/not-a-date/plan-followup")
+            assert bad_date.status == 400
+
+            context = server.request(
+                "GET", "/api/prep/20260911/review-context").json()
+            verification = context["plan_effect"]["market"]["verification"]
+            assert verification["advice"] == "hold"
+            assert verification["conclusion"] == "correct"
+            assert verification["evidence"]["score_change"] == 10.0

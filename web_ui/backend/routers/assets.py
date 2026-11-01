@@ -25,7 +25,7 @@ from ..deps import (
 )
 from ..errors import ApiError
 from ..presenters import auction_effect as auction_effect_view
-from ..presenters import auction_view, prep_view
+from ..presenters import auction_view, prep_effect, prep_view
 
 router = APIRouter(tags=["assets"])
 
@@ -199,10 +199,32 @@ class MarketSide(BaseModel):
     position_pct: float | None = None
 
 
+class VerificationEvidence(BaseModel):
+    prev_state: str | None = None
+    current_state: str | None = None
+    prev_score: float | None = None
+    current_score: float | None = None
+    score_change: float | None = None
+    limit_up_cnt: float | None = None
+    limit_down_cnt: float | None = None
+    broken_rate: float | None = None
+    yesterday_premium_pct: float | None = None
+
+
+class MarketVerification(BaseModel):
+    conclusion: Literal["correct", "wrong", "neutral", "not_evaluable"]
+    reason: str | None = None
+    advice: Literal["empty", "hold"] | None = None
+    prev_trade_date: str | None = None
+    current_trade_date: str | None = None
+    evidence: VerificationEvidence
+
+
 class MarketComparison(BaseModel):
     prev: MarketSide
     current: MarketSide
     score_change: float | None = None
+    verification: MarketVerification
 
 
 class MainlineDelta(BaseModel):
@@ -273,6 +295,65 @@ class ReviewContext(BaseModel):
     plan_names: list[PlanName] = []
     plan_effect: PlanEffect
     degraded: list[str] = []
+
+
+# ─── plan-followup 响应模型（样本锚计划日，行情只读本地日 K） ─────────────
+
+
+class PlanFollowupCell(BaseModel):
+    entry_date: str | None = None
+    exit_date: str | None = None
+    net_return_pct: float | None = None
+    outcome: Literal["up", "down", "flat"] | None = None
+    exclusion_reason: str | None = None
+
+
+class PlanFollowupRow(BaseModel):
+    code: str
+    name: str | None = None
+    group: Literal["recommended", "not_recommended", "data_insufficient"]
+    score: float | None = None
+    level: str | None = None
+    horizons: dict[str, PlanFollowupCell] = {}
+
+
+class PlanFollowupGroup(BaseModel):
+    group: str
+    label: str
+    valid: int
+    excluded: int
+    mean_net_return_pct: float | None = None
+    median_net_return_pct: float | None = None
+
+
+class PlanFollowupHorizon(BaseModel):
+    horizon: int
+    groups: list[PlanFollowupGroup] = []
+    spread: float | None = None
+
+
+class PlanFollowupCoverage(BaseModel):
+    plan_codes: int
+    loaded_codes: int
+    codes_with_bars: int
+    bar_dates: int
+    truncated: bool = False
+
+
+class PlanFollowup(BaseModel):
+    status: Literal["ok", "insufficient_data"]
+    reason: str | None = None
+    trade_date: str
+    plan_date: str | None = None
+    plan_date_source: Literal["plan_review", "previous_snapshot"] | None = None
+    data_source: Literal["local_stock_daily"]
+    cost_bps: float
+    horizons: list[int]
+    rows: list[PlanFollowupRow] = []
+    summary: list[PlanFollowupHorizon] = []
+    local_coverage: PlanFollowupCoverage
+    warnings: list[str] = []
+    caveats: list[str] = []
 
 
 # ─── auction 响应模型 ──────────────────────────────────────────────────────
@@ -546,6 +627,38 @@ def prep_review_context(trade_date: str, source: str = "v2",
     return ReviewContext(**prep_view.build_review_context(
         trade_date=day, current=current, prev=prev,
         prev_meta=prev_meta, prev_plan=prev_plan))
+
+
+@router.get("/api/prep/{trade_date}/plan-followup", response_model=PlanFollowup)
+def prep_plan_followup(trade_date: str,
+                       horizons: str | None = "1,3,5",
+                       assets=Depends(assets_repository),
+                       store=Depends(decision_review_store),
+                       load_bars=Depends(local_bars_loader)) -> PlanFollowup:
+    """计划日被否 / 推荐股的 T+1/3/5 净收益（固定 v2，无 source 参数）。"""
+
+    day = _normalize_date_or_400(trade_date)
+    requested = _parse_horizons(horizons)
+    current_error: str | None = None
+    try:
+        current = assets.get_prep_snapshot(day, "v2")
+    except Exception as exc:      # 损坏快照 → 空态，不 500
+        current = None
+        current_error = f"{type(exc).__name__}: {exc}"
+    try:
+        _prev, prev_meta = assets.get_previous_prep_snapshot(day, "v2")
+    except Exception:
+        prev_meta = {}
+    payload = prep_effect.run_plan_followup(
+        trade_date=day,
+        current=current,
+        prev_meta=prev_meta,
+        store=store.build_store("prep"),
+        load_bars=load_bars,
+        horizons=requested,
+        current_error=current_error,
+    )
+    return PlanFollowup(**payload)
 
 
 # ─── auction 端点 ──────────────────────────────────────────────────────────

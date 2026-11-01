@@ -34,10 +34,10 @@ function BrandMark({ size = 28 }: { size?: number }) {
 const NAV = [
   { to: "/", label: "总览", icon: IconGrid, match: (p: string) => p === "/" },
   { to: "/scans", label: "扫描", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
-  { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
   { to: "/prep", label: "复盘", icon: IconCalendar, match: (p: string) => p === "/prep" },
   { to: "/auction", label: "竞价", icon: IconClock, match: (p: string) => p === "/auction" },
   { to: "/account", label: "账户", icon: IconWallet, match: (p: string) => p === "/account" },
+  { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

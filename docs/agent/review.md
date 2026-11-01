@@ -44,4 +44,23 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 **前端行为**：FilterBar 在「体系」后新增「口径」Select（默认严格；v1 固定宽松并禁用；切体系 / 切口径导致生效口径变为宽松时，同 patch 把严格专有的 `pending_recompute` / `cannot_evaluate` 状态清空为「全部」，宽松选项列表不含这两项；「重置」保留 source，v2 回严格、v1 保持宽松）。表格、卡片与客户端排序都使用**已加载响应**的口径（`responseCaliber` 与 `data` / `summary` 在 `requestSeq` 守卫内原子写入），不使用表单待提交值。状态列展示服务端 `derived_status`，状态表头排序也按 `derived_status`（不再按可能为 `NULL` 的 `strict_review_status`）。卡片平均收益 / 最佳随口径选择键；宽松胜率与严格胜率两张卡始终同时展示；「待回测」的「待重算 / 失败」副文案来自严格侧重算进度，仅 v2 + strict 展示。
 
+## 入选后表现（只读端点，固定宽松口径）
+
+`GET /api/dragons/{trade_date}/{code}/performance?as_of=YYYYMMDD` 是抽屉内的局部增强，与 `/api/dragons` 冻结契约、固定 5 日回测、`dragon_review_strict` 侧表完全隔离。
+
+- **实现**：`dragon_quant/review/performance.py::compute_performance` 纯函数（无 DB / 无 provider / 无时钟），仅复用 `find_entry_day` 与 `kbar_to_dict`；有效 bar 逻辑本地实现并与 `review.main._is_valid_bar` 做 parity 测试。路由经 `deps.kline_provider()`（雪球，普通 `def` 线程池）与 `deps.clock_module()`（缺省 `as_of` = Asia/Shanghai 当天）注入，均可被测试替换。
+- **口径**：宽松入场——入选后首个 `high != low` 日按最低价买入；窗口从买入日到 `as_of` 的最新**有效**日 K（不依赖交易日历、不跳过 T+1）。峰值只看买入日之后，并列取最早日期；回撤窗口为「买入日 → 峰值日」，峰值后的新低不计入。
+- **状态与 HTTP**：记录存在时一律 200；`status` ∈ `ok` / `no_entry` / `empty_window` / `error`（传输或数据问题写 `error` 文本）。400 只给参数错误（非法日期、`as_of < trade_date`），404 只给龙头记录不存在。
+- **记录存在性（2026-11-01 增量）**：`dragons_v2` 行命中，**或**当日原始扫描真龙贡献（`scan_stocks_v2` join `scans_v2`，过滤 `is_true_dragon is not False` / `rank is not None` / `rank <= scan_top_n`，按 `code` 取最佳贡献）命中即视为记录存在；两处都无才 404。计算链路不变。
+- **命名**：返回 `max_return_since_entry` / `max_drawdown_since_entry` / `peak_date` / `latest_bar_date`，**不返回** `max_return_5d` / `max_drawdown_5d`；前端标签为「至最新日 K」。
+- **不写库、不改 CLI**：不读/写 review 字段、不写严格侧表、不缓存状态。
+- **trade-dates**：`DragonDateEntry` 增加 `items` 全量（同一排序），`preview` 仍为前三；前端本地展开，不追加按日请求。
+- **近几日卡片数据源（2026-11-01 增量）**：卡片读**原始扫描真龙榜**（`scans_v2` + `scan_stocks_v2`），展示被 `dragons_v2` 5 日去重排除的当日真龙（同为 rank1 也按日展示）；日期取 `list_scan_dates` 与 `list_dragon_trade_dates` 并集，逐日构建非空卡片直到收满 `limit`。无扫描贡献的遗留日期回退 `get_dragons`。**总览表 / `/api/summary` / 回测池 / `dragons_v2` 仍只读 `dragons_v2`，5 日去重语义完全不变**——`count` 表示「当日原始真龙支数」，可与回测池条数不同。
+- **明细回退**：`GET /api/dragons/{date}/{code}` 优先按口径查 `dragons_v2`；缺行时回退当日扫描最佳贡献（`dims` / `reject_reason` 仍经 `get_scan_stocks`，`review_loose` / `review_strict` / `derived_status` 为空，`dims_source` 为 `scan_stocks`）。
+- **抽屉展示**：移除双口径对照卡片，保留真伪/否决/当前口径徽标、Meta、概念、五维、否决原因与扫描报告原文（默认展开）；绩效卡独立请求、失败卡内降级并可重试，不阻塞明细。
+
 **Web UI 指标联动**：顶部 7 张卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表同源。`GET /api/dragons` 成功响应为 `{data, count, summary}`：`summary` 由筛选后的完整 rows 经 `dragons.summarize_review_rows(rows, source, include_derived_counts=True, caliber=caliber)` 计算（客户端分页不影响统计，未来若服务端分页必须先汇总再切片），`data` / `count` 不变；`caliber` 只影响 `derived_completed` / `derived_pending` 的状态来源（宽松直接取 `review_status`），旧键与 `*_strict` 键不随口径变化。`GET /api/summary` 保留为无筛选参数的 legacy 端点，其实现是 `get_review_summary` 兼容 wrapper（同样从 `query_dragons` 全量 rows 汇总），**不接收口径参数、完全不变**。`summary` 在 legacy 键之外附加 `derived_completed` / `derived_pending`（`pending` + `pending_recompute`）；row 只增返回 `derived_status`。前端仅在初始 / 出错时允许 `Summary | null`，修改筛选不自动请求，点击「查询」或回车同时刷新卡片与列表；「重置」保留 source、口径回到该体系默认，并清空其余筛选、立即恢复全量；慢旧响应由请求序号丢弃。空集或无可评测样本显示 `—`，真实无赢家显示 `0.0%`。
+
+## 只读投影说明（2026-11-01）
+
+本次不改固定 5 日回测与 `dragon_review_strict`。dashboard 新增的扫描运行态、复盘/竞价日历与成效全部是只读投影（`web_ui/backend/presenters/`）；竞价成效复用 `infra.factor.decision_review`，行情只读本地 `prep_assets.stock_daily`，不触网。

@@ -59,7 +59,7 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
       title="筛选"
       description="修改条件后点击查询；回车亦触发"
       right={
-        <span className="text-[12px] text-ink-2">
+        <span className="text-body text-ink-2">
           共 <span className="num text-ink">{count}</span> 条
         </span>
       }
@@ -114,7 +114,7 @@ export function FilterBar({ filters, count, onChange, onSearch, onReset }: Props
         />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
         <button type="button" className="btn btn-primary" onClick={onSearch}>
           <IconSearch size={14} />
           查询

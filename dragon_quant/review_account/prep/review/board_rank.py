@@ -10,12 +10,11 @@
 from __future__ import annotations
 
 import math
-import re
 from typing import Any, Mapping
 
-from .config import CONFIG, ReviewConfig
+from dragon_quant.infra.board_height import parse_board_height
 
-_LIANBAN_RE = re.compile(r"(\d+)天(\d+)板")
+from .config import CONFIG, ReviewConfig
 
 
 def _num(value: Any) -> float | None:
@@ -44,11 +43,9 @@ def _normalize(raw: Any, cap: float) -> float | None:
 
 
 def _row_height(row: Mapping[str, Any]) -> int | None:
-    high_num = _num(row.get("high_num"))
-    if high_num is not None and high_num > 0:
-        return int(high_num)
-    match = _LIANBAN_RE.search(str(row.get("high") or ""))
-    return int(match.group(2)) if match else None
+    """板数（含 THS 打包值解码）；唯一实现见 ``infra.board_height``。"""
+
+    return parse_board_height(row)
 
 
 def _members(row: Mapping[str, Any]) -> list[str] | None:

@@ -110,11 +110,10 @@ export function DragonsPage() {
       <PageHeader
         eyebrow="OVERVIEW · 龙头回测"
         title="龙头总览"
-        description="五维「识别真龙」评分结果与双口径回测。红涨绿跌；严格口径为入选次一交易日开盘价买入，宽松口径为最低价买入。"
       />
 
       {error ? (
-        <div className="alert-critical mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-[12.5px]">
+        <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
           <IconAlert size={15} />
           加载失败：{error}
         </div>
@@ -123,7 +122,6 @@ export function DragonsPage() {
       <div className="grid gap-3">
         <SummaryCards summary={summary} caliber={responseCaliber} />
         <RecentDragons
-          caliber={responseCaliber}
           onSelect={(date, code) => setSelected({ date, code })}
         />
         <FilterBar

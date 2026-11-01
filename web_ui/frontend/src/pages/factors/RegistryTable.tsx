@@ -10,20 +10,20 @@ function buildColumns(selected: string): Column<FactorSpecView>[] {
     render: (row) => (
       <div className="min-w-0">
         <div
-          className={`font-mono text-[12.5px] ${
+          className={`font-mono text-body ${
             row.name === selected ? "text-brand-bright" : "text-ink"
           }`}
         >
           {row.name}
         </div>
-        {row.label ? <div className="text-[11px] text-ink-3">{row.label}</div> : null}
+        {row.label ? <div className="text-caption text-ink-3">{row.label}</div> : null}
       </div>
     ),
   },
   {
     key: "source",
     header: "source",
-    render: (row) => <span className="text-[12px] text-ink-2">{row.source ?? "—"}</span>,
+    render: (row) => <span className="text-body text-ink-2">{row.source ?? "—"}</span>,
   },
   {
     key: "code_version",
@@ -36,14 +36,14 @@ function buildColumns(selected: string): Column<FactorSpecView>[] {
     render: (row) => (
       <span className="inline-flex items-center gap-1.5">
         <span className="num text-ink-2">{row.db_version ?? "—"}</span>
-        {row.db_registered ? null : <Badge tone="warn">未注册</Badge>}
+        {row.db_registered ? null : <Badge tone="warning">未注册</Badge>}
       </span>
     ),
   },
   {
     key: "pit",
     header: "PIT",
-    render: (row) => <span className="text-[12px] text-ink-2">{row.pit_rule ?? "—"}</span>,
+    render: (row) => <span className="text-body text-ink-2">{row.pit_rule ?? "—"}</span>,
   },
   {
     key: "enabled",
@@ -56,7 +56,7 @@ function buildColumns(selected: string): Column<FactorSpecView>[] {
     key: "description",
     header: "说明",
     render: (row) => (
-      <span className="text-[12px] text-ink-2" title={row.description ?? undefined}>
+      <span className="text-body text-ink-2" title={row.description ?? undefined}>
         {row.description ?? "—"}
       </span>
     ),

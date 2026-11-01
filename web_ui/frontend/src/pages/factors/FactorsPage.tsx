@@ -148,7 +148,7 @@ export function FactorsPage() {
         title="因子视图"
         description="代码注册表为唯一真值，DB 版本为最新快照；缺失 = 无行，resolved_versions 永远显式。"
         actions={
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-ink-2">
+          <span className="inline-flex items-center gap-1.5 text-body text-ink-2">
             <IconDatabase size={14} />
             <span className="num text-ink">{factors.length}</span> 个因子
           </span>
@@ -156,7 +156,7 @@ export function FactorsPage() {
       />
 
       {error ? (
-        <div className="alert-critical mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-[12.5px]">
+        <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
           <IconAlert size={15} />
           加载失败：{error}
         </div>

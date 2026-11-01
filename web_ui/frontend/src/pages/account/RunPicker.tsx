@@ -38,7 +38,7 @@ export function RunPicker({
         </span>
         <span className="flex shrink-0 items-center gap-2">
           {selected ? (
-            <span className={`num text-[11.5px] ${pnlClass(selected.total_return)}`}>
+            <span className={`num text-body ${pnlClass(selected.total_return)}`}>
               {runReturnLabel(selected)}
             </span>
           ) : null}
@@ -53,7 +53,7 @@ export function RunPicker({
           role="listbox"
         >
           {runs.length === 0 ? (
-            <div className="px-3 py-4 text-[12px] text-ink-2">暂无回测批次</div>
+            <div className="px-3 py-4 text-body text-ink-2">暂无回测批次</div>
           ) : (
             runs.map((run) => (
               <div
@@ -72,8 +72,8 @@ export function RunPicker({
                     setOpen(false);
                   }}
                 >
-                  <div className="truncate text-[12.5px] text-ink">{runLabel(run)}</div>
-                  <div className="mt-0.5 flex items-center gap-2 font-mono text-[10.5px] text-ink-3">
+                  <div className="truncate text-body text-ink">{runLabel(run)}</div>
+                  <div className="mt-0.5 flex items-center gap-2 font-mono text-caption text-ink-3">
                     <span>
                       {run.date_from} ~ {run.date_to}
                     </span>
@@ -83,7 +83,7 @@ export function RunPicker({
                 </button>
                 <button
                   type="button"
-                  className="icon-btn h-7 w-7 hover:bg-critical-soft hover:text-critical-text"
+                  className="icon-btn h-7 w-7 hover:bg-danger-soft hover:text-danger-text-text"
                   aria-label={`删除记录 ${run.id}`}
                   title="删除该记录"
                   onClick={(event) => {
@@ -97,7 +97,7 @@ export function RunPicker({
               </div>
             ))
           )}
-          <div className="mt-1 border-t border-hairline px-2.5 py-1.5 font-mono text-[10px] text-ink-3">
+          <div className="mt-1 border-t border-hairline px-2.5 py-1.5 font-mono text-caption text-ink-3">
             {runs.length} 个批次 · 收益 {fmtPct(selected?.total_return ?? null)}
           </div>
         </div>

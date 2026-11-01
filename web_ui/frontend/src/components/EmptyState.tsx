@@ -18,9 +18,9 @@ export function EmptyState({
         {icon ?? <IconLayers size={20} />}
       </div>
       <div>
-        <div className="text-[14px] font-medium text-ink">{title}</div>
+        <div className="text-body font-medium text-ink">{title}</div>
         {description ? (
-          <div className="mx-auto mt-1 max-w-md text-[12.5px] leading-relaxed text-ink-2">
+          <div className="mx-auto mt-1 max-w-md text-body leading-relaxed text-ink-2">
             {description}
           </div>
         ) : null}

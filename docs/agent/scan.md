@@ -99,3 +99,10 @@ Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
 - **同花顺排行字段必须用 `zdf`（涨跌幅）**：旧 `tradezdf` 是资金流字段，会无视 order/page 返回固定 50 行资金流入板块（曾导致领跌榜全为正值的 bug）；网关有 403 频控，需退避重试 + 页间延迟，单页 DOM 非严格有序，须抓多页后本地按 pct 排序。
 - **雪球需 Cookie**：失效表现为空体 / 403；`pankou.json` 盘后返回空体，已弃用，封单改用腾讯收盘盘口（`Quote.bid1_volume`，买一量，单位手）。
 - **不要在文档重建实现细节**：反爬 URL、DOM 选择器、字段下标、Chrome UA 只留在 provider 实现与 Git 历史；大面积失效时更新 UA 版本号即可。
+
+## 扫描运行态与日志（dashboard 只读投影，2026-11-01）
+
+- dashboard 列表用**批量聚合**读取运行态：`scans.summarize_scan_stocks(ids)`（`stock_n` / `true_dragon_n`）与 `logs.summarize_scan_logs(ids)`（`log_entries` / `error_n` / `first_ts` / `last_ts`），**不逐行**调用 `log_summary`（避免 N+1）。
+- 三态由日志聚合推导：`log_entries == 0 → 已完成·无日志`；`error_n > 0 → 已完成·有异常`；否则 `已完成`。不新增运行历史表；未落库的崩溃没有 `scans_v2` 行，页面不展示、不推断。
+- 日志正文分页 `GET /api/scans/{id}/logs?level=&offset=&limit=`（`ORDER BY ts DESC`，默认 200、上限 500，级别白名单 info/warn/error），**不返回 `data_json`**；无日志返回 200 `available=false`，不是错误（日志可能已被 `storage clear --logs` 清理）。
+- `scan/storage/{scans,logs}.py` 只新增只读函数（`summarize_scan_stocks` / `summarize_scan_logs` / `get_scan_logs_page` / `count_scan_logs_filtered`），表结构、写入路径与既有 `log_summary` 契约不变。

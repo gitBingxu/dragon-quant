@@ -44,8 +44,8 @@ export function Drawer({
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
           <div className="min-w-0">
-            <div className="text-[15px] font-semibold text-ink">{title}</div>
-            {subtitle ? <div className="mt-0.5 text-[12px] text-ink-2">{subtitle}</div> : null}
+            <div className="text-title font-semibold text-ink">{title}</div>
+            {subtitle ? <div className="mt-0.5 text-body text-ink-2">{subtitle}</div> : null}
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">
             <IconX size={16} />

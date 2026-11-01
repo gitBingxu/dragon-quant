@@ -54,11 +54,11 @@ export function EntryReasonStats({ stats }: { stats: AccountPositionStats | null
                             }}
                           />
                         </div>
-                        <span className={`num text-[12px] ${total ? "text-ink" : "text-ink-2"}`}>
+                        <span className={`num text-body ${total ? "text-ink" : "text-ink-2"}`}>
                           {row.win_rate != null ? `${row.win_rate.toFixed(1)}%` : "—"}
                         </span>
                         {!total && row.trades > 0 && row.trades < 5 ? (
-                          <Badge tone="warn">样本不足</Badge>
+                          <Badge tone="warning">样本不足</Badge>
                         ) : null}
                       </div>
                     </td>

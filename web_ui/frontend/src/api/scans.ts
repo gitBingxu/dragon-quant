@@ -1,5 +1,7 @@
 import { getJson, qs } from "./client";
 
+export type ScanStatus = "completed" | "completed_with_errors" | "logs_missing";
+
 export interface ScanSummary {
   id: string;
   scan_date: string;
@@ -9,7 +11,42 @@ export interface ScanSummary {
   workers: number | null;
   created_at: string;
   source: string;
+  true_dragon_n: number | null;
+  stock_n: number | null;
+  log_entries: number;
+  error_n: number | null;
+  status: ScanStatus;
 }
+
+export interface ScanLogEntry {
+  ts: number | null;
+  time: string | null;
+  category: string;
+  level: string;
+  message: string;
+  code: string;
+}
+
+export interface ScanLogSummary {
+  total_entries: number;
+  phases: Array<{ key: string; label: string; message: string }>;
+  api_total: number;
+  api_ok: number;
+  api_error: number;
+  api_by_provider: Record<string, { count?: number; total_ms?: number }>;
+  scorer_count: number;
+  error_count: number;
+  truncated: boolean;
+}
+
+export interface ScanLogsPage {
+  scan_id: string;
+  available: boolean;
+  total: number;
+  entries: ScanLogEntry[];
+  summary: ScanLogSummary | null;
+}
+
 
 export interface ScanDetail extends ScanSummary {
   has_raw_output: boolean;
@@ -59,5 +96,15 @@ export function fetchScanStocks(
   return getJson<ScanStocksPage>(
     `/api/scans/${encodeURIComponent(scanId)}/stocks` +
       qs({ true_only: opts.trueOnly ?? false, limit: opts.limit ?? 200, offset: opts.offset ?? 0 })
+  );
+}
+
+export function fetchScanLogs(
+  scanId: string,
+  opts: { level?: string; offset?: number; limit?: number } = {}
+) {
+  return getJson<ScanLogsPage>(
+    `/api/scans/${encodeURIComponent(scanId)}/logs` +
+      qs({ level: opts.level, offset: opts.offset ?? 0, limit: opts.limit ?? 200 })
   );
 }

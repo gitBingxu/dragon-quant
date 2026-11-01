@@ -12,7 +12,7 @@ const COLUMNS: Column<AccountPosition>[] = [
     key: "stock",
     header: "股票",
     render: (row) => (
-      <span className="text-[12.5px] text-ink">
+      <span className="text-body text-ink">
         <span className="num text-ink-3">{row.code}</span> {row.name}
       </span>
     ),
@@ -56,7 +56,7 @@ const COLUMNS: Column<AccountPosition>[] = [
   {
     key: "reason",
     header: "退出逻辑",
-    render: (row) => <span className="font-mono text-[11.5px] text-ink-2">{row.exit_reason_code}</span>,
+    render: (row) => <span className="font-mono text-body text-ink-2">{row.exit_reason_code}</span>,
   },
   {
     key: "post_return",

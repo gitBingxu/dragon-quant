@@ -22,7 +22,7 @@ const COLUMNS: Column<FactorRun>[] = [
       row.ok == null ? (
         <span className="text-ink-3">—</span>
       ) : (
-        <Badge tone={row.ok ? "brand" : "critical"}>{row.ok ? "成功" : "失败"}</Badge>
+        <Badge tone={row.ok ? "brand" : "danger"}>{row.ok ? "成功" : "失败"}</Badge>
       ),
   },
   {
@@ -47,7 +47,7 @@ const COLUMNS: Column<FactorRun>[] = [
     key: "warnings",
     header: "warnings",
     render: (row) => (
-      <span className="text-[12px] text-ink-2" title={row.warnings.join("; ") || undefined}>
+      <span className="text-body text-ink-2" title={row.warnings.join("; ") || undefined}>
         {row.warnings.length ? `${row.warnings.length} 条` : "—"}
       </span>
     ),
@@ -55,7 +55,7 @@ const COLUMNS: Column<FactorRun>[] = [
   {
     key: "created",
     header: "创建时间",
-    render: (row) => <span className="num text-[11.5px] text-ink-3">{row.created_at}</span>,
+    render: (row) => <span className="num text-body text-ink-3">{row.created_at}</span>,
   },
 ];
 

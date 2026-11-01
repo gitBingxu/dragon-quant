@@ -24,7 +24,7 @@ const COLUMNS: Column<AccountTrade>[] = [
     key: "stock",
     header: "股票",
     render: (row) => (
-      <span className="text-[12.5px] text-ink">
+      <span className="text-body text-ink">
         <span className="num text-ink-3">{row.code}</span> {row.name}
       </span>
     ),
@@ -69,7 +69,7 @@ const COLUMNS: Column<AccountTrade>[] = [
     key: "reason",
     header: "逻辑",
     render: (row) => (
-      <span className="block max-w-[380px] truncate text-[12px] text-ink-2" title={row.reason_text || row.reason_code}>
+      <span className="block max-w-[380px] truncate text-body text-ink-2" title={row.reason_text || row.reason_code}>
         {row.reason_text || row.reason_code}
       </span>
     ),

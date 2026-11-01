@@ -8,6 +8,7 @@ import {
   IconSigma,
   IconWallet,
 } from "./components/icons";
+import { IconClock } from "./components/icons-extra";
 
 /** README 品牌图标（assets/icon.svg）：红渐变圆角方块 + 白色 K 线蜡烛。 */
 function BrandMark({ size = 28 }: { size?: number }) {
@@ -35,6 +36,7 @@ const NAV = [
   { to: "/scans", label: "扫描", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
   { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
   { to: "/prep", label: "复盘", icon: IconCalendar, match: (p: string) => p === "/prep" },
+  { to: "/auction", label: "竞价", icon: IconClock, match: (p: string) => p === "/auction" },
   { to: "/account", label: "账户", icon: IconWallet, match: (p: string) => p === "/account" },
 ];
 
@@ -48,10 +50,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link to="/" className="flex shrink-0 items-center gap-2.5 no-underline">
             <BrandMark size={28} />
             <span className="hidden flex-col leading-none sm:flex">
-              <span className="text-[13px] font-semibold tracking-[0.02em] text-ink">
+              <span className="text-body font-semibold tracking-[0.02em] text-ink">
                 DRAGON QUANT
               </span>
-              <span className="mt-1 font-mono text-[9px] uppercase tracking-[0.22em] text-ink-3">
+              <span className="mt-1 font-mono text-caption uppercase tracking-[0.22em] text-ink-3">
                 龙头量化终端
               </span>
             </span>
@@ -65,7 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-[12.5px] font-medium no-underline transition-colors ${
+                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-body font-medium no-underline transition-colors ${
                     active
                       ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand-focus"
                       : "text-ink-2 hover:bg-hover hover:text-ink"
@@ -86,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6">{children}</main>
 
-      <footer className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 px-4 pb-6 pt-2 text-[11px] text-ink-3 sm:px-6">
+      <footer className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 px-4 pb-6 pt-2 text-caption text-ink-3 sm:px-6">
         <span>Dragon Quant · 龙头战法量化筛选系统</span>
         <span className="font-mono">A股语义：红涨 · 绿跌</span>
       </footer>

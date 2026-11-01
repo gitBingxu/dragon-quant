@@ -1,0 +1,175 @@
+// 中文展示映射（纯函数）。空值一律「—」/「数据不足」，不编造。
+
+export const MAINLINE_STATE_LABELS: Record<string, string> = {
+  new: "新进主线",
+  strengthening: "走强",
+  stable: "稳定",
+  weakening: "走弱",
+  unknown: "数据不足",
+};
+
+export const UNKNOWN_REASON_LABELS: Record<string, string> = {
+  prev_snapshot_missing: "前日无快照",
+  prev_snapshot_corrupt: "前日快照损坏",
+  prev_mainlines_missing: "前日无主线",
+  prev_mainline_score_missing: "前日主线缺分",
+  mainline_score_missing: "当日主线缺分",
+  mainline_prev_rank_missing: "前日无该主线排名",
+  mainline_change_below_threshold: "变化未达阈值",
+  board_members_missing: "缺成分名单",
+  snapshot_missing: "当日无快照",
+};
+
+export const MARKET_STATE_LABELS: Record<string, string> = {
+  strong: "强",
+  neutral: "中性",
+  weak: "弱",
+  ice: "冰点",
+  unknown: "数据不足",
+};
+
+export const FEEDBACK_STATE_LABELS: Record<string, string> = {
+  confirmed: "确认",
+  invalidated: "否决",
+  unknown: "数据不足",
+  pending: "待评估",
+};
+
+export const PLANNED_ACTION_LABELS: Record<string, string> = {
+  execute_plan: "按计划执行",
+  cancel_entry: "取消建仓",
+  observe_only: "仅观察",
+};
+
+export const JUDGEMENT_LABELS: Record<string, string> = {
+  correct_avoidance: "正确回避",
+  missed_opportunity: "错过机会",
+  data_gap: "数据不足",
+};
+
+export const GROUP_LABELS: Record<string, string> = {
+  recommended: "推荐",
+  not_recommended: "明确不推荐",
+  unknown: "数据不足",
+};
+
+export const ASSET_CATEGORY_LABELS: Record<string, string> = {
+  core: "核心",
+  same_day_only: "仅当日",
+  review_conditional: "复盘条件",
+  auxiliary: "辅助",
+  report: "元数据",
+};
+
+export const LEGAL_ABSENCE_LABELS: Record<string, string> = {
+  same_day_only_history: "历史日不可补采",
+  first_day_no_plan: "首日无计划",
+  no_prev_plan: "无前日计划",
+  review_assets_disabled: "复盘资产已关闭",
+  not_attempted: "未采集",
+  legal_empty: "合法空态",
+};
+
+export const COLLECTION_STATUS_LABELS: Record<string, string> = {
+  ok: "已采+已评",
+  asset_only: "仅原始资产",
+  snapshot_only: "仅快照",
+  missing: "无记录",
+};
+
+export const QUALITY_LABELS: Record<string, string> = {
+  ok: "正常",
+  degraded: "降级",
+  unavailable: "数据不足",
+  vetoed: "否决",
+  unknown: "未知",
+};
+
+export const SCAN_STATUS_LABELS: Record<string, string> = {
+  completed: "已完成",
+  completed_with_errors: "已完成·有异常",
+  logs_missing: "已完成·无日志",
+};
+
+export const EFFECT_QUALITY_LABELS: Record<string, string> = {
+  ok: "可用",
+  low_confidence: "样本不足",
+  not_evaluable: "不可评估",
+};
+
+export function labelOf(
+  map: Record<string, string>,
+  value: string | null | undefined,
+  fallback = "—"
+): string {
+  if (!value) return fallback;
+  return map[value] ?? value;
+}
+
+export const ASSET_TYPE_LABELS: Record<string, string> = {
+  dragons: "真龙榜",
+  ths_limit_up_pool: "涨停池",
+  ths_block_top: "板块榜",
+  market_breadth: "市场宽度",
+  fg_boards: "同花顺榜单",
+  holdings: "持仓",
+  fund_flow: "资金流",
+  cninfo_announcements: "公告",
+  macro_global: "宏观",
+  stock_daily: "个股日 K",
+  prev_plan: "前日计划",
+  auction_feedback: "竞价反馈",
+  t1_intraday: "次日盘中",
+  collection_report: "采集记录",
+};
+
+export const ASSET_STATUS_LABELS: Record<string, string> = {
+  ok: "正常",
+  empty: "无数据",
+  error: "采集异常",
+  unavailable: "不可用",
+  empty_suspicious: "数据可疑",
+};
+
+export const DIRECTION_LABELS: Record<string, string> = {
+  bull: "看多",
+  bear: "看空",
+  neutral: "中性",
+};
+
+export const VALIDATION_LABELS: Record<string, string> = {
+  ok: "通过",
+  warn: "注意",
+  fail: "未通过",
+};
+
+export const CHECKPOINT_LABELS: Record<string, string> = {
+  T1_open: "次日开盘",
+  T1_close: "次日收盘",
+};
+
+export const EFFECT_REASON_LABELS: Record<string, string> = {
+  insufficient_samples: "样本不足",
+  local_bars_missing: "本地日 K 缺失",
+  no_snapshot: "无竞价快照",
+  calendar_unavailable: "无本地交易日",
+  no_snapshot_in_range: "窗口内无快照",
+};
+
+export const CALENDAR_BASIS_LABELS: Record<string, string> = {
+  bars_union: "本地交易日",
+  index_calendar: "交易所日历",
+};
+
+export const DATA_SOURCE_LABELS: Record<string, string> = {
+  local_stock_daily: "本地日 K",
+};
+
+export function assetTypeLabel(assetType: string): string {
+  return ASSET_TYPE_LABELS[assetType] ?? "其他资产";
+}
+
+export function reasonLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return EFFECT_REASON_LABELS[code] ?? `其他原因（${code}）`;
+}

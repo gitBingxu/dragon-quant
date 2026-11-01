@@ -32,12 +32,25 @@
   --color-up-soft: rgba(239, 78, 94, 0.14);
   --color-down: #26a87a;
   --color-down-soft: rgba(38, 168, 122, 0.14);
-  --color-warn: #f0b429;
-  --color-warn-soft: rgba(240, 180, 41, 0.14);
-  --color-info: #4a9eff;
-  --color-info-soft: rgba(74, 158, 255, 0.14);
-  --color-critical: #e5484d;
-  --color-critical-soft: rgba(229, 72, 77, 0.14);
+  /* 语义状态四态：danger(失败/硬风险) · warning(异常但可用) ·
+     normal(正常/已完成) · positive(好于基准)。A 股 up/down 独立，状态色
+     不得用于价格/涨跌/收益单元格。 */
+  --color-danger: #f97066;
+  --color-danger-soft: rgba(249, 112, 102, 0.14);
+  --color-danger-line: rgba(249, 112, 102, 0.35);
+  --color-danger-text: #ffb4ab;
+  --color-warning: #f0b429;
+  --color-warning-soft: rgba(240, 180, 41, 0.14);
+  --color-warning-line: rgba(240, 180, 41, 0.35);
+  --color-warning-text: #f7d774;
+  --color-normal: #4a9eff;
+  --color-normal-soft: rgba(74, 158, 255, 0.14);
+  --color-normal-line: rgba(74, 158, 255, 0.35);
+  --color-normal-text: #a5c9ff;
+  --color-positive: #2dd4bf;
+  --color-positive-soft: rgba(45, 212, 191, 0.14);
+  --color-positive-line: rgba(45, 212, 191, 0.35);
+  --color-positive-text: #99f6e4;
 
   /* 表面 / 交互（替代 bg-white/… 与 bg-black/… 的语义表面） */
   --color-raise: rgba(255, 255, 255, 0.015);
@@ -47,11 +60,21 @@
   --color-header: rgba(11, 14, 20, 0.82);
   --color-input: #0f131d;
   --color-scrim: rgba(0, 0, 0, 0.65);
-  /* 语义色（组合描边 / 文本），避免斜杠透明度 */
-  --color-critical-text: #ff9093;
-  --color-critical-line: rgba(229, 72, 77, 0.35);
-  --color-warn-line: rgba(240, 180, 41, 0.35);
   --color-brand-focus: rgba(140, 111, 240, 0.35);
+
+  /* 排版令牌：html 14px 基准，所有可见文字最小 1rem（不靠缩字换密度）。 */
+  --text-caption: 1rem;
+  --text-caption--line-height: 1.25rem;
+  --text-body: 1rem;
+  --text-body--line-height: 1.5rem;
+  --text-title: 1.0625rem;
+  --text-title--line-height: 1.5rem;
+  --text-section: 1.125rem;
+  --text-section--line-height: 1.625rem;
+  --text-page: 1.5rem;
+  --text-page--line-height: 1.875rem;
+  --text-metric: 1.75rem;
+  --text-metric--line-height: 2rem;
 
   --font-sans: -apple-system, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -107,13 +130,22 @@
     --color-up-soft: rgba(196, 36, 52, 0.1);
     --color-down: #0e7a5a;
     --color-down-soft: rgba(14, 122, 90, 0.1);
-    --color-warn: #8a5a00;
-    --color-warn-soft: rgba(138, 90, 0, 0.12);
-    --color-info: #1d63c9;
-    --color-info-soft: rgba(29, 99, 201, 0.1);
-    --color-critical: #c62828;
-    --color-critical-soft: rgba(198, 40, 40, 0.1);
-    --color-critical-text: #b42318;
+    --color-danger: #b42318;
+    --color-danger-soft: rgba(180, 35, 24, 0.1);
+    --color-danger-line: rgba(180, 35, 24, 0.3);
+    --color-danger-text: #b42318;
+    --color-warning: #8a5a00;
+    --color-warning-soft: rgba(138, 90, 0, 0.12);
+    --color-warning-line: rgba(138, 90, 0, 0.3);
+    --color-warning-text: #8a5a00;
+    --color-normal: #1d63c9;
+    --color-normal-soft: rgba(29, 99, 201, 0.1);
+    --color-normal-line: rgba(29, 99, 201, 0.3);
+    --color-normal-text: #1d63c9;
+    --color-positive: #0f766e;
+    --color-positive-soft: rgba(15, 118, 110, 0.1);
+    --color-positive-line: rgba(15, 118, 110, 0.3);
+    --color-positive-text: #0f766e;
 
     /* 交互 / 组合线 */
     --color-raise: rgba(16, 24, 40, 0.03);
@@ -121,8 +153,6 @@
     --color-hover: rgba(16, 24, 40, 0.05);
     --color-hover-strong: rgba(16, 24, 40, 0.08);
     --color-brand-focus: rgba(109, 75, 216, 0.3);
-    --color-critical-line: rgba(198, 40, 40, 0.3);
-    --color-warn-line: rgba(138, 90, 0, 0.3);
     --color-halo: rgba(16, 24, 40, 0.1);
 
     /* CSS-only */
@@ -144,6 +174,8 @@
   }
 
   html {
+    /* 1rem = 14px：全站排版基准；所有可见文字最小 1rem。 */
+    font-size: 14px;
     color-scheme: dark;
   }
   html[data-theme="light"] {
@@ -165,7 +197,7 @@
     background-attachment: fixed;
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 1rem;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -216,10 +248,17 @@
 @layer components {
   /* 面板：1px 描边 + 顶部分层高光 + 深阴影 */
   .panel {
+    /* 面板作为 grid/flex 子项时必须可收缩，宽表才能落在容器内部滚动。 */
+    min-width: 0;
     background: var(--panel-sheen), var(--color-panel);
     border: 1px solid var(--color-hairline);
     border-radius: 12px;
     box-shadow: var(--shadow-panel);
+  }
+
+  /* 面板内的 grid 子项同样不得被宽表撑破页面（390px 不产生页面级横滚）。 */
+  .panel .grid > * {
+    min-width: 0;
   }
 
   .panel-head {
@@ -232,14 +271,14 @@
   }
 
   .panel-title {
-    font-size: 13px;
+    font-size: var(--text-title);
     font-weight: 600;
     letter-spacing: 0.01em;
   }
 
   .panel-desc {
     margin-top: 2px;
-    font-size: 12px;
+    font-size: var(--text-body);
     color: var(--color-ink-2);
   }
 
@@ -258,7 +297,7 @@
     border: 1px solid transparent;
     border-radius: 8px;
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--text-body);
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
@@ -298,18 +337,18 @@
     color: var(--color-ink);
   }
   .btn-danger {
-    background: var(--color-critical-soft);
-    border-color: var(--color-critical-line);
-    color: var(--color-critical-text);
+    background: var(--color-danger-soft);
+    border-color: var(--color-danger-line);
+    color: var(--color-danger-text);
   }
   .btn-danger:hover:not(:disabled) {
-    background: color-mix(in oklab, var(--color-critical) 22%, transparent);
+    background: color-mix(in oklab, var(--color-danger) 22%, transparent);
   }
   .btn-sm {
     height: 28px;
     padding: 0 10px;
     border-radius: 7px;
-    font-size: 12px;
+    font-size: var(--text-body);
   }
 
   .icon-btn {
@@ -343,7 +382,7 @@
     background: var(--color-input);
     color: var(--color-ink);
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--text-body);
     transition:
       border-color 140ms ease,
       box-shadow 140ms ease;
@@ -374,7 +413,7 @@
     min-width: 0;
   }
   .field-label {
-    font-size: 11px;
+    font-size: var(--text-caption);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -384,13 +423,14 @@
   /* 数据表 */
   .dt-wrap {
     width: 100%;
+    max-width: 100%;
     overflow: auto;
   }
   .dt {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    font-size: 13px;
+    font-size: var(--text-body);
   }
   .dt th {
     position: sticky;
@@ -400,7 +440,7 @@
     border-bottom: 1px solid var(--color-hairline);
     background: var(--color-panel-2);
     color: var(--color-ink-2);
-    font-size: 11px;
+    font-size: var(--text-caption);
     font-weight: 600;
     letter-spacing: 0.06em;
     text-align: left;
@@ -431,7 +471,7 @@
   .num {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 12.5px;
+    font-size: var(--text-body);
   }
 
   /* 分段控件 */
@@ -450,7 +490,7 @@
     padding: 0 10px;
     border-radius: 7px;
     color: var(--color-ink-2);
-    font-size: 12px;
+    font-size: var(--text-body);
     font-weight: 500;
     transition:
       background 140ms ease,
@@ -528,20 +568,30 @@
     background: var(--color-down-soft);
     color: var(--color-down);
   }
-  .badge-warn {
-    border-color: color-mix(in oklab, var(--color-warn) 35%, transparent);
-    background: var(--color-warn-soft);
-    color: var(--color-warn);
+  .badge-danger {
+    border-color: var(--color-danger-line);
+    background: var(--color-danger-soft);
+    color: var(--color-danger-text);
   }
-  .badge-info {
-    border-color: color-mix(in oklab, var(--color-info) 35%, transparent);
-    background: var(--color-info-soft);
-    color: var(--color-info);
+  .badge-warning {
+    border-color: var(--color-warning-line);
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
   }
-  .badge-critical {
-    border-color: var(--color-critical-line);
-    background: var(--color-critical-soft);
-    color: var(--color-critical-text);
+  .badge-normal {
+    border-color: var(--color-normal-line);
+    background: var(--color-normal-soft);
+    color: var(--color-normal-text);
+  }
+  .badge-positive {
+    border-color: var(--color-positive-line);
+    background: var(--color-positive-soft);
+    color: var(--color-positive-text);
+  }
+  .badge-muted {
+    border-color: var(--color-hairline);
+    background: transparent;
+    color: var(--color-ink-3);
   }
   .badge-outline {
     border-color: var(--color-hairline-2);
@@ -550,9 +600,9 @@
   }
 
   /* 错误条：布局类（间距 / 圆角 / flex）保留在 TSX。 */
-  .alert-critical {
-    border: 1px solid var(--color-critical-line);
-    background: var(--color-critical-soft);
-    color: var(--color-critical-text);
+  .alert-danger {
+    border: 1px solid var(--color-danger-line);
+    background: var(--color-danger-soft);
+    color: var(--color-danger-text);
   }
 }

@@ -15,15 +15,15 @@ export function PageHeader({
     <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {eyebrow ? (
-          <div className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.18em] text-brand">
+          <div className="mb-1.5 font-mono text-caption font-semibold uppercase tracking-[0.18em] text-brand">
             {eyebrow}
           </div>
         ) : null}
-        <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.02em] text-ink">
+        <h1 className="text-metric font-semibold leading-tight tracking-[-0.02em] text-ink">
           {title}
         </h1>
         {description ? (
-          <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-2">
+          <p className="mt-1.5 max-w-3xl text-body leading-relaxed text-ink-2">
             {description}
           </p>
         ) : null}

@@ -17,15 +17,15 @@ export function CurrentPosition({ latest }: { latest: AccountSnapshot | null }) 
           <div className="grid h-10 w-10 place-items-center rounded-xl border border-hairline bg-raise-strong text-ink-2">
             <IconWallet size={19} />
           </div>
-          <div className="text-[13px] text-ink">空仓</div>
-          <div className="text-[11.5px] text-ink-3">当前无持仓，资金处于现金状态。</div>
+          <div className="text-body text-ink">空仓</div>
+          <div className="text-body text-ink-3">当前无持仓，资金处于现金状态。</div>
         </div>
       ) : (
         <div className="grid gap-3">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="truncate text-[15px] font-semibold text-ink">{latest!.position_name}</div>
-              <div className="num mt-0.5 text-[11.5px] text-ink-3">{latest!.position_code}</div>
+              <div className="truncate text-title font-semibold text-ink">{latest!.position_name}</div>
+              <div className="num mt-0.5 text-body text-ink-3">{latest!.position_code}</div>
             </div>
             <Badge tone="brand">持仓中</Badge>
           </div>
@@ -39,7 +39,7 @@ export function CurrentPosition({ latest }: { latest: AccountSnapshot | null }) 
               className={pnlClass(latest!.position_unrealized_return)}
             />
           </div>
-          <div className="flex items-center justify-between text-[11.5px] text-ink-3">
+          <div className="flex items-center justify-between text-body text-ink-3">
             <span>现金</span>
             <span className="num text-ink-2">{fmtNum(latest!.cash, 2)}</span>
           </div>
@@ -60,8 +60,8 @@ function Metric({
 }) {
   return (
     <div>
-      <div className="text-[10.5px] uppercase tracking-[0.08em] text-ink-3">{label}</div>
-      <div className={`num mt-0.5 text-[12.5px] text-ink ${className}`}>{value ?? "—"}</div>
+      <div className="text-caption uppercase tracking-[0.08em] text-ink-3">{label}</div>
+      <div className={`num mt-0.5 text-body text-ink ${className}`}>{value ?? "—"}</div>
     </div>
   );
 }

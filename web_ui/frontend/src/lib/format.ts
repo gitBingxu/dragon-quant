@@ -57,7 +57,7 @@ export function pnlVar(v: number | null | undefined): string {
   return "var(--color-ink-2)";
 }
 
-export type StatusTone = "neutral" | "brand" | "warn" | "info" | "critical" | "down";
+export type StatusTone = "neutral" | "brand" | "warning" | "normal" | "danger" | "down";
 
 export interface StatusMeta {
   label: string;
@@ -67,17 +67,17 @@ export interface StatusMeta {
 export function statusMeta(status: string | null | undefined): StatusMeta {
   switch (status) {
     case "completed":
-      return { label: "已完成", tone: "info" };
+      return { label: "已完成", tone: "normal" };
     case "pending":
-      return { label: "待回测", tone: "warn" };
+      return { label: "待回测", tone: "warning" };
     case "pending_recompute":
-      return { label: "待重算", tone: "warn" };
+      return { label: "待重算", tone: "warning" };
     case "cannot_evaluate":
       return { label: "无法评估", tone: "neutral" };
     case "no_entry":
       return { label: "无介入", tone: "neutral" };
     case "error":
-      return { label: "失败", tone: "critical" };
+      return { label: "失败", tone: "danger" };
     default:
       return { label: status ?? "—", tone: "neutral" };
   }

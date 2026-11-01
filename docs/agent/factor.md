@@ -78,3 +78,7 @@ python -m dragon_quant factor fin status
 | 表 | 用途 | 关键点 |
 |----|------|--------|
 | **`factor_*`（assets.db）** | 因子层（P0） | `factor_values` 长表主键 `(trade_date, code, factor_name, factor_version)`，缺失=无行（绝不写 0/中性分）；`factor_registry` 元数据历史快照（`ON CONFLICT DO NOTHING`，重插旧版本不得刷新 `created_at`）；`factor_build_runs` 逐日审计；`factor_sector_snapshots` 主板块快照（`UNIQUE(trade_date, code, category)`，`category` 可能是 `gn`/`dq`，只有 `hy` 是真实行业）；`factor_model_snapshots` 供 P2 使用。M6 起纳入 `infra/assets/sync`（`factor` domain source，行级合并；派生数据可重算但一并备份） |
+
+## dashboard 竞价成效复用（只读，2026-11-01）
+
+`GET /api/auction/{date}/effect` 复用 `infra.factor.decision_review` 的 Adapter + 纯核心与 1/3/5 日净收益口径，行情经 `LocalStockDailyMarket` 注入本地 `prep_assets.stock_daily`；不改 `factor` CLI、阈值（`min_days=20` / `min_group_samples=30` / `cost_bps=13`）或表结构。缺本地 bar 时按既有剔除原因计入覆盖，不写 0 收益。

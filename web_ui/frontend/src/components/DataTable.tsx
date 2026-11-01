@@ -95,7 +95,7 @@ export function DataTable<T>({
           {rows.length === 0 ? (
             <tr>
               <td colSpan={columns.length}>
-                <div className="px-4 py-10 text-center text-[13px] text-ink-2">
+                <div className="px-4 py-10 text-center text-body text-ink-2">
                   {empty ?? "暂无数据"}
                 </div>
               </td>

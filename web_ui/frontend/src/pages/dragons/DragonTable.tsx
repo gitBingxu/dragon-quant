@@ -100,7 +100,7 @@ function renderCell(row: Dragon, col: Col, caliber: ReviewCaliber) {
   const field = col.field ? caliberField(caliber, col.field) : null;
   switch (col.key) {
     case "code":
-      return <span className="font-mono text-[12.5px] text-ink">{row.code}</span>;
+      return <span className="font-mono text-body text-ink">{row.code}</span>;
     case "name":
       return <span className="font-medium text-ink">{row.name}</span>;
     case "trade_date":
@@ -125,7 +125,7 @@ function renderCell(row: Dragon, col: Col, caliber: ReviewCaliber) {
       return <span className="num text-ink-2">{row.board_count ?? "—"}</span>;
     case "concepts":
       return (
-        <span className="text-[12px] text-ink-2">
+        <span className="text-body text-ink-2">
           {(row.concepts || []).slice(0, 3).join(" · ") || "—"}
         </span>
       );

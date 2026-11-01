@@ -65,7 +65,7 @@ export function EquityPlot({
           <text
             x={geom.equity.right + 8}
             y={tick.y + 3.5}
-            fontSize="10.5"
+            fontSize="14"
             fill="var(--color-ink-3)"
             style={{ fontFamily: "var(--font-mono)" }}
           >
@@ -77,7 +77,7 @@ export function EquityPlot({
       <text
         x={geom.equity.left}
         y={geom.drawdown.top - 12}
-        fontSize="10"
+        fontSize="14"
         fill="var(--color-ink-3)"
         letterSpacing="0.08em"
       >
@@ -96,7 +96,7 @@ export function EquityPlot({
           <text
             x={geom.drawdown.right + 8}
             y={tick.y + 3.5}
-            fontSize="10.5"
+            fontSize="14"
             fill="var(--color-ink-3)"
             style={{ fontFamily: "var(--font-mono)" }}
           >
@@ -117,7 +117,7 @@ export function EquityPlot({
           key={`dt-${tick.x}`}
           x={tick.x}
           y={geom.height - 8}
-          fontSize="10.5"
+          fontSize="14"
           fill="var(--color-ink-3)"
           textAnchor="middle"
           style={{ fontFamily: "var(--font-mono)" }}

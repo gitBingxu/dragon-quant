@@ -1112,9 +1112,14 @@
           "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d3_yes_pip_failure_exits_with_manual_hint",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d4_static_cache_headers",
-          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke"
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d6_performance_endpoint_uses_fake_kline_only",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d7_recent_cards_use_raw_scan_true_dragons",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d8_prep_calendar_review_context_and_missing_day",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d9_scan_runtime_states_and_logs",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d10_auction_calendar_day_and_local_effect"
         ],
-        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network."
       },
       "npm": {
         "tests": [

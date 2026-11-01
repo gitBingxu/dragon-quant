@@ -43,9 +43,9 @@ export function Modal({
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
           <div>
-            <div className="text-[14px] font-semibold text-ink">{title}</div>
+            <div className="text-body font-semibold text-ink">{title}</div>
             {description ? (
-              <div className="mt-1 text-[12px] leading-relaxed text-ink-2">{description}</div>
+              <div className="mt-1 text-body leading-relaxed text-ink-2">{description}</div>
             ) : null}
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭">

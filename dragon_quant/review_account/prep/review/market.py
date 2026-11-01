@@ -17,6 +17,8 @@ import math
 import re
 from typing import Any, Mapping, Tuple
 
+from dragon_quant.infra.board_height import parse_board_height
+
 from .config import CONFIG, ReviewConfig
 
 _LIANBAN_RE = re.compile(r"(\d+)天(\d+)板")
@@ -187,14 +189,9 @@ def _promotion_rate(
 
 
 def _row_height(row: Mapping[str, Any]) -> int | None:
-    high_num = _num(row.get("high_num"))
-    if high_num is not None and high_num > 0:
-        return int(high_num)
-    for key in ("high", "high_days"):
-        match = _LIANBAN_RE.search(str(row.get(key) or ""))
-        if match:
-            return int(match.group(2))
-    return None
+    """板数（含 THS 打包值解码）；唯一实现见 ``infra.board_height``。"""
+
+    return parse_board_height(row)
 
 
 def _max_board_height(assets: Mapping[str, Any], pool_rows: list[dict]) -> int | None:

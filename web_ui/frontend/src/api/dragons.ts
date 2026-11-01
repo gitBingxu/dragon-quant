@@ -15,6 +15,8 @@ export interface DragonDateEntry {
   trade_date: string;
   count: number;
   preview: DragonPreview[];
+  /** 全量（同一排序）；旧后端缺失时前端回退 preview。 */
+  items?: DragonPreview[];
 }
 
 export interface Dims {
@@ -66,6 +68,34 @@ export function fetchDragonDetail(tradeDate: string, code: string, caliber?: str
   return getJson<DragonDetail>(
     `/api/dragons/${encodeURIComponent(tradeDate)}/${encodeURIComponent(code)}` +
       qs({ source: DRAGON_SOURCE, caliber })
+  );
+}
+
+// ─── 入选后表现（宽松口径，至最新有效日 K） ────────────────────────────────
+
+export type PerformanceStatus = "ok" | "no_entry" | "empty_window" | "error";
+
+export interface DragonPerformance {
+  trade_date: string;
+  code: string;
+  caliber: "loose";
+  status: PerformanceStatus;
+  as_of: string;
+  buy_date: string | null;
+  buy_price: number | null;
+  max_return_since_entry: number | null;
+  max_drawdown_since_entry: number | null;
+  peak_date: string | null;
+  latest_bar_date: string | null;
+  bars_in_window: number | null;
+  bars_after_entry: number | null;
+  error: string | null;
+}
+
+export function fetchDragonPerformance(tradeDate: string, code: string, asOf?: string) {
+  return getJson<DragonPerformance>(
+    `/api/dragons/${encodeURIComponent(tradeDate)}/${encodeURIComponent(code)}/performance` +
+      qs({ as_of: asOf })
   );
 }
 

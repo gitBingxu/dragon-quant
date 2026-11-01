@@ -83,7 +83,7 @@ export function CreateRunModal({
     >
       <div className="grid gap-3.5">
         {error ? (
-          <div className="alert-critical flex items-center gap-2 rounded-lg px-3 py-2 text-[12.5px]">
+          <div className="alert-danger flex items-center gap-2 rounded-lg px-3 py-2 text-body">
             <IconAlert size={14} />
             {error}
           </div>

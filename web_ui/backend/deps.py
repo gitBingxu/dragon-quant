@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+
 from starlette.requests import Request
 
 
@@ -68,6 +70,54 @@ def benchmark_provider():
     from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 
     return XueqiuProvider()
+
+
+def kline_provider():
+    """``/api/dragons/.../performance`` 的日 K provider（与账户基准解耦）。"""
+    from dragon_quant.infra.provider.xueqiu import XueqiuProvider
+
+    return XueqiuProvider()
+
+
+def clock_module():
+    """路由解析缺省 ``as_of`` 的时钟 seam（测试可直接 override）。"""
+    from dragon_quant.infra import clock
+
+    return clock
+
+
+def scan_logs_repository():
+    """扫描日志/摘要只读仓储（``scan_logs_v2``）。"""
+    from dragon_quant.scan.storage import logs
+
+    return logs
+
+
+def decision_review_store():
+    """决策回测只读快照 store（``prep_snapshots`` / ``auction_snapshots``）。"""
+    from dragon_quant.infra.factor import decision_review_store
+
+    return decision_review_store
+
+
+def local_bars_loader():
+    """竞价成效的本地日 K loader（只读 ``prep_assets.stock_daily``，不触网）。"""
+    from dragon_quant.infra.assets import db as assets_db
+
+    def load(codes, date_from, date_to):
+        return assets_db.list_stock_daily_bars(codes, date_from, date_to)
+
+    return load
+
+
+def review_assets_enabled() -> bool:
+    """复盘资产开关（``DQ_REVIEW_ASSETS_ENABLED``，默认 true）。
+
+    只用于日历 ``expected`` 判定，不改 prep 采集行为；不 import
+    ``review_account.prep.collectors``（那会把 provider 拉进 Web 进程）。
+    """
+    raw = os.environ.get("DQ_REVIEW_ASSETS_ENABLED", "")
+    return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
 def dashboard_settings(request: Request):

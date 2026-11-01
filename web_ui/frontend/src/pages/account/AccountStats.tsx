@@ -33,7 +33,7 @@ export function AccountStats({
       />
       <StatCard
         label="策略"
-        value={<span className="text-[15px]">{run?.strategy_name ?? "—"}</span>}
+        value={<span className="text-title">{run?.strategy_name ?? "—"}</span>}
         tone="brand"
         sub={run?.display_name ?? undefined}
       />

@@ -35,7 +35,7 @@ export function DeleteRunModal({
         </>
       }
     >
-      <p className="text-[13px] leading-relaxed text-ink-2">
+      <p className="text-body leading-relaxed text-ink-2">
         确认删除记录「<span className="font-medium text-ink">{label}</span>」？
         该批次的交割单、持仓、快照和决策时间线将一并删除，且不可恢复。
       </p>

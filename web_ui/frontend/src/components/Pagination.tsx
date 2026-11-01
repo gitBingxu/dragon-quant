@@ -30,7 +30,7 @@ export function Pagination({
   const pages = pageWindow(page, pageCount);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-4 py-2.5">
-      <div className="text-[11.5px] text-ink-2">
+      <div className="text-body text-ink-2">
         第 <span className="num text-ink">{from}</span>–
         <span className="num text-ink">{to}</span> 条 · 共{" "}
         <span className="num text-ink">{total}</span> 条
@@ -38,7 +38,7 @@ export function Pagination({
       <div className="flex items-center gap-3">
         {onPageSizeChange ? (
           <select
-            className="select h-7 w-[92px] text-[12px]"
+            className="select h-7 w-[92px] text-body"
             value={String(pageSize)}
             onChange={(event) => onPageSizeChange(Number(event.currentTarget.value))}
           >
@@ -105,7 +105,7 @@ function PageButton({
     <button
       type="button"
       onClick={() => onClick(page)}
-      className={`num grid h-7 min-w-7 place-items-center rounded-md px-1.5 text-[12px] transition-colors ${
+      className={`num grid h-7 min-w-7 place-items-center rounded-md px-1.5 text-body transition-colors ${
         active
           ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand-focus"
           : "text-ink-2 hover:bg-hover hover:text-ink"

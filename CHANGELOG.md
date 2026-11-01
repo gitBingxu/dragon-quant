@@ -14,14 +14,28 @@
 
 ### Added
 - `dashboard` 命令 + P0 五页（总览 / 扫描 / 因子 / 复盘 / 账户）与只读 FastAPI 后端。
+- 新增独立 `/auction` 集合竞价页（运行概况 / 竞价结果 / 成效 / 资产日历 / 当日逐股明细）与导航。
+- 新只读端点：`GET /api/prep/calendar`、`GET /api/prep/{date}/review-context`、`GET /api/auction/calendar`、`GET /api/auction/{date}/effect`、`GET /api/scans/{id}/logs`。
+- 复盘/竞价「近一年资产日历 + 当日表格」：三态 + 合法缺席豁免，**所有日期可点击**（完全缺失日返回 200 与全部应有资产缺失，不 404）。
+- 扫描列表批量补 `真龙数 / 错误数 / 日志条数 / 状态`（`已完成 / 已完成·有异常 / 已完成·无日志`）；详情新增错误摘要与日志分页。
+- 复盘成效复用既有 `plan_review` / `feedback`：否决股后续表现、推荐对照、计划执行与「当日开→收」事实；前日市场建议与今日实际并排。
+- 竞价成效复用 `factor decision-review` 口径，行情**只读本地 `prep_assets.stock_daily`**，打开页面不触网。
 - `[web]` 可选 extra（fastapi + uvicorn）；首次调用 `dashboard` 交互式安装，非 TTY / 失败降级为手动指令。
+- `GET /api/dragons/{trade_date}/{code}/performance`：只读「入选后表现」（宽松入场、窗口至最新有效日 K），不写库、不改固定 5 日回测/CLI。
+- `GET /api/dragons/trade-dates` 响应增加 `items` 全量（`preview` 前三兼容）。
 
 ### Changed
+- dashboard 复盘/竞价拆分：`/prep` 只保留盘后复盘（固定六段），删除原始 JSON 调试块（API/CLI 仍可查）。
+- dashboard 排版统一 `html{font-size:14px}` + 六个 `--text-*` 令牌，所有可见文字最小 1rem；语义色收敛为 `danger/warning/normal/positive`（+soft/line/text），删除 `warn/critical/info`，A 股 `up/down` 独立。
 - `web_ui` 后端由 stdlib `http.server` 重写为 FastAPI；`web_ui.start_server` 降级为 deprecated 薄壳，`review --ui` / `review-account --ui` 仅保留为弃用别名。
 - 前端新增极简 pathname 路由与 AppShell，`vite base` 改为 `/` 以支持 `/scans/<id>` 深链。
+- dashboard 总览文案/排序调整（「已回测」、胜率 tooltip、筛选右对齐、榜单本地展开）；抽屉移除双口径卡片并新增独立绩效请求；复盘页改为结果优先展示，原始 JSON / 水位 / 竞价默认收起。
+- 近几日榜单改读**原始扫描真龙榜**（`scans_v2` + `scan_stocks_v2`），展示被 `dragons_v2` 5 日去重排除的当日真龙；总览表 / `/api/summary` / 回测池仍只读 `dragons_v2`，5 日去重不变。
 
 ### Fixed
+- `high_num` THS 打包值（如 `0x50005`）导致最高板显示为 327685：新增 `dragon_quant/infra/board_height.py` 共享纯解析器（`days = v>>16`、`boards = v&0xffff`，校验 `1 <= boards <= days <= 99`），5 个调用点统一接入；旧快照在 dashboard 展示解码板数并标「需重算」，不自动重算、不写库。
 - E2E `test_g2_version_matches_package_version` 改为从 `dragon_quant._version` 读取版本，不再硬编码。
+- 龙头明细与「入选后表现」在 `dragons_v2` 缺行时回退当日原始扫描贡献（五维经 `scan_stocks_v2`，绩效仅需扫描入选记录存在），两处都无才 404。
 
 ## [0.7.4] - 2026-10-30
 

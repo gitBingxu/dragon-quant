@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from functools import wraps
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .. import compat, params
-from ..deps import dragon_repository, scan_repository
+from ..deps import (
+    clock_module,
+    dragon_repository,
+    kline_provider,
+    scan_repository,
+)
 from ..errors import ApiError
 from ..schemas import Dims, QuoteFields, ReviewFields
 
@@ -62,6 +69,7 @@ class DragonDateEntry(BaseModel):
     trade_date: str
     count: int
     preview: list[DragonPreview]
+    items: list[DragonPreview]
 
 
 class TradeDatesPage(BaseModel):
@@ -91,20 +99,94 @@ def _preview(row: dict) -> DragonPreview:
     )
 
 
+_SCAN_RANK_MISSING = 9999
+
+
+def _scan_contributions(day: str, src: str, scans) -> list[dict]:
+    """当日可见原始真龙贡献。
+
+    过滤口径与 ``dragons.rebuild_dragons_for_date`` 的入选集合保持一致：
+    ``is_true_dragon is not False``（None 视为未知但保留）、``rank is not None``、
+    ``rank <= scan_top_n``。展示层只复用该口径的结果，不复制 5 日 gate 规则。
+    """
+    contribs = scans.list_scan_stock_contributions_by_date(day, source=src)
+    return [
+        c for c in contribs
+        if c.get("is_true_dragon") is not False
+        and c.get("rank") is not None
+        and c.get("scan_top_n") is not None
+        and c["rank"] <= c["scan_top_n"]
+    ]
+
+
+def _best_scan_contributions(contribs: list[dict]) -> dict[str, dict]:
+    """按 ``code`` 选最佳贡献：``rank`` 最小 → ``composite_score`` 最高 → 最新扫描。
+
+    规则逐项对齐 ``dragons.rebuild_dragons_for_date``（仅 3 个键）；出现第三个
+    消费方时再提取为公共只读函数。
+    """
+    best: dict[str, dict] = {}
+    for c in contribs:
+        code = c.get("code")
+        if not code:
+            continue
+        cur = best.get(code)
+        if cur is None:
+            best[code] = c
+            continue
+        rank_new = c["rank"] if c.get("rank") is not None else _SCAN_RANK_MISSING
+        rank_cur = cur["rank"] if cur.get("rank") is not None else _SCAN_RANK_MISSING
+        if rank_new != rank_cur:
+            if rank_new < rank_cur:
+                best[code] = c
+            continue
+        score_new = c.get("composite_score") or 0
+        score_cur = cur.get("composite_score") or 0
+        if score_new != score_cur:
+            if score_new > score_cur:
+                best[code] = c
+            continue
+        if (c.get("scan_created_at") or "") > (cur.get("scan_created_at") or ""):
+            best[code] = c
+    return best
+
+
+def _find_scan_contribution(day: str, code: str, src: str, scans) -> dict | None:
+    """当日扫描贡献中该 ``code`` 的最佳行；无则 ``None``。"""
+    return _best_scan_contributions(_scan_contributions(day, src, scans)).get(code)
+
+
 @router.get("/api/dragons/trade-dates", response_model=TradeDatesPage)
 def list_trade_dates(source: str = "v2", limit: int = 10,
-                     dragons=Depends(dragon_repository)) -> TradeDatesPage:
+                     dragons=Depends(dragon_repository),
+                     scans=Depends(scan_repository)) -> TradeDatesPage:
     limits = params.clamp_limit(limit, default=10, maximum=50)
     src = params.parse_source(source)
-    dates = dragons.list_dragon_trade_dates(source=src)
-    recent = list(reversed(dates[-limits:]))
+    # 日期并集：扫描表覆盖「当日全部被 5 日去重」的日期，dragons 表兜底遗留数据。
+    dates = sorted(
+        set(scans.list_scan_dates(source=src))
+        | set(dragons.list_dragon_trade_dates(source=src)),
+        reverse=True,
+    )
     data: list[DragonDateEntry] = []
-    for trade_date in recent:
-        rows = dragons.get_dragons(trade_date, src)
+    # 逐日构建非空卡片直到收满 limit；不得先截断日期再丢弃空条目。
+    for trade_date in dates:
+        if len(data) >= limits:
+            break
+        rows = list(_best_scan_contributions(
+            _scan_contributions(trade_date, src, scans)).values())
+        if not rows:
+            # 无可用扫描贡献（v1 历史 / 扫描表被清理）→ 保持旧行为。
+            rows = dragons.get_dragons(trade_date, src)
+        ordered = _preview_sort(rows)
+        if not ordered:
+            continue
+        items = [_preview(row) for row in ordered]
         data.append(DragonDateEntry(
             trade_date=trade_date,
-            count=len(rows),
-            preview=[_preview(row) for row in _preview_sort(rows)[:3]],
+            count=len(items),
+            preview=items[:3],
+            items=items,
         ))
     return TradeDatesPage(data=data, count=len(data))
 
@@ -155,6 +237,15 @@ def _dims(stock: dict) -> Dims:
     )
 
 
+def _find_dragon_row(day: str, code: str, src: str, caliber: str,
+                     dragons) -> dict | None:
+    """按可见口径查 ``dragons_v2`` 行；无则 ``None``（明细与绩效共用）。"""
+    rows = dragons.query_dragons(
+        {"date_from": day, "date_to": day}, source=src, caliber=caliber,
+    )
+    return next((item for item in rows if item.get("code") == code), None)
+
+
 @router.get("/api/dragons/{trade_date}/{code}", response_model=DragonDetail)
 def dragon_detail(trade_date: str, code: str, source: str = "v2",
                   caliber: str | None = None,
@@ -166,10 +257,10 @@ def dragon_detail(trade_date: str, code: str, source: str = "v2",
         raise ApiError(400, "invalid_request", str(exc)) from exc
     src = params.parse_source(source)
     resolved = dragons.resolve_caliber(caliber, src)
-    rows = dragons.query_dragons(
-        {"date_from": day, "date_to": day}, source=src, caliber=resolved,
-    )
-    row = next((item for item in rows if item.get("code") == code), None)
+    row = _find_dragon_row(day, code, src, resolved, dragons)
+    if row is None:
+        # 被 5 日去重排除的当日真龙：回退原始扫描贡献（字段结构不变）。
+        row = _find_scan_contribution(day, code, src, scans)
     if row is None:
         raise ApiError(404, "not_found", f"{day} 无代码 {code} 的龙头记录")
 
@@ -221,3 +312,83 @@ def dragon_detail(trade_date: str, code: str, source: str = "v2",
         dims_source=dims_source,
         reject_reason=reject_reason,
     )
+
+
+# ─── 新增：入选后表现（宽松口径，至最新有效日 K） ─────────────────────────
+
+
+class DragonPerformance(BaseModel):
+    trade_date: str
+    code: str
+    caliber: Literal["loose"] = "loose"
+    status: Literal["ok", "no_entry", "empty_window", "error"]
+    as_of: str
+    buy_date: str | None = None
+    buy_price: float | None = None
+    max_return_since_entry: float | None = None
+    max_drawdown_since_entry: float | None = None
+    peak_date: str | None = None
+    latest_bar_date: str | None = None
+    bars_in_window: int | None = None
+    bars_after_entry: int | None = None
+    error: str | None = None
+
+
+def _normalize_date_or_400(raw: str | None, field: str) -> str:
+    try:
+        return params.normalize_date(raw)
+    except ValueError as exc:
+        raise ApiError(400, "invalid_request", f"{field}: {exc}") from exc
+
+
+def _kline_days(trade_date: str, as_of: str) -> int:
+    span = (datetime.strptime(as_of, "%Y-%m-%d")
+            - datetime.strptime(trade_date, "%Y-%m-%d")).days
+    return min(1500, max(90, span + 30))
+
+
+@router.get(
+    "/api/dragons/{trade_date}/{code}/performance",
+    response_model=DragonPerformance,
+)
+def dragon_performance(
+    trade_date: str,
+    code: str,
+    as_of: str | None = None,
+    dragons=Depends(dragon_repository),
+    scans=Depends(scan_repository),
+    provider=Depends(kline_provider),
+    clock=Depends(clock_module),
+) -> DragonPerformance:
+    """入选后表现：宽松入场语义，窗口到 ``as_of`` 的最新有效日 K。
+
+    该端点是抽屉内的局部增强：记录存在时一律 200，传输/数据问题用
+    ``status="error"`` 表达；400 只给参数错误，404 只给记录不存在。
+    """
+    day = _normalize_date_or_400(trade_date, "trade_date")
+    if as_of:
+        as_of_day = _normalize_date_or_400(as_of, "as_of")
+    else:
+        as_of_day = clock.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    if as_of_day < day:
+        raise ApiError(400, "invalid_request", "as_of 不能早于 trade_date")
+
+    # 记录存在性：dragons_v2 行或当日原始扫描贡献任一命中即可（绩效口径固定 v2）。
+    row = _find_dragon_row(day, code, "v2", dragons.resolve_caliber(None, "v2"),
+                           dragons)
+    if row is None and _find_scan_contribution(day, code, "v2", scans) is None:
+        raise ApiError(404, "not_found", f"{day} 无代码 {code} 的龙头记录")
+
+    from dragon_quant.review.performance import compute_performance
+
+    try:
+        klines = provider.get_kline(
+            code, days=_kline_days(day, as_of_day), fq_type="normal")
+    except Exception as exc:  # noqa: BLE001 - 传输失败降级为 200 error
+        return DragonPerformance(
+            trade_date=day, code=code, status="error", as_of=as_of_day,
+            error=f"K线拉取失败: {exc}",
+        )
+
+    result = compute_performance(klines, day, as_of_day)
+    return DragonPerformance(trade_date=day, code=code, **result)

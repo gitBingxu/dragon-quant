@@ -1,0 +1,18 @@
+{
+  "providers": {
+    "xueqiu": {
+      "get_kline": {
+        "by_code": {
+          "600001": [
+            {"timestamp": 1786950000000, "volume": 1000000.0, "open": 10.0, "high": 10.2, "low": 9.8, "close": 10.0, "chg": 0.0, "pct": 0.0, "turnover": 3.0, "amount": 10000000.0},
+            {"timestamp": 1787036400000, "volume": 1000000.0, "open": 10.1, "high": 10.5, "low": 10.0, "close": 10.3, "chg": 0.3, "pct": 3.0, "turnover": 3.0, "amount": 10300000.0},
+            {"timestamp": 1787122800000, "volume": 1000000.0, "open": 10.3, "high": 10.4, "low": 9.8, "close": 10.2, "chg": -0.1, "pct": -1.0, "turnover": 3.0, "amount": 10200000.0},
+            {"timestamp": 1787209200000, "volume": 1000000.0, "open": 10.2, "high": 10.6, "low": 9.6, "close": 10.5, "chg": 0.3, "pct": 3.0, "turnover": 3.0, "amount": 10500000.0},
+            {"timestamp": 1787295600000, "volume": 1000000.0, "open": 10.5, "high": 10.8, "low": 9.9, "close": 10.7, "chg": 0.2, "pct": 2.0, "turnover": 3.0, "amount": 10700000.0},
+            {"timestamp": 1789110000000, "volume": 1000000.0, "open": 10.0, "high": 10.05, "low": 9.95, "close": 10.0, "chg": 0.0, "pct": 0.0, "turnover": 3.0, "amount": 10000000.0}
+          ]
+        }
+      }
+    }
+  }
+}

@@ -9,11 +9,11 @@ import { usePagination } from "../../lib/pagination";
 
 const EVENT_META: Record<
   AccountTimelineEvent["event_type"],
-  { label: string; color: string; tone: "up" | "down" | "info" | "neutral" }
+  { label: string; color: string; tone: "up" | "down" | "normal" | "neutral" }
 > = {
   BUY: { label: "买入", color: "var(--color-up)", tone: "up" },
   SELL: { label: "卖出", color: "var(--color-down)", tone: "down" },
-  HOLD: { label: "持仓", color: "var(--color-info)", tone: "info" },
+  HOLD: { label: "持仓", color: "var(--color-normal)", tone: "normal" },
   IDLE: { label: "空仓", color: "var(--color-ink-3)", tone: "neutral" },
 };
 
@@ -86,7 +86,7 @@ function TimelineItem({
     : [];
   return (
     <div className="grid grid-cols-[86px_14px_minmax(0,1fr)] items-start gap-3">
-      <span className="num pt-1 text-[11.5px] text-ink-3">{event.event_date}</span>
+      <span className="num pt-1 text-body text-ink-3">{event.event_date}</span>
       <span className="relative flex justify-center pt-1.5">
         <span
           className="h-2.5 w-2.5 rounded-full"
@@ -101,19 +101,19 @@ function TimelineItem({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge tone={meta.tone}>{meta.label}</Badge>
-            <span className={`text-[13px] font-medium ${isIdle ? "text-ink-2" : "text-ink"}`}>
+            <span className={`text-body font-medium ${isIdle ? "text-ink-2" : "text-ink"}`}>
               {event.title || meta.label}
             </span>
             {event.code ? (
-              <span className="font-mono text-[11px] text-ink-3">{event.code}</span>
+              <span className="font-mono text-caption text-ink-3">{event.code}</span>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-3 font-mono text-[10.5px] text-ink-3">
+          <div className="flex shrink-0 items-center gap-3 font-mono text-caption text-ink-3">
             {event.cash != null ? <span>现金 {fmtMoney(event.cash)}</span> : null}
             {event.total_equity != null ? <span>权益 {fmtMoney(event.total_equity)}</span> : null}
           </div>
         </div>
-        <p className={`mt-1.5 text-[12px] leading-relaxed ${isIdle ? "text-ink-2" : "text-ink-2"}`}>
+        <p className={`mt-1.5 text-body leading-relaxed ${isIdle ? "text-ink-2" : "text-ink-2"}`}>
           {event.detail || event.reason_code}
         </p>
         {details.length > 0 ? (
@@ -123,7 +123,7 @@ function TimelineItem({
                 <Badge tone={detail.passed ? "brand" : "neutral"}>
                   {typeof detail.rank === "number" ? `#${detail.rank}` : "—"}
                 </Badge>
-                <span className={`text-[11.5px] ${detail.passed ? "text-ink-2" : "text-ink-3"}`}>
+                <span className={`text-body ${detail.passed ? "text-ink-2" : "text-ink-3"}`}>
                   {String(detail.reason_text || detail.reason_code || "")}
                 </span>
               </div>
@@ -131,7 +131,7 @@ function TimelineItem({
           </div>
         ) : null}
         {position ? (
-          <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[10.5px] text-ink-3">
+          <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-caption text-ink-3">
             <span>卖出日 {position.exit_date}</span>
             <span className={pnlClass(position.realized_return)}>
               闭环收益 {fmtPct(position.realized_return)}

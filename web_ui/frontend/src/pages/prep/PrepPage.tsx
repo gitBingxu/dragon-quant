@@ -1,234 +1,219 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  fetchAuctionDates,
-  fetchAuctionDay,
-  fetchPrepDates,
+  fetchPrepCalendar,
   fetchPrepSnapshot,
   fetchPrepWatermark,
-  type AuctionDayView,
+  fetchReviewContext,
+  type PrepCalendar,
   type PrepSnapshotView,
   type PrepWatermark,
+  type ReviewContext,
 } from "../../api/assets";
+import { AssetCalendar } from "../../components/AssetCalendar";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { Section } from "../../components/Section";
-import { Select } from "../../components/Select";
-import { IconCalendar } from "../../components/icons";
 import { IconAlert } from "../../components/icons-extra";
 import { navigate, useSearchParams } from "../../router";
-import { WatermarkSection } from "./WatermarkSection";
-import { SnapshotSection } from "./SnapshotSection";
-import { AuctionSection } from "./AuctionSection";
+import { AssetDayTable } from "./AssetDayTable";
+import { CandidateList } from "./CandidateList";
+import { MainlineTable } from "./MainlineTable";
+import { MarketStrip } from "./MarketStrip";
+import { PlanReviewSection } from "./PlanReviewSection";
+import { RunOverview } from "./RunOverview";
+import { buildCandidateViews, buildMainlineRows, buildMarketView, buildRunInfo } from "./prepModel";
 
-async function fetchAuctionDatesSafe(): Promise<string[]> {
-  try {
-    const payload = await fetchAuctionDates(60);
-    return Array.from(new Set([...payload.snapshot_dates, ...payload.asset_dates]));
-  } catch {
-    return [];
+function normalizeIso(value: string): string {
+  const text = (value || "").trim();
+  if (/^\d{8}$/.test(text)) {
+    return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
   }
+  return text;
+}
+
+function messageOf(exc: unknown): string {
+  return exc instanceof Error ? exc.message : String(exc);
 }
 
 export function PrepPage() {
   const search = useSearchParams();
-  const urlDate = search.get("date") ?? "";
+  const urlDate = normalizeIso(search.get("date") ?? "");
 
-  const [dates, setDates] = useState<string[]>([]);
-  const [snapshotDates, setSnapshotDates] = useState<string[]>([]);
-  const [datesLoaded, setDatesLoaded] = useState(false);
+  const [calendar, setCalendar] = useState<PrepCalendar | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(true);
   const [date, setDate] = useState(urlDate);
   const [watermark, setWatermark] = useState<PrepWatermark | null>(null);
   const [snapshot, setSnapshot] = useState<PrepSnapshotView | null>(null);
-  const [auction, setAuction] = useState<AuctionDayView | null>(null);
+  const [context, setContext] = useState<ReviewContext | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dayLoading, setDayLoading] = useState(false);
-  const [snapshotLoading, setSnapshotLoading] = useState(false);
-  const selfWritten = useRef("");
+  const [loading, setLoading] = useState(false);
 
+  // 日历：一次请求覆盖近一年，不逐日请求。
   useEffect(() => {
     let active = true;
-    Promise.all([fetchPrepDates(60), fetchAuctionDatesSafe()])
-      .then(([prep, auctionDates]) => {
+    fetchPrepCalendar(365)
+      .then((payload) => {
         if (!active) return;
-        const union = Array.from(
-          new Set([...prep.asset_dates, ...prep.snapshot_dates, ...auctionDates])
-        ).sort();
-        setDates(union);
-        setSnapshotDates(prep.snapshot_dates);
-        // 仅在没有 URL 日期时回落到最新交易日。
-        if (!urlDate && union.length > 0) setDate(union[union.length - 1]);
+        setCalendar(payload);
+        if (!urlDate) {
+          const fallback = payload.latest_record_date ?? payload.end_date;
+          if (fallback) {
+            setDate(fallback);
+            navigate(`/prep?date=${fallback}`, { replace: true });
+          }
+        }
       })
       .catch((exc: unknown) => {
-        if (active) setError(exc instanceof Error ? exc.message : String(exc));
+        if (active) setError(messageOf(exc));
       })
       .finally(() => {
-        if (active) setDatesLoaded(true);
+        if (active) setCalendarLoading(false);
       });
     return () => {
       active = false;
     };
   }, []);
 
-  // URL → 状态：直链打开与浏览器后退/前进；本页写回 URL 时跳过。
+  // URL → 状态：直链与浏览器前进/后退。
   useEffect(() => {
-    if (window.location.search === selfWritten.current) return;
     if (urlDate && urlDate !== date) setDate(urlDate);
   }, [urlDate, date]);
 
-  // 资产水位与竞价：按所选日期请求。
+  // 当日请求：资产表始终请求；快照/成效仅在该日 has_snapshot 时请求。
   useEffect(() => {
     if (!date) return;
     let active = true;
     setError(null);
-    setDayLoading(true);
-    Promise.all([fetchPrepWatermark(date), fetchAuctionDay(date).catch(() => null)])
-      .then(([water, auctionDay]) => {
+    setLoading(true);
+    setSnapshot(null);
+    setContext(null);
+    fetchPrepWatermark(date)
+      .then(async (water) => {
         if (!active) return;
         setWatermark(water);
-        setAuction(auctionDay);
+        if (!water.has_snapshot) return;
+        const [snap, ctx] = await Promise.all([
+          fetchPrepSnapshot(date).catch(() => null),
+          fetchReviewContext(date).catch(() => null),
+        ]);
+        if (!active) return;
+        setSnapshot(snap);
+        setContext(ctx);
       })
       .catch((exc: unknown) => {
-        if (active) {
-          setWatermark(null);
-          setAuction(null);
-          setError(exc instanceof Error ? exc.message : String(exc));
-        }
+        if (!active) return;
+        setWatermark(null);
+        setError(messageOf(exc));
       })
       .finally(() => {
-        if (active) setDayLoading(false);
+        if (active) setLoading(false);
       });
     return () => {
       active = false;
     };
   }, [date]);
 
-  // 快照详情仅在快照日期列表包含该日时请求，避免预期 404。
-  const snapshotKey = snapshotDates.join("|");
-  useEffect(() => {
-    if (!date || !snapshotDates.includes(date)) {
-      setSnapshot(null);
-      setSnapshotLoading(false);
-      return;
-    }
-    let active = true;
-    setSnapshot(null);
-    setSnapshotLoading(true);
-    fetchPrepSnapshot(date)
-      .then((payload) => {
-        if (active) setSnapshot(payload);
-      })
-      .catch(() => {
-        if (active) setSnapshot(null);
-      })
-      .finally(() => {
-        if (active) setSnapshotLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [date, snapshotKey]);
-
   const changeDate = (next: string) => {
     setDate(next);
-    const params = new URLSearchParams(window.location.search);
-    params.set("date", next);
-    const query = params.toString();
-    selfWritten.current = `?${query}`;
-    navigate(`${window.location.pathname}?${query}`);
+    const query = `date=${encodeURIComponent(next)}`;
+    if (window.location.search.replace(/^\?/, "") !== query) {
+      navigate(`/prep?${query}`);
+    }
   };
 
-  const snapshotSettled =
-    Boolean(date) && datesLoaded && !snapshotLoading && snapshot === null;
+  const market = snapshot ? buildMarketView(snapshot) : null;
+  const mainlines = snapshot ? buildMainlineRows(snapshot, context) : [];
+  const candidates = snapshot ? buildCandidateViews(snapshot) : [];
+  const runInfo = snapshot ? buildRunInfo(snapshot) : null;
 
   return (
     <>
       <PageHeader
         eyebrow="PREP · 盘后复盘"
-        title="盘后复盘 / 集合竞价"
-        description="只读 assets.db（create=False，绝不建库）。资产水位、复盘快照块与竞价强度分布按交易日聚合；交易日写入 URL 可直链分享。"
+        title="盘后复盘"
+        description="查看复盘结果、计划成效与数据资产。所有日期都可点击，没有资产的日子也会如实展示缺失。"
         actions={
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-ink-2">
-            <IconCalendar size={14} />
-            <span className="num text-ink">{dates.length}</span> 个交易日
-          </span>
+          date ? (
+            <span className="text-caption text-ink-2">
+              当前交易日 <span className="num text-ink">{date}</span>
+            </span>
+          ) : null
         }
       />
 
       {error ? (
-        <div className="alert-critical mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-[12.5px]">
-          <IconAlert size={15} />
+        <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
+          <IconAlert size={16} />
           加载失败：{error}
         </div>
       ) : null}
 
       <div className="grid gap-3">
-        <Section
-          title="选择交易日"
-          description="日期来自 prep 资产、复盘快照与竞价快照的并集"
-          bodyClassName="px-4 py-3.5 sm:px-[18px]"
-        >
-          {dates.length === 0 ? (
-            <EmptyState
-              title={datesLoaded ? "未找到 assets.db 数据" : "正在读取交易日…"}
-              description={datesLoaded ? "请先运行 dragon-quant prep 生成复盘资产。" : undefined}
-              icon={<IconCalendar size={20} />}
+        <Section title="运行概况" description="当日应有资产与采集记录；异常折叠在下方">
+          {watermark ? (
+            <RunOverview
+              watermark={watermark}
+              snapshot={snapshot}
+              runInfo={runInfo}
+              context={context}
             />
           ) : (
-            <div className="flex flex-wrap items-end gap-3">
-              <Select
-                label="交易日"
-                value={date}
-                options={dates.map((item) => ({ value: item, label: item }))}
-                onChange={changeDate}
-                width={220}
-              />
-              <div className="pb-1.5 font-mono text-[11px] text-ink-3">
-                最新 {dates[dates.length - 1]} · 共 {dates.length} 个可查看交易日
-              </div>
-            </div>
+            <EmptyState
+              title={loading ? "正在读取该日资产…" : calendarLoading ? "正在读取日历…" : "该日无资产记录"}
+              description="请先运行 dragon-quant prep 生成复盘资产。"
+            />
           )}
         </Section>
 
-        {watermark ? (
-          <Section
-            title={`资产水位 · ${watermark.trade_date}`}
-            description="present / status / as_of / usable_display 来自 prep 资产元数据"
-            bodyClassName="px-4 py-3.5 sm:px-[18px]"
-          >
-            <WatermarkSection watermark={watermark} />
-          </Section>
-        ) : null}
+        <Section title="上次计划复盘 / 成效" description="回看上一交易日的计划与次日的实际表现">
+          {snapshot ? (
+            <PlanReviewSection context={context} snapshot={snapshot} candidates={candidates} />
+          ) : (
+            <EmptyState title="该日无复盘快照" description="无快照则不评估计划成效；不补算、不编造。" />
+          )}
+        </Section>
 
-        {snapshot ? (
-          <Section
-            title="复盘快照"
-            description={`version ${snapshot.version ?? "—"} · ${snapshot.slim ? "slim" : "full"}`}
-            bodyClassName="px-4 py-3.5 sm:px-[18px]"
-          >
-            <SnapshotSection snapshot={snapshot} />
-          </Section>
-        ) : snapshotSettled ? (
-          <Section title="复盘快照" description="该日快照不可用">
-            <EmptyState
-              title="该日无复盘快照"
-              description="prep 未生成快照，或该日快照缺失；资产水位与竞价数据仍可查看。"
-            />
-          </Section>
-        ) : null}
+        <Section title="市场" description="涨停 / 跌停 / 溢价 / 晋级率 / 最高板 / 炸板率 / 成交额；390px 在容器内横向滚动">
+          {snapshot ? (
+            <MarketStrip market={market} />
+          ) : (
+            <div className="text-body text-ink-3">该日无复盘快照。</div>
+          )}
+        </Section>
 
-        {auction ? (
-          <Section
-            title={`竞价快照 · ${auction.trade_date}`}
-            description={`共 ${auction.count} 只 · 强度分布与明细`}
-            bodyClassName="px-4 py-3.5 sm:px-[18px]"
-          >
-            <AuctionSection auction={auction} />
-          </Section>
-        ) : null}
+        <Section title="主线" description="状态中文化；排名/分数变化用中性箭头，不是涨跌" bodyClassName="px-3 py-3 sm:px-4">
+          {snapshot ? (
+            <MainlineTable rows={mainlines} />
+          ) : (
+            <div className="text-body text-ink-3">该日无复盘快照。</div>
+          )}
+        </Section>
 
-        {dayLoading && !watermark ? (
-          <div className="text-[12px] text-ink-3">正在加载该日资产与竞价数据…</div>
-        ) : null}
+        <Section title="候选" description="主角：全宽列表，行展开预期与贡献">
+          {snapshot ? (
+            <CandidateList candidates={candidates} />
+          ) : (
+            <div className="text-body text-ink-3">该日无复盘快照。</div>
+          )}
+        </Section>
+
+        <Section title="数据资产" description="近一年日历 + 当日明细；图标表示完备 / 不完备 / 资产缺失">
+          <AssetCalendar
+            startDate={calendar?.start_date ?? date}
+            endDate={calendar?.end_date ?? date}
+            days={calendar?.days ?? []}
+            selected={date}
+            onSelect={changeDate}
+            loading={calendarLoading}
+          />
+          <div className="mt-3">
+            {watermark ? (
+              <AssetDayTable watermark={watermark} />
+            ) : (
+              <EmptyState title="该日无资产记录" />
+            )}
+          </div>
+        </Section>
       </div>
     </>
   );

@@ -312,3 +312,36 @@ def has_scan(scan_id: str, source: str = "v2") -> bool:
     finally:
         conn.close()
 
+
+def summarize_scan_stocks(scan_ids: list[str], source: str = "v2") -> dict[str, dict]:
+    """批量聚合 ``scan_stocks``：``{scan_id: {stock_n, true_dragon_n}}``（只读）。
+
+    列表页一次查询拿到当日榜单规模与真龙数，避免逐行 N+1（方案 §5.6）。
+    不存在的 scan_id 不出现在结果里，由调用方按 ``None`` / 0 处理。
+    """
+    ids = [str(scan_id) for scan_id in (scan_ids or []) if scan_id]
+    if not ids:
+        return {}
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            "SELECT scan_id, COUNT(*), "
+            "SUM(CASE WHEN is_true_dragon = 1 THEN 1 ELSE 0 END) "
+            f"FROM {t['scan_stocks']} WHERE scan_id IN ({placeholders}) "
+            "GROUP BY scan_id",
+            ids,
+        ).fetchall()
+        return {
+            row[0]: {
+                "stock_n": int(row[1] or 0),
+                "true_dragon_n": int(row[2] or 0),
+            }
+            for row in rows
+        }
+    finally:
+        conn.close()
+

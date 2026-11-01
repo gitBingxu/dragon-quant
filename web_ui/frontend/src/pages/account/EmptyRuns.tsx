@@ -9,8 +9,8 @@ export function EmptyRuns({ onCreate }: { onCreate: () => void }) {
         <div className="grid h-12 w-12 place-items-center rounded-2xl border border-hairline bg-brand-soft text-brand-bright">
           <IconTrendUp size={22} />
         </div>
-        <h2 className="text-[16px] font-semibold text-ink">还没有账户回测记录</h2>
-        <p className="max-w-[440px] text-[12.5px] leading-relaxed text-ink-2">
+        <h2 className="text-title font-semibold text-ink">还没有账户回测记录</h2>
+        <p className="max-w-[440px] text-body leading-relaxed text-ink-2">
           生成第一条账户级回测批次：选择日期范围与初始资金，系统将按策略逐日撮合并输出权益曲线、
           交割单、单票收益与决策时间线。
         </p>

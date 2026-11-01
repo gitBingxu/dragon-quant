@@ -397,8 +397,12 @@ def report_ok(types: list[str]) -> dict:
     return {asset_type: {"status": "ok"} for asset_type in types}
 
 
-def prep_assets_tables(assets: dict[str, dict]) -> dict:
-    """Seed spec for ``assets.db.prep_assets`` ({asset_type: payload})."""
+def prep_assets_tables(assets: dict[str, dict],
+                       trade_date: str = TRADE_DATE) -> dict:
+    """Seed spec for ``assets.db.prep_assets`` ({asset_type: payload}).
+
+    ``trade_date`` 可选（D8 多日期日历场景）；默认行为与既有调用完全一致。
+    """
 
     return {"tables": {"prep_assets": {
         "columns": {
@@ -409,11 +413,62 @@ def prep_assets_tables(assets: dict[str, dict]) -> dict:
         },
         "primary_key": ["trade_date", "asset_type"],
         "rows": [
-            {"trade_date": TRADE_DATE, "asset_type": asset_type,
+            {"trade_date": trade_date, "asset_type": asset_type,
              "payload_json": json.dumps(payload, ensure_ascii=False,
                                         sort_keys=True),
-             "created_at": f"{TRADE_DATE} 16:45:00"}
+             "created_at": f"{trade_date} 16:45:00"}
             for asset_type, payload in assets.items()
+        ],
+    }}}
+
+
+def scan_log_seed(scan_id: str, entries: list[dict],
+                  source: str = "v2") -> dict:
+    """``scan_logs_v2`` 行（D9 运行态/错误摘要；默认不影响既有用例）。"""
+
+    rows = [
+        {
+            "scan_id": scan_id,
+            "ts": entry.get("ts", 0.0),
+            "category": entry.get("category", ""),
+            "level": entry.get("level", ""),
+            "message": entry.get("message", ""),
+            "code": entry.get("code", ""),
+            "data_json": json.dumps(entry.get("data", {}), ensure_ascii=False),
+            "source": source,
+        }
+        for entry in entries
+    ]
+    return {"tables": {"scan_logs_v2": {
+        "columns": {
+            "scan_id": "TEXT NOT NULL", "ts": "REAL", "category": "TEXT",
+            "level": "TEXT", "message": "TEXT", "code": "TEXT",
+            "data_json": "TEXT", "source": "TEXT",
+        },
+        "primary_key": [],
+        "rows": rows,
+    }}}
+
+
+def prep_snapshot_rows(rows: list[dict]) -> dict:
+    """``prep_snapshots`` 显式多行（D8 跨日上下文；result 为 dict）。"""
+
+    return {"tables": {"prep_snapshots": {
+        "columns": {
+            "trade_date": "TEXT NOT NULL", "source": "TEXT NOT NULL",
+            "result_json": "TEXT NOT NULL", "created_at": "TEXT",
+        },
+        "primary_key": ["trade_date", "source"],
+        "rows": [
+            {
+                "trade_date": row["trade_date"],
+                "source": row.get("source", "v2"),
+                "result_json": json.dumps(row["result"], ensure_ascii=False,
+                                          sort_keys=True),
+                "created_at": row.get("created_at",
+                                      f"{row['trade_date']} 16:45:00"),
+            }
+            for row in rows
         ],
     }}}
 
@@ -560,14 +615,31 @@ SCAN_STOCK_COLUMNS = {
 }
 
 
-def scan_db_seed(scan_id: str = "v2_20260911_5",
-                 scan_date: str = "2026-09-11") -> dict:
-    scan_row = {
-        "id": scan_id, "scan_date": scan_date, "elapsed_s": 1.5, "top_n": 5,
-        "candidates_n": 2, "workers": 2, "raw_output": None, "source": "v2",
-        "created_at": f"{scan_date} 15:30:00",
+def scan_stock_row(scan_id: str, code: str, name: str, rank: int,
+                   score: float = 80.0, *, is_true_dragon: int = 1,
+                   board_count: int = 2, concepts: list[str] | None = None,
+                   reject_reason: str | None = None,
+                   report_text: str = "r") -> dict:
+    """``scan_stocks_v2`` 完整行（D7 去重场景注入用）。"""
+    return {
+        "scan_id": scan_id, "code": code, "name": name, "rank": rank,
+        "composite_score": score, "board_count": board_count,
+        "concepts_json": json.dumps(concepts or [], ensure_ascii=False),
+        "dim_drive": 90.0, "dim_anti_drop": 75.0, "dim_leadership": 80.0,
+        "dim_absorption": 49.0, "dim_liquidity": 55.0,
+        "is_true_dragon": is_true_dragon, "reject_reason": reject_reason,
+        "report_text": report_text, "open_px": 10.0, "close_px": 11.0,
+        "high_px": 11.0, "low_px": 10.0, "pct": 10.0,
+        "turnover_rate": 8.0, "amount": 100_000_000.0,
+        "market_cap": 1_000_000_000.0, "source": "v2",
     }
-    stock_rows = [
+
+
+def scan_db_seed(scan_id: str = "v2_20260911_5",
+                 scan_date: str = "2026-09-11", *,
+                 stocks: list[dict] | None = None,
+                 top_n: int = 5) -> dict:
+    stock_rows = stocks if stocks is not None else [
         {"scan_id": scan_id, "code": "600001", "name": "龙头A", "rank": 1,
          "composite_score": 88.0, "board_count": 2,
          "concepts_json": json.dumps(["AI算力"], ensure_ascii=False),
@@ -587,6 +659,12 @@ def scan_db_seed(scan_id: str = "v2_20260911_5",
          "turnover_rate": 5.0, "amount": 80_000_000.0,
          "market_cap": 800_000_000.0, "source": "v2"},
     ]
+    scan_row = {
+        "id": scan_id, "scan_date": scan_date, "elapsed_s": 1.5,
+        "top_n": top_n, "candidates_n": len(stock_rows), "workers": 2,
+        "raw_output": None, "source": "v2",
+        "created_at": f"{scan_date} 15:30:00",
+    }
     return {"tables": {
         "scans_v2": {"columns": SCAN_COLUMNS, "primary_key": ["id"],
                      "rows": [scan_row]},

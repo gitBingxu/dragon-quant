@@ -335,7 +335,9 @@ dev = ["fastapi>=0.162.0", "uvicorn>=0.54.0", "httpx>=0.27"]
 | `dragon_quant.infra.factor.service` | `list_factors`、`query`、`status` | 因子注册表/值 |
 | `dragon_quant.infra.factor.storage` | `list_registry`、`list_build_runs` | 注册表 DB 快照 / build 审计 |
 | `dragon_quant.infra.storage.paths` | `DB_PATH`、`ASSETS_DB_PATH` | 仅 `/api/meta` 的 `is_file()` 探测 |
-| `dragon_quant.infra.provider.xueqiu` | `XueqiuProvider` | **仅** `/api/account/benchmark`（既有行为，普通 def） |
+| `dragon_quant.review.performance` | `compute_performance` | **仅** `/api/dragons/{date}/{code}/performance` 纯计算（无 DB / 无 provider / 无时钟） |
+| `dragon_quant.infra.clock` | `now` | **仅**绩效端点解析缺省 `as_of`（Asia/Shanghai 当天） |
+| `dragon_quant.infra.provider.xueqiu` | `XueqiuProvider` | **仅** `/api/account/benchmark`（既有行为）与绩效端点日 K（普通 def） |
 
 明确禁止：
 - `web_ui` 内出现 `import sqlite3`、`sqlite3.connect`、任何建表/写表 SQL；
@@ -420,7 +422,8 @@ class Meta(BaseModel):
 class DragonDateEntry(BaseModel):
     trade_date: str
     count: int
-    preview: list[DragonPreview]      # 最多 3 条，按 rank（null 最后）再 composite desc
+    preview: list[DragonPreview]      # 前 3 条，按 rank（null 最后）再 composite desc
+    items: list[DragonPreview]        # 全量（同一排序）；preview == items[:3]
 
 class DragonPreview(BaseModel):
     code: str; name: str
@@ -428,7 +431,29 @@ class DragonPreview(BaseModel):
     is_true_dragon: bool | None
 ```
 
-实现：`list_dragon_trade_dates(source)` 取最近 `limit` 个（升序返回 → 反转），逐日 `get_dragons(date, source)` 计数与取前 3。N ≤ 10 的 N+1 查询可接受；二期若需要一次聚合再在 `scan.storage` 增加专用只读函数（不在本期）。
+实现：日期取 `scan_repository.list_scan_dates(source)` 与 `dragons.list_dragon_trade_dates(source)` 的**并集**（降序），逐日构建非空卡片直到收满 `limit`（不得先截断日期再丢空条目）。单日来源为**原始扫描真龙榜**：`list_scan_stock_contributions_by_date(date, source)` 过滤 `is_true_dragon is not False` / `rank is not None` / `rank <= scan_top_n`，按 `code` 取最佳贡献（`rank` 最小 → `composite_score` 最高 → `scan_created_at` 最新），再按 `rank` → `composite_score` 降序 → `code` 排序。无可用扫描贡献的遗留日期回退 `get_dragons(date, source)`。因此卡片会展示被 `dragons_v2` 5 日去重排除的当日真龙（2026-11-01 增量）；总览表 / `/api/summary` / 回测池仍只读 `dragons_v2`，5 日去重不变，`count` 表示「当日原始真龙支数」。前端本地展开 `items`，不追加按日请求；`items` 缺失时回退 `preview`。
+
+**`GET /api/dragons/{trade_date}/{code}/performance?as_of=YYYYMMDD`** → 入选后表现（只读、固定宽松口径）
+
+```python
+class DragonPerformance(BaseModel):
+    trade_date: str; code: str
+    caliber: Literal["loose"] = "loose"
+    status: Literal["ok", "no_entry", "empty_window", "error"]
+    as_of: str
+    buy_date: str | None; buy_price: float | None
+    max_return_since_entry: float | None
+    max_drawdown_since_entry: float | None
+    peak_date: str | None; latest_bar_date: str | None
+    bars_in_window: int | None; bars_after_entry: int | None
+    error: str | None
+```
+
+- 计算在 `dragon_quant/review/performance.py`：首个 `high != low` 日按最低价买入，窗口到 `as_of` 最新有效日 K；峰值只看买入日之后（并列取最早），回撤窗口为买入日 → 峰值日（峰值后新低不计入）。
+- 记录存在时一律 200；`status="error"` 表达数据/传输失败；400 只给参数错误，404 只给记录不存在（`dragons_v2` 行与当日原始扫描贡献**均不存在**时才 404）。
+- 明细同规则：优先 `dragons_v2` 可见行，缺行回退当日扫描最佳贡献（五维经 `get_scan_stocks`，`review_*` 为空）；两处都无才 404。
+- **不返回** `max_return_5d` / `max_drawdown_5d`；不写库、不改固定 5 日回测 / CLI。
+- 抽屉独立请求、独立降级与重试；切换口径不重复拉绩效。
 
 **`GET /api/dragons/{trade_date}/{code}?source=v2&caliber=strict`** → 明细
 
@@ -866,7 +891,7 @@ export function Link({ to, children }) { /* <a href={to} onClick={preventDefault
   - `TradesTable` / `PositionsTable` / `Timeline` / `TimelineItem` / `EntryReasonStats` / `CurrentPosition` / `CreateRunModal` / `DeleteRunModal` / `EmptyRuns` / `Stat` / `Pager` 独立文件；
   - `lib/pagination.ts`：`usePagination`；
   - `lib/format.ts`：`fmtNum/fmtPct/pnlColor/fmtMoney/fmtCompactMoney/defaultRunName/...`。
-- **App.tsx**：改名为 `pages/dragons/DragonsPage.tsx`，新增「近几日榜单」分组（`trade-dates` 预览）与「明细抽屉」（`DragonDetailDrawer`，展示五维 + 严格/宽松对照）。筛选/口径/请求序号守卫/客户端排序逻辑原样保留。
+- **App.tsx**：改名为 `pages/dragons/DragonsPage.tsx`，新增「近几日榜单」分组（`trade-dates` 的 `items` 本地展开）与「明细抽屉」（`DragonDetailDrawer`，展示五维 + 入选后表现，移除双口径对照卡片）。筛选/口径/请求序号守卫/客户端排序逻辑原样保留。
 - **新页面**用统一的 `Section` / `StatCard` / `EmptyState`；表格统一 `DataTable`（Mantine `Table` + 前端分页），但**不**为四张表强造抽象，字段差异大时直接写 `Table`。
 - **空态文案**面向操作：例如 assets.db 不存在时提示「未找到 assets.db，请先运行 `dragon-quant prep`」；因子无行时提示「该日无因子值（缺失=无行）」。
 
@@ -881,7 +906,8 @@ export function Link({ to, children }) { /* <a href={to} onClick={preventDefault
 
 - **source 上下文**（⚠ 已被 2026-10-31「dashboard v2 收敛 + 三态主题」取代：前端固定 v2、删除选择器、旧 `?source=v1` 忽略 query；下文为历史设计）：`AppShell` 从 URL `?source=` 读取并渲染选择器；切换时 `navigate("?source=v1")`（保持当前 path）。总览/账户两页消费；其余页面不发送 source。
 - **caliber**：只在总览页 FilterBar 出现（严格默认，v1 强制宽松），行为与今天逐项一致。
-- **下钻**：总览行 → `DragonDetailDrawer`（不发新页面）；扫描列表 → `/scans/:id`；因子 → 右侧详情面板（URL `?factor=`）；复盘 → 日期下拉（URL `?date=`）。
+- **下钻**：总览行 → `DragonDetailDrawer`（不发新页面；绩效请求独立并行、失败不阻塞明细）；扫描列表 → `/scans/:id`；因子 → 右侧详情面板（URL `?factor=`）；复盘 → 日期下拉（URL `?date=`）。
+- **复盘展示**：`pages/prep/prepModel.ts` 把快照投影为「结果优先」模型（市场 → 主线 → 候选 → 次级 → 原始 JSON → 水位 → 竞价）；原始 JSON / 水位 / 竞价默认收起，**不改快照字段/算法**。
 - **请求竞态**：沿用 `requestSeq` 模式；页面卸载后丢弃响应。
 - **loading / error**：每个区块独立错误（`Alert`），不整页白屏。
 
@@ -958,6 +984,9 @@ export function Link({ to, children }) { /* <a href={to} onClick={preventDefault
 |---|---|
 | `test_web_backend_app.py` | `create_app` 路由/`/api` 404/错误处理器；cache header 三档；dist 缺失 build hint；`/api/meta`；Host 头白名单（非允许 Host → 400） |
 | `test_web_backend_dragons.py` | 冻结端点逐键（含 `derived_*`、`strict_*`、`derived_status`）；`summary.total==count==len(data)`；caliber 切换；trade-dates；detail（含 `scan_stocks_missing`） |
+| `test_review_performance.py` | 绩效纯函数：入场 / 峰值 / 回撤边界、`no_entry` / `empty_window` / `error`、有效 bar parity、无 5 日键 |
+| `test_web_backend.py`（扩展） | `trade-dates.items` 全长与 `preview == items[:3]`；performance 的 200/400/404、provider 失败降级、精确键集 |
+| `test_web_frontend_results.py` | 零依赖源码/dist 扫描：总览文案、tooltip、榜单展开、抽屉绩效、复盘 adapter 与折叠顺序 |
 | `test_web_backend_scans.py` | 列表/详情（无 raw_output）/stocks 排序与 true_only/分页截断 |
 | `test_web_backend_factors.py` | 注册表合并（代码真值 + DB version/params）；values 的 `resolved_versions`/PIT/coverage；runs 摘要与 `include_report` |
 | `test_web_backend_assets.py` | prep 13+1 类固定清单、`collection_report` 映射、快照 slim 裁剪、auction 汇总分类、assets.db 缺失空态 |
@@ -1000,7 +1029,7 @@ export function Link({ to, children }) { /* <a href={to} onClick={preventDefault
 
 | 门禁 | 改动 |
 |---|---|
-| `coverage-map.json` | `parser_snapshot.node_count` 53→54、`top_level_count` 15→16、新增 `dashboard` 节点（flags `-h/--help/--port/--no-browser/--yes`）；`coverage.nodes.dashboard.tests`；`independent_entries.web.tests` 追加 D1–D5；`description` 数字同步 |
+| `coverage-map.json` | `parser_snapshot.node_count` 53→54、`top_level_count` 15→16、新增 `dashboard` 节点（flags `-h/--help/--port/--no-browser/--yes`）；`coverage.nodes.dashboard.tests`；`independent_entries.web.tests` 追加 D1–D6（D6 = performance 端点 fake K 线冒烟）；`description` 数字同步 |
 | `test_coverage_map.py` | 函数名与断言 53/15 → 54/16 |
 | `test_cli_global.py` | `TOP_LEVEL_COMMANDS` 增 `dashboard` |
 | `test_skill_routes.py::test_top_level_commands_covered_by_safety` | 必须在同一 commit 更新 `skills/dragon-quant/references/safety.md`（新增 `dashboard` 行，T0）与 `commands.md`（routes 表新增行） |
@@ -1111,3 +1140,44 @@ npm test
 4. **g2 版本断言修复归属**：建议在本 feat 内作为测试卫生修复（独立 commit），否则无法宣称 E2E 全绿；请 main 确认是否接受跨范围小修。
 
 除此之外无阻塞项；阶段 2 未改变 main 已定的任何方向（目录、打包、命令、兼容红线、功能面均保持）。
+
+---
+
+## 17. 增量：dashboard 运维与复盘成效（2026-11-01，已实施）
+
+> 历史正文不重写；本节是该 web_ui owner 文档的增量契约。完整方案见
+> `docs/solutions/2026-11-01-dashboard-operations-results-design.md`。
+
+### 17.1 路由与页面
+
+| 路径 | 页面 | 说明 |
+|---|---|---|
+| `/prep` | 盘后复盘 | 固定顺序：运行概况（含运行异常）→ 上次计划复盘/成效 → 市场 → 主线 → 候选 → 数据资产；**不再包含集合竞价，不再渲染原始 JSON** |
+| `/auction` | 集合竞价（新增） | 固定顺序：运行概况 → 竞价结果 → 成效 → 资产日历 → 当日逐股明细 |
+| `/scans`、`/scans/:id` | 扫描 | 列表补状态/真龙/日志/错误；详情补运行概况、错误摘要与日志分页 |
+
+`AppShell` 在「复盘」后新增「竞价」。两页深链均为 `?date=YYYY-MM-DD`（API 兼容 `YYYYMMDD`），`popstate` 驱动前进/后退，无 `?date=` 时默认最近有记录日。
+
+### 17.2 新端点
+
+| 端点 | 语义 |
+|---|---|
+| `GET /api/prep/calendar?days=365&end=` | 近一年日历：`days` 只含有记录日期；三态 `complete/incomplete/missing`；`expected_ok/expected_total` 覆盖**所有当日应有资产**；合法缺席 `exempt[]` |
+| `GET /api/prep/{date}`（增量） | 每资产增 `category/expected/legal_absence/asset_complete`；水位增 `has_prior_snapshot/first_record_day/expected_ok/expected_total`；完全缺失日 200 不 404 |
+| `GET /api/prep/{date}/snapshot`（增量） | 新增 `derived`：`high_num` 打包值解码 + `needs_recompute`；快照本体不改 |
+| `GET /api/prep/{date}/review-context`（新增） | 跨日主线 delta、补名优先级、`plan_review`/`feedback` 成效事实、前日/今日市场并排 |
+| `GET /api/auction/calendar?days=365&end=` | 只读 code 覆盖；`veto`/数据不足不影响采集完备 |
+| `GET /api/auction/{date}`（增量） | 行增 `name/collected/evaluated/collection_status/key_evidence`；响应增 `run/names/asset_codes` |
+| `GET /api/auction/{date}/effect?window=20` | 本地 `stock_daily` 日 K + `decision_review`；窗口 ≤60、codes ≤300；缺数据 `insufficient_data` |
+| `GET /api/scans/{id}/logs?level=&offset=&limit=` | 日志分页（不返回 `data_json`）；无日志 200 `available=false` |
+
+### 17.3 前端契约
+
+- **排版**：`html{font-size:14px}`；六个 `--text-*` 令牌（caption/body/title/section/page/metric）全部 ≥1rem；源码无 `text-[<14px]`、无 `text-xs/text-sm`；SVG `fontSize>=14`。
+- **语义色**：`danger/warning/normal/positive` + `-soft/-line/-text`；删除 `warn/critical/info`；A 股 `up/down` 独立，价格/收益/回撤只用 `up/down`；禁止斜杠透明度。
+- **共享组件**：`AssetCalendar`（窗口内所有日期可点击，含完全缺失日/周末）、`Buy`…；不引入全局 store 或图表库。
+- **零依赖契约测试**：`dragon_quant/tests/test_web_frontend_ops.py`；改前端后 `npm --prefix web_ui/frontend run build` 同批更新 `dist`。
+
+### 17.4 架构与只读边界（不变）
+
+`web_ui` 仍零 SQL、零写库、零 provider import；新增 `backend/presenters/` 纯投影层，读能力全部落在 `dragon_quant` 既有仓储（`create=False`）。竞价页不引用 `kline_provider`，成效只读本地 `prep_assets.stock_daily`。

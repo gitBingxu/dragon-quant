@@ -75,9 +75,24 @@ python -m dragon_quant prep --json                        # 完整复盘 JSON（
 
 ## prep / auction 资产与快照表契约
 
+> dashboard 复盘页为展示投影（`web_ui/frontend/src/pages/prep/prepModel.ts` + 结果优先组件），只消费既有快照字段，**不改快照字段、prep 算法/采集或 CLI**；原始 JSON / 水位 / 竞价默认收起。
+
 | 表 | 用途 | 关键点 |
 |----|------|--------|
 | `prep_assets`（assets.db） | 复盘原始数据资产 | `prep` 命令采集；`UNIQUE(trade_date, asset_type)`，单事务按键 UPSERT；资产类型 `dragons`/`ths_limit_up_pool`/`ths_block_top`/`market_breadth`/`fg_boards`/`holdings`/`fund_flow`/`cninfo_announcements`/`macro_global`/`stock_daily`/`prev_plan`/`auction_feedback`/`t1_intraday`/`collection_report`；`collection_report` 按条合并，语义为「该日期资产当前最佳状态」（未执行的键沿用存量，失败补采不覆盖健康状态；review 独立修复不写 report）；每日落库=时间换历史 |
 | `prep_snapshots`（assets.db） | 盘后复盘计算结果 | 单列 `result_json` 存完整复盘结果（`sentiment` 情绪/建议仓位 + `main_boards` 主线 + `macro` 宏观扰动 + `candidates` 候选池（含 `facts`/`verdict`/`dimensions`/`ignore_reason`） + `review`/`review_candidates`（详细池评分） + `strategy_context` + `feedback`/`plan_review`（T-1 计划存在时） + `dragon_source` 血缘），`UNIQUE(trade_date, source)`，`source` 固定 `v2`；当前 `version=0.8`；加字段=加 JSON key，无需改表 |
 | `auction_assets`（assets.db） | 集合竞价原始资产 | `auction` 命令产出；`items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`quote_json`（可空）存 `Quote` 行情快照（昨收/跌停价/流通市值等，旧行为 NULL），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
 | `auction_snapshots`（assets.db） | 集合竞价强度计算结果 | `auction` 采集/`auction --recompute DATE` 写入；单列 `analysis_json` 存 **v2** 契约（旧键 `version`/`code`/`is_weak`/`strength`/`direction`/`level`/`dims`/`reject_reason`/`unverified`/`rank` 全保留，`version="2"`；新增 `rank_reason`/`pre_veto_strength`/`validation_status`/`config_version`/`config_hash`/`semantics`/`data_quality`/`risk_events`/`raw_factors`/`evidence`/`reference_prices`/`windows`/`actions`；`strength`/`level`/`dims.*.score`/`rank` 允许 `null`），`UNIQUE(trade_date, code, source)`、`source` 默认 `v2`；同日重跑整日原子替换，空结果不删旧快照。读接口 `assets_db.list_auction_snapshots` / `get_auction_snapshot`（逐行 JSON 损坏隔离）供候选池 A 维度消费；`assets_db.list_auction_history(before_date, codes, limit=5)` 只读历史末点匹配量（不建库/建表） |
+
+## dashboard 复盘 / 竞价投影（只读，2026-11-01）
+
+`web_ui` 只读 `assets.db`（`create=False`），不改快照字段、算法、采集器或 CLI。
+
+- `/prep` 只保留盘后复盘；`/auction` 独立页（导航「竞价」）。两页规范深链均为 `?date=YYYY-MM-DD`，API 参数层同时接受 `YYYYMMDD` 并归一。
+- `GET /api/prep/calendar?days=365&end=`：单连接 3 条轻量投影（资产类型 / `collection_report` 小对象 / 快照日期），不读大 payload；`days` 只返回**有记录日期**，前端对窗口内其余日期渲染「无记录」且**全部可点击**。
+- 完备判定：`expected_ok/expected_total` 覆盖**所有当日应有资产**（core / same_day_only / review_conditional / auxiliary）。合法缺席按 `same_day_only_history`、`first_day_no_plan`、`no_prev_plan`、`review_assets_disabled`、`not_attempted`、`legal_empty` 豁免；`collection_report` 只是「最佳已知状态」，不当作本次运行成功证明。
+- `GET /api/prep/{date}` 对任意合法日期返回 200（完全缺失日 = 全部 expected 缺失 + `has_snapshot=false`），不 404、不建库。
+- `GET /api/prep/{date}/snapshot` 新增 `derived`（`high_num` 打包值解码 + `needs_recompute`），快照本体不改；`GET /api/prep/{date}/review-context` 提供跨日主线 delta、补名与 `plan_review`/`feedback` 成效事实，不新增阈值、不改计算。
+- `GET /api/auction/calendar`：只读 `auction_assets(trade_date, code)` 与 `auction_snapshots(trade_date, code)`；`veto` / 数据不足 / `unverified` 是评估结果，不影响采集完备。
+- `GET /api/auction/{date}/effect`：行情**只读本地 `prep_assets.stock_daily`**（不触网、不经 provider），复用 `infra.factor.decision_review` 核与 1/3/5 日净收益口径；窗口默认 20（上限 60）、codes 并集上限 300，超限显式 `truncated`。缺本地日 K → `insufficient_data + local_bars_missing`；样本不足 → `insufficient_samples`，不是错误。
+- 本地日 K 缺 `limit_up` 涨停标记：一字板可能未被剔除（caveats 显式标注）；本期不推导涨停价，不新增第二套价格口径。

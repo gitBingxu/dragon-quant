@@ -10,12 +10,12 @@ const VALUE_COLUMNS: Column<FactorValueRow>[] = [
   {
     key: "code",
     header: "代码",
-    render: (row) => <span className="font-mono text-[12.5px] text-ink">{row.code}</span>,
+    render: (row) => <span className="font-mono text-body text-ink">{row.code}</span>,
   },
   {
     key: "factor",
     header: "因子",
-    render: (row) => <span className="font-mono text-[12px] text-ink-2">{row.factor_name}</span>,
+    render: (row) => <span className="font-mono text-body text-ink-2">{row.factor_name}</span>,
   },
   {
     key: "value",
@@ -26,13 +26,13 @@ const VALUE_COLUMNS: Column<FactorValueRow>[] = [
   {
     key: "available",
     header: "可用时点",
-    render: (row) => <span className="num text-[11.5px] text-ink-2">{row.available_at || "—"}</span>,
+    render: (row) => <span className="num text-body text-ink-2">{row.available_at || "—"}</span>,
   },
   {
     key: "scan",
     header: "血缘 scan",
     render: (row) => (
-      <span className="font-mono text-[11.5px] text-ink-3">{row.source_scan_id ?? "—"}</span>
+      <span className="font-mono text-body text-ink-3">{row.source_scan_id ?? "—"}</span>
     ),
   },
 ];
@@ -47,18 +47,18 @@ export function DayValues({ day }: { day: FactorDayView }) {
         <StatCard
           label="缺失版本"
           value={day.missing_versions.length}
-          tone={day.missing_versions.length ? "warn" : "neutral"}
+          tone={day.missing_versions.length ? "warning" : "neutral"}
           sub={day.missing_versions.join(", ") || "无缺失"}
         />
       </div>
 
       <div className="rounded-lg border border-hairline bg-raise px-3.5 py-3">
-        <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-ink-2">
+        <div className="mb-2 text-caption font-semibold uppercase tracking-[0.09em] text-ink-2">
           resolved_versions
         </div>
         <div className="flex flex-wrap gap-1.5">
           {Object.entries(day.resolved_versions).length === 0 ? (
-            <span className="text-[12px] text-ink-3">—</span>
+            <span className="text-body text-ink-3">—</span>
           ) : (
             Object.entries(day.resolved_versions).map(([name, version]) => (
               <Badge key={name} tone="outline">
@@ -68,7 +68,7 @@ export function DayValues({ day }: { day: FactorDayView }) {
             ))
           )}
         </div>
-        <div className="mt-2 font-mono text-[10.5px] text-ink-3">
+        <div className="mt-2 font-mono text-caption text-ink-3">
           coverage 来源：{day.coverage_source}
         </div>
       </div>
@@ -87,10 +87,10 @@ export function DayValues({ day }: { day: FactorDayView }) {
             <tbody>
               {Object.entries(day.coverage).map(([name, cov]) => (
                 <tr key={name}>
-                  <td className="font-mono text-[12px] text-ink">{name}</td>
+                  <td className="font-mono text-body text-ink">{name}</td>
                   <td className="text-right num text-ink-2">{fmtNum(cov.coverage, 3)}</td>
                   <td className="text-right num text-ink-2">{cov.rows ?? "—"}</td>
-                  <td className="text-[12px] text-ink-2">{cov.status ?? "—"}</td>
+                  <td className="text-body text-ink-2">{cov.status ?? "—"}</td>
                 </tr>
               ))}
             </tbody>

@@ -4,6 +4,7 @@ import { ScansPage } from "./pages/scans/ScansPage";
 import { ScanDetailPage } from "./pages/scans/ScanDetailPage";
 import { FactorsPage } from "./pages/factors/FactorsPage";
 import { PrepPage } from "./pages/prep/PrepPage";
+import { AuctionPage } from "./pages/auction/AuctionPage";
 import { AccountPage } from "./pages/account/AccountPage";
 
 type RouteDef = {
@@ -20,6 +21,7 @@ const ROUTES: RouteDef[] = [
   },
   { match: /^\/factors$/, render: () => <FactorsPage /> },
   { match: /^\/prep$/, render: () => <PrepPage /> },
+  { match: /^\/auction$/, render: () => <AuctionPage /> },
   { match: /^\/account$/, render: () => <AccountPage /> },
 ];
 

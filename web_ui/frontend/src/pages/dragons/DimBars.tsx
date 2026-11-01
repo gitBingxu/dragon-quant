@@ -18,11 +18,11 @@ export function DimBars({ dims }: { dims: Dims | null }) {
         return (
           <div key={dim.key}>
             <div className="mb-1.5 flex items-baseline justify-between gap-2">
-              <span className="text-[12px] text-ink-2">
+              <span className="text-body text-ink-2">
                 {dim.label}
-                <span className="ml-1.5 font-mono text-[10px] text-ink-3">{dim.weight}</span>
+                <span className="ml-1.5 font-mono text-caption text-ink-3">{dim.weight}</span>
               </span>
-              <span className="num text-[12.5px] text-ink">{fmtNum(value, 1)}</span>
+              <span className="num text-body text-ink">{fmtNum(value, 1)}</span>
             </div>
             <div className="meter">
               <span

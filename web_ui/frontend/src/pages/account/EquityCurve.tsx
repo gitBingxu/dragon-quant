@@ -27,10 +27,10 @@ export function EquityCurve({
           <Legend color={BENCH_COLOR} label="上证指数" />
           {last ? (
             <>
-              <span className="text-[11.5px] text-ink-3">
+              <span className="text-body text-ink-3">
                 最新权益 <span className="num text-ink">{fmtMoney(last.total_equity)}</span>
               </span>
-              <span className="text-[11.5px] text-ink-3">
+              <span className="text-body text-ink-3">
                 回撤 <span className="num text-down">{fmtPct(last.drawdown)}</span>
               </span>
             </>
@@ -57,7 +57,7 @@ export function EquityCurve({
 
 function TrendLegend() {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-2">
+    <span className="inline-flex items-center gap-1.5 text-body text-ink-2">
       <span className="flex h-[2px] w-3 overflow-hidden rounded-full">
         <span className="h-full w-1/2" style={{ background: "var(--color-up)" }} />
         <span className="h-full w-1/2" style={{ background: "var(--color-down)" }} />
@@ -69,7 +69,7 @@ function TrendLegend() {
 
 function Legend({ color, label }: { color: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-2">
+    <span className="inline-flex items-center gap-1.5 text-body text-ink-2">
       <span className="h-[2px] w-3 rounded-full" style={{ background: color }} />
       {label}
     </span>

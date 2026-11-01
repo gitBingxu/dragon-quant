@@ -173,7 +173,7 @@ export function AccountPage() {
       />
 
       {error ? (
-        <div className="alert-critical mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-[12.5px]">
+        <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
           <IconAlert size={15} />
           加载失败：{error}
         </div>

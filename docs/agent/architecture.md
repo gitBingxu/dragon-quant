@@ -65,6 +65,7 @@ dragon_quant/
 │       └── breakout.py / divergence.py
 ├── infra/                       # 叶子层：唯一连接/schema/路径/缓存/provider/资产/因子
 │   ├── __init__.py / clock.py / models.py / market_calendar.py / module_proxy.py
+│   ├── board_height.py          # high_num 共享纯解析器（打包值解码，零依赖叶子）
 │   ├── provider/                # 数据源适配
 │   │   ├── __init__.py / main.py / base.py / bundle.py / data.py / rate_limit.py
 │   │   ├── tdx.py / ths.py / xueqiu.py / tencent.py / macro.py
@@ -93,7 +94,7 @@ dragon_quant/
 ├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
 
 # 同级仓库包（不是 dragon_quant 的子包）
-web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static）+ frontend/src/{pages,api,lib,router,theme} + dist（入库）
+web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static/presenters 纯投影）+ frontend/src/{pages,api,lib,components,router,theme} + dist（入库）
 ```
 
 ## 命令导航与入口事实

@@ -48,7 +48,7 @@ export function EquityTooltip({
       <text
         x={x + 12}
         y={y + 21}
-        fontSize="11"
+        fontSize="14"
         fill="var(--color-ink-2)"
         style={{ fontFamily: "var(--font-mono)" }}
       >
@@ -56,13 +56,13 @@ export function EquityTooltip({
       </text>
       {rows.map((row, index) => (
         <g key={row.label}>
-          <text x={x + 12} y={y + 42 + index * 17} fontSize="11.5" fill="var(--color-ink-2)">
+          <text x={x + 12} y={y + 42 + index * 17} fontSize="14" fill="var(--color-ink-2)">
             {row.label}
           </text>
           <text
             x={x + width - 12}
             y={y + 42 + index * 17}
-            fontSize="11.5"
+            fontSize="14"
             fill={row.color ?? "var(--color-ink)"}
             textAnchor="end"
             style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}

@@ -35,6 +35,12 @@
 
 **依赖**：`[project.optional-dependencies]` 的 `web = fastapi>=0.162 / uvicorn>=0.54`（裸 uvicorn），`dev` 额外含 `httpx` 供 `TestClient`。基础安装仍只有 playwright/tmdx。`import web_ui` / `web_ui.backend` / `web_ui.backend.serve` 零 fastapi import、零目录副作用。
 
+**入选后表现与展示精修（2026-10-31）**：新增只读 `GET /api/dragons/{trade_date}/{code}/performance`，路由注入 `deps.kline_provider()`（复用 `XueqiuProvider`，仅该端点）与 `deps.clock_module()`（仅解析缺省 `as_of`）；计算在 `dragon_quant/review/performance.py` 纯函数中完成，不写库、不改 CLI / 固定 5 日回测。白名单增量为 `dragon_quant.review.performance`（纯计算）与 `dragon_quant.infra.clock`（路由解析 `as_of`），`XueqiuProvider` 复用仅限绩效端点。前端新增 `HintIcon` / `CollapsibleSection`、`pages/prep/prepModel.ts` 投影与 `dragon_quant/tests/test_web_frontend_results.py` 零依赖契约测试；`trade-dates` 增 `items` 全量。改前端后仍必须 `npm --prefix web_ui/frontend run build`，让 `web_ui/dist` 与源码同批更新。
+
+**近几日卡片原始扫描榜（2026-11-01 增量）**：`routers/dragons.py` 的 `trade-dates` 改从 `deps.scan_repository()` 的 `list_scan_dates` / `list_scan_stock_contributions_by_date` 组装卡片（日期与 `list_dragon_trade_dates` 取并集），明细/绩效在 `dragons_v2` 缺行时回退当日扫描贡献。只新增只读组合，不改 `scan/storage`、`review`、DB schema、CLI 与前端源码，因此 `web_ui/dist/**` 与 `coverage-map.json` 的 parser 计数均不变；E2E D7 覆盖该口径（`seed_builders.scan_db_seed` 新增可选 `stocks` / `top_n`，默认行为不变）。
+
+**运维/复盘成效投影（2026-11-01 增量）**：`web_ui/backend/presenters/` 新增纯投影层（`scan_view` / `prep_view` / `auction_view` / `auction_effect`），路由只做参数与响应；`deps.py` 白名单增量：`dragon_quant.infra.board_height`、`dragon_quant.infra.factor.decision_review(+_store)`、`dragon_quant.scan.storage.logs`、`dragon_quant.infra.assets.db`（`prep_calendar_rows` / `auction_calendar_rows` / `list_auction_asset_names` / `list_stock_daily_bars` / `first_prep_record_date` / `first_prep_snapshot_date`）与无 I/O 的 `review_assets_enabled()`。新端点：`/api/prep/calendar`、`/api/prep/{date}/review-context`、`/api/auction/calendar`、`/api/auction/{date}/effect`、`/api/scans/{id}/logs`。前端新增 `AssetCalendar` 与 `/auction` 页；排版统一 `html{font-size:14px}` + 六个 `--text-*` 令牌（所有可见文字 ≥1rem），语义色收敛为 `danger/warning/normal/positive`（+soft/line/text），删除 `warn/critical/info`，A 股 `up/down` 独立。零依赖契约测试为 `dragon_quant/tests/test_web_frontend_ops.py`；改前端后必须 `npm --prefix web_ui/frontend run build` 让 dist 同批更新。
+
 ## 测试与 E2E 细则
 
 - **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。

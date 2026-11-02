@@ -121,10 +121,11 @@ class TestSkillContent(unittest.TestCase):
 
     def test_operations_cover_contracts(self):
         text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
-        for token in ("单能力", "每日量化入库", "--ui-only", "--no-browser",
+        for token in ("单能力", "每日量化入库", "dashboard", "--no-browser",
                       "真实", "URL", "--true-only", "16:40", "09:25", "09:30",
                       "factor-groups"):
             self.assertIn(token, text)
+        self.assertNotIn("--ui-only", text)
 
     def test_operations_single_capability_no_implicit_write(self):
         text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
@@ -362,7 +363,7 @@ class TestSkillTomorrowStrategy(unittest.TestCase):
 
 
 class TestPremarketSkill(unittest.TestCase):
-    """盘前预案：八类白名单、T0、八段模板、三锚/四态、外部证据与体量。"""
+    """盘前预案：九类白名单、T0、八段模板、三锚/四态、外部证据与体量。"""
 
     def _premarket(self) -> str:
         return (ROOT / "references" / "premarket.md").read_text(encoding="utf-8")
@@ -370,9 +371,9 @@ class TestPremarketSkill(unittest.TestCase):
     def _evidence(self) -> str:
         return (ROOT / "references" / "evidence.md").read_text(encoding="utf-8")
 
-    def test_skill_declares_eight_capabilities_and_premarket_route(self):
+    def test_skill_declares_nine_capabilities_and_premarket_route(self):
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("八类", text)
+        self.assertIn("九类", text)
         self.assertIn("盘前预案", text)
         self.assertIn("premarket", text)
         self.assertIn("T0", text)

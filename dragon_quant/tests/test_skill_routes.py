@@ -19,6 +19,7 @@ ALLOWED_TOP = {
     "premarket",
     "factor",
     "review-account",
+    "dashboard",
 }
 ALLOWED_DATA = {"quote", "kline", "minute", "batch-quote"}
 ALLOWED_FACTOR = {"build", "query"}
@@ -171,6 +172,23 @@ class TestSkillRoutes(unittest.TestCase):
         self.assertIn("premarket", safety)
         self.assertEqual(safety["premarket"]["tier"], "T0")
 
+    def test_dashboard_route_is_read_only_and_never_auto_installs(self):
+        rows = [route for route in _routes()
+                if _route_command_parts(route["command"])[0] == "dashboard"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["write_class"], "T0")
+        for flag in ("--port", "--no-browser"):
+            self.assertIn(flag, rows[0]["key_flags"])
+        safety = {row["command"]: row for row in _safety()}
+        self.assertEqual(safety["dashboard"]["tier"], "T0")
+        safety_text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")
+        forbidden = safety_text.split("## 禁止操作", 1)[1]
+        self.assertIn("--yes", forbidden)
+        self.assertIn("自动安装", forbidden)
+        self.assertNotIn("dragon-quant dashboard --yes", _skill_blob())
+        # 面板统一走 dashboard，不在 Skill 正文重新引入 CLI 弃用别名。
+        self.assertNotIn("--ui-only", _skill_blob())
+
     def test_hidden_alias_and_v1_absent(self):
         blob = _skill_blob()
         self.assertNotIn("scan_v2", blob)
@@ -184,7 +202,7 @@ class TestSkillRoutes(unittest.TestCase):
             self.assertNotIn(parent_help, blob)
 
     def test_backtest_routes_do_not_allow_ui_flag(self):
-        """两段式 UI：回测行只能回测，开面板必须走独立 --ui-only。"""
+        """两段式 UI：回测行只能回测，开面板必须走独立 dashboard 路由。"""
         backtest_rows = 0
         for route in _routes():
             parent, _ = _route_command_parts(route["command"])

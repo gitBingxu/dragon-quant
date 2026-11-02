@@ -34,7 +34,8 @@
 - 前端新增极简 pathname 路由与 AppShell，`vite base` 改为 `/` 以支持 `/scans/<id>` 深链。
 - dashboard 总览文案/排序调整（「已回测」、胜率 tooltip、筛选右对齐、榜单本地展开）；抽屉移除双口径卡片并新增独立绩效请求；复盘页改为结果优先展示，原始 JSON / 水位 / 竞价默认收起。
 - 近几日榜单改读**原始扫描真龙榜**（`scans_v2` + `scan_stocks_v2`），展示被 `dragons_v2` 5 日去重排除的当日真龙；总览表 / `/api/summary` / 回测池仍只读 `dragons_v2`，5 日去重不变。
-- **版本**：Python `0.8.0`；npm / Skill `1.3.0`；`metadata.min-cli-version` `0.8.0`。E2E coverage-map 同步为 55 个 parser 节点 / 17 个顶层命令（含 dashboard 与 premarket），新增 `golden/premarket/context.json`，旧 golden 不变。
+- **版本**：Python `0.8.0`；npm / Skill `1.3.1`；`metadata.min-cli-version` `0.8.0`。E2E coverage-map 同步为 55 个 parser 节点 / 17 个顶层命令（含 dashboard 与 premarket），新增 `golden/premarket/context.json`，旧 golden 不变。
+- **Agent Skill 面板路由**：白名单由八类升九类，新增「可视化面板」（`dashboard`，T0 长驻）；`review --ui-only` / `review-account --ui-only` 不再作为 Skill 路由（CLI 兼容别名保留）。`dashboard --yes` 与 `DQ_WEB_AUTO_INSTALL=1` 明确禁止，缺 `[web]` 时只转述手动安装指令。
 - **盘前作战卡模板 v2**：`references/premarket.md` 从按数据域的八段审计报告改为按交易时间线的盘前作战卡（一页结论 / 市场与主线剧本 / 主线与角色地图 / 候选逐只作战卡 / 09:15–15:00 逐时点检查表 / 持仓与退出 / 不做什么与盘中更新纪律 / 盘后归因）；市场层三向剧本仅作叙述，动作仍只取个股 `allowed_actions` 与 `action_ceiling` 交集；报告正文改为全汉语用语（字段名只保留在 Agent 操作说明与「输出用语」映射表）；**09:25 编排**：09:25 前只出无竞价版并主动建议，09:25 后先检查竞价状态，缺失时主动建议运行 `auction`（T1，需本轮确认），成功后重跑 `premarket`，不自动运行、不自动 `--force`；新增调研报告与方案文档 `docs/research/2026-11-02-premarket-playbook-research.md`、`docs/solutions/2026-11-02-premarket-playbook-v2-design.md`。
 - **存储只读 API**：`get_previous_prep_snapshot` / `list_auction_snapshots` / `dragons_mirror.list_dragon_trade_dates` 增加向后兼容的 `readonly=True` 路径（`_connect_readonly`，`busy_timeout=5000`，跳过 schema 建表）；默认行为不变。
 - **Agent Skill 收敛为交易日助手**：默认命令面从 15 个顶层命令收敛为七类白名单（个股行情、扫描与真龙、盘后复盘、集合竞价、龙头回测、账户回测、因子入库与读回）；未开放能力统一走固定话术 + issue 链接，不再以命令、路由或否定示例出现。新增 `references/reports.md`（prep 九段 / auction 七段模板），`operations.md` 固定单能力/每日复合、UI 生命周期与因子三组静态名单，`safety.md` 仅保留 T0/T1。

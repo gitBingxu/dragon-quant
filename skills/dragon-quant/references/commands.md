@@ -15,14 +15,13 @@
 | 历史扫描 | dragon-quant scan --date | --date --top | T0 | json | 明确历史日时才用；优先 dragons |
 | 真龙核验 | dragon-quant dragons | --date --true-only | T0 | json | scan 后结构化核验 |
 | 龙头回测 | dragon-quant review | --date --top | T1 | human | 只处理成熟 pending；failed>0 要如实报告 |
-| 回测面板 | dragon-quant review --ui-only | --ui-only --port --no-browser | T0 | url | 不回测；长驻；URL 取自启动日志 |
+| 可视化面板 | dragon-quant dashboard | --port --no-browser | T0 | url | 长驻；只起面板不回测；URL 取自启动日志；禁止 --yes 自动安装 |
 | 盘后复盘 | dragon-quant prep | --date --recompute --force --json | T1 | human/json | 当日 ≥16:40；--force 不绕门禁 |
 | 集合竞价 | dragon-quant auction | --force --recompute --json | T1 | human/json | 当日 ≥09:25；命中快照本次只读；无 --date |
 | 盘前预案 | dragon-quant premarket | --date --json | T0 | human/json | 只读；不写库；缺数据降级 exit0；不触网 |
 | 因子构建 | dragon-quant factor build | --date --only --json | T1 | human/json | 只允许三组固定名单；禁止默认 build |
 | 因子读回 | dragon-quant factor query | --date --name --json | T0 | human/json | 仅入库核对与代表因子读回 |
 | 账户回测 | dragon-quant review-account | --from --to --capital | T1 | human | 默认策略与 v2；不传 --config |
-| 账户面板 | dragon-quant review-account --ui-only | --ui-only --port --no-browser | T0 | url | 只开已有面板；URL 取自启动日志 |
 <!-- routes:end -->
 
 ## 关键约定
@@ -34,6 +33,6 @@
 - **`prep` 当日门禁 16:40**，`--force` 不绕过；`--recompute` 不触网但仍写快照。
 - **`auction` 没有 `--date`**；快照命中时本次只读，`--force` 才重采，`--recompute DATE` 用已存资产重算。
 - **`factor build` 的 exit 0 不等于全部成功**：必须解析 `reports[0].factors[].status` 并逐因子核对。
-- **`review --ui-only` / `review-account --ui-only` 不回测、不写业务记录**；只开面板时不重跑回测。
+- **`dashboard` 只起面板、不回测、不写业务记录**；面板已打开时不要重复跑回测。缺 `[web]` 依赖时给出手动安装指令，不要加 `--yes`。
 - **复合意图“回测并打开面板”** 默认按 CLI 正常行为尝试打开浏览器；只有用户明确只要 URL/不要浏览器，或宿主无浏览器能力时才加 `--no-browser`。
 - **`review-account` 终端没有 JSON**：只读人读摘要，详细结果在面板；`--config` 不接受用户自定义参数。

@@ -111,7 +111,7 @@ npx dragon-quant-skills doctor                     # 检查安装完整性、CLI
 - 安装成功后按目标输出提示：Hermes 项目运行 `hermes skills trust <projectRoot>`，Pi 编辑后 `/reload`，DeepSeek 自动发现 skills 根的直接子项，其余按客户端重载。安装器不自动修改任何 trust 或客户端配置，也不宣称客户端已完成真实加载验证。
 - 在 dragon-quant 仓库根使用 `--agent openclaw` 会命中包内 `skills/` 源目录，install / uninstall 会直接拒绝（`--force` 也不能绕过）；请到消费项目运行，或用 `--target-dir` 指向临时 workspace。`all` 会在项目根创建 OpenClaw 的 `skills/`，不希望时请显式列出目标。
 
-Agent 可用的能力限定为八类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
+Agent 可用的能力限定为九类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回、可视化面板。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
 
 仓库内 Skill 版本可能高于 npm registry 已发布版本；安装后用 `npx dragon-quant-skills doctor` 核对实际安装的 Skill 版本、来源与最低 CLI 版本，不要假定 `npx` 拉到的就是仓库中的最新内容。
 
@@ -137,8 +137,8 @@ dragon-quant scan --top 5
 # 回测已到观察期的扫描结果
 dragon-quant review
 
-# 打开龙头回测面板
-dragon-quant review --ui-only
+# 打开龙头回测面板（dashboard 默认落在复盘页）
+dragon-quant dashboard
 ```
 
 ![龙头回测面板](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/review.png)

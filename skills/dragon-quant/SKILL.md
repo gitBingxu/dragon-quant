@@ -4,7 +4,7 @@ description: Use when the user asks about A-share 个股行情, 真龙/龙头扫
 license: MIT
 compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
-  skill-version: "1.3.0"
+  skill-version: "1.3.1"
   min-cli-version: "0.8.0"
 ---
 
@@ -25,25 +25,26 @@ metadata:
 按顺序短路，失败即停并说明修复方式；不要跳过检查直接拼命令。
 
 1. **CLI 是否存在、版本是否够**：`dragon-quant -v`。项目内优先 `.venv/bin/python -m dragon_quant -v`。低于 `min-cli-version` 时停止，给出升级/安装指引；不要自动安装 Python 包。
-2. **能力是否在白名单**：只有 `references/commands.md` 的八类能力可以执行。不在白名单时，直接使用本文件末尾的固定话术，不解释内部命令、不列替代命令名。
+2. **能力是否在白名单**：只有 `references/commands.md` 的九类能力可以执行。不在白名单时，直接使用本文件末尾的固定话术，不解释内部命令、不列替代命令名。
 3. **命令与参数是否存在**：只对白名单**叶子**命令取 help（如 `data quote -h`、`factor build -h`）；不要取父级 `data -h` / `factor -h`，避免把未开放子命令带进上下文。只使用白名单列出的参数。
 4. **时点门禁**：统一按 Asia/Shanghai 与交易日判断。`scan` 当日 15:00 前不执行；`prep` 当日 16:40 前不执行；`auction` 当日 09:25 前不执行。时段不满足时说明等待条件，不用 `--force` 绕过。
 5. **数据源**：个股 K 线/分时雪球链路为空或 403 时，改用 `--source tencent` 重试一次；仍失败则如实说明数据不可得。
 6. **写确认**：T0 可直接执行；T1 必须本轮明确请求或确认，上一次同意不代表这一次同意。
 7. **执行后校验**：输出非空、JSON 可解析、`trade_date` 与请求日期一致；空行/失败字符串不等于成功。
 
-## 能力白名单（八类）
+## 能力白名单（九类）
 
-只有下面八类能力可以执行，详细命令与参数见 `references/commands.md`：
+只有下面九类能力可以执行，详细命令与参数见 `references/commands.md`：
 
 1. **个股行情**：实时行情、日 K、分时、批量行情。
 2. **扫描与真龙**：当日扫描（默认 `--top 5`）→ `dragons --true-only` 结构化核验；历史日优先读 `dragons`。
 3. **盘后复盘**：`prep` + 固定九段报告。
 4. **集合竞价**：`auction` + 固定七段报告。
 5. **盘前预案**：`premarket`（T0 只读）+ 外部证据 + 盘前作战卡八段模板；09:25 后缺失竞价时**主动建议**运行 `auction`（T1，需本轮确认），完成后重跑 `premarket`。
-6. **龙头回测**：先回测，再 `--ui-only` 打开回测面板。
-7. **账户回测**：先引导区间/资金，再回测，再 `--ui-only` 打开账户面板。
+6. **龙头回测**：先回测，再用 `dashboard` 打开面板。
+7. **账户回测**：先引导区间/资金，再回测，再用 `dashboard` 打开账户页（URL `/account`）。
 8. **因子入库**：仅三组内置因子的 `factor build --only` 与代表因子 `factor query` 读回。
+9. **可视化面板**：`dashboard`（T0 长驻，只起面板不回测）；缺 `[web]` 时只给手动安装指令，禁止 `--yes` 自动安装。
 
 单能力请求只执行用户点名的那一个能力，不隐式附带其他写操作；只有用户明确说“每日全流程 / 每日量化入库 / 今天全套”时才按每日复合 workflow 执行。详见 `references/operations.md`。
 
@@ -89,7 +90,7 @@ metadata:
 
 ## 未开放能力
 
-任何不在八类白名单内的能力（含用户点名但未开放的功能、缺功能、体验问题、数据异常无法解释），统一回复下面这句话，逐字使用，不解释内部命令、不列替代命令名：
+任何不在九类白名单内的能力（含用户点名但未开放的功能、缺功能、体验问题、数据异常无法解释），统一回复下面这句话，逐字使用，不解释内部命令、不列替代命令名：
 
 > 当前功能还不稳定，暂未对 Agent 开放。你可以到 https://github.com/gitBingxu/dragon-quant/issues 反馈需求或问题。
 

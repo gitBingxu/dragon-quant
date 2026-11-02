@@ -1,0 +1,58 @@
+review_type: research
+round: 1
+verdict: APPROVE
+summary: "调研覆盖中英文实践、行为科学与交易所规则，能支撑“按交易时间线重排模板”的方向；存在 3 项 MAJOR（备选方案、三向/四态映射、市场层标签的动作边界），已在同一轮修复。"
+findings:
+  - severity: MAJOR
+    dimension: "候选方案完整性"
+    location: "报告 §3/§4；方案 §2"
+    finding: "只给出一种模板重排方案，未显式比较增量补丁、完整重排、拆分两份 reference 的取舍。"
+    evidence: "报告 §4 直接给出推荐骨架；方案 §2 原只有设计模式，无备选方案对比。"
+    recommendation: "补充 A/B/C 方案对比与选择理由。"
+    resolution: "已在方案 §2.1 增加备选方案对比表，选择 B（按交易时间线重排）。"
+  - severity: MAJOR
+    dimension: "可行动性"
+    location: "报告 §3.3；方案 §4"
+    finding: "“三向剧本 + 四态映射”没有显式映射表，落地时容易出现“超预期=confirmed”的语义漂移。"
+    evidence: "报告只写市场层三向、个股层四态；方案模板未定义两者对应关系。"
+    recommendation: "增加三向↔四态映射表，并明确 09:25 前只能 wait。"
+    resolution: "已在方案 §2.2 增加映射表，明确 confirmed 只在 09:25/开盘验证后出现。"
+  - severity: MAJOR
+    dimension: "风险识别"
+    location: "方案模板 §2"
+    finding: "市场层“超预期/符合/不及预期”可能被误用为新判断/新评分，与项目“不新增评分”约束冲突。"
+    evidence: "模板三向剧本表使用市场层标签，但 premarket_sc_v1 没有对应的市场级三向字段。"
+    recommendation: "明确市场层标签只用于叙述、不产生动作；无法机械判断时写“无法判断”。"
+    resolution: "已在模板 §2 增加说明，并在方案 §7 增加实现前行数测量。"
+  - severity: MINOR
+    dimension: "事实准确性"
+    location: "报告 §结论先行 / §1.1"
+    finding: "“外部专业模板的共同骨架”对 7 个英文样本的概括偏强。"
+    evidence: "样本为非随机从业者博客/Prop firm 教育材料。"
+    recommendation: "改为“样本中的专业模板骨架高度相似”。"
+    resolution: "已修改措辞。"
+  - severity: MINOR
+    dimension: "需求覆盖"
+    location: "报告 §4"
+    finding: "完整模板放在方案文档，研究报告只有骨架；读者可能只读报告而看不到可落地模板。"
+    evidence: "报告 §4 末尾只有指向方案文档的链接。"
+    recommendation: "保持交叉链接，并在交付说明中明确两份文档的关系。"
+    resolution: "已在报告 §4 末保留链接；交付说明会同时给出两份路径。"
+  - severity: MINOR
+    dimension: "项目检查清单"
+    location: "方案 §7"
+    finding: "Skill reference 有 300 行/总 1200 行上限，模板草案尚未测量行数。"
+    evidence: "test_skill_content.py 的 test_premarket_and_evidence_size_caps 与 test_all_reference_size_caps。"
+    recommendation: "实现前用 wc -l 测量，超限则拆分 intraday.md。"
+    resolution: "已在方案 §7 增加测量与拆分规则。"
+scorecard:
+  critical: 0
+  major: 3
+  minor: 3
+  dimensions_passed: "6/6"
+post_review_fixes:
+  - "方案 §2.1 增加备选方案对比。"
+  - "方案 §2.2 增加三向↔四态映射。"
+  - "模板 §2 增加市场层标签不产生动作的边界说明。"
+  - "方案 §7 增加 300 行上限测量与拆分规则。"
+  - "报告措辞改为“样本中的专业模板”。"

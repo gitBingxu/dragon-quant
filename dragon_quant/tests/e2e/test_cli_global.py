@@ -25,6 +25,7 @@ TOP_LEVEL_COMMANDS = (
     "dragons",
     "prep",
     "auction",
+    "premarket",
     "assets",
     "factor",
     "buy",

@@ -13,7 +13,7 @@ dragon_quant/
 │   ├── __init__.py              # lazy `COMMANDS` 注册表 + `dispatch(name, args)` 唯一分发入口
 │   ├── _shared.py               # CLI 纯 helper（策略 JSON / 日期 / 序列化）单一实现
 │   ├── scan.py / logs.py / data.py / blacklist.py / review.py / review_account.py
-│   └── dragons.py / prep.py / auction.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py
+│   └── dragons.py / prep.py / auction.py / premarket.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py
 ├── scan/                        # 扫描 feature（可调用包）
 │   ├── __init__.py              # 可调用包：scan(...) → scan.orchestrator.main.scan
 │   ├── sectors.py               # 板块身份 (source, category, code) + cache 键构造
@@ -51,6 +51,9 @@ dragon_quant/
 │   │   ├── __init__.py / main.py / collect.py / recompute.py / scoring.py / dates.py
 │   │   ├── normalize.py / features.py / events.py / dimensions.py / context.py
 │   │   └── registry.py / strength.py / serialize.py / report.py / types.py
+│   ├── premarket/               # 只读盘前上下文（T0：Facade + Adapter + 纯投影）
+│   │   ├── __init__.py / main.py / snapshot.py / context.py
+│   │   └── anchors.py / actions.py / report.py
 │   ├── strategy/                # 策略纯拆分（main.py 只门面重导出）
 │   │   ├── __init__.py / main.py / common.py / buy.py / checks.py / sell.py
 │   │   ├── execution.py / priority.py / risk.py
@@ -103,7 +106,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 > 每个顶层命令的实现在 `commands/<name>.py` 的 `handle(args, services)`（buy/sell 共用
 > `commands/buy_sell.py` 的 `handle_buy`/`handle_sell`）。测试与脚本应直接走
 > `commands.dispatch` 或命令模块的公共 helper，不存在第二个转发层。真实导航链是
-> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 16 个（含 `dashboard`，长驻、只读面板）；`app.py`（Composition Root）只是
+> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 17 个（含 `dashboard` 长驻只读面板与 `premarket` 只读盘前上下文）；`app.py`（Composition Root）只是
 > commands 按需调用的装配支路，不在链上多一跳。
 
 > **入口事实（实测）**：`python -m dragon_quant`（不带子命令）与 `-h` 一样**打印帮助并 exit 0**，
@@ -117,6 +120,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 > `review_account.prep.main`（`run_prep` + `format_advice_lines` / `format_candidate_lines`）；
 > `review_account.live_trade.main.run_buy/run_sell`；
 > `review_account.auction.main.run_auction/run_auction_recompute`；
+> `review_account.premarket.main.run_premarket`（只读盘前上下文，T0）；
 > `infra.factor.main` 13 个批准出口（`build/list_factors/query/status/export_matrix/evaluate_factor/
 > fin_sync/fin_calibrate/fin_status/parse_only/FactorModel/annotate_pool/CleanConfig`）；
 > `infra.assets.main.run`；`infra.factor.maintenance.plan_purge/apply_purge`（`assets purge-derived`，命令层取锁）；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；

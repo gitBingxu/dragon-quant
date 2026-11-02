@@ -134,13 +134,37 @@ def _connect(create: bool = True, path=None) -> Optional[sqlite3.Connection]:
 def _connect_readonly(path=None) -> Optional[sqlite3.Connection]:
     """纯只读连接（``mode=ro``）：不执行 WAL PRAGMA、不建库/建表/建 sidecar。
 
-    仅供 dry-run / 审计计数使用；写路径仍走 :func:`_connect`。
+    供 dry-run / 审计计数 / 盘前只读上下文使用；写路径仍走 :func:`_connect`。
+    缺表 / 锁等待由调用方（或 Adapter）捕获 ``sqlite3.Error``，绝不自动建表。
+
+    WAL 回退：SQLite 只有在 ``-shm`` 存在时才能用 ``mode=ro`` 打开 WAL 库；
+    干净的库（已 checkpoint、sidecar 被移除或为 0 字节）会报
+    ``unable to open database file``。此时若 ``-wal`` 不存在或为 0 字节，
+    用 ``immutable=1`` 只读打开（没有未 checkpoint 的事务可丢，且不建 sidecar）；
+    若 ``-wal`` 非空则无法安全只读，原样抛错交由 Adapter 降级。
     """
 
     db_path = ASSETS_DB_PATH if path is None else path
     if not Path(db_path).exists():
         return None
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        conn = None
+    if conn is not None:
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("SELECT 1")      # sqlite3 连接是惰性的：强制真实打开
+            return conn
+        except sqlite3.OperationalError:
+            conn.close()
+    wal = Path(f"{db_path}-wal")
+    if wal.exists() and wal.stat().st_size:
+        raise sqlite3.OperationalError("unable to open database file")
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("SELECT 1")
+    return conn
 
 
 def _assert_schema_shape(conn: sqlite3.Connection, full: bool = False):
@@ -352,7 +376,8 @@ def has_prep_snapshot(trade_date: str, source: str = "v2") -> bool:
         conn.close()
 
 
-def get_previous_prep_snapshot(before_date: str, source: str = "v2"
+def get_previous_prep_snapshot(before_date: str, source: str = "v2", *,
+                               readonly: bool = False
                                ) -> tuple[Optional[dict], dict]:
     """读取**严格早于** ``before_date`` 的最近一盘前快照（prev 注入，只读）。
 
@@ -362,22 +387,40 @@ def get_previous_prep_snapshot(before_date: str, source: str = "v2"
     - JSON 损坏 → ``(None, {"trade_date": 该日, "error": "..."})``，调用方据此标
       ``prev_snapshot_corrupt``；
     - ``trade_date < ?`` 严格小于，绝不返回当日快照（避免自己和自己比）。
+
+    ``readonly=True`` 走 :func:`_connect_readonly`（``mode=ro``、零 DDL、零
+    WAL/shm sidecar）；缺表 / 锁等待等 ``sqlite3.Error`` 由调用方捕获，绝不建表。
+    默认 ``False`` 保持既有行为（写路径连接 + 读路径 schema 兼容）。
     """
 
     empty_meta = {"trade_date": None, "created_at": None, "error": None}
-    conn = _connect(create=False)
-    if conn is None:
-        return None, dict(empty_meta)
-    try:
-        _ensure_schema(conn, migrate=False)
-        row = conn.execute(
-            "SELECT result_json, trade_date, created_at FROM prep_snapshots "
-            "WHERE trade_date < ? AND source = ? "
-            "ORDER BY trade_date DESC LIMIT 1",
-            (before_date, source),
-        ).fetchone()
-    finally:
-        conn.close()
+    if readonly:
+        conn = _connect_readonly()
+        if conn is None:
+            return None, dict(empty_meta)
+        try:
+            row = conn.execute(
+                "SELECT result_json, trade_date, created_at FROM prep_snapshots "
+                "WHERE trade_date < ? AND source = ? "
+                "ORDER BY trade_date DESC LIMIT 1",
+                (before_date, source),
+            ).fetchone()
+        finally:
+            conn.close()
+    else:
+        conn = _connect(create=False)
+        if conn is None:
+            return None, dict(empty_meta)
+        try:
+            _ensure_schema(conn, migrate=False)
+            row = conn.execute(
+                "SELECT result_json, trade_date, created_at FROM prep_snapshots "
+                "WHERE trade_date < ? AND source = ? "
+                "ORDER BY trade_date DESC LIMIT 1",
+                (before_date, source),
+            ).fetchone()
+        finally:
+            conn.close()
     if row is None:
         return None, dict(empty_meta)
     payload, error = _load_json(row[0], None)
@@ -583,12 +626,27 @@ def _snapshot_row(trade_date: str, code: str, analysis, error) -> dict:
 
 
 def list_auction_snapshots(trade_date: str, source: str = "v2",
-                           with_meta: bool = False) -> list[dict]:
+                           with_meta: bool = False, *,
+                           readonly: bool = False) -> list[dict]:
     """列出某日竞价强度快照，按 code 排序；逐行 JSON 损坏只标 ``error``，不中断整批。
 
     ``with_meta=True`` 时逐行追加 ``created_at`` 键（因子层血缘读取，方案 §15.2）；
-    默认 ``False`` 返回形状保持不变。
+    默认 ``False`` 返回形状保持不变。``readonly=True`` 走 ``_connect_readonly``
+    （``mode=ro``、零 DDL、零 sidecar）；缺表等 ``sqlite3.Error`` 由调用方捕获。
     """
+    if readonly:
+        conn = _connect_readonly()
+        if conn is None:
+            return []
+        try:
+            rows = conn.execute(
+                "SELECT trade_date, code, analysis_json, created_at FROM auction_snapshots "
+                "WHERE trade_date = ? AND source = ? ORDER BY code",
+                (trade_date, source),
+            ).fetchall()
+        finally:
+            conn.close()
+        return _auction_snapshot_rows(rows, with_meta)
     conn = _connect(create=False)
     if conn is None:
         return []
@@ -599,16 +657,20 @@ def list_auction_snapshots(trade_date: str, source: str = "v2",
             "WHERE trade_date = ? AND source = ? ORDER BY code",
             (trade_date, source),
         ).fetchall()
-        result = []
-        for r in rows:
-            analysis, error = _load_json(r[2], {})
-            item = _snapshot_row(r[0], r[1], analysis, error)
-            if with_meta:
-                item["created_at"] = r[3]
-            result.append(item)
-        return result
     finally:
         conn.close()
+    return _auction_snapshot_rows(rows, with_meta)
+
+
+def _auction_snapshot_rows(rows, with_meta: bool) -> list[dict]:
+    result = []
+    for r in rows:
+        analysis, error = _load_json(r[2], {})
+        item = _snapshot_row(r[0], r[1], analysis, error)
+        if with_meta:
+            item["created_at"] = r[3]
+        result.append(item)
+    return result
 
 
 def get_auction_snapshot(trade_date: str, code: str,

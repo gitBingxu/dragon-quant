@@ -4,8 +4,9 @@
 1. 总览文案与筛选右对齐；
 2. 近几日榜单 items 本地展开；
 3. 抽屉移除双口径卡片、新增独立绩效请求与默认展开报告；
-4. 复盘页结果优先 adapter + 折叠；
-5. dist 与源码同批构建，旧文案不回流。
+4. 复盘页结果优先 adapter + 折叠；五区块顺序固定；
+5. 竞价页四区块顺序固定；
+6. dist 与源码同批构建，旧文案不回流。
 """
 
 from __future__ import annotations
@@ -75,16 +76,16 @@ def test_prep_adapter_has_explicit_fallback_chain() -> None:
 
 
 def test_prep_page_drops_raw_json_and_uses_new_sections() -> None:
-    """原始 JSON 块已删除（调试走 API/CLI）；六段顺序固定。"""
+    """原始 JSON 块已删除（调试走 API/CLI）；五区块顺序固定。"""
     page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
-    for token in ("RunOverview", "PlanReviewSection", "MarketStrip",
-                  "MainlineTable", "CandidateList", "数据资产"):
+    for token in ("AssetCalendar", "PrepCoreResult", "PrepDayEffectSection",
+                  "AssetDayTable", "AccuracyBoard"):
         assert token in page, f"PrepPage 缺少 {token!r}"
     assert "SnapshotRawDetails" not in page
     assert "JSON.stringify" not in page
 
-    order = ['title="运行概况"', 'title="上次计划复盘', 'title="市场"',
-             'title="主线"', 'title="候选"', 'title="数据资产"']
+    order = ["<AssetCalendar", "<PrepCoreResult", "<PrepDayEffectSection",
+             "<AssetDayTable", "<AccuracyBoard"]
     positions = [page.index(token) for token in order]
     assert positions == sorted(positions)
 
@@ -115,7 +116,8 @@ def test_prep_page_no_longer_hosts_auction() -> None:
     assert "集合竞价" not in text
     assert "AuctionSection" not in text
     auction = _read(SRC / "pages" / "auction" / "AuctionPage.tsx")
-    for token in ("运行概况", "竞价结果", "成效", "资产日历", "当日逐股明细"):
+    for token in ("AssetCalendar", "ResultsSection", "AssetCollectionSection",
+                  "AccuracyBoard"):
         assert token in auction, f"AuctionPage 缺少 {token!r}"
     route = _read(SRC / "router.tsx")
     assert "<AuctionPage />" in route

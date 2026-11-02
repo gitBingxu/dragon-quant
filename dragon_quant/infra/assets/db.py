@@ -976,6 +976,61 @@ def list_auction_asset_names(trade_date: str, *, db_path=None) -> dict[str, str]
 STOCK_DAILY_MAX_BARS = 200_000
 
 
+def list_stock_daily_bar_dates(date_from: str | None = None,
+                               date_to: str | None = None, *,
+                               db_path=None) -> list[str]:
+    """本地 ``stock_daily`` 资产的 bar 日期并集（升序去重；只读、不建库）。
+
+    这是「本地已确认交易日」序列（``bars_union``），**不是**交易所日历。扫描
+    区间内每份 ``stock_daily`` payload 的 ``rows[*][*].date`` 并集；损坏 payload
+    跳过不中断。供日历默认日期、单日效果与全历史准确率共用。
+    """
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        clauses = ["asset_type = 'stock_daily'"]
+        params: list = []
+        if date_from is not None:
+            clauses.append("trade_date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            clauses.append("trade_date <= ?")
+            params.append(date_to)
+        payloads = conn.execute(
+            "SELECT payload_json FROM prep_assets "
+            f"WHERE {' AND '.join(clauses)} ORDER BY trade_date",
+            tuple(params),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    dates: set[str] = set()
+    for (payload_json,) in payloads:
+        payload, error = _load_json(payload_json, None)
+        if error is not None or not isinstance(payload, dict):
+            continue
+        rows = payload.get("rows")
+        if not isinstance(rows, dict):
+            continue
+        for bars in rows.values():
+            if not isinstance(bars, list):
+                continue
+            for bar in bars:
+                if not isinstance(bar, dict):
+                    continue
+                day = str(bar.get("date") or "")
+                if not day:
+                    continue
+                if date_from is not None and day < date_from:
+                    continue
+                if date_to is not None and day > date_to:
+                    continue
+                dates.add(day)
+    return sorted(dates)
+
+
 def list_stock_daily_bars(codes, date_from: str, date_to: str,
                           max_bars: int = STOCK_DAILY_MAX_BARS, *,
                           db_path=None) -> dict:

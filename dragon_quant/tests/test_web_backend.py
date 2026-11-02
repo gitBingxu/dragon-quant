@@ -34,9 +34,23 @@ def make_client(**overrides) -> TestClient:
     app = create_app(DashboardSettings())
     if "scan_repository" in overrides and "scan_logs_repository" not in overrides:
         overrides["scan_logs_repository"] = FakeScanLogs()
+    # 单元测试默认不读取真实 assets.db：本地交易日序列为空。
+    overrides.setdefault("bar_calendar_loader", _empty_calendar_loader())
     for name, value in overrides.items():
         app.dependency_overrides[getattr(deps, name)] = _constant_override(value)
     return TestClient(app, base_url=BASE)
+
+
+def _empty_calendar_loader():
+    return lambda date_from=None, date_to=None: []
+
+
+def _calendar_loader(dates):
+    def load(date_from=None, date_to=None):
+        return [day for day in dates
+                if (date_from is None or day >= date_from)
+                and (date_to is None or day <= date_to)]
+    return load
 
 
 # ─── app / meta / 404 / cache ───────────────────────────────────────────────
@@ -1498,3 +1512,260 @@ def test_review_context_market_verification_shape():
     assert evidence["limit_down_cnt"] == 3
     # 既有 score_change 语义不变（来自 review.market.score_change）。
     assert market["score_change"] == 5.0
+
+
+# ─── 3A：默认日期字段 / prep effect / accuracy / 路由顺序 ────────────────────
+
+ACC_CALENDAR = ["2026-09-01", "2026-09-02", "2026-09-03",
+                "2026-09-04", "2026-09-05"]
+
+
+def _acc_bar(day, *, open_px, close):
+    return {"date": day, "open": open_px, "high": max(open_px, close) + 0.1,
+            "low": min(open_px, close) - 0.1, "close": close,
+            "volume": 1000.0}
+
+
+def _acc_bars() -> dict:
+    return {
+        "600001": [
+            _acc_bar("2026-09-01", open_px=10.0, close=10.5),
+            _acc_bar("2026-09-02", open_px=10.0, close=11.0),
+            _acc_bar("2026-09-03", open_px=11.0, close=9.0),
+            _acc_bar("2026-09-04", open_px=10.5, close=12.0),
+            _acc_bar("2026-09-05", open_px=12.0, close=12.5),
+        ],
+    }
+
+
+def _acc_snapshot(day: str, candidates) -> dict:
+    return {"trade_date": day, "version": "0.8",
+            "sentiment": {"position_pct": 0.5},
+            "review_candidates": candidates,
+            "review": {"mainlines": []}}
+
+
+class FakeAccuracyAssets(FakeAssets):
+    def __init__(self):
+        self.prep_days = {
+            "2026-09-01": _acc_snapshot("2026-09-01", [
+                {"code": "600001", "name": "龙头A",
+                 "eligibility": "eligible", "position_pct": 20}]),
+            "2026-09-02": _acc_snapshot("2026-09-02", [
+                {"code": "600001", "name": "龙头A",
+                 "eligibility": "eligible", "position_pct": 20}]),
+        }
+
+    def list_prep_snapshot_dates(self):
+        return sorted(self.prep_days)
+
+    def get_prep_snapshot(self, trade_date, source="v2", with_meta=False):
+        payload = self.prep_days.get(trade_date)
+        if with_meta:
+            return payload, {"created_at": f"{trade_date} 17:00:00"}
+        return payload
+
+    def list_auction_snapshot_dates(self):
+        return ["2026-09-01"]
+
+    def list_auction_snapshots(self, trade_date, source="v2",
+                               with_meta=False):
+        if trade_date != "2026-09-01":
+            return []
+        return [{"trade_date": trade_date, "code": "600001", "version": "2",
+                 "level": "强", "direction": "bear", "is_weak": False,
+                 "data_quality": {"status": "ok"}, "unverified": False}]
+
+    def list_auction_asset_names(self, trade_date, **kwargs):
+        return {"600001": "龙头A"}
+
+
+def _acc_bars_loader(*_args, **_kwargs):
+    return {"rows": _acc_bars(), "truncated": False,
+            "bar_dates": ACC_CALENDAR, "codes": ["600001"]}
+
+
+def test_prep_calendar_default_date_fields():
+    client = make_client(
+        assets_repository=FakeAssets(),
+        clock_module=_fixed_clock(),
+        bar_calendar_loader=_calendar_loader(["2026-09-10", "2026-09-11"]),
+    )
+    calendar = client.get("/api/prep/calendar?days=365").json()
+    assert calendar["default_date"] == "2026-09-10"
+    assert calendar["default_date_source"] == "local_bar_previous"
+    assert calendar["calendar_basis"] == "local_stock_daily_bars_union"
+    assert calendar["calendar_latest_date"] == "2026-09-11"
+    assert calendar["degraded"] is False
+    assert calendar["degraded_reason"] is None
+
+
+def test_auction_calendar_default_date_fields():
+    client = make_client(
+        assets_repository=FakeAssets(),
+        clock_module=_fixed_clock(),
+        bar_calendar_loader=_calendar_loader(["2026-09-10", "2026-09-11"]),
+    )
+    calendar = client.get("/api/auction/calendar?days=365").json()
+    assert calendar["default_date"] == "2026-09-11"
+    assert calendar["default_date_source"] == "local_bar_latest"
+    assert calendar["calendar_latest_date"] == "2026-09-11"
+
+
+def test_static_accuracy_routes_win_over_dynamic_date():
+    client = make_client(
+        assets_repository=FakeAccuracyAssets(),
+        clock_module=_fixed_clock(),
+        bar_calendar_loader=_calendar_loader(ACC_CALENDAR),
+        local_bars_loader=_acc_bars_loader,
+    )
+    prep = client.get("/api/prep/accuracy")
+    assert prep.status_code == 200
+    assert prep.json()["summary"]["correct"] == 2
+    assert prep.json()["as_of"] == "2026-09-02"
+
+    auction = client.get("/api/auction/accuracy")
+    assert auction.status_code == 200
+    assert auction.json()["summary"]["correct"] == 1
+    assert auction.json()["day_kind_counts"] == {}
+
+
+class FakeEmptyAccuracyAssets(FakeAccuracyAssets):
+    def list_prep_snapshot_dates(self):
+        return []
+
+    def list_auction_snapshot_dates(self):
+        return []
+
+
+def test_prep_accuracy_empty_db_returns_200_insufficient_data():
+    client = make_client(
+        assets_repository=FakeEmptyAccuracyAssets(), clock_module=_fixed_clock(),
+        bar_calendar_loader=_calendar_loader([]),
+        local_bars_loader=_acc_bars_loader,
+    )
+    body = client.get("/api/prep/accuracy").json()
+    assert body["status"] == "insufficient_data"
+    assert body["reason"] == "no_snapshots"
+    auction = client.get("/api/auction/accuracy").json()
+    assert auction["status"] == "insufficient_data"
+    assert auction["reason"] == "no_snapshots"
+
+
+EFFECT_CALENDAR = ["2026-09-10", "2026-09-11", "2026-09-14",
+                   "2026-09-15", "2026-09-16", "2026-09-17"]
+
+
+class FakeEffectAssets(FakeAssets):
+    def __init__(self):
+        self.snapshot = {
+            "trade_date": "2026-09-11", "version": "0.8",
+            "sentiment": {"position_pct": 0.5},
+            "review": {"mainlines": [
+                {"rank": 1, "board_name": "机器人", "category": "概念",
+                 "is_mainline": True},
+                {"rank": 2, "board_name": "AI算力", "category": "概念",
+                 "is_mainline": False},
+            ]},
+            "review_candidates": [
+                {"code": "600001", "name": "龙头A", "role": "leader",
+                 "review_score": 88.0, "eligibility": "eligible",
+                 "position_pct": 20},
+                {"code": "600002", "name": "跟风B",
+                 "eligibility": "not_qualified", "position_pct": 0},
+            ],
+        }
+        self.blocks = {
+            "2026-09-11": {"rows": [
+                {"name": "机器人", "code": "885517", "change": 2.31},
+                {"name": "AI算力", "code": "885100", "change": 1.0}]},
+            "2026-09-14": {"rows": [
+                {"name": "机器人", "code": "885517", "change": 3.14},
+                {"name": "AI算力", "code": "885100", "change": 1.5}]},
+        }
+
+    def get_prep_snapshot(self, trade_date, source="v2", with_meta=False):
+        payload = self.snapshot if trade_date == "2026-09-11" else None
+        if with_meta:
+            return payload, {"created_at": "2026-09-11 17:00:00"}
+        return payload
+
+    def get_prep_asset(self, trade_date, asset_type):
+        if asset_type == "ths_block_top":
+            return self.blocks.get(trade_date)
+        return None
+
+
+def _effect_bars_loader(*_args, **_kwargs):
+    bars = {"600001": [
+        _acc_bar("2026-09-14", open_px=10.0, close=10.5),
+        _acc_bar("2026-09-15", open_px=10.5, close=11.0),
+        _acc_bar("2026-09-16", open_px=11.0, close=11.8),
+        _acc_bar("2026-09-17", open_px=11.8, close=10.4),
+    ]}
+    return {"rows": bars, "truncated": False,
+            "bar_dates": EFFECT_CALENDAR, "codes": ["600001"]}
+
+
+def test_prep_effect_route_shape_and_strict_fields():
+    client = make_client(
+        assets_repository=FakeEffectAssets(),
+        bar_calendar_loader=_calendar_loader(EFFECT_CALENDAR),
+        local_bars_loader=_effect_bars_loader,
+    )
+    body = client.get("/api/prep/20260911/effect").json()
+    assert body["status"] == "ok"
+    assert body["trade_date"] == "2026-09-11"
+    assert body["next_trade_date"] == "2026-09-14"
+    assert body["snapshot_version"] == "0.8"
+    assert body["data_source"] == "local_prep_assets+local_stock_daily"
+    boards = body["boards"]
+    assert boards["source"] == "review_mainlines"
+    assert len(boards["rows"]) == 1
+    assert boards["rows"][0]["board_code"] == "885517"
+    assert boards["rows"][0]["next_change_pct"] == 3.14
+    rows = {row["code"]: row for row in body["stocks"]["rows"]}
+    assert rows["600001"]["status"] in ("completed", "pending")
+    assert rows["600001"]["group"] == "recommended"
+    assert rows["600002"]["group"] == "not_recommended"
+    assert body["coverage"]["boards_total"] == 1
+    assert body["coverage"]["stocks_total"] == 2
+
+
+def test_prep_effect_missing_snapshot_and_invalid_date():
+    client = make_client(
+        assets_repository=FakeEffectAssets(),
+        bar_calendar_loader=_calendar_loader(EFFECT_CALENDAR),
+        local_bars_loader=_effect_bars_loader,
+    )
+    missing = client.get("/api/prep/20200101/effect").json()
+    assert missing["status"] == "insufficient_data"
+    assert missing["reason"] == "snapshot_missing"
+    assert client.get("/api/prep/not-a-date/effect").status_code == 400
+
+
+def test_accuracy_router_registered_before_assets_router():
+    from web_ui.backend.routers import ROUTERS
+    from web_ui.backend.routers import accuracy as accuracy_router
+    from web_ui.backend.routers import assets as assets_router
+
+    order = [router for router in ROUTERS]
+    assert order.index(accuracy_router.router) < order.index(assets_router.router)
+
+
+def test_prep_effect_local_bars_error_is_visible_in_warnings():
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("disk unavailable")
+
+    client = make_client(
+        assets_repository=FakeEffectAssets(),
+        bar_calendar_loader=_calendar_loader(EFFECT_CALENDAR),
+        local_bars_loader=boom,
+    )
+    response = client.get("/api/prep/20260911/effect")
+    assert response.status_code == 200
+    body = response.json()
+    assert any("local_bars_error" in warning for warning in body["warnings"])
+    assert body["stocks"]["rows"]
+    assert {row["status"] for row in body["stocks"]["rows"]} <= {
+        "cannot_evaluate", "pending"}

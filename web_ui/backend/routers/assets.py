@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from .. import params
 from ..deps import (
     assets_repository,
+    bar_calendar_loader,
     clock_module,
     decision_review_store,
     local_bars_loader,
@@ -26,6 +27,7 @@ from ..deps import (
 from ..errors import ApiError
 from ..presenters import auction_effect as auction_effect_view
 from ..presenters import auction_view, prep_effect, prep_view
+from ..presenters.calendar_defaults import resolve_default_date
 
 router = APIRouter(tags=["assets"])
 
@@ -103,6 +105,14 @@ class PrepCalendar(BaseModel):
     end_date: str
     latest_record_date: str | None = None
     days: list[PrepCalendarDay]
+    default_date: str
+    default_date_source: Literal[
+        "local_bar_previous", "local_bar_latest",
+        "record_date_fallback", "today_fallback"]
+    calendar_basis: Literal["local_stock_daily_bars_union", "record_dates"]
+    calendar_latest_date: str | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 class PrepAssetStatus(BaseModel):
@@ -376,6 +386,14 @@ class AuctionCalendar(BaseModel):
     end_date: str
     latest_record_date: str | None = None
     days: list[AuctionCalendarDay]
+    default_date: str
+    default_date_source: Literal[
+        "local_bar_previous", "local_bar_latest",
+        "record_date_fallback", "today_fallback"]
+    calendar_basis: Literal["local_stock_daily_bars_union", "record_dates"]
+    calendar_latest_date: str | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 class AuctionSnapshotRow(BaseModel):
@@ -509,6 +527,7 @@ def prep_calendar(days: int = 365, end: str | None = None,
                   assets=Depends(assets_repository),
                   clock=Depends(clock_module),
                   review_enabled: bool = Depends(review_assets_enabled),
+                  load_calendar=Depends(bar_calendar_loader),
                   ) -> PrepCalendar:
     window = _clamp_days(days)
     end_day = _normalize_date_or_400(end) if end else _today_iso(clock)
@@ -519,7 +538,11 @@ def prep_calendar(days: int = 365, end: str | None = None,
         review_assets_enabled=review_enabled,
         first_snapshot_date=assets.first_prep_snapshot_date(),
     )
-    return PrepCalendar(available=bool(rows), **built)
+    defaults = resolve_default_date(
+        page="prep", bar_dates=load_calendar(start_day, end_day) or [],
+        reference_date=end_day,
+        latest_record_date=built.get("latest_record_date"))
+    return PrepCalendar(available=bool(rows), **built, **defaults)
 
 
 @router.get("/api/prep/{trade_date}", response_model=PrepWatermark)
@@ -681,14 +704,20 @@ def auction_dates(limit: int = 30, assets=Depends(assets_repository)) -> Auction
 @router.get("/api/auction/calendar", response_model=AuctionCalendar)
 def auction_calendar(days: int = 365, end: str | None = None,
                      assets=Depends(assets_repository),
-                     clock=Depends(clock_module)) -> AuctionCalendar:
+                     clock=Depends(clock_module),
+                     load_calendar=Depends(bar_calendar_loader),
+                     ) -> AuctionCalendar:
     window = _clamp_days(days)
     end_day = _normalize_date_or_400(end) if end else _today_iso(clock)
     start_day = _window_start(end_day, window)
     rows = assets.auction_calendar_rows(start_day, end_day)
     built = auction_view.build_auction_calendar(
         rows=rows, start_date=start_day, end_date=end_day)
-    return AuctionCalendar(available=bool(rows), **built)
+    defaults = resolve_default_date(
+        page="auction", bar_dates=load_calendar(start_day, end_day) or [],
+        reference_date=end_day,
+        latest_record_date=built.get("latest_record_date"))
+    return AuctionCalendar(available=bool(rows), **built, **defaults)
 
 
 @router.get("/api/auction/{trade_date}", response_model=AuctionDayView)

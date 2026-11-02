@@ -9,9 +9,6 @@
  * 打包值当板数渲染。
  */
 import type {
-  NoTradeItem,
-  PlanFollowup,
-  PlanFollowupRow,
   PrepSnapshotView,
   PrepWatermark,
   ReviewContext,
@@ -287,6 +284,52 @@ export function buildCandidateViews(snapshot: PrepSnapshotView): CandidateView[]
   });
 }
 
+// ─── 推荐建仓标的（核心结果） ─────────────────────────────────────────────
+
+export interface RecommendedCandidate {
+  code: string;
+  name: string | null;
+  role: string | null;
+  score: number | null;
+  positionPct: number | null;
+  mainline: string | null;
+}
+
+/**
+ * 推荐建仓标的：只读 `review_candidates`，固定 `eligibility === "eligible"`
+ * 且 `position_pct > 0`；不从旧 `candidates[]` 兼容投影取信号。
+ */
+export function buildRecommendedCandidates(
+  snapshot: PrepSnapshotView
+): RecommendedCandidate[] {
+  const reviewed = asList(snapshot.review_candidates);
+  if (!reviewed) return [];
+  return reviewed
+    .map((item) => ({
+      code: text(item.code) ?? "",
+      name: text(item.name),
+      role: text(item.role),
+      score: num(item.review_score),
+      positionPct: num(item.position_pct),
+      mainline: text(asDict(item.mainline)?.board_name),
+      eligibility: text(item.eligibility),
+    }))
+    .filter(
+      (item) =>
+        item.code !== "" &&
+        item.eligibility === "eligible" &&
+        (item.positionPct ?? 0) > 0
+    )
+    .map((item) => ({
+      code: item.code,
+      name: item.name,
+      role: item.role,
+      score: item.score,
+      positionPct: item.positionPct,
+      mainline: item.mainline,
+    }));
+}
+
 // ─── 运行概况 ──────────────────────────────────────────────────────────────
 
 export interface RunInfo {
@@ -374,7 +417,7 @@ export function display(value: string | number | null | undefined): string {
   return String(value);
 }
 
-// ─── 运行异常（RunOverview / PrepSummaryBand 共用，避免两处各算一遍） ────
+// ─── 运行异常（核心结果摘要 / 资产明细共用，避免两处各算一遍） ────────
 
 export interface Anomaly {
   level: "danger" | "warning";
@@ -420,82 +463,4 @@ export function buildAnomalies(
     }
   }
   return items;
-}
-
-// ─── 否决股成效（T+1/3/5，按 code join，不重算收益） ─────────────────────
-
-export const FOLLOWUP_HORIZONS = ["1", "3", "5"] as const;
-
-export interface NoTradeOutcome {
-  code: string;
-  name: string | null;
-  judgement: NoTradeItem["judgement"];
-  outcomePct: number | null;
-  cells: Record<string, { pct: number | null; reason: string | null }>;
-  /** 计划日快照里没有该股样本 → 全部「待评估 · 计划日无该股样本」。 */
-  sampleMissing: boolean;
-}
-
-export function buildNoTradeOutcomes(
-  noTrade: NoTradeItem[],
-  followup: PlanFollowup | null
-): NoTradeOutcome[] {
-  const byCode = new Map<string, PlanFollowupRow>();
-  for (const row of followup?.rows ?? []) byCode.set(row.code, row);
-  return noTrade.map((item) => {
-    const sample = byCode.get(item.code) ?? null;
-    const cells: NoTradeOutcome["cells"] = {};
-    for (const horizon of FOLLOWUP_HORIZONS) {
-      const cell = sample?.horizons?.[horizon];
-      cells[horizon] = {
-        pct: cell?.net_return_pct ?? null,
-        reason: cell?.exclusion_reason ?? null,
-      };
-    }
-    return {
-      code: item.code,
-      name: sample?.name ?? item.name,
-      judgement: item.judgement,
-      outcomePct: item.outcome_pct,
-      cells,
-      sampleMissing: sample == null,
-    };
-  });
-}
-
-// ─── 结论带 KPI（T+1 概览；单日样本只描述，不下策略结论） ───────────────
-
-export interface FollowupKpis {
-  recommendedPct: number | null;
-  rejectedPct: number | null;
-  spreadPct: number | null;
-  validSamples: number;
-  totalSamples: number;
-  /** 各组有效样本数（均值旁展示 n，避免把总样本数当组样本数）。 */
-  recommendedN: number;
-  rejectedN: number;
-}
-
-export function buildFollowupKpis(followup: PlanFollowup | null): FollowupKpis {
-  const horizon =
-    followup?.summary?.find((item) => item.horizon === 1) ?? null;
-  const groupOf = (key: string) =>
-    horizon?.groups.find((group) => group.group === key) ?? null;
-  const recommended = groupOf("recommended");
-  const rejected = groupOf("not_recommended");
-  const recommendedN = recommended?.valid ?? 0;
-  const rejectedN = rejected?.valid ?? 0;
-  return {
-    recommendedPct: recommended?.mean_net_return_pct ?? null,
-    rejectedPct: rejected?.mean_net_return_pct ?? null,
-    spreadPct: horizon?.spread ?? null,
-    validSamples: recommendedN + rejectedN,
-    totalSamples:
-      (recommended?.valid ?? 0) +
-      (recommended?.excluded ?? 0) +
-      (rejected?.valid ?? 0) +
-      (rejected?.excluded ?? 0),
-    recommendedN,
-    rejectedN,
-  };
 }

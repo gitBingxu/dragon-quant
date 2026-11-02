@@ -451,6 +451,7 @@ def _current_snapshot_result() -> dict:
             "mainlines": [{
                 "rank": 1, "board_name": "AI算力", "mainline_score": 88.0,
                 "state": "strengthening", "high_num": 327685,
+                "is_mainline": True,
                 "evidence": ["最高 327685 板"],
             }],
             "market": {
@@ -482,21 +483,37 @@ def _current_snapshot_result() -> dict:
     }
 
 
+def _ops_assets(day: str, *, omit: tuple[str, ...] = (),
+                report_overrides: dict[str, str] | None = None) -> dict:
+    """prep 运维夹具；ths_block_top 带真实上游 code/change 契约。"""
+
+    assets = _prep_assets_for(day, omit=omit,
+                              report_overrides=report_overrides)
+    if day in ("2026-09-11", "2026-09-14"):
+        assets["ths_block_top"] = {"as_of": day, "rows": [{
+            "name": "AI算力", "code": "885100",
+            "change": 2.5 if day == "2026-09-11" else 3.5,
+        }]}
+    return assets
+
+
 def _seed_prep_ops(box: EnvSandbox) -> None:
     dragon_spec = sb.dragon_db_seed([])
     seed_db(box, dragon_spec)
     assets_spec = sb.mirror_db_seed([])
     merged = _merge_scan_seeds(
-        sb.prep_assets_tables(_prep_assets_for(
+        sb.prep_assets_tables(_ops_assets(
             "2026-09-08", omit=("stock_daily",)), trade_date="2026-09-08"),
-        sb.prep_assets_tables(_prep_assets_for(
+        sb.prep_assets_tables(_ops_assets(
             "2026-09-09", report_overrides={"cninfo_announcements": "error"}),
             trade_date="2026-09-09"),
-        sb.prep_assets_tables(_prep_assets_for("2026-09-10"),
+        sb.prep_assets_tables(_ops_assets("2026-09-10"),
                               trade_date="2026-09-10"),
-        sb.prep_assets_tables(_prep_assets_for(
+        sb.prep_assets_tables(_ops_assets(
             "2026-09-11", omit=("market_breadth", "stock_daily")),
             trade_date="2026-09-11"),
+        sb.prep_assets_tables(_ops_assets(
+            "2026-09-14", omit=("stock_daily",)), trade_date="2026-09-14"),
         sb.prep_snapshot_rows([
             {"trade_date": "2026-09-10", "result": _prev_snapshot_result()},
             {"trade_date": "2026-09-11", "result": _current_snapshot_result()},
@@ -680,6 +697,16 @@ def test_d10_auction_calendar_day_and_local_effect():
             assert by_date["2026-09-09"]["status"] == "incomplete"
             assert by_date["2026-09-09"]["asset_only_codes"] == ["600001"]
             assert calendar["latest_record_date"] == "2026-09-11"
+            assert calendar["default_date"] == "2026-09-11"
+            assert calendar["default_date_source"] == "local_bar_latest"
+
+            accuracy = server.request("GET", "/api/auction/accuracy").json()
+            assert accuracy["status"] == "ok"
+            assert accuracy["as_of"] == "2026-09-16"
+            assert accuracy["window"]["entry_offset"] == 0
+            assert accuracy["window"]["exit_offset"] == 2
+            assert accuracy["summary"]["correct"] == 2
+            assert accuracy["summary"]["valid"] == 2
 
             day = server.request("GET", "/api/auction/20260911").json()
             assert day["names"] == {"600001": "龙头A"}
@@ -764,3 +791,63 @@ def test_d11_prep_plan_followup_local_returns():
             assert verification["advice"] == "hold"
             assert verification["conclusion"] == "correct"
             assert verification["evidence"]["score_change"] == 10.0
+
+
+# ─── D12：默认日期字段 / 单日效果 / prep 全历史准确率（方案 §6/§7） ─────────
+
+
+def test_d12_prep_default_date_effect_and_accuracy():
+    with sandbox("dashboard-d12") as box:
+        _seed_prep_ops(box)
+        with start_dashboard(box) as server:
+            calendar = server.request(
+                "GET", "/api/prep/calendar?days=365&end=2026-09-11").json()
+            assert calendar["default_date"] == "2026-09-10"
+            assert calendar["default_date_source"] == "local_bar_previous"
+            assert calendar["calendar_basis"] == "local_stock_daily_bars_union"
+            assert calendar["calendar_latest_date"] == "2026-09-11"
+            assert calendar["degraded"] is False
+
+            effect = server.request(
+                "GET", "/api/prep/20260911/effect").json()
+            assert effect["trade_date"] == "2026-09-11"
+            assert effect["next_trade_date"] == "2026-09-14"
+            assert effect["snapshot_version"] == "0.8"
+            boards = effect["boards"]
+            assert boards["source"] == "review_mainlines"
+            assert [row["board_name"] for row in boards["rows"]] == ["AI算力"]
+            board = boards["rows"][0]
+            assert board["board_code"] == "885100"
+            assert board["t_change_pct"] == 2.5
+            assert board["next_change_pct"] == 3.5
+            assert board["match"] == "code"
+            assert boards["summary"]["evaluated"] == 1
+            assert boards["summary"]["mean_change_pct"] == 3.5
+            # 快照无 sentiment → 候选全部 data_insufficient，不伪造成看空。
+            stocks = effect["stocks"]
+            assert stocks["available"] is True
+            assert {row["group"] for row in stocks["rows"]} == {
+                "data_insufficient"}
+            assert effect["status"] == "ok"
+
+            accuracy = server.request("GET", "/api/prep/accuracy").json()
+            assert accuracy["status"] == "ok"
+            assert accuracy["as_of"] == "2026-09-15"
+            # latest_bar_date 按注入时钟截断（E2E 时钟固定 09-11）。
+            assert accuracy["latest_bar_date"] == "2026-09-11"
+            assert accuracy["sample_unit"] == "stock_day"
+            assert accuracy["window"]["entry_offset"] == 1
+            assert accuracy["window"]["exit_offset"] == 3
+            assert accuracy["snapshot_count"] == 2
+            assert accuracy["day_kind_counts"] == {
+                "build": 1, "no_build": 0, "signal_missing": 1}
+            assert accuracy["summary"]["correct"] == 1
+            assert accuracy["summary"]["valid"] == 1
+            assert accuracy["summary"]["excluded"] >= 1
+            assert accuracy["stocks"][0]["code"] == "600001"
+
+            missing = server.request("GET", "/api/prep/20200101/effect").json()
+            assert missing["status"] == "insufficient_data"
+            assert missing["reason"] == "snapshot_missing"
+            bad = server.request("GET", "/api/prep/not-a-date/effect")
+            assert bad.status == 400

@@ -326,6 +326,12 @@ def _pool_suspicious(payload: dict) -> Optional[str]:
 
 
 def _collect_ths_block_top(ctx: PrepContext) -> dict:
+    """题材主线榜原样落库；真实上游行含 ``code`` / ``change``。
+
+    ``code`` = 板块代码，``change`` = 板块涨跌幅（百分数），与 ``name`` 一起
+    供 dashboard 单日效果做 T+1 板块匹配；采集器不改写、不补齐字段。
+    """
+
     api_date = ctx.trade_date.replace("-", "")
     data = ctx.ths.get_block_top(api_date)
     return {"trade_date": ctx.trade_date, "api_date": api_date, "rows": data["rows"]}

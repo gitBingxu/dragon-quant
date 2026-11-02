@@ -234,5 +234,49 @@ class TestListStockDailyBars(_Base):
                          ["2026-09-10", "2026-09-11"])
 
 
+class TestListStockDailyBarDates(_Base):
+    def _seed_daily(self):
+        with self._patched():
+            assets_db.save_prep_assets("2026-09-10", {"stock_daily": {"rows": {
+                "600001": [{"date": "2026-09-09"}, {"date": "2026-09-10"}],
+                "600002": [{"date": "2026-09-10"}],
+            }}})
+            assets_db.save_prep_assets("2026-09-11", {"stock_daily": {"rows": {
+                "600001": [{"date": "2026-09-11"}],
+            }}})
+
+    def test_union_of_bars_dates_sorted_unique(self):
+        self._seed_daily()
+        with self._patched():
+            dates = assets_db.list_stock_daily_bar_dates()
+        self.assertEqual(dates, ["2026-09-09", "2026-09-10", "2026-09-11"])
+
+    def test_window_filter_is_inclusive(self):
+        self._seed_daily()
+        with self._patched():
+            dates = assets_db.list_stock_daily_bar_dates(
+                "2026-09-10", "2026-09-10")
+        self.assertEqual(dates, ["2026-09-10"])
+
+    def test_corrupt_payload_is_skipped(self):
+        self._seed_daily()
+        with self._patched():
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "UPDATE prep_assets SET payload_json='{broken' "
+                    "WHERE trade_date='2026-09-11' AND asset_type='stock_daily'")
+                conn.commit()
+            finally:
+                conn.close()
+            dates = assets_db.list_stock_daily_bar_dates()
+        self.assertEqual(dates, ["2026-09-09", "2026-09-10"])
+
+    def test_missing_db_returns_empty_without_creating(self):
+        with self._patched():
+            self.assertEqual(assets_db.list_stock_daily_bar_dates(), [])
+        self.assertFalse(self.db_path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

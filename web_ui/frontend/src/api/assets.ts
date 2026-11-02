@@ -58,7 +58,27 @@ export interface PrepCalendarDay {
   report_error: string | null;
 }
 
-export interface PrepCalendar {
+export type DefaultDateSource =
+  | "local_bar_previous"
+  | "local_bar_latest"
+  | "record_date_fallback"
+  | "today_fallback";
+
+export type CalendarBasis =
+  | "local_stock_daily_bars_union"
+  | "record_dates";
+
+export interface CalendarDefaults {
+  /** 后端按本地日 K 计算的默认日期；URL `?date=` 优先。 */
+  default_date: string;
+  default_date_source: DefaultDateSource;
+  calendar_basis: CalendarBasis;
+  calendar_latest_date: string | null;
+  degraded: boolean;
+  degraded_reason: string | null;
+}
+
+export interface PrepCalendar extends CalendarDefaults {
   available: boolean;
   start_date: string;
   end_date: string;
@@ -286,12 +306,149 @@ export interface AuctionCalendarDay {
   asset_only_codes: string[];
 }
 
-export interface AuctionCalendar {
+export interface AuctionCalendar extends CalendarDefaults {
   available: boolean;
   start_date: string;
   end_date: string;
   latest_record_date: string | null;
   days: AuctionCalendarDay[];
+}
+
+// ─── 全历史判断准确率（prep / auction 共用形状） ─────────────────────────
+
+export interface AccuracyWindow {
+  entry_offset: number;
+  exit_offset: number;
+  entry_price: string;
+  exit_price: string;
+  cost_bps: number;
+}
+
+export interface AccuracySummary {
+  correct: number;
+  valid: number;
+  excluded: number;
+  hit_rate: number | null;
+  excluded_by_reason: Record<string, number>;
+}
+
+export interface AccuracyStock {
+  code: string;
+  name: string | null;
+  correct: number;
+  valid: number;
+  excluded: number;
+  hit_rate: number | null;
+}
+
+export interface AccuracyResponse {
+  status: "ok" | "insufficient_data";
+  reason: string | null;
+  /** 最新可验证日：其后仍有完整窗口交易日。 */
+  as_of: string | null;
+  latest_bar_date: string | null;
+  snapshot_count: number;
+  data_source: "local_stock_daily";
+  calendar_basis: string;
+  sample_unit: "stock_day";
+  window: AccuracyWindow;
+  summary: AccuracySummary;
+  day_kind_counts: Record<string, number>;
+  stocks: AccuracyStock[];
+  excluded_snapshot_dates: Record<string, number>;
+  warnings: string[];
+  caveats: string[];
+}
+
+// ─── prep 当前选中日效果（主线次日 + 严格逐股） ───────────────────────────
+
+export interface EffectBoardRow {
+  rank: number | null;
+  board_name: string | null;
+  category: string | null;
+  is_mainline: boolean;
+  board_code: string | null;
+  t_change_pct: number | null;
+  next_change_pct: number | null;
+  match: string | null;
+  exclusion_reason: string | null;
+  warnings: string[];
+}
+
+export interface EffectBoardSummary {
+  evaluated: number;
+  missing: number;
+  mean_change_pct: number | null;
+}
+
+export interface EffectBoards {
+  available: boolean;
+  reason: string | null;
+  source: string | null;
+  rows: EffectBoardRow[];
+  summary: EffectBoardSummary;
+}
+
+export type EffectStockGroup =
+  | "recommended"
+  | "not_recommended"
+  | "data_insufficient";
+export type EffectStockStatus = "completed" | "cannot_evaluate" | "pending";
+
+export interface EffectStockRow {
+  code: string;
+  name: string | null;
+  group: EffectStockGroup;
+  role: string | null;
+  review_score: number | null;
+  eligibility: string | null;
+  position_pct: number | null;
+  status: EffectStockStatus;
+  buy_date: string | null;
+  buy_price: number | null;
+  max_return_5d: number | null;
+  max_drawdown_5d: number | null;
+  max_return_hold_days: number | null;
+  partial_window: boolean;
+  reason: string | null;
+}
+
+export interface EffectGroupSummary {
+  group: string;
+  label: string;
+  valid: number;
+  cannot_evaluate: number;
+  pending: number;
+  mean_max_return_5d: number | null;
+  median_max_return_5d: number | null;
+  mean_max_drawdown_5d: number | null;
+  median_max_drawdown_5d: number | null;
+}
+
+export interface EffectStocks {
+  available: boolean;
+  reason: string | null;
+  rows: EffectStockRow[];
+  summary: EffectGroupSummary[];
+}
+
+export interface PrepEffect {
+  status: "ok" | "insufficient_data";
+  reason: string | null;
+  trade_date: string;
+  next_trade_date: string | null;
+  snapshot_version: string | null;
+  data_source: "local_prep_assets+local_stock_daily";
+  calendar_basis: string;
+  boards: EffectBoards;
+  stocks: EffectStocks;
+  coverage: {
+    boards_total: number;
+    stocks_total: number;
+    bar_dates: number;
+  };
+  warnings: string[];
+  caveats: string[];
 }
 
 export interface AuctionSnapshotRow {
@@ -431,6 +588,18 @@ export function fetchPlanFollowup(tradeDate: string, horizons = "1,3,5") {
   );
 }
 
+/** 当前选中日效果：主线次日涨跌 + 严格逐股收益/回撤。 */
+export function fetchPrepEffect(tradeDate: string) {
+  return getJson<PrepEffect>(
+    `/api/prep/${encodeURIComponent(tradeDate)}/effect`
+  );
+}
+
+/** 全历史判断准确率：固定截至最新可验证日，不随选中日变化。 */
+export function fetchPrepAccuracy() {
+  return getJson<AccuracyResponse>("/api/prep/accuracy");
+}
+
 export function fetchAuctionDates(limit = 30) {
   return getJson<{ snapshot_dates: string[]; asset_dates: string[]; count: number }>(
     `/api/auction/dates${qs({ limit })}`
@@ -449,4 +618,9 @@ export function fetchAuctionEffect(tradeDate: string, window = 20) {
   return getJson<AuctionEffect>(
     `/api/auction/${encodeURIComponent(tradeDate)}/effect${qs({ window })}`
   );
+}
+
+/** 竞价全历史判断准确率：固定截至最新可验证日，不随选中日变化。 */
+export function fetchAuctionAccuracy() {
+  return getJson<AccuracyResponse>("/api/auction/accuracy");
 }

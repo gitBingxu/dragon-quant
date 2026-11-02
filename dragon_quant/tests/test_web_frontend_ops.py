@@ -1,13 +1,16 @@
-"""dashboard 运维与复盘成效重构的前端契约测试（方案 §9.4）。
+"""dashboard 复盘 / 竞价改版前端契约测试（方案 §9、§13.4）。
 
 纯源码 / dist 文本扫描，零依赖、零网络：
 1. 排版：html 14px、所有可见文字最小 1rem、dist 含六个文本令牌；
 2. 语义色：danger/warning/normal/positive 四态，旧 warn/critical/info 清零；
-3. `/prep` 六段顺序、标题、删除原始 JSON；
-4. `/auction` 五段顺序、路由/导航、成效只读本地；
-5. 扫描页运行态/日志；
-6. `high_num` 只消费服务端 derived；
-7. dist 与源码同批构建、旧文案不回流。
+3. `/prep` 五区块顺序；删除旧「结论」「运行概况」「上次计划复盘」；
+4. 共用 GitHub Contributions 日历：周列 × 7 行、月份/星期标签、Less-More、
+   无格内图标、sticky、容器横滚、键盘与 aria；
+5. `/auction` 四区块顺序；结果表只删风险事件/决策质量/关键证据三列；
+6. AccuracyBoard 两页共用、固定端点、描述性统计文案；
+7. 扫描页运行态/日志；
+8. `high_num` 只消费服务端 derived；
+9. dist 与源码同批构建、旧区块不回回流。
 """
 
 from __future__ import annotations
@@ -19,6 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "web_ui" / "frontend" / "src"
 DIST_ASSETS = REPO_ROOT / "web_ui" / "dist" / "assets"
 STYLES = SRC / "styles.css"
+
+PREP_PAGE = SRC / "pages" / "prep" / "PrepPage.tsx"
+AUCTION_PAGE = SRC / "pages" / "auction" / "AuctionPage.tsx"
+CALENDAR = SRC / "components" / "AssetCalendar.tsx"
+ACCURACY_BOARD = SRC / "components" / "AccuracyBoard.tsx"
+API = SRC / "api" / "assets.ts"
+LABELS = SRC / "lib" / "labels.ts"
 
 TEXT_TOKENS = ("caption", "body", "title", "section", "page", "metric")
 MIN_REM_PX = 14
@@ -138,56 +148,188 @@ def test_pnl_class_stays_up_down_only() -> None:
         assert status not in block, f"pnlClass 不应使用状态色 {status}"
 
 
-# ─── 3. /prep ──────────────────────────────────────────────────────────────
+# ─── 3. /prep 五区块 ──────────────────────────────────────────────────────
 
 
 def test_prep_page_is_after_close_review_only() -> None:
-    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
+    page = _read(PREP_PAGE)
     assert 'title="盘后复盘"' in page
     assert "集合竞价" not in page
-    for token in ("运行概况", "上次计划复盘", "成效", "数据资产"):
-        assert token in page, f"PrepPage 缺少 {token!r}"
-    run_overview = _read(SRC / "pages" / "prep" / "RunOverview.tsx")
-    assert "运行异常" in run_overview
+    for token in ("数据资产日历", "核心结果", "当前 T 日效果", "当日资产明细"):
+        assert token in page, f"PrepPage 缺少区块 {token!r}"
 
 
-def test_prep_page_has_fixed_section_order() -> None:
-    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
-    order = ['title="运行概况"', 'title="上次计划复盘', 'title="市场"',
-             'title="主线"', 'title="候选"', 'title="数据资产"']
+def test_prep_page_has_five_sections_in_order() -> None:
+    page = _read(PREP_PAGE)
+    order = ["<AssetCalendar", "<PrepCoreResult", "<PrepDayEffectSection",
+             "<AssetDayTable", "<AccuracyBoard"]
     positions = [page.index(token) for token in order]
     assert positions == sorted(positions), positions
 
 
+def test_prep_page_drops_legacy_blocks_and_requests() -> None:
+    page = _read(PREP_PAGE)
+    for legacy in ("PrepSummaryBand", "RunOverview", "PlanReviewSection",
+                   "CandidateList", "fetchPlanFollowup", "fetchReviewContext"):
+        assert legacy not in page, f"PrepPage 仍引用旧区块 {legacy!r}"
+    assert 'title="结论"' not in page
+    assert 'title="运行概况"' not in page
+    assert "上次计划复盘" not in page
+
+
+def test_prep_page_uses_backend_default_date_and_new_endpoints() -> None:
+    page = _read(PREP_PAGE)
+    assert "default_date" in page, "PrepPage 必须使用后端 default_date"
+    for token in ("fetchPrepEffect", "fetchPrepAccuracy"):
+        assert token in page, f"PrepPage 缺少 {token!r}"
+
+    api = _read(API)
+    for token in ("fetchPrepEffect", "fetchPrepAccuracy", "fetchAuctionAccuracy",
+                  "PrepEffect", "AccuracyResponse", "default_date_source"):
+        assert token in api, f"assets api 缺少 {token!r}"
+
+
 def test_prep_page_has_no_raw_json() -> None:
-    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
+    page = _read(PREP_PAGE)
     assert "SnapshotRawDetails" not in page
     assert "JSON.stringify" not in page
     assert not (SRC / "pages" / "prep" / "SnapshotSection.tsx").exists()
 
 
-def test_prep_calendar_is_shared_and_all_dates_clickable() -> None:
-    calendar = _read(SRC / "components" / "AssetCalendar.tsx")
-    for token in ("button", "aria-label", "onSelect", "inRange", "missing"):
-        assert token in calendar, f"AssetCalendar 缺少 {token!r}"
-    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
-    assert "AssetCalendar" in page and "AssetDayTable" in page
-    api = _read(SRC / "api" / "assets.ts")
-    for token in ("fetchPrepCalendar", "fetchReviewContext"):
-        assert token in api
+# ─── 4. 共用日历（GitHub Contributions 风格） ──────────────────────────────
 
 
-def test_calendar_uses_success_warning_error_icons() -> None:
-    """main 必须修改 1：日期格与图例必须有可访问的成功/警告/错误图标。"""
-    calendar = _read(SRC / "components" / "AssetCalendar.tsx")
-    for token in ("StatusIcon", "<svg", "aria-hidden", "complete", "incomplete",
-                  "positive-soft", "warning-soft", "danger-soft", "资产缺失"):
+def test_asset_calendar_is_github_style_and_shared() -> None:
+    calendar = _read(CALENDAR)
+    for token in ("overflow-x-auto", "aria-current", "aria-label", "title=",
+                  "onSelect", "button", "bg-panel-3", "bg-danger-soft",
+                  "bg-warning-soft", "bg-positive-soft", "border-danger-line",
+                  "border-warning-line", "border-positive-line", "ring-brand",
+                  "较少", "较多", "WEEKDAY_LABELS", "月",
+                  "gridAutoFlow", "gridTemplateRows"):
         assert token in calendar, f"AssetCalendar 缺少 {token!r}"
-    assert calendar.count("<StatusIcon") >= 2, "图例与日期格都要渲染状态图标"
+    # 不保留格内图标：状态只由方块色阶表达。
+    assert "StatusIcon" not in calendar, "日历不应再使用格内状态图标"
+    assert "<svg" not in calendar, "日历不应再内联图标"
+
+    for page in (PREP_PAGE, AUCTION_PAGE):
+        assert "AssetCalendar" in _read(page), f"{page.name} 未复用共享日历"
+
+
+def test_calendar_is_sticky_below_app_header() -> None:
+    for page in (PREP_PAGE, AUCTION_PAGE):
+        text = _read(page)
+        assert "sticky top-14 z-20" in text, (
+            f"{page.name} 日历 Section 必须 sticky 且避开 56px 顶栏")
+
+
+def test_calendar_marks_missing_days_as_no_record() -> None:
+    calendar = _read(CALENDAR)
+    assert "无记录" in calendar
+    assert "资产缺失" in calendar
+    assert "完备" in calendar
+    assert "不完备" in calendar
+
+
+# ─── 5. /auction 四区块 ────────────────────────────────────────────────────
+
+
+def test_auction_page_has_four_sections_in_order() -> None:
+    page = _read(AUCTION_PAGE)
+    order = ["<AssetCalendar", "<ResultsSection", "<AssetCollectionSection",
+             "<AccuracyBoard"]
+    positions = [page.index(token) for token in order]
+    assert positions == sorted(positions), positions
+    for legacy in ("RunSection", "EffectSection", 'title="运行概况"',
+                   'title="成效"'):
+        assert legacy not in page, f"AuctionPage 仍展示旧区块 {legacy!r}"
+
+
+def test_auction_results_table_keeps_required_columns() -> None:
+    page = _read(AUCTION_PAGE)
+    for removed in ('"关键证据"', '"风险事件"', '"决策质量"'):
+        assert removed not in page, f"竞价结果表应删除 {removed}"
+    for kept in ('"代码"', '"名称"', '"强度"', '"等级"', '"方向"',
+                 '"排名"', '"采集状态"'):
+        assert kept in page, f"竞价结果表缺少 {kept}"
+    assert "OUTCOME_HORIZONS = [1, 3, 5]" in page
+    assert "T+${horizon}" in page
+    assert "OutcomeCell" in page
+    assert "fetchAuctionEffect" in page, "T+1/3/5 仍取既有 selected_day 口径"
+
+
+def test_auction_asset_collection_section_has_no_decision_quality() -> None:
+    page = _read(AUCTION_PAGE)
+    for token in ("当日资产采集", "采集状态", "未知原因",
+                  "run.error_rows", "snapshot_only_codes", "asset_only_codes"):
+        assert token in page, f"AuctionPage 资产采集区块缺少 {token!r}"
+    assert "决策质量" not in page
+
+
+# ─── 6. AccuracyBoard 两页共用 ────────────────────────────────────────────
+
+
+def test_accuracy_board_is_shared_and_fixed() -> None:
+    board = _read(ACCURACY_BOARD)
+    for token in ("AccuracyResponse", "as_of", "最新可验证日", "hit_rate",
+                  "excluded_by_reason", "excluded_snapshot_dates", "stocks",
+                  "caveats", "描述性统计", "不构成策略有效性结论", "条数",
+                  "day_kind_counts", "sample_unit"):
+        assert token in board, f"AccuracyBoard 缺少 {token!r}"
+    assert "胜率" not in board, "AccuracyBoard 不得使用「胜率」"
+    assert "验证有效" not in board, "AccuracyBoard 不得使用「验证有效」"
+
+    for page in (PREP_PAGE, AUCTION_PAGE):
+        assert "AccuracyBoard" in _read(page), f"{page.name} 未复用 AccuracyBoard"
+
+    api = _read(API)
+    assert "/api/prep/accuracy" in api
+    assert "/api/auction/accuracy" in api
+    assert "fetchPrepAccuracy" in api and "fetchAuctionAccuracy" in api
+
+
+def test_accuracy_board_does_not_receive_selected_date() -> None:
+    """准确率固定全历史，不随日历选中日变化。"""
+    board = _read(ACCURACY_BOARD)
+    assert "trade_date" not in board
+    assert "date=" not in board
+    for page in (PREP_PAGE, AUCTION_PAGE):
+        text = _read(page)
+        # 页面里 AccuracyBoard 的调用不得传 date。
+        match = re.search(r"<AccuracyBoard[^>]*>", text)
+        assert match, f"{page.name} 未渲染 AccuracyBoard"
+        assert "date" not in match.group(0), f"{page.name} 把选中日传给了 AccuracyBoard"
+
+
+def test_new_labels_exist() -> None:
+    labels = _read(LABELS)
+    for token in ("DEFAULT_DATE_SOURCE_LABELS", "ACCURACY_REASON_LABELS",
+                  "EFFECT_REASON_LABELS", "ACCURACY_GROUP_LABELS",
+                  "本地前一交易日", "本地最近交易日", "记录日回退", "今日回退",
+                  "窗口未成熟", "缺本地日 K", "推荐", "不推荐"):
+        assert token in labels, f"labels.ts 缺少 {token!r}"
+
+
+# ─── 7. 复盘核心结果 / 单日效果组件 ────────────────────────────────────────
+
+
+def test_prep_core_result_combines_required_parts() -> None:
+    core = _read(SRC / "pages" / "prep" / "PrepCoreResult.tsx")
+    for token in ("MarketStrip", "MainlineTable", "是否建仓", "推荐建仓标的",
+                  "positionPct", "positionAdvice", "expected_ok", "expected_total",
+                  "buildAnomalies", "review_candidates", "eligibility"):
+        assert token in core, f"PrepCoreResult 缺少 {token!r}"
+
+    effect = _read(SRC / "pages" / "prep" / "PrepDayEffectSection.tsx")
+    for token in ("max_return_5d", "max_drawdown_5d", "max_return_hold_days",
+                  "recommended", "not_recommended", "data_insufficient",
+                  "next_change_pct", "mean_max_return_5d",
+                  "median_max_drawdown_5d", "EFFECT_REASON_LABELS"):
+        assert token in effect, f"PrepDayEffectSection 缺少 {token!r}"
 
 
 def test_market_strip_shows_real_inputs_not_sub_scores() -> None:
-    """main 必须修改 2：市场必须是真实原始指标，不能用 0–100 子分冒充。"""
+    """市场必须是真实原始指标，不能用 0–100 子分冒充。"""
     strip = _read(SRC / "pages" / "prep" / "MarketStrip.tsx")
     for token in ("inputs", "limitUpCnt", "limitDownCnt", "premiumPct",
                   "promotionRate", "maxBoardHeight", "brokenRate",
@@ -202,39 +344,14 @@ def test_market_strip_shows_real_inputs_not_sub_scores() -> None:
 
 
 def test_prep_copy_is_human_readable() -> None:
-    """main 必须修改 3：主展示文案不得出现开发术语。"""
-    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
+    page = _read(PREP_PAGE)
     assert "create=False" not in page
     assert "expected" not in page
-    assert "查看复盘结果、计划成效与数据资产" in page
-
-    run = _read(SRC / "pages" / "prep" / "RunOverview.tsx")
-    assert "expected_ok / expected_total" not in run
-    assert "error / empty / unavailable" not in run
-    assert "当日应有资产" in run and "采集异常或不可用" in run
-
-    plan = _read(SRC / "pages" / "prep" / "PlanReviewSection.tsx")
-    for jargon in ("plan_review", "T+1 反馈", "检查点 T1"):
-        assert jargon not in plan, f"PlanReviewSection 仍出现 {jargon!r}"
-    assert "CHECKPOINT_LABELS" in plan and "次日反馈" in plan
-    assert "计划日当日表现" in plan
 
     table = _read(SRC / "pages" / "prep" / "AssetDayTable.tsx")
     for token in ("assetTypeLabel", "数据日期", "无采集记录", "ASSET_STATUS_LABELS"):
         assert token in table, f"AssetDayTable 缺少 {token!r}"
     assert "无 report 条目" not in table
-
-
-def test_auction_copy_is_human_readable() -> None:
-    page = _read(SRC / "pages" / "auction" / "AuctionPage.tsx")
-    for token in ("DIRECTION_LABELS", "reasonLabel", "CALENDAR_BASIS_LABELS",
-                  "DATA_SOURCE_LABELS", "VALIDATION_LABELS", "技术信息",
-                  "数据说明与覆盖范围"):
-        assert token in page, f"AuctionPage 缺少 {token!r}"
-    labels = _read(SRC / "lib" / "labels.ts")
-    for token in ("看多", "看空", "次日开盘", "样本不足", "本地日 K",
-                  "本地交易日", "其他原因"):
-        assert token in labels, f"labels.ts 缺少中文映射 {token!r}"
 
 
 def test_high_num_is_only_consumed_via_derived() -> None:
@@ -244,28 +361,7 @@ def test_high_num_is_only_consumed_via_derived() -> None:
     assert "needs_recompute" in model
 
 
-# ─── 4. /auction ───────────────────────────────────────────────────────────
-
-
-def test_auction_page_has_five_sections_and_no_network_provider() -> None:
-    page = _read(SRC / "pages" / "auction" / "AuctionPage.tsx")
-    order = ["运行概况", "竞价结果", "成效", "资产日历", "当日逐股明细"]
-    positions = [page.index(f'title="{token}"') for token in order]
-    assert positions == sorted(positions), positions
-    assert "fetchAuctionEffect" in page
-    for forbidden in ("fetchDragonPerformance", "kline_provider",
-                      "provider", "http://", "https://"):
-        assert forbidden not in page, f"AuctionPage 不应出现 {forbidden!r}"
-
-
-def test_auction_route_and_navigation_exist() -> None:
-    route = _read(SRC / "router.tsx")
-    assert "AuctionPage" in route and "/^\\/auction$/" in route
-    shell = _read(SRC / "AppShell.tsx")
-    assert 'to: "/auction"' in shell and "竞价" in shell
-
-
-# ─── 5. 扫描页 ─────────────────────────────────────────────────────────────
+# ─── 8. 扫描页 ─────────────────────────────────────────────────────────────
 
 
 def test_scans_pages_show_runtime_state_and_logs() -> None:
@@ -279,20 +375,21 @@ def test_scans_pages_show_runtime_state_and_logs() -> None:
     listing = _read(SRC / "pages" / "scans" / "ScansPage.tsx")
     for token in ("SCAN_STATUS_LABELS", "真龙", "错误"):
         assert token in listing
-    labels = _read(SRC / "lib" / "labels.ts")
+    labels = _read(LABELS)
     assert "已完成·无日志" in labels
 
 
-# ─── 6. dist ───────────────────────────────────────────────────────────────
+# ─── 9. dist ───────────────────────────────────────────────────────────────
 
 
 def test_dist_contains_new_copy_and_drops_old_blocks() -> None:
     js = _dist_js()
-    for token in ("盘后复盘", "运行概况", "上次计划复盘", "运行异常",
-                  "数据资产", "当日逐股明细", "待评估"):
+    for token in ("盘后复盘", "核心结果", "当前 T 日效果", "当日资产明细",
+                  "当日资产采集", "全历史逐股判断准确率", "描述性统计",
+                  "较少", "较多", "待评估"):
         assert token in js, f"dist JS 缺少新文案: {token!r}"
-    for legacy in ("次级信息", "原始 JSON", "严格 / 宽松口径对照"):
-        assert legacy not in js, f"dist JS 不应回流出旧文案: {legacy!r}"
+    for legacy in ("运行概况", "上次计划复盘", "原始 JSON"):
+        assert legacy not in js, f"dist JS 不应回流出旧区块: {legacy!r}"
 
 
 def test_dist_assets_referenced_by_index() -> None:
@@ -302,56 +399,25 @@ def test_dist_assets_referenced_by_index() -> None:
     assert any(path.is_file() for path in DIST_ASSETS.glob("*.css"))
 
 
-# ─── 7. 核心问题直答（2026-11-01 增量） ───────────────────────────────────
+# ─── 10. 核心问题直答（增量） ─────────────────────────────────────────────
 
 
 CORE_QUESTION_FILES = (
     "components/MiniBar.tsx",
     "components/DataTable.tsx",
+    "components/AssetCalendar.tsx",
+    "components/AccuracyBoard.tsx",
     "pages/scans/ScanHealthBand.tsx",
     "pages/scans/ScansPage.tsx",
     "pages/scans/ScanDetailPage.tsx",
-    "pages/prep/PrepSummaryBand.tsx",
     "pages/prep/PrepPage.tsx",
-    "pages/prep/PlanReviewSection.tsx",
-    "pages/prep/RunOverview.tsx",
+    "pages/prep/PrepCoreResult.tsx",
+    "pages/prep/PrepDayEffectSection.tsx",
     "pages/prep/prepModel.ts",
     "pages/auction/AuctionPage.tsx",
     "lib/labels.ts",
     "api/assets.ts",
 )
-
-
-def test_prep_plan_followup_sections() -> None:
-    page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
-    for token in ("PrepSummaryBand", "fetchPlanFollowup", "结论"):
-        assert token in page, f"PrepPage 缺少 {token!r}"
-
-    plan = _read(SRC / "pages" / "prep" / "PlanReviewSection.tsx")
-    for token in ("空仓验证", "否决股", "T+1", "T+3", "T+5", "verification"):
-        assert token in plan, f"PlanReviewSection 缺少 {token!r}"
-
-    model = _read(SRC / "pages" / "prep" / "prepModel.ts")
-    for token in ("buildNoTradeOutcomes", "buildFollowupKpis", "buildAnomalies",
-                  "recommendedN", "rejectedN"):
-        assert token in model, f"prepModel 缺少 {token!r}"
-
-    band = _read(SRC / "pages" / "prep" / "PrepSummaryBand.tsx")
-    assert "recommendedN" in band and "rejectedN" in band, (
-        "结论带的 n 必须是各组有效样本数，不是总和")
-
-    api = _read(SRC / "api" / "assets.ts")
-    assert "fetchPlanFollowup" in api and "PlanFollowup" in api
-    assert "MarketVerification" in api and "VerificationConclusion" in api
-
-
-def test_verification_labels_exist() -> None:
-    labels = _read(SRC / "lib" / "labels.ts")
-    for token in ("验证正确", "验证错误", "中性", "待评估"):
-        assert token in labels, f"labels.ts 缺少验证标签 {token!r}"
-    for token in ("VERIFICATION_CONCLUSION_LABELS", "VERIFICATION_REASON_LABELS",
-                  "EXCLUSION_REASON_LABELS", "PLAN_ADVICE_LABELS"):
-        assert token in labels, f"labels.ts 缺少映射 {token!r}"
 
 
 def test_scan_health_band() -> None:
@@ -367,9 +433,9 @@ def test_scan_health_band() -> None:
 
 
 def test_auction_density() -> None:
-    page = _read(SRC / "pages" / "auction" / "AuctionPage.tsx")
+    page = _read(AUCTION_PAGE)
     assert "<details" not in page, "逐股折叠块应已删除（技术告警改用 CollapsibleSection）"
-    for token in ("T+1", "T+3", "T+5", "强弱差", "outcomes.get(row.code)"):
+    for token in ("T+1", "T+3", "T+5", "outcomes.get(row.code)"):
         assert token in page, f"AuctionPage 缺少 {token!r}"
     assert page.count("OutcomeCell") >= 2, "T+1/3/5 三列应复用 OutcomeCell"
 
@@ -394,5 +460,5 @@ def test_new_components_have_no_slash_alpha() -> None:
 
 def test_dist_contains_core_question_copy() -> None:
     js = _dist_js()
-    for token in ("空仓验证", "否决股", "扫描健康", "距今", "T+1", "强弱差"):
+    for token in ("扫描健康", "距今", "T+1", "核心结果", "准确率"):
         assert token in js, f"dist JS 缺少核心问题文案: {token!r}"

@@ -199,11 +199,82 @@ export const EFFECT_REASON_LABELS: Record<string, string> = {
   no_snapshot: "无竞价快照",
   calendar_unavailable: "无本地交易日",
   no_snapshot_in_range: "窗口内无快照",
+  // prep 单日效果 / 严格逐股
+  snapshot_missing: "当日无复盘快照",
+  review_candidates_missing: "无复盘候选",
+  local_bars_truncated: "本地日 K 截断",
+  next_trading_day_unavailable: "无下一交易日",
+  next_trading_day_not_available: "下一交易日尚未就绪",
+  window_not_started: "收益窗口尚未开始",
+  missing_bar: "缺本地日 K",
+  invalid_bar: "本地日 K 无效",
+  mainline_missing: "无主线数据",
+  board_asset_missing: "当日板块资产缺失",
+  next_board_asset_missing: "次日板块资产缺失",
+  board_code_missing: "板块代码缺失",
+  change_missing: "涨跌幅缺失",
+  ambiguous_board_name: "板块同名，无法匹配",
+  next_board_missing: "次日无该板块",
+  no_signal: "无有效信号",
 };
 
 export const CALENDAR_BASIS_LABELS: Record<string, string> = {
   bars_union: "本地交易日",
   index_calendar: "交易所日历",
+  local_stock_daily_bars_union: "本地日 K 交易日并集",
+  record_dates: "记录日",
+};
+
+/** 日历默认日期来源（后端 `default_date_source`）。 */
+export const DEFAULT_DATE_SOURCE_LABELS: Record<string, string> = {
+  local_bar_previous: "本地前一交易日",
+  local_bar_latest: "本地最近交易日",
+  record_date_fallback: "记录日回退",
+  today_fallback: "今日回退",
+};
+
+/** 全历史准确率的样本级 / 日级排除原因。 */
+export const ACCURACY_REASON_LABELS: Record<string, string> = {
+  market_signal_missing: "当日市场信号缺失",
+  candidate_data_insufficient: "候选数据不足",
+  signal_missing: "竞价信号缺失",
+  immature: "窗口未成熟",
+  calendar_unavailable: "本地交易日缺失",
+  missing_bar: "缺本地日 K",
+  invalid_bar: "本地日 K 无效",
+  snapshot_unsupported: "快照版本不支持",
+  snapshot_corrupt: "快照损坏",
+  review_candidates_missing: "无复盘候选",
+  no_snapshots: "无历史快照",
+  local_bars_missing: "本地日 K 缺失",
+  local_bars_truncated: "本地日 K 截断",
+};
+
+/** 准确率逐股 / 单日效果的样本分组。 */
+export const ACCURACY_GROUP_LABELS: Record<string, string> = {
+  recommended: "推荐",
+  not_recommended: "不推荐",
+  data_insufficient: "数据不足",
+};
+
+/** prep 单日效果逐股状态。 */
+export const EFFECT_STOCK_STATUS_LABELS: Record<string, string> = {
+  completed: "已完成",
+  cannot_evaluate: "无法评估",
+  pending: "待评估",
+};
+
+/** prep 板块次日匹配方式。 */
+export const EFFECT_MATCH_LABELS: Record<string, string> = {
+  code: "代码匹配",
+  name: "名称回退",
+};
+
+/** prep 准确率「是否建仓」日级计数。 */
+export const DAY_KIND_LABELS: Record<string, string> = {
+  build: "建仓日",
+  no_build: "不建仓日",
+  signal_missing: "信号缺失",
 };
 
 export const DATA_SOURCE_LABELS: Record<string, string> = {

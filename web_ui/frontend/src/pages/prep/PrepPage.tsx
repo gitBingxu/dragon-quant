@@ -1,36 +1,27 @@
 import { useEffect, useState } from "react";
 import {
-  fetchPlanFollowup,
+  fetchPrepAccuracy,
   fetchPrepCalendar,
+  fetchPrepEffect,
   fetchPrepSnapshot,
   fetchPrepWatermark,
-  fetchReviewContext,
-  type PlanFollowup,
+  type AccuracyResponse,
   type PrepCalendar,
+  type PrepEffect,
   type PrepSnapshotView,
   type PrepWatermark,
-  type ReviewContext,
 } from "../../api/assets";
+import { AccuracyBoard } from "../../components/AccuracyBoard";
 import { AssetCalendar } from "../../components/AssetCalendar";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { Section } from "../../components/Section";
 import { IconAlert } from "../../components/icons-extra";
+import { CALENDAR_BASIS_LABELS, DEFAULT_DATE_SOURCE_LABELS, labelOf } from "../../lib/labels";
 import { navigate, useSearchParams } from "../../router";
 import { AssetDayTable } from "./AssetDayTable";
-import { CandidateList } from "./CandidateList";
-import { MainlineTable } from "./MainlineTable";
-import { MarketStrip } from "./MarketStrip";
-import { PlanReviewSection } from "./PlanReviewSection";
-import { PrepSummaryBand } from "./PrepSummaryBand";
-import { RunOverview } from "./RunOverview";
-import {
-  buildAnomalies,
-  buildCandidateViews,
-  buildMainlineRows,
-  buildMarketView,
-  buildRunInfo,
-} from "./prepModel";
+import { PrepCoreResult } from "./PrepCoreResult";
+import { PrepDayEffectSection } from "./PrepDayEffectSection";
 
 function normalizeIso(value: string): string {
   const text = (value || "").trim();
@@ -53,14 +44,16 @@ export function PrepPage() {
   const [date, setDate] = useState(urlDate);
   const [watermark, setWatermark] = useState<PrepWatermark | null>(null);
   const [snapshot, setSnapshot] = useState<PrepSnapshotView | null>(null);
-  const [context, setContext] = useState<ReviewContext | null>(null);
-  const [followup, setFollowup] = useState<PlanFollowup | null>(null);
-  const [followupLoading, setFollowupLoading] = useState(false);
-  const [followupFailed, setFollowupFailed] = useState(false);
+  const [effect, setEffect] = useState<PrepEffect | null>(null);
+  const [effectLoading, setEffectLoading] = useState(false);
+  const [effectError, setEffectError] = useState<string | null>(null);
+  const [accuracy, setAccuracy] = useState<AccuracyResponse | null>(null);
+  const [accuracyLoading, setAccuracyLoading] = useState(true);
+  const [accuracyError, setAccuracyError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 日历：一次请求覆盖近一年，不逐日请求。
+  // 日历：一次请求覆盖近一年；默认日期由后端按本地日 K 计算，URL date 优先。
   useEffect(() => {
     let active = true;
     fetchPrepCalendar(365)
@@ -68,7 +61,8 @@ export function PrepPage() {
         if (!active) return;
         setCalendar(payload);
         if (!urlDate) {
-          const fallback = payload.latest_record_date ?? payload.end_date;
+          const fallback =
+            payload.default_date ?? payload.latest_record_date ?? payload.end_date;
           if (fallback) {
             setDate(fallback);
             navigate(`/prep?date=${fallback}`, { replace: true });
@@ -86,33 +80,53 @@ export function PrepPage() {
     };
   }, []);
 
+  // 全历史准确率固定请求，不随选中日变化；失败不阻塞其他区块。
+  useEffect(() => {
+    let active = true;
+    setAccuracyLoading(true);
+    setAccuracyError(null);
+    fetchPrepAccuracy()
+      .then((payload) => {
+        if (active) setAccuracy(payload);
+      })
+      .catch((exc: unknown) => {
+        if (!active) return;
+        setAccuracy(null);
+        setAccuracyError(messageOf(exc));
+      })
+      .finally(() => {
+        if (active) setAccuracyLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // URL → 状态：直链与浏览器前进/后退。
   useEffect(() => {
     if (urlDate && urlDate !== date) setDate(urlDate);
   }, [urlDate, date]);
 
-  // 当日请求：资产表始终请求；快照/成效仅在该日 has_snapshot 时请求。
+  // 当日请求：资产表 + 快照 + 单日效果；任何一项失败不拖垮其他区块。
   useEffect(() => {
     if (!date) return;
     let active = true;
     setError(null);
     setLoading(true);
+    setWatermark(null);
     setSnapshot(null);
-    setContext(null);
-    setFollowup(null);
-    setFollowupFailed(false);
+    setEffect(null);
+    setEffectError(null);
+    setEffectLoading(true);
+
     fetchPrepWatermark(date)
       .then(async (water) => {
         if (!active) return;
         setWatermark(water);
         if (!water.has_snapshot) return;
-        const [snap, ctx] = await Promise.all([
-          fetchPrepSnapshot(date).catch(() => null),
-          fetchReviewContext(date).catch(() => null),
-        ]);
+        const snap = await fetchPrepSnapshot(date).catch(() => null);
         if (!active) return;
         setSnapshot(snap);
-        setContext(ctx);
       })
       .catch((exc: unknown) => {
         if (!active) return;
@@ -122,40 +136,24 @@ export function PrepPage() {
       .finally(() => {
         if (active) setLoading(false);
       });
+
+    fetchPrepEffect(date)
+      .then((payload) => {
+        if (active) setEffect(payload);
+      })
+      .catch((exc: unknown) => {
+        if (!active) return;
+        setEffect(null);
+        setEffectError(messageOf(exc));
+      })
+      .finally(() => {
+        if (active) setEffectLoading(false);
+      });
+
     return () => {
       active = false;
     };
   }, [date]);
-
-  // 二级请求：仅当该日有计划（plan_effect.available）才读计划日后续收益，
-  // 无计划的日子不白读计划日快照；失败不阻塞页面其他区块。
-  useEffect(() => {
-    if (!date || !context || context.trade_date !== date
-        || !context.plan_effect?.available) {
-      setFollowup(null);
-      setFollowupLoading(false);
-      setFollowupFailed(false);
-      return;
-    }
-    let active = true;
-    setFollowupLoading(true);
-    setFollowupFailed(false);
-    fetchPlanFollowup(date)
-      .then((payload) => {
-        if (active) setFollowup(payload);
-      })
-      .catch(() => {
-        if (!active) return;
-        setFollowup(null);
-        setFollowupFailed(true);
-      })
-      .finally(() => {
-        if (active) setFollowupLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [date, context]);
 
   const changeDate = (next: string) => {
     setDate(next);
@@ -165,20 +163,23 @@ export function PrepPage() {
     }
   };
 
-  const market = snapshot ? buildMarketView(snapshot) : null;
-  const mainlines = snapshot ? buildMainlineRows(snapshot, context) : [];
-  const candidates = snapshot ? buildCandidateViews(snapshot) : [];
-  const runInfo = snapshot ? buildRunInfo(snapshot) : null;
-  const anomalies = watermark
-    ? buildAnomalies(watermark, runInfo, context, snapshot)
-    : [];
+  const defaultSource = calendar
+    ? labelOf(
+        DEFAULT_DATE_SOURCE_LABELS,
+        calendar.default_date_source,
+        calendar.default_date_source
+      )
+    : null;
+  const basis = calendar
+    ? labelOf(CALENDAR_BASIS_LABELS, calendar.calendar_basis, calendar.calendar_basis)
+    : null;
 
   return (
     <>
       <PageHeader
         eyebrow="PREP · 盘后复盘"
         title="盘后复盘"
-        description="查看复盘结果、计划成效与数据资产。所有日期都可点击，没有资产的日子也会如实展示缺失。"
+        description="查看复盘核心结果、当前效果、资产明细与全历史准确率。所有日期都可点击，缺数据如实展示缺失。"
         actions={
           date ? (
             <span className="text-caption text-ink-2">
@@ -196,72 +197,16 @@ export function PrepPage() {
       ) : null}
 
       <div className="grid gap-3">
-        {/* 结论带：资产齐备度 / 运行异常 / T+1 成效 / 空仓验证 */}
-        {watermark ? (
-          <PrepSummaryBand
-            watermark={watermark}
-            anomalyCount={anomalies.length}
-            context={context}
-            followup={followup}
-            followupLoading={followupLoading}
-            followupFailed={followupFailed}
-          />
-        ) : null}
-
-        <Section title="运行概况" description="当日应有资产与采集记录；异常折叠在下方">
-          {watermark ? (
-            <RunOverview
-              watermark={watermark}
-              snapshot={snapshot}
-              runInfo={runInfo}
-              context={context}
-            />
-          ) : (
-            <EmptyState
-              title={loading ? "正在读取该日资产…" : calendarLoading ? "正在读取日历…" : "该日无资产记录"}
-              description="请先运行 dragon-quant prep 生成复盘资产。"
-            />
-          )}
-        </Section>
-
-        <Section title="上次计划复盘 / 成效" description="回看上一交易日的计划与次日的实际表现">
-          {snapshot ? (
-            <PlanReviewSection
-              context={context}
-              snapshot={snapshot}
-              candidates={candidates}
-              followup={followup}
-            />
-          ) : (
-            <EmptyState title="该日无复盘快照" description="无快照则不评估计划成效；不补算、不编造。" />
-          )}
-        </Section>
-
-        <Section title="市场" description="涨停 / 跌停 / 溢价 / 晋级率 / 最高板 / 炸板率 / 成交额；390px 在容器内横向滚动">
-          {snapshot ? (
-            <MarketStrip market={market} />
-          ) : (
-            <div className="text-body text-ink-3">该日无复盘快照。</div>
-          )}
-        </Section>
-
-        <Section title="主线" description="状态中文化；排名/分数变化用中性箭头，不是涨跌" bodyClassName="px-3 py-3 sm:px-4">
-          {snapshot ? (
-            <MainlineTable rows={mainlines} />
-          ) : (
-            <div className="text-body text-ink-3">该日无复盘快照。</div>
-          )}
-        </Section>
-
-        <Section title="候选" description="主角：全宽列表，行展开预期与贡献">
-          {snapshot ? (
-            <CandidateList candidates={candidates} />
-          ) : (
-            <div className="text-body text-ink-3">该日无复盘快照。</div>
-          )}
-        </Section>
-
-        <Section title="数据资产" description="近一年日历 + 当日明细；图标表示完备 / 不完备 / 资产缺失">
+        {/* 1. 年度日历：GitHub Contributions 风格，sticky 于 56px 顶栏下方。 */}
+        <Section
+          title="数据资产日历"
+          description={
+            calendar
+              ? `近一年；默认日期：${defaultSource ?? "本地交易日"}。${basis ?? ""}，按本地日 K 交易日并集推算，不是交易所日历。`
+              : "近一年数据资产日历；点任意日期切换。"
+          }
+          className="sticky top-14 z-20"
+        >
           <AssetCalendar
             startDate={calendar?.start_date ?? date}
             endDate={calendar?.end_date ?? date}
@@ -270,14 +215,67 @@ export function PrepPage() {
             onSelect={changeDate}
             loading={calendarLoading}
           />
-          <div className="mt-3">
-            {watermark ? (
-              <AssetDayTable watermark={watermark} />
-            ) : (
-              <EmptyState title="该日无资产记录" />
-            )}
-          </div>
+          {calendar?.degraded ? (
+            <div className="mt-2 text-caption text-warning">
+              默认日期已降级：{labelOf(
+                { local_bars_missing: "本地日 K 缺失", no_previous_trading_day: "无前一交易日" },
+                calendar.degraded_reason,
+                calendar.degraded_reason ?? "未知原因"
+              )}
+              。
+            </div>
+          ) : null}
         </Section>
+
+        {/* 2. 核心结果：市场情绪 / 主线 / 是否建仓 / 推荐标的 / 资产异常摘要。 */}
+        <Section
+          title="核心结果"
+          description="市场情绪、主线、是否建仓、推荐建仓标的与资产异常摘要。"
+        >
+          {watermark || snapshot ? (
+            <PrepCoreResult snapshot={snapshot} watermark={watermark} />
+          ) : (
+            <EmptyState
+              title={loading ? "正在读取该日复盘…" : "该日无复盘记录"}
+              description="请先运行 dragon-quant prep 生成复盘资产。"
+            />
+          )}
+        </Section>
+
+        {/* 3. 当前 T 日效果：主线次日涨跌 + 严格逐股收益/回撤。 */}
+        <Section
+          title="当前 T 日效果"
+          description="真主线次日涨跌；推荐 / 不推荐逐股严格最大收益与回撤。只读本地日 K。"
+        >
+          <PrepDayEffectSection
+            effect={effect}
+            loading={effectLoading}
+            error={effectError}
+          />
+        </Section>
+
+        {/* 4. 当日资产明细与缺席/异常原因。 */}
+        <Section
+          title="当日资产明细"
+          description="当日应有资产、缺失与合法缺席原因；采集记录是已知最新状态，不代表本次运行成功。"
+        >
+          {watermark ? (
+            <AssetDayTable watermark={watermark} />
+          ) : (
+            <EmptyState
+              title={loading ? "正在读取该日资产…" : "该日无资产记录"}
+              description="空日期只展示缺失，不补算、不编造。"
+            />
+          )}
+        </Section>
+
+        {/* 5. 全历史逐股判断准确率：固定截至最新可验证日。 */}
+        <AccuracyBoard
+          scope="prep"
+          data={accuracy}
+          loading={accuracyLoading}
+          error={accuracyError}
+        />
       </div>
     </>
   );

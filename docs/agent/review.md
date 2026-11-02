@@ -61,6 +61,18 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 **Web UI 指标联动**：顶部 7 张卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表同源。`GET /api/dragons` 成功响应为 `{data, count, summary}`：`summary` 由筛选后的完整 rows 经 `dragons.summarize_review_rows(rows, source, include_derived_counts=True, caliber=caliber)` 计算（客户端分页不影响统计，未来若服务端分页必须先汇总再切片），`data` / `count` 不变；`caliber` 只影响 `derived_completed` / `derived_pending` 的状态来源（宽松直接取 `review_status`），旧键与 `*_strict` 键不随口径变化。`GET /api/summary` 保留为无筛选参数的 legacy 端点，其实现是 `get_review_summary` 兼容 wrapper（同样从 `query_dragons` 全量 rows 汇总），**不接收口径参数、完全不变**。`summary` 在 legacy 键之外附加 `derived_completed` / `derived_pending`（`pending` + `pending_recompute`）；row 只增返回 `derived_status`。前端仅在初始 / 出错时允许 `Summary | null`，修改筛选不自动请求，点击「查询」或回车同时刷新卡片与列表；「重置」保留 source、口径回到该体系默认，并清空其余筛选、立即恢复全量；慢旧响应由请求序号丢弃。空集或无可评测样本显示 `—`，真实无赢家显示 `0.0%`。
 
+## 严格指标共享核（2026-11-02）
+
+严格口径的收益 / 回撤纯计算已抽到无 I/O 的 `dragon_quant/review/strict_metrics.py`：
+`is_valid_bar` / `window_metrics` / `evaluate_strict`。`review/main.py` 的
+`_is_valid_bar`、`_strict_review` 保留为兼容别名并改为调用共享核；`_loose_review`
+也改用 `window_metrics`。Web 的 `presenters/day_effect.py` 只调用
+`evaluate_strict`，不 import `review.main`（避免把 provider / storage 拉进 Web 进程）。
+
+约束：共享核逐字迁移、**不得**改变数值或输出字段形状。`dragon_quant/tests/test_review_strict_metrics.py`
+以 parity 断言旧测试全部不变的数值语义；新公式或阈值必须改 owner 文档并补 parity。
+`review/performance.py` 的宽松「至最新日 K」口径与此核完全隔离。
+
 ## 只读投影说明（2026-11-01）
 
 本次不改固定 5 日回测与 `dragon_review_strict`。dashboard 新增的扫描运行态、复盘/竞价日历与成效全部是只读投影（`web_ui/backend/presenters/`）；竞价成效复用 `infra.factor.decision_review`，行情只读本地 `prep_assets.stock_daily`，不触网。

@@ -110,6 +110,16 @@ def local_bars_loader():
     return load
 
 
+def bar_calendar_loader():
+    """本地已确认交易日 loader（``stock_daily`` bar 日期并集，只读不建库）。"""
+    from dragon_quant.infra.assets import db as assets_db
+
+    def load(date_from=None, date_to=None):
+        return assets_db.list_stock_daily_bar_dates(date_from, date_to)
+
+    return load
+
+
 def review_assets_enabled() -> bool:
     """复盘资产开关（``DQ_REVIEW_ASSETS_ENABLED``，默认 true）。
 

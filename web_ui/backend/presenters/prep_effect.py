@@ -24,6 +24,7 @@ from dragon_quant.infra.factor.decision_review import (
 
 from .. import params
 from .local_market import LOCAL_CAVEATS, LocalStockDailyMarket, shift_day
+from .snapshot_io import split_load
 
 MAX_PLAN_CODES = 120
 BAR_LOOKBACK_DAYS = 120
@@ -104,13 +105,9 @@ class _PreloadedStore:
 
 
 def _split_load(loaded: Any) -> tuple[dict, dict]:
-    """``store.load`` 正常返回 ``(payload, meta)``；兼容直接返回 payload。"""
+    """兼容旧调用名；唯一实现在 :mod:`presenters.snapshot_io`。"""
 
-    if isinstance(loaded, tuple) and len(loaded) == 2:
-        payload, meta = loaded
-        return (payload if isinstance(payload, Mapping) else {}), (
-            meta if isinstance(meta, Mapping) else {})
-    return (loaded if isinstance(loaded, Mapping) else {}), {}
+    return split_load(loaded)
 
 
 # ─── 投影 helper ──────────────────────────────────────────────────────────

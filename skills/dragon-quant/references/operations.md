@@ -17,11 +17,12 @@
 
 ## 次日盘前 session（交易日 ≥09:25）
 
-1. `dragon-quant premarket --json`（T0 只读）：拿到 T-1 计划 + T 日竞价 + 结构化降级，按 `references/premarket.md` 八段模板起草。
-2. 09:25 前 `auction.state=not_ready` 时先出无竞价版；09:25 后重跑 `premarket` 读取终态。
-3. 只有用户明确要求时，才运行 `dragon-quant auction --json`（T1，会写 assets.db）；09:25 前不运行，说明数据尚未形成。
-4. 按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
-5. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
+1. `dragon-quant premarket --json`（T0 只读）：拿到 T-1 计划 + T 日竞价 + 结构化降级，按 `references/premarket.md` 的盘前作战卡八段模板起草。
+2. **09:25 前**：只出无竞价版；结尾主动建议「09:25 后先运行 `auction` 采集竞价终态，再重新生成盘前预案」。
+3. **09:25 后**：先跑 `premarket` 检查竞价状态；`ready / partial` 直接生成；缺失 / 不可用时**主动建议**运行 `dragon-quant auction --json`（T1，会写 assets.db），给出确认话术；只有用户本轮明确确认后才执行；成功后重跑 `premarket`，再生成最终预案。用户拒绝或自行执行 → 无竞价版并写明「竞价缺失」。
+4. 不自动运行 `auction`、不自动加 `--force`、不用 `--force` 绕过 09:25 门禁。
+5. 按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
+6. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
 
 ## 八类 workflow
 

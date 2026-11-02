@@ -40,7 +40,7 @@ metadata:
 2. **扫描与真龙**：当日扫描（默认 `--top 5`）→ `dragons --true-only` 结构化核验；历史日优先读 `dragons`。
 3. **盘后复盘**：`prep` + 固定九段报告。
 4. **集合竞价**：`auction` + 固定七段报告。
-5. **盘前预案**：`premarket`（T0 只读）+ 外部证据 + 固定八段模板。
+5. **盘前预案**：`premarket`（T0 只读）+ 外部证据 + 盘前作战卡八段模板；09:25 后缺失竞价时**主动建议**运行 `auction`（T1，需本轮确认），完成后重跑 `premarket`。
 6. **龙头回测**：先回测，再 `--ui-only` 打开回测面板。
 7. **账户回测**：先引导区间/资金，再回测，再 `--ui-only` 打开账户面板。
 8. **因子入库**：仅三组内置因子的 `factor build --only` 与代表因子 `factor query` 读回。
@@ -74,13 +74,18 @@ metadata:
 
 只引用已有数值与枚举，不新增阈值、不补行情、不按分数排优先顺序。字段细节与四态映射见 `references/outputs.md`；盘前完整流程见下节。
 
-## 盘前预案（八段模板 + 外部证据）
+## 盘前预案（作战卡八段模板 + 外部证据）
 
 1. 运行 `dragon-quant premarket [--date D] --json`（T0）。它只读 T-1 `prep` 快照与 T 日 `auction` 快照，缺数据、损坏、未到 09:25、缓存状态未知都只做结构化降级并 exit 0。
 2. 先看 `data_quality` / `degraded` / `prep.strictness` / `proven_gap` / `auction.state`：`plan_usable=false` 或 `proven_gap=true` 时只观察，不新建。
-3. 09:25 前 `auction.state=not_ready`：先按 T-1 计划 + 外部证据出「无竞价版」；**不得**声称已有竞价事实。09:25 后再重跑 `premarket` 读取终态。`premarket` 不会自动运行 `auction`；只有用户明确要求时才运行会写库的 `auction`。
-4. 外部证据按 `references/evidence.md` 采集：官方/原文优先，媒体只作线索，社交只作待核实；每条保存来源级别与四个时点。
-5. 按 `references/premarket.md` 的八段模板输出，事实 / 工作假设 / 行动分栏；行动只取 `allowed_actions` 与资格、仓位、veto、`data_quality`、账户闸门的交集，不发明买卖点。
+3. **09:25 前**：只运行 `premarket`（T0），输出无竞价版；结尾必须主动建议「09:25 后先运行 `auction` 采集竞价终态，再重新生成盘前预案」。09:25 前不运行 `auction`，**不得**声称已有竞价事实。
+4. **09:25 后**：先运行 `premarket`（T0）检查 `auction.state`：
+   - `ready / partial` → 直接生成有竞价版；
+   - 缺失 / 不可用 → **主动建议**运行 `auction`（T1，会写 `assets.db`），给出确认话术；只有用户**本轮明确确认**后才执行；成功后重跑 `premarket`，确认竞价状态可用，再生成最终预案；
+   - 用户拒绝，或用户自行执行 `! dragon-quant auction` → 输出无竞价版，并写明「竞价缺失」。
+5. **禁止**：自动运行 `auction`、自动加 `--force`、用 `--force` 绕过 09:25 门禁。`premarket` 仍是 T0，不写库；`auction` 是唯一写入步骤。
+6. 外部证据按 `references/evidence.md` 采集：官方/原文优先，媒体只作线索，社交只作待核实；每条保存来源级别与四个时点。
+7. 按 `references/premarket.md` 的作战卡八段模板输出：第一屏是「一页结论」（动作上限 / 风险预算 / 必验问题 / 不做什么），随后是作战卡与逐时点检查表；事实 / 工作假设 / 行动分栏；行动只取 `allowed_actions` 与资格、仓位、veto、`data_quality`、账户闸门的交集，不发明买卖点。
 
 ## 未开放能力
 
@@ -97,7 +102,7 @@ metadata:
 | `references/commands.md` | 需要确定白名单命令、关键参数、写类或输出模式时 |
 | `references/outputs.md` | 需要解读字段语义、降级字段或 `strategy_context` 六段时 |
 | `references/reports.md` | 生成 prep / auction 报告时 |
-| `references/premarket.md` | 生成盘前预案（八段模板、三锚/四态、候选条件表）时 |
+| `references/premarket.md` | 生成盘前预案（作战卡八段、一页结论、逐时点检查表）时 |
 | `references/evidence.md` | 盘前采集外部政策/公告/外围行情与信源分级时 |
 | `references/playbooks.md` | 遇到行情失败、门禁、空数据、因子缺失、UI 启动失败时 |
 | `references/operations.md` | 单能力/每日复合 workflow、UI 生命周期、因子三组名单时 |

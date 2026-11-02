@@ -3,6 +3,8 @@
 > 触发：改动 `premarket` 命令、`review_account/premarket/*`、盘前快照 Adapter、三锚/行动上限投影、盘前 JSON 契约或 Skill 盘前模板时读本文。
 > 本文权威：`premarket` 的只读语义、快照选择严格性、`premarket_sc_v1` 字段与时点、降级原因码、三锚投影与行动上限、外部证据边界。
 > Skill 侧模板与信源流程 owner：`skills/dragon-quant/references/premarket.md` / `evidence.md`。
+> 盘前模板为「盘前作战卡」八段（一页结论 / 市场与主线剧本 / 主线与角色地图 / 候选逐只作战卡 / 开盘后时间表 / 持仓与退出 / 不做什么与盘中更新纪律 / 盘后归因），事实 / 工作假设 / 行动分栏，动作只取 `allowed_actions` 与资格、仓位、veto、`data_quality`、账户闸门的交集；本文件只描述 CLI 契约，不复制模板正文。
+> Skill 侧 09:25 流程：09:25 前只出无竞价版并主动建议；09:25 后先检查竞价状态，缺失时**主动建议**运行 `auction`（T1，需本轮明确确认），成功后重跑 `premarket`；`premarket` CLI 本身仍不运行 `auction`、不写库。
 > 上游权威：AGENTS.md（硬约束与项目路由）；prep/auction 产物契约见 [prep-auction](prep-auction.md)；策略数值见 `review_account/strategy/STRATEGY.md`。
 
 ## 命令

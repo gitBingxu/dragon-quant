@@ -384,20 +384,87 @@ class TestPremarketSkill(unittest.TestCase):
     def test_premarket_template_has_eight_fixed_sections(self):
         text = self._premarket()
         headings = (
-            "# 盘前预案",
+            "# 盘前作战卡",
+            "## 0. 一页结论",
             "## 1. 信息截止与覆盖",
-            "## 2. 市场与账户总闸门",
-            "## 3. 三类锚与四种情景",
-            "## 4. 主线与角色复核",
-            "## 5. 候选逐只条件表",
-            "## 6. 组合与执行约束",
-            "## 7. 开盘后验证时间表",
-            "## 8. 无法交易与盘后归因",
+            "## 2. 市场与主线剧本",
+            "## 3. 主线与角色地图",
+            "## 4. 候选逐只作战卡",
+            "## 5. 开盘后时间表与确认清单",
+            "## 6. 持仓与退出",
+            "## 7. 不做什么 + 盘中更新纪律",
+            "## 8. 盘后归因与明日输入",
             "## 附录：外部证据清单",
             "## 声明",
         )
         positions = [text.index(heading) for heading in headings]
-        self.assertEqual(positions, sorted(positions), "盘前八段顺序被改变")
+        self.assertEqual(positions, sorted(positions), "盘前作战卡八段顺序被改变")
+
+    def test_premarket_template_has_one_page_conclusion_and_timetable(self):
+        text = self._premarket()
+        for token in (
+            "今日动作上限",
+            "风险预算",
+            "必须验证的 3 个问题",
+            "今天不做什么",
+            "关注顺序 ≠ 买入优先级",
+            "观察卡",
+            "开盘后时间表与确认清单",
+            "09:15–09:20",
+            "09:20–09:25",
+            "09:25–09:30",
+            "09:30–09:35",
+            "09:35–10:00",
+            "13:00–14:30",
+            "14:30–15:00",
+            "盘中更新纪律",
+            "允许改变剧本",
+            "禁止改变",
+        ):
+            self.assertIn(token, text)
+
+    def test_premarket_report_body_uses_chinese_terms(self):
+        """报告正文只写汉语用语；JSON 字段名只允许出现在操作说明/映射表。"""
+        text = self._premarket()
+        body = text.split("# 盘前作战卡", 1)[1]
+        for banned in (
+            "observe_only", "position_pct", "action_ceiling", "allowed_actions",
+            "gap_low", "gap_high", "ratio_low", "seal_by", "eligibility",
+            "confirmed", "weakened", "invalidated", "data_quality", "veto",
+            "position_basis", "expectations_unavailable", "not_qualified",
+            "plan_usable", "auction_usable", "proven_gap", "degraded",
+            "T-1", "T+1", "T 日", "sell 规则", "review_score", "review_grade",
+            "confidence", "position_basis", "main_net_amount", "t_pct",
+            "t_turnover", "limit_up_type", "first_limit_up_time", "high_days",
+            "reason_type_today", "sum_pct", "warning", "same_mainline_counts",
+            "disclaimer", "cache", "trading_day", "blocked_by",
+            "auction_unavailable", "eligibility_not_qualified",
+        ):
+            self.assertNotIn(banned, body, f"报告正文出现英文术语: {banned}")
+
+    def test_premarket_workflow_recommends_auction_after_0925(self):
+        """09:25 前建议、09:25 后缺失竞价时主动建议 auction，但必须本轮确认。"""
+        text = self._premarket()
+        for token in (
+            "09:25 前", "09:25 后", "主动建议", "auction", "T1",
+            "assets.db", "本轮明确确认", "重跑 `premarket`",
+            "不自动加 `--force`", "不能自行等到 09:25", "竞价缺失",
+        ):
+            self.assertIn(token, text)
+
+    def test_skill_premarket_route_recommends_auction_with_consent(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for token in (
+            "09:25 前", "09:25 后", "主动建议", "auction", "T1",
+            "本轮明确确认", "重跑 `premarket`", "自动运行 `auction`",
+            "`--force`",
+        ):
+            self.assertIn(token, text)
+
+    def test_safety_premarket_may_suggest_but_not_auto_run_auction(self):
+        text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")
+        self.assertIn("盘前预案流程可以主动建议运行 `auction`", text)
+        self.assertIn("必须等用户本轮明确确认", text)
 
     def test_premarket_template_separates_fact_assumption_action(self):
         text = self._premarket()
@@ -409,7 +476,7 @@ class TestPremarketSkill(unittest.TestCase):
                       "allowed_actions", "action_ceiling", "observe_only",
                       "wait", "no_new_position", "position_pct",
                       "不是清仓", "expectations_unavailable", "gap_high",
-                      "追价警戒", "现有 sell 规则", "09:25", "09:30",
+                      "追价警戒", "现有卖出规则", "09:25", "09:30",
                       "不得倒填", "不自动交易", "不构成投资建议"):
             self.assertIn(token, text)
 

@@ -19,6 +19,7 @@
 
 ### Changed
 - **版本**：Python `0.8.0`；npm / Skill `1.3.0`；`metadata.min-cli-version` `0.8.0`。E2E coverage-map 同步为 54 个 parser 节点 / 16 个顶层命令，新增 `golden/premarket/context.json`，旧 golden 不变。
+- **盘前作战卡模板 v2**：`references/premarket.md` 从按数据域的八段审计报告改为按交易时间线的盘前作战卡（一页结论 / 市场与主线剧本 / 主线与角色地图 / 候选逐只作战卡 / 09:15–15:00 逐时点检查表 / 持仓与退出 / 不做什么与盘中更新纪律 / 盘后归因）；市场层三向剧本仅作叙述，动作仍只取个股 `allowed_actions` 与 `action_ceiling` 交集；报告正文改为全汉语用语（字段名只保留在 Agent 操作说明与「输出用语」映射表）；**09:25 编排**：09:25 前只出无竞价版并主动建议，09:25 后先检查竞价状态，缺失时主动建议运行 `auction`（T1，需本轮确认），成功后重跑 `premarket`，不自动运行、不自动 `--force`；新增调研报告与方案文档 `docs/research/2026-11-02-premarket-playbook-research.md`、`docs/solutions/2026-11-02-premarket-playbook-v2-design.md`。
 - **存储只读 API**：`get_previous_prep_snapshot` / `list_auction_snapshots` / `dragons_mirror.list_dragon_trade_dates` 增加向后兼容的 `readonly=True` 路径（`_connect_readonly`，`busy_timeout=5000`，跳过 schema 建表）；默认行为不变。
 
 ### Changed

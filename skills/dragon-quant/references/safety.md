@@ -18,7 +18,7 @@
 | dragons | --date --true-only | T0 | 只读 JSON；scan 后核验真龙 |
 | data | quote/kline/minute/batch-quote | T0 | 触网只读；失败字符串不等于成功 |
 | prep | --date --recompute --force --json | T1 | 写 assets.db；当日需 16:40 后 |
-| auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后 |
+| auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后；premarket 可主动建议，但执行需本轮确认 |
 | premarket | --date --json | T0 | 只读；不写库；缺数据降级 exit0；不触网 |
 | review | --date --top | T1 | 回写回测字段；failed>0 如实报告 |
 | review | --ui-only --port --no-browser | T0 | 只启动回测面板，长驻，不回测 |
@@ -40,6 +40,7 @@
 - **UI-only**：`将启动本地 Web UI 面板（长驻，可能需要初始化/校验本地 schema，不写业务记录），并默认尝试打开浏览器；是否继续？`
 - **文件**：`将把报告写入 <path>（本地文件）。是否继续？`；用户指定仓库内路径时提示会影响 git 状态。
 - 用户本轮明确点名某个 T1 操作可视为确认；上一次同意不代表这一次同意。
+- 盘前预案流程可以主动建议运行 `auction`，但不得因用户要预案就默认执行；必须等用户本轮明确确认。
 - 语义模糊（“看看今天的”“整理一下”）时先确认，不自行选择写操作。
 
 ## 禁止操作

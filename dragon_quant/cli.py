@@ -358,6 +358,27 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     auction_p.add_argument("--json", dest="json", action="store_true",
                            help="输出完整 JSON（默认只展示参与竞价判断的标的强弱与汇总）")
 
+    # premarket 子命令（只读盘前上下文：T-1 prep + T 竞价 + 结构化降级；T0）
+    premarket_p = sub.add_parser(
+        "premarket",
+        help="只读盘前预案上下文（T-1 复盘 + T 竞价，缺数据结构化降级）",
+        usage="dragon-quant premarket [--date YYYYMMDD] [--json]",
+        description="只读汇总盘前上下文：严格早于 T 的最近 prep 快照、T 日竞价"
+                    "快照与结构化缺口。T0：不写库、不触网、不重算、不新增表；"
+                    "缺 prep / 缺竞价 / 损坏 / 未到 09:25 均为结构化降级并 exit 0。",
+        epilog="""Examples:
+  dragon-quant premarket                    # T=今天，human 摘要
+  dragon-quant premarket --date 20261030    # 指定 T
+  dragon-quant premarket --json             # 完整 JSON
+  dragon-quant premarket --date 2026-10-30 --json
+""",
+    )
+    premarket_p.add_argument("--date", default=None,
+                             help="预案交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD；"
+                                  "默认 Asia/Shanghai 当日)")
+    premarket_p.add_argument("--json", dest="json", action="store_true",
+                             help="输出完整 JSON（默认 human 摘要）")
+
     # assets 子命令（数据资产云端同步）
     assets_p = sub.add_parser(
         "assets",

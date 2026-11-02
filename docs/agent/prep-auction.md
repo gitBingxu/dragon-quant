@@ -2,6 +2,7 @@
 
 > 触发：改动 `prep` 复盘（采集/计算/门禁/快照）、`auction` 竞价采集与重算、`prep_*` / `auction_*` 资产与快照口径、情绪温度或候选池判定时读本文。
 > 本文权威：prep 两段式与增量采集、`collection_report` 语义、可采性矩阵与时点门禁、复盘窗口与候选池、宏观扰动口径、auction 候选池/回退/输出契约、prep/auction 资产与快照表契约。
+> 盘前只读上下文（T-1 prep + T 日 auction + 结构化降级、三锚与行动上限）见 [premarket](premarket.md)；本文不重复。
 > 上游权威：AGENTS.md（硬约束与项目路由）；两段式执行流与消费流图见 [资产架构](../../dragon_quant/infra/assets/ASSETS_ARCHITECTURE.md) §2/§3（本文不复制图）。
 
 ## 盘后复盘 `prep`（两段式 + 增量采集 + 独立资产库）

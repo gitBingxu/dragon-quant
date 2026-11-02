@@ -50,6 +50,7 @@ TOP_LEVEL_COMMANDS = (
     "dragons",
     "prep",
     "auction",
+    "premarket",
     "assets",
     "factor",
     "buy",
@@ -76,7 +77,7 @@ HANDLER_ATTRIBUTES = {
 # Commands whose providers are decided per invocation.
 CONDITIONAL_PROVIDER_COMMANDS = ("review-account", "prep", "factor")
 PROVIDER_ALWAYS = ("vpa", "buy", "sell")
-PROVIDER_NEVER = ("scan", "logs", "blacklist", "dragons", "storage", "assets")
+PROVIDER_NEVER = ("scan", "logs", "blacklist", "dragons", "storage", "assets", "premarket")
 
 
 def _args_for(name: str) -> SimpleNamespace:
@@ -150,7 +151,7 @@ class TestCommandRegistry(unittest.TestCase):
     def test_every_top_level_command_has_its_own_handler_module(self):
         from dragon_quant import commands
 
-        self.assertEqual(len(MIGRATED_COMMANDS), 15)
+        self.assertEqual(len(MIGRATED_COMMANDS), 16)
         for name in MIGRATED_COMMANDS:
             with self.subTest(command=name):
                 entry = commands.COMMANDS[name]
@@ -664,7 +665,7 @@ class TestMigratedHandlers(unittest.TestCase):
     def test_every_migrated_handler_accepts_args_and_services(self):
         from dragon_quant import commands
 
-        self.assertEqual(len(MIGRATED_COMMANDS), 15)
+        self.assertEqual(len(MIGRATED_COMMANDS), 16)
         for name in MIGRATED_COMMANDS:
             with self.subTest(command=name):
                 handler = commands.COMMANDS[name].load()

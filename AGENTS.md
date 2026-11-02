@@ -56,6 +56,7 @@ python -m dragon_quant prep               # 盘后复盘
 | [review](docs/agent/review.md) | 改龙头回测、双口径、严格口径侧表、回测 Web UI 的 API 与指标卡片 | 双口径规则 / 严格侧表 / Web UI 汇总契约 |
 | [trading](docs/agent/trading.md) | 改 `review-account` / `buy` / `sell`、候选池消费、数据分级、信号表、`/account` API、费用与评估 | 账户与实盘的产品/运维契约 |
 | [prep-auction](docs/agent/prep-auction.md) | 改 `prep` 复盘、`auction` 竞价、快照口径、`prep_*` / `auction_*` 资产 | 两段式 / 时点门禁 / 资产类型 / 快照与竞价口径 |
+| [premarket](docs/agent/premarket.md) | 改 `premarket`、盘前只读上下文、三锚/行动上限、盘前 JSON 契约 | 只读语义 / 严格 T-1 / 降级原因码 / 行动上限 |
 | [assets](docs/agent/assets.md) | 改 `assets push/pull/status/verify`、分区与水位、恢复回填、`dragons` 镜像 | 同步运维语义 / 分区 / 水位 / 恢复 / 退出码 |
 | [factor](docs/agent/factor.md) | 改因子层、财务与 PIT、矩阵导出/评估、决策接入、新增或修改因子 | 因子层契约 / 财务 PIT / 矩阵与评估 / 排序注入 |
 | [development](docs/agent/development.md) | 改 Agent Skill 包、Web UI 前端构建、E2E 安全边界 / golden / 覆盖图、打包边界 | 开发与发布流程 |

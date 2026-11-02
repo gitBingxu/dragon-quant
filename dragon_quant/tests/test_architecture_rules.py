@@ -116,3 +116,41 @@ class TestReviewPackageIsPure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPremarketIsReadOnlyAndPure(unittest.TestCase):
+    """premarket 只读：纯投影不触网/不 import provider/factor；CLI 薄入口。"""
+
+    PREMARKET_DIR = (REPO_ROOT / "dragon_quant" / "review_account" / "premarket")
+
+    def test_premarket_never_imports_provider_network_or_factor(self):
+        forbidden = (
+            "dragon_quant.infra.provider",
+            "dragon_quant.infra.factor",
+            "socket", "urllib", "requests", "http.client", "pandas",
+            "dragon_quant.review_account.prep.service",
+            "dragon_quant.review_account.prep.compute",
+            "dragon_quant.review_account.auction.collect",
+            "dragon_quant.review_account.auction.scoring",
+        )
+        offenders = {}
+        for path in sorted(self.PREMARKET_DIR.glob("*.py")):
+            hits = _hits(path, forbidden)
+            if hits:
+                offenders[path.name] = hits
+        self.assertEqual(offenders, {})
+
+    def test_premarket_never_writes_storage(self):
+        blob = "\n".join(path.read_text(encoding="utf-8")
+                         for path in sorted(self.PREMARKET_DIR.glob("*.py")))
+        for token in ("save_prep_snapshot", "save_auction_asset",
+                      "replace_auction_snapshots", "_ensure_schema",
+                      "journal_mode=WAL", "CREATE TABLE"):
+            self.assertNotIn(token, blob)
+
+    def test_commands_premarket_is_a_thin_entry(self):
+        path = REPO_ROOT / "dragon_quant" / "commands" / "premarket.py"
+        self.assertEqual(
+            _hits(path, ("dragon_quant.infra.assets", "sqlite3",
+                         "dragon_quant.infra.provider", "socket", "urllib")),
+            [])

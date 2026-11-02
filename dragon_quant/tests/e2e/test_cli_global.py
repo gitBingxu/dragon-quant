@@ -25,6 +25,7 @@ TOP_LEVEL_COMMANDS = (
     "dragons",
     "prep",
     "auction",
+    "premarket",
     "assets",
     "factor",
     "buy",
@@ -65,7 +66,7 @@ def test_g2_version_matches_package_version(sandbox):
     short_flag = runner().run_cli(["-v"], sandbox=sandbox)
     for result in (long_flag, short_flag):
         assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "dragon-quant 0.7.2"
+        assert result.stdout.strip() == "dragon-quant 0.8.0"
 
 
 def test_g3_unknown_command_exits_two_with_usage(sandbox):

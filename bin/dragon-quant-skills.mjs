@@ -6,12 +6,14 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   expandAgents, findProjectRoot, resolveSkillsRoot,
+  getAgentHints, getSameNameNote,
 } from "../lib/paths.mjs";
 import { loadSkillPackage, readPackageVersion } from "../lib/skill-package.mjs";
 import { install, InstallerError } from "../lib/install.mjs";
 import { uninstall } from "../lib/uninstall.mjs";
 import { runDoctor } from "../lib/doctor.mjs";
 import { detectCli, compareVersions, meetsMinVersion } from "../lib/python.mjs";
+import { shouldPromptInstall, selectAgents } from "../lib/agent-select.mjs";
 
 const NODE_FLOOR = "22.20.0";
 const PACKAGE_ROOT = process.env.DQ_SKILLS_PACKAGE_ROOT
@@ -29,38 +31,71 @@ const USAGE = `dragon-quant-skills — dragon-quant Agent Skill 安装器
                                 [--target-dir DIR] [--dry-run] [--force] [--json]
   dragon-quant-skills version   [--json]
 
-默认 scope 是 project；--global 才会写入用户目录。--target-dir 表示项目根目录。
+默认 scope 是 project；--global 才会写入用户目录。--target-dir 表示项目根目录
+（Pi 与 OpenClaw 表示工作目录 / workspace）。--agent 支持逗号多选与 all：
+claude-code / codex / openclaw / hermes / deepseek / pi / agents / all。
+
+裸 install 在 stdin/stdout/stderr 均为终端时进入交互多选
+（↑/↓ 移动，空格切换，a 全选/清空，Enter 确认，q 取消）；--agent、--json
+或任一标准流被重定向时跳过交互，沿用默认 claude-code。
 `;
 
-function printJson(payload) {
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+const SUPPORTED_AGENTS = "支持 claude-code / codex / openclaw / hermes / deepseek / pi / agents / all";
+
+function printJson(stdout, payload) {
+  stdout.write(`${JSON.stringify(payload)}\n`);
 }
 
-function printUsage() {
-  process.stdout.write(USAGE);
+function printUsage(stdout) {
+  stdout.write(USAGE);
 }
 
-function fail(command, code, message, hint, jsonMode, exitCode) {
+function fail(streams, command, code, message, hint, jsonMode, exitCode) {
   if (jsonMode) {
-    printJson({ ok: false, command, error: { code, message, hint } });
+    printJson(streams.stdout, { ok: false, command, error: { code, message, hint } });
   } else {
-    process.stderr.write(`错误：${message}\n`);
-    if (hint) process.stderr.write(`提示：${hint}\n`);
+    streams.stderr.write(`错误：${message}\n`);
+    if (hint) streams.stderr.write(`提示：${hint}\n`);
   }
   return exitCode;
 }
 
-function detectCliSafe(pythonArg) {
+function detectCliSafe(pythonArg, env) {
   try {
-    return detectCli({ pythonArg });
+    return detectCli({ pythonArg, env });
   } catch (err) {
     return { found: false, command: null, version: null, source: null, error: err.message };
   }
 }
 
-export async function main(argv = process.argv.slice(2)) {
+function canonicalPath(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return path.resolve(target);
+  }
+}
+
+function findSelfHostingAgent(agentNames, roots, scope, targetDir) {
+  if (scope !== "project" || targetDir) return null;
+  const packageSkills = canonicalPath(path.join(PACKAGE_ROOT, "skills"));
+  for (const agent of agentNames) {
+    if (agent !== "openclaw") continue;
+    if (canonicalPath(roots.get(agent)) === packageSkills) return agent;
+  }
+  return null;
+}
+
+export async function main(argv = process.argv.slice(2), io = {}) {
+  const stdin = io.stdin ?? process.stdin;
+  const stdout = io.stdout ?? process.stdout;
+  const stderr = io.stderr ?? process.stderr;
+  const home = io.home ?? os.homedir();
+  const env = io.env ?? process.env;
+  const streams = { stdout, stderr };
+
   if (compareVersions(process.versions.node, NODE_FLOOR) < 0) {
-    process.stderr.write(
+    stderr.write(
       `Node ${process.versions.node} 低于最低要求 ${NODE_FLOOR}，请升级 Node 后重试。\n`,
     );
     return 2;
@@ -87,7 +122,7 @@ export async function main(argv = process.argv.slice(2)) {
       },
     });
   } catch (err) {
-    return fail("unknown", "usage", err.message, "运行 dragon-quant-skills -h 查看用法", argv.includes("--json"), 2);
+    return fail(streams, "unknown", "usage", err.message, "运行 dragon-quant-skills -h 查看用法", argv.includes("--json"), 2);
   }
 
   const { values, positionals } = parsed;
@@ -95,7 +130,7 @@ export async function main(argv = process.argv.slice(2)) {
   const command = positionals[0] ?? (values.version ? "version" : "help");
 
   if (values.help || command === "help") {
-    printUsage();
+    printUsage(stdout);
     return 0;
   }
 
@@ -104,37 +139,62 @@ export async function main(argv = process.argv.slice(2)) {
     try {
       version = readPackageVersion(PACKAGE_ROOT);
     } catch (err) {
-      return fail(command, "integrity", `无法读取包版本：${err.message}`, "请重新安装 npm 包", jsonMode, 1);
+      return fail(streams, command, "integrity", `无法读取包版本：${err.message}`, "请重新安装 npm 包", jsonMode, 1);
     }
     if (jsonMode) {
-      printJson({ ok: true, command: "version", version });
+      printJson(stdout, { ok: true, command: "version", version });
     } else {
-      process.stdout.write(`dragon-quant-skills ${version}\n`);
+      stdout.write(`dragon-quant-skills ${version}\n`);
     }
     return 0;
   }
 
   if (!["install", "doctor", "uninstall"].includes(command)) {
-    return fail(command, "usage", `未知命令：${command}`, "可用命令：install / doctor / uninstall / version", jsonMode, 2);
+    return fail(streams, command, "usage", `未知命令：${command}`, "可用命令：install / doctor / uninstall / version", jsonMode, 2);
   }
 
   if (values.global && values["target-dir"]) {
-    return fail(command, "usage", "--global 与 --target-dir 不能同时使用", "--target-dir 只对 project scope 生效", jsonMode, 2);
+    return fail(streams, command, "usage", "--global 与 --target-dir 不能同时使用", "--target-dir 只对 project scope 生效", jsonMode, 2);
   }
   if (values.global && values.project) {
-    return fail(command, "usage", "--global 与 --project 不能同时使用", "省略 --project 即为默认 project scope", jsonMode, 2);
+    return fail(streams, command, "usage", "--global 与 --project 不能同时使用", "省略 --project 即为默认 project scope", jsonMode, 2);
+  }
+
+  // Interactive strategy: only a bare `install` on a full TTY prompts; every
+  // other path keeps the historical default (claude-code). The choice is then
+  // validated by the same expandAgents path as `--agent`.
+  let agentSpec = values.agent;
+  if (shouldPromptInstall({ command, agentArg: values.agent, jsonMode, stdin, stdout, stderr })) {
+    let selected;
+    try {
+      selected = await selectAgents({ input: stdin, output: stderr });
+    } catch (err) {
+      return fail(
+        streams,
+        command,
+        "io",
+        `交互选择失败：${err.message}`,
+        "可改用 --agent NAME[,NAME...]，或加 --json 跳过交互",
+        jsonMode,
+        1,
+      );
+    }
+    if (selected === null) {
+      stderr.write("已取消，未写入任何文件。\n");
+      return 0;
+    }
+    agentSpec = selected.join(",");
   }
 
   let agentNames;
   try {
-    agentNames = expandAgents(values.agent ?? "claude-code");
+    agentNames = expandAgents(agentSpec ?? "claude-code");
   } catch (err) {
-    return fail(command, "usage", err.message, "支持 claude-code / agents / all", jsonMode, 2);
+    return fail(streams, command, "usage", err.message, SUPPORTED_AGENTS, jsonMode, 2);
   }
 
   const scope = values.global ? "global" : "project";
   const cwd = process.cwd();
-  const home = os.homedir();
   const targetDir = values["target-dir"] ? path.resolve(values["target-dir"]) : undefined;
   const projectRoot = targetDir ?? findProjectRoot(cwd);
 
@@ -143,14 +203,40 @@ export async function main(argv = process.argv.slice(2)) {
     for (const agent of agentNames) {
       roots.set(
         agent,
-        resolveSkillsRoot({ agent, scope, projectRoot, home, targetDir: scope === "project" ? targetDir : undefined }),
+        resolveSkillsRoot({
+          agent,
+          scope,
+          projectRoot,
+          home,
+          cwd,
+          env,
+          targetDir: scope === "project" ? targetDir : undefined,
+        }),
       );
     }
   } catch (err) {
-    return fail(command, "usage", err.message, "检查 --agent 与 scope 参数", jsonMode, 2);
+    return fail(streams, command, "usage", err.message, "检查 --agent 与 scope 参数", jsonMode, 2);
   }
 
   const skillDirs = new Map(agentNames.map((agent) => [agent, path.join(roots.get(agent), "dragon-quant")]));
+
+  // Self-hosting guard: OpenClaw's project target is `<workspace>/skills`, which
+  // equals this package's `skills/` source dir when run from the package root.
+  // Reject install AND uninstall before any write; --force must not bypass it.
+  if (command === "install" || command === "uninstall") {
+    const selfHostingAgent = findSelfHostingAgent(agentNames, roots, scope, targetDir);
+    if (selfHostingAgent) {
+      return fail(
+        streams,
+        command,
+        "usage",
+        `${selfHostingAgent} 项目目标与本包 skills/ 源目录重合：${path.join(PACKAGE_ROOT, "skills")}`,
+        "请到消费项目运行；或用 --target-dir 指向临时 workspace。该保护不受 --force 影响。",
+        jsonMode,
+        2,
+      );
+    }
+  }
 
   if (command === "uninstall") {
     const agents = [];
@@ -171,17 +257,17 @@ export async function main(argv = process.argv.slice(2)) {
       }
     } catch (err) {
       const code = err instanceof InstallerError ? err.code : "io";
-      return fail(command, code, err.message, err.hint ?? null, jsonMode, 1);
+      return fail(streams, command, code, err.message, err.hint ?? null, jsonMode, 1);
     }
 
     if (jsonMode) {
-      printJson({ ok: true, command, scope, agents, warnings: [], backup_path: null });
+      printJson(stdout, { ok: true, command, scope, agents, warnings: [], backup_path: null });
       return 0;
     }
     for (const item of agents) {
-      process.stdout.write(`- ${item.agent}: ${item.state} → ${item.path}\n`);
+      stdout.write(`- ${item.agent}: ${item.state} → ${item.path}\n`);
     }
-    process.stdout.write(`卸载完成（不会删除 skills 根目录）。\n`);
+    stdout.write(`卸载完成（不会删除 skills 根目录）。\n`);
     return 0;
   }
 
@@ -190,7 +276,7 @@ export async function main(argv = process.argv.slice(2)) {
     try {
       return loadSkillPackage(PACKAGE_ROOT);
     } catch (err) {
-      return fail(command, "integrity", `无法读取包内 skill：${err.message}`, "请重新安装 npm 包", jsonMode, 1);
+      return fail(streams, command, "integrity", `无法读取包内 skill：${err.message}`, "请重新安装 npm 包", jsonMode, 1);
     }
   })();
   if (typeof pkg === "number") return pkg;
@@ -201,14 +287,15 @@ export async function main(argv = process.argv.slice(2)) {
       const otherScope = scope === "project" ? "global" : "project";
       let otherSkillsRoot;
       try {
-        otherSkillsRoot = resolveSkillsRoot({ agent, scope: otherScope, projectRoot, home });
+        otherSkillsRoot = resolveSkillsRoot({ agent, scope: otherScope, projectRoot, home, cwd, env });
       } catch {
         continue;
       }
       const otherDir = path.join(otherSkillsRoot, "dragon-quant");
       if (fs.existsSync(otherDir)) {
+        const note = getSameNameNote(agent) ?? "可能按客户端优先级遮蔽；可用 --all-scopes 检查。";
         warnings.push(
-          `另一 scope 已安装同名 skill：${otherDir}（${otherScope}）。Claude Code 优先级 Enterprise > personal(global) > project，旧版本可能遮蔽本次安装。`,
+          `另一 scope 已安装同名 skill：${otherDir}（${otherScope}）。${note}`,
         );
       }
     }
@@ -235,16 +322,18 @@ export async function main(argv = process.argv.slice(2)) {
           path: report.skillDir,
           state: report.state,
           actions: report.actions,
+          // A dry run has not taken effect, so do not advertise reload/trust hints.
+          hints: values["dry-run"] ? [] : getAgentHints(agent, { scope, projectRoot }),
           warnings: [],
         });
       }
     } catch (err) {
       const code = err instanceof InstallerError ? err.code : "io";
-      return fail(command, code, err.message, err.hint ?? null, jsonMode, 1);
+      return fail(streams, command, code, err.message, err.hint ?? null, jsonMode, 1);
     }
 
     const minVersion = pkg.meta.metadata?.["min-cli-version"] ?? pkg.packageVersion;
-    const cli = detectCliSafe(values.python);
+    const cli = detectCliSafe(values.python, env);
     if (!cli.found) {
       warnings.push(
         `未找到 dragon-quant CLI：${cli.error}。安装已完成，但 skill 运行前需先安装 CLI。修复：python3 -m venv .venv && .venv/bin/pip install -e .`,
@@ -256,7 +345,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
 
     if (jsonMode) {
-      printJson({
+      printJson(stdout, {
         ok: true,
         command,
         scope,
@@ -267,17 +356,20 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
 
-    process.stdout.write(`dragon-quant-skills ${pkg.packageVersion}（${scope}）\n`);
+    stdout.write(`dragon-quant-skills ${pkg.packageVersion}（${scope}）\n`);
     for (const item of agents) {
-      process.stdout.write(`- ${item.agent}: ${item.state} → ${item.path}\n`);
+      stdout.write(`- ${item.agent}: ${item.state} → ${item.path}\n`);
     }
     if (values["dry-run"]) {
-      process.stdout.write(`dry-run：未写入任何文件（最终路径见上）。\n`);
+      stdout.write(`dry-run：未写入任何文件（最终路径见上）。\n`);
     } else {
-      process.stdout.write(`已完成。首次安装或升级后请在 Claude Code 运行 /reload-skills，或重启会话。\n`);
-      for (const backup of backups) process.stdout.write(`备份：${backup}\n`);
+      stdout.write(`已完成。\n`);
+      for (const item of agents) {
+        for (const hint of item.hints) stdout.write(`提示（${item.agent}）：${hint}\n`);
+      }
+      for (const backup of backups) stdout.write(`备份：${backup}\n`);
     }
-    for (const warning of warnings) process.stdout.write(`警告：${warning}\n`);
+    for (const warning of warnings) stdout.write(`警告：${warning}\n`);
     return 0;
   }
 
@@ -290,7 +382,7 @@ export async function main(argv = process.argv.slice(2)) {
     const otherScope = scope === "project" ? "global" : "project";
     let otherRoot;
     try {
-      otherRoot = resolveSkillsRoot({ agent, scope: otherScope, projectRoot, home });
+      otherRoot = resolveSkillsRoot({ agent, scope: otherScope, projectRoot, home, cwd, env });
     } catch {
       continue;
     }
@@ -304,21 +396,21 @@ export async function main(argv = process.argv.slice(2)) {
     packageFiles: pkg.files,
     packageVersion: pkg.packageVersion,
     meta: pkg.meta,
-    detect: () => detectCliSafe(values.python),
+    detect: () => detectCliSafe(values.python, env),
     projectRoot,
   });
 
   if (jsonMode) {
-    printJson({ ok: report.ok, command: "doctor", checks: report.checks, installs: report.installs });
+    printJson(stdout, { ok: report.ok, command: "doctor", checks: report.checks, installs: report.installs });
     return report.ok ? 0 : 1;
   }
 
   for (const check of report.checks) {
-    process.stdout.write(`[${check.status}] ${check.id}: ${check.detail}\n`);
-    if (check.fix) process.stdout.write(`        修复：${check.fix}\n`);
+    stdout.write(`[${check.status}] ${check.id}: ${check.detail}\n`);
+    if (check.fix) stdout.write(`        修复：${check.fix}\n`);
   }
-  const cli = detectCliSafe(values.python);
-  if (cli.found) process.stdout.write(`CLI：${cli.command}（${cli.version}，${cli.source}）\n`);
+  const cli = detectCliSafe(values.python, env);
+  if (cli.found) stdout.write(`CLI：${cli.command}（${cli.version}，${cli.source}）\n`);
   return report.ok ? 0 : 1;
 }
 

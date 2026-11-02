@@ -1,0 +1,49 @@
+{
+  "summary": {
+    "total_inline_citations": 22,
+    "unique_citation_numbers": 15,
+    "reference_entries": 15,
+    "critical_issues": 0,
+    "issue_count": 0,
+    "warnings": 0,
+    "verdict": "PASS"
+  },
+  "issues": [],
+  "warnings": [],
+  "citation_coverage": {
+    "inline_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "reference_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  }
+}

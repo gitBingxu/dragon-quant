@@ -19,6 +19,7 @@
 
 - [稳定性说明](#稳定性说明)
 - [快速使用](#快速使用)
+- [Agent Skill](#agent-skill)
 - [龙头扫描](#龙头扫描)
 - [龙头回测](#龙头回测)
 - [设计哲学](#设计哲学)
@@ -37,8 +38,9 @@
 | `review` 龙头回测 | 稳定 | — |
 | `prep` 盘后复盘 | 快速迭代中 | 2026 年 12 月初 |
 | `auction` 集合竞价强度判断 | 快速迭代中 | 2026 年 12 月初 |
+| `premarket` 盘前预案上下文（只读） | 快速迭代中 | 2026 年 12 月初 |
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
-| `agent-skill` 盘前预案复盘回测等 skills | 快速迭代中 | 2026 年 12 月中 |
+| `agent-skill` Agent 交易日助手 | 快速迭代中 | 2026 年 12 月中 |
 
 ## 快速使用
 
@@ -52,9 +54,56 @@ dragon-quant scan --top 5
 
 # 回测扫描结果并打开面板
 dragon-quant review --ui
+
+# 盘前只读上下文（T-1 复盘 + T 日竞价；缺数据结构化降级）
+dragon-quant premarket --json
 ```
 
 只需查看已有回测结果时，运行 `dragon-quant review --ui-only`。
+
+## Agent Skill
+
+仓库内置单主 Agent Skill，让 Claude Code 等 Agent 按「交易日助手」定位使用 dragon-quant。安装器支持六个真实 harness 的项目级与用户级目标，可逗号多选或用 `all`；在真正的终端里裸跑 `install` 会弹出多选菜单：
+
+```bash
+npx dragon-quant-skills install                    # 终端里多选；直接 Enter 只装 claude-code
+npx dragon-quant-skills install --agent hermes     # 单个目标，跳过菜单
+npx dragon-quant-skills install --agent claude-code,hermes   # 多选，一次写两个目录
+npx dragon-quant-skills install --agent all        # 六个 harness
+npx dragon-quant-skills install --global --agent pi            # 用户级
+npx dragon-quant-skills doctor                     # 检查安装完整性、CLI 版本与遮蔽
+```
+
+交互菜单只列出六个真实 harness（不含 `agents` 别名），默认勾选 `claude-code`：
+
+- `↑` / `↓` 移动（首尾环绕），`空格` 切换当前项，`a` 全选 / 清空，`Enter` 确认；空选择时 Enter 不离场并提示「至少选择一个 agent」。
+- `q` 或 `Ctrl+C` 取消：进程 exit 0，不写任何文件（skills 根目录也不会创建）。
+- 仅在 `install`、未显式给 `--agent`、未加 `--json`，且 `stdin` / `stdout` / `stderr` **全部是 TTY** 时弹菜单；菜单与提示只写 stderr，stdout 仍只保留安装摘要。任一标准流被重定向（CI、管道到 `jq`、`2>log`）都会跳过交互并按默认 `claude-code` 安装。
+- 由 Makefile、`npm run`、任务运行器等非人类调用但仍继承 TTY 的脚本，请显式传 `--agent` 或 `--json`，避免等待按键。`doctor` 与 `uninstall` 永不弹菜单。
+
+| agent | 项目级目录（project scope） | 用户级目录（--global） |
+|---|---|---|
+| `claude-code`（默认） | `<projectRoot>/.claude/skills` | `~/.claude/skills` |
+| `codex` | `<projectRoot>/.agents/skills` | `~/.agents/skills` |
+| `openclaw` | `<workspace>/skills` | `${OPENCLAW_STATE_DIR:-~/.openclaw}/skills` |
+| `hermes` | `<projectRoot>/.hermes/skills` | `~/.hermes/skills` |
+| `deepseek`（developer preview） | `<projectRoot>/.dsh/skills` | `${DSH_HOME:-~/.dsh}/skills` |
+| `pi` | `<cwd>/.pi/skills` | `${PI_CODING_AGENT_DIR:-~/.pi/agent}/skills` |
+| `agents`（兼容别名） | `<projectRoot>/.agents/skills` | `~/.agents/skills` |
+
+- `all` 展开为六个真实 harness（`claude-code,codex,openclaw,hermes,deepseek,pi`），不包含兼容别名 `agents`。
+- Pi 与 OpenClaw 以当前工作目录 / workspace 为基准，不向上寻找 git root；`--target-dir` 对它们始终优先，表示工作目录。
+- 三个官方环境变量只影响 `--global`：空串视为未设置，`~/` 展开为 home，相对路径按 cwd 解析。
+- 安装成功后按目标输出提示：Hermes 项目运行 `hermes skills trust <projectRoot>`，Pi 编辑后 `/reload`，DeepSeek 自动发现 skills 根的直接子项，其余按客户端重载。安装器不自动修改任何 trust 或客户端配置，也不宣称客户端已完成真实加载验证。
+- 在 dragon-quant 仓库根使用 `--agent openclaw` 会命中包内 `skills/` 源目录，install / uninstall 会直接拒绝（`--force` 也不能绕过）；请到消费项目运行，或用 `--target-dir` 指向临时 workspace。`all` 会在项目根创建 OpenClaw 的 `skills/`，不希望时请显式列出目标。
+
+Agent 可用的能力限定为八类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
+
+仓库内 Skill 版本可能高于 npm registry 已发布版本；安装后用 `npx dragon-quant-skills doctor` 核对实际安装的 Skill 版本、来源与最低 CLI 版本，不要假定 `npx` 拉到的就是仓库中的最新内容。
+
+不在白名单内的能力统一回复：
+
+> 当前功能还不稳定，暂未对 Agent 开放。你可以到 https://github.com/gitBingxu/dragon-quant/issues 反馈需求或问题。
 
 ## 龙头扫描
 

@@ -1,6 +1,7 @@
 import type { PrepWatermark } from "../../api/assets";
 import { Badge } from "../../components/Badge";
-import { DataTable, type Column } from "../../components/DataTable";
+import { type Column } from "../../components/DataTable";
+import { PaginatedDataTable } from "../../components/PaginatedDataTable";
 import {
   ASSET_CATEGORY_LABELS,
   ASSET_STATUS_LABELS,
@@ -109,10 +110,11 @@ export function AssetDayTable({ watermark }: { watermark: PrepWatermark }) {
         {" · "}「采集记录」是该日期已知的最新状态，不代表本次运行一定成功。
       </div>
       <div className="overflow-hidden rounded-lg border border-hairline">
-        <DataTable
+        <PaginatedDataTable
           columns={COLUMNS}
           rows={watermark.assets}
           rowKey={(row) => row.asset_type}
+          resetKey={watermark.trade_date}
           minWidth={980}
           empty="该日没有资产记录。"
         />

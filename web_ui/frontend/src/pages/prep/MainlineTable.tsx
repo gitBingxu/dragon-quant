@@ -1,5 +1,6 @@
 import { Badge } from "../../components/Badge";
-import { DataTable, type Column } from "../../components/DataTable";
+import { type Column } from "../../components/DataTable";
+import { PaginatedDataTable } from "../../components/PaginatedDataTable";
 import { fmtNum } from "../../lib/format";
 import { MAINLINE_STATE_LABELS, UNKNOWN_REASON_LABELS, labelOf } from "../../lib/labels";
 import { display, type MainlineRow } from "./prepModel";
@@ -102,16 +103,23 @@ const COLUMNS: Column<MainlineRow>[] = [
   },
 ];
 
-export function MainlineTable({ rows }: { rows: MainlineRow[] }) {
+export function MainlineTable({
+  rows,
+  resetKey,
+}: {
+  rows: MainlineRow[];
+  resetKey?: string | number | null;
+}) {
   if (rows.length === 0) {
     return <div className="text-body text-ink-3">该日无主线数据。</div>;
   }
   return (
     <div className="overflow-hidden rounded-lg border border-hairline">
-      <DataTable
+      <PaginatedDataTable
         columns={COLUMNS}
         rows={rows}
         rowKey={(row) => `${row.name ?? "mainline"}-${row.index}`}
+        resetKey={resetKey}
         minWidth={980}
       />
     </div>

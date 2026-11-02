@@ -22,18 +22,7 @@ const ALIGN: Record<string, string> = {
   center: "text-center",
 };
 
-export function DataTable<T>({
-  columns,
-  rows,
-  rowKey,
-  sort,
-  onSort,
-  onRowClick,
-  rowClassName,
-  empty,
-  minWidth = 0,
-  maxHeight,
-}: {
+export interface DataTableProps<T> {
   columns: Column<T>[];
   rows: T[];
   rowKey: (row: T, index: number) => string;
@@ -45,7 +34,20 @@ export function DataTable<T>({
   empty?: ReactNode;
   minWidth?: number;
   maxHeight?: number;
-}) {
+}
+
+export function DataTable<T>({
+  columns,
+  rows,
+  rowKey,
+  sort,
+  onSort,
+  onRowClick,
+  rowClassName,
+  empty,
+  minWidth = 0,
+  maxHeight,
+}: DataTableProps<T>) {
   return (
     <div className="dt-wrap" style={maxHeight ? { maxHeight } : undefined}>
       <table className="dt" style={minWidth ? { minWidth } : undefined}>

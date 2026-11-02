@@ -16,8 +16,9 @@ import type {
 } from "../api/assets";
 import { Badge } from "./Badge";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { DataTable, type Column } from "./DataTable";
+import { type Column } from "./DataTable";
 import { EmptyState } from "./EmptyState";
+import { PaginatedDataTable } from "./PaginatedDataTable";
 import { Section } from "./Section";
 import { StatCard } from "./StatCard";
 import {
@@ -188,7 +189,7 @@ function Body({
       </div>
 
       <div className="overflow-hidden rounded-lg border border-hairline">
-        <DataTable
+        <PaginatedDataTable
           columns={STOCK_COLUMNS}
           rows={data.stocks}
           rowKey={(row) => row.code}

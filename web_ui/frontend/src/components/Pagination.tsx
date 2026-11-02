@@ -29,17 +29,21 @@ export function Pagination({
   const to = Math.min(page * pageSize, total);
   const pages = pageWindow(page, pageCount);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-4 py-2.5">
-      <div className="text-body text-ink-2">
+    <nav
+      aria-label="表格分页"
+      className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-4 py-2.5"
+    >
+      <div className="text-body text-ink-2" aria-live="polite">
         第 <span className="num text-ink">{from}</span>–
         <span className="num text-ink">{to}</span> 条 · 共{" "}
         <span className="num text-ink">{total}</span> 条
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {onPageSizeChange ? (
           <select
             className="select h-7 w-[92px] text-body"
             value={String(pageSize)}
+            aria-label="每页条数"
             onChange={(event) => onPageSizeChange(Number(event.currentTarget.value))}
           >
             {pageSizeOptions.map((size) => (
@@ -87,7 +91,7 @@ export function Pagination({
           </button>
         </div>
       </div>
-    </div>
+    </nav>
   );
 }
 

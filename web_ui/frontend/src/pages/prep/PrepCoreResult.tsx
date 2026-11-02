@@ -8,8 +8,9 @@
  */
 import type { PrepSnapshotView, PrepWatermark } from "../../api/assets";
 import { Badge, type BadgeTone } from "../../components/Badge";
-import { DataTable, type Column } from "../../components/DataTable";
+import { type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
+import { PaginatedDataTable } from "../../components/PaginatedDataTable";
 import { fmtNum } from "../../lib/format";
 import { UNKNOWN_REASON_LABELS, labelOf } from "../../lib/labels";
 import { MainlineTable } from "./MainlineTable";
@@ -108,7 +109,7 @@ export function PrepCoreResult({
       <div className="grid gap-2">
         <div className="text-body font-medium text-ink">主线</div>
         {snapshot ? (
-          <MainlineTable rows={mainlines} />
+          <MainlineTable rows={mainlines} resetKey={snapshot.trade_date} />
         ) : (
           <div className="text-body text-ink-3">该日无复盘快照。</div>
         )}
@@ -143,10 +144,11 @@ export function PrepCoreResult({
           </div>
           {snapshot ? (
             <div className="overflow-hidden rounded-lg border border-hairline">
-              <DataTable
+              <PaginatedDataTable
                 columns={RECOMMENDED_COLUMNS}
                 rows={recommended}
                 rowKey={(row) => row.code}
+                resetKey={snapshot.trade_date}
                 minWidth={640}
                 empty="无推荐建仓标的（空仓、无合格候选或信号缺失）。"
               />

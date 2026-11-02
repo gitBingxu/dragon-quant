@@ -15,8 +15,9 @@ import type {
 } from "../../api/assets";
 import { Badge } from "../../components/Badge";
 import { CollapsibleSection } from "../../components/CollapsibleSection";
-import { DataTable, type Column } from "../../components/DataTable";
+import { type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
+import { PaginatedDataTable } from "../../components/PaginatedDataTable";
 import { fmtNum, fmtPct, pnlClass } from "../../lib/format";
 import {
   ACCURACY_GROUP_LABELS,
@@ -249,10 +250,12 @@ function StockGroup({
   title,
   rows,
   empty,
+  resetKey,
 }: {
   title: string;
   rows: EffectStockRow[];
   empty: string;
+  resetKey: string | number | null;
 }) {
   return (
     <div className="grid gap-1.5">
@@ -261,10 +264,11 @@ function StockGroup({
         <Badge tone="outline">{rows.length} 只</Badge>
       </div>
       <div className="overflow-hidden rounded-lg border border-hairline">
-        <DataTable
+        <PaginatedDataTable
           columns={STOCK_COLUMNS}
           rows={rows}
           rowKey={(row) => row.code}
+          resetKey={resetKey}
           minWidth={1080}
           empty={empty}
         />
@@ -358,10 +362,11 @@ export function PrepDayEffectSection({
         {effect.boards.available ? (
           <>
             <div className="overflow-hidden rounded-lg border border-hairline">
-              <DataTable
+              <PaginatedDataTable
                 columns={BOARD_COLUMNS}
                 rows={effect.boards.rows}
                 rowKey={(row) => row.board_code ?? row.board_name ?? String(row.rank)}
+                resetKey={effect.trade_date}
                 minWidth={900}
                 empty="无真主线板块可评估。"
               />
@@ -386,10 +391,11 @@ export function PrepDayEffectSection({
           <div className="grid gap-1.5">
             <div className="text-body font-medium text-ink">组内汇总</div>
             <div className="overflow-hidden rounded-lg border border-hairline">
-              <DataTable
+              <PaginatedDataTable
                 columns={SUMMARY_COLUMNS}
                 rows={summaries}
                 rowKey={(row) => row.group}
+                resetKey={effect.trade_date}
                 minWidth={900}
                 empty="暂无组汇总。"
               />
@@ -400,11 +406,13 @@ export function PrepDayEffectSection({
             title="推荐"
             rows={recommended}
             empty="无推荐标的。"
+            resetKey={effect.trade_date}
           />
           <StockGroup
             title="不推荐"
             rows={notRecommended}
             empty="无明确不推荐标的。"
+            resetKey={effect.trade_date}
           />
 
           {insufficient.length ? (

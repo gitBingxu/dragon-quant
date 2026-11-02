@@ -13,9 +13,10 @@ import {
 import { AccuracyBoard } from "../../components/AccuracyBoard";
 import { AssetCalendar } from "../../components/AssetCalendar";
 import { Badge } from "../../components/Badge";
-import { DataTable, type Column } from "../../components/DataTable";
+import { type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { PaginatedDataTable } from "../../components/PaginatedDataTable";
 import { Section } from "../../components/Section";
 import { IconAlert } from "../../components/icons-extra";
 import { fmtNum, pnlClass } from "../../lib/format";
@@ -172,10 +173,11 @@ function ResultsSection({
   return (
     <div>
       <div className="overflow-hidden rounded-lg border border-hairline">
-        <DataTable
+        <PaginatedDataTable
           columns={columns}
           rows={day.snapshots}
           rowKey={(row) => row.code}
+          resetKey={day.trade_date}
           minWidth={920}
         />
       </div>
@@ -311,10 +313,11 @@ function AssetCollectionSection({ day }: { day: AuctionDayView }) {
         />
       ) : (
         <div className="overflow-hidden rounded-lg border border-hairline">
-          <DataTable
+          <PaginatedDataTable
             columns={COLLECTION_COLUMNS}
             rows={rows}
             rowKey={(row) => row.code}
+            resetKey={day.trade_date}
             minWidth={720}
           />
         </div>

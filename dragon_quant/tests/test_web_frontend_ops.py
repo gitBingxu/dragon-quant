@@ -202,12 +202,15 @@ def test_prep_page_has_no_raw_json() -> None:
 def test_asset_calendar_is_github_style_and_shared() -> None:
     calendar = _read(CALENDAR)
     for token in ("overflow-x-auto", "aria-current", "aria-label", "title=",
-                  "onSelect", "button", "bg-panel-3", "bg-danger-soft",
-                  "bg-warning-soft", "bg-positive-soft", "border-danger-line",
+                  "onSelect", "button", "bg-panel-3",
+                  "bg-warning-soft", "bg-positive-soft",
                   "border-warning-line", "border-positive-line", "ring-brand",
-                  "较少", "较多", "WEEKDAY_LABELS", "月",
+                  "完整", "缺失", "WEEKDAY_LABELS", "月",
                   "gridAutoFlow", "gridTemplateRows"):
         assert token in calendar, f"AssetCalendar 缺少 {token!r}"
+    # 「资产缺失」红色态已并入黄色「缺失」：组件不再产出该标签，也不使用 danger 色阶。
+    for dropped in ('"资产缺失"', "bg-danger-soft", "border-danger-line"):
+        assert dropped not in calendar, f"AssetCalendar 不应再含 {dropped!r}"
     # 不保留格内图标：状态只由方块色阶表达。
     assert "StatusIcon" not in calendar, "日历不应再使用格内状态图标"
     assert "<svg" not in calendar, "日历不应再内联图标"
@@ -225,10 +228,9 @@ def test_calendar_is_sticky_below_app_header() -> None:
 
 def test_calendar_marks_missing_days_as_no_record() -> None:
     calendar = _read(CALENDAR)
-    assert "无记录" in calendar
-    assert "资产缺失" in calendar
-    assert "完备" in calendar
-    assert "不完备" in calendar
+    assert '"无"' in calendar
+    assert '"完整"' in calendar
+    assert '"缺失"' in calendar
 
 
 # ─── 5. /auction 四区块 ────────────────────────────────────────────────────
@@ -386,7 +388,7 @@ def test_dist_contains_new_copy_and_drops_old_blocks() -> None:
     js = _dist_js()
     for token in ("盘后复盘", "核心结果", "当前 T 日效果", "当日资产明细",
                   "当日资产采集", "全历史逐股判断准确率", "描述性统计",
-                  "较少", "较多", "待评估"):
+                  "完整", "缺失", "待评估"):
         assert token in js, f"dist JS 缺少新文案: {token!r}"
     for legacy in ("运行概况", "上次计划复盘", "原始 JSON"):
         assert legacy not in js, f"dist JS 不应回流出旧区块: {legacy!r}"

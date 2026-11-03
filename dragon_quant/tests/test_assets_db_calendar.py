@@ -278,5 +278,127 @@ class TestListStockDailyBarDates(_Base):
         self.assertFalse(self.db_path.exists())
 
 
+class TestListRecentPlanCandidateCodes(_Base):
+    def _seed(self):
+        with self._patched():
+            assets_db.save_prep_snapshot("2026-09-08", {
+                "review_candidates": [
+                    {"code": "600005", "position_pct": 8},
+                ]})
+            assets_db.save_prep_snapshot("2026-09-09", {
+                "review_candidates": [
+                    {"code": "600001", "position_pct": 0},
+                    {"code": "600002", "eligibility": "not_qualified"},
+                    {"code": "600001", "position_pct": 9},   # 同日内重复
+                    {"position_pct": 5},                     # 无 code，忽略
+                    "not-a-dict",
+                ]})
+            assets_db.save_prep_snapshot("2026-09-10", {
+                "review_candidates": [{"code": "600003"}]})
+            assets_db.save_prep_snapshot("2026-09-11", {
+                "review_candidates": [{"code": "600004"}]})
+
+    def test_strictly_before_orders_days_newest_first(self):
+        self._seed()
+        with self._patched():
+            window = assets_db.list_recent_plan_candidate_codes(
+                "2026-09-11", days=2)
+        # 09-11 自身被排除；日序由新到旧（09-10 → 09-09）。
+        self.assertEqual(window["codes"], ["600003", "600001", "600002"])
+        self.assertEqual(window["trade_dates"], ["2026-09-09", "2026-09-10"])
+        self.assertEqual(window["lookback_days"], 2)
+        self.assertEqual(window["corrupt_dates"], [])
+
+    def test_all_candidates_kept_regardless_of_eligibility_or_position(self):
+        self._seed()
+        with self._patched():
+            window = assets_db.list_recent_plan_candidate_codes(
+                "2026-09-11", days=10)
+        # position_pct=0 / eligibility=not_qualified 也必须保留（评估样本=全量候选）。
+        self.assertIn("600001", window["codes"])
+        self.assertIn("600002", window["codes"])
+        # 日序由新到旧：09-10 (600003) 先于 09-09，09-11 自身被排除。
+        self.assertEqual(window["codes"][:2], ["600003", "600001"])
+
+    def test_corrupt_result_json_is_reported_and_skipped(self):
+        self._seed()
+        with self._patched():
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "UPDATE prep_snapshots SET result_json='{broken' "
+                    "WHERE trade_date='2026-09-10'")
+                conn.commit()
+            finally:
+                conn.close()
+            window = assets_db.list_recent_plan_candidate_codes(
+                "2026-09-11", days=10)
+        self.assertEqual(window["corrupt_dates"], ["2026-09-10"])
+        self.assertNotIn("600003", window["codes"])
+        self.assertIn("600005", window["codes"])
+
+    def test_missing_db_returns_empty_without_creating(self):
+        with self._patched():
+            window = assets_db.list_recent_plan_candidate_codes("2026-09-11")
+        self.assertEqual(window["codes"], [])
+        self.assertEqual(window["trade_dates"], [])
+        self.assertEqual(window["lookback_days"], 10)
+        self.assertFalse(self.db_path.exists())
+
+    def test_days_must_be_positive(self):
+        with self.assertRaises(ValueError):
+            assets_db.list_recent_plan_candidate_codes("2026-09-11", days=0)
+
+
+class TestStockDailyDetectionReads(_Base):
+    def _seed_daily(self):
+        with self._patched():
+            assets_db.save_prep_assets("2026-09-10", {"stock_daily": {"rows": {
+                "600001": [{"date": "2026-09-09"}, {"date": "2026-09-10"}],
+                "600002": [{"date": "2026-09-08"}],
+            }}})
+            assets_db.save_prep_assets("2026-09-11", {"stock_daily": {"rows": {
+                "600001": [{"date": "2026-09-11"}],
+            }}})
+
+    def test_latest_asset_date_and_last_bar_dates(self):
+        self._seed_daily()
+        with self._patched():
+            self.assertEqual(
+                assets_db.latest_stock_daily_asset_date(), "2026-09-11")
+            last = assets_db.stock_daily_last_bar_dates(["600001", "600002"])
+        # 600001 取最新日期；600002 只在更早资产日出现。
+        self.assertEqual(last, {"600001": "2026-09-11", "600002": "2026-09-08"})
+
+    def test_codes_filter_and_unknown_code_absent(self):
+        self._seed_daily()
+        with self._patched():
+            last = assets_db.stock_daily_last_bar_dates(["600002", "600999"])
+        self.assertEqual(last, {"600002": "2026-09-08"})
+
+    def test_corrupt_payload_is_skipped(self):
+        self._seed_daily()
+        with self._patched():
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "UPDATE prep_assets SET payload_json='{broken' "
+                    "WHERE trade_date='2026-09-11' AND asset_type='stock_daily'")
+                conn.commit()
+            finally:
+                conn.close()
+            last = assets_db.stock_daily_last_bar_dates(["600001"])
+            self.assertEqual(assets_db.latest_stock_daily_asset_date(),
+                             "2026-09-11")
+        # 最新资产日损坏 → 继续向旧扫描，取 2026-09-10 行。
+        self.assertEqual(last, {"600001": "2026-09-10"})
+
+    def test_missing_db_returns_empty_without_creating(self):
+        with self._patched():
+            self.assertIsNone(assets_db.latest_stock_daily_asset_date())
+            self.assertEqual(assets_db.stock_daily_last_bar_dates(), {})
+        self.assertFalse(self.db_path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

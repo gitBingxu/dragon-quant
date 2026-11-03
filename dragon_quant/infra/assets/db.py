@@ -1037,6 +1037,142 @@ def list_auction_asset_names(trade_date: str, *, db_path=None) -> dict[str, str]
 # 本地日 K 加载上限（bars）；超限按「最近日期优先、整组保留」截断并告警。
 STOCK_DAILY_MAX_BARS = 200_000
 
+#: 计划候选回看窗口：近 N 个「有快照的交易日」（无快照日不占位，非交易所日历）。
+PLAN_CANDIDATE_LOOKBACK_DAYS = 10
+
+
+def list_recent_plan_candidate_codes(
+    before_date: str,
+    days: int = PLAN_CANDIDATE_LOOKBACK_DAYS,
+    *,
+    source: str = "v2",
+    db_path=None,
+) -> dict:
+    """严格早于 ``before_date`` 的最近 ``days`` 个快照日的候选 code 并集。
+
+    这是「读取现有快照的投影」，不落任何派生资产：C（prep 扩池）与 B
+    （assets backfill-stock-daily）共用同一份读取口径。
+
+    返回::
+
+        {
+          "codes": [...],          # 去重；日序由新到旧，日内按 review_candidates 顺序
+          "trade_dates": [...],    # 实际读取的快照日（升序）
+          "corrupt_dates": [...],  # result_json 损坏/缺 review_candidates 的日期
+          "lookback_days": days,
+        }
+
+    取 ``review_candidates`` 的**全部**带 code 候选，不按 ``eligibility`` /
+    ``position_pct`` 过滤（dashboard 评估样本正是全量候选）。库不存在 → 空结构且
+    不建库；单日 JSON 损坏 → 记 ``corrupt_dates`` 并跳过，不中断。
+    """
+
+    days = int(days)
+    if days < 1:
+        raise ValueError("days 必须 >= 1")
+    result = {"codes": [], "trade_dates": [], "corrupt_dates": [],
+              "lookback_days": days}
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return result
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = conn.execute(
+            "SELECT trade_date, result_json FROM prep_snapshots "
+            "WHERE trade_date < ? AND source = ? "
+            "ORDER BY trade_date DESC LIMIT ?",
+            (before_date, source, days),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    seen: set[str] = set()
+    trade_dates: list[str] = []
+    for trade_date, payload_json in rows:
+        payload, error = _load_json(payload_json, None)
+        candidates = (payload.get("review_candidates")
+                      if isinstance(payload, dict) else None)
+        if error is not None or not isinstance(candidates, list):
+            result["corrupt_dates"].append(trade_date)
+            continue
+        trade_dates.append(trade_date)
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("code")
+            if isinstance(code, str) and code and code not in seen:
+                seen.add(code)
+                result["codes"].append(code)
+    result["trade_dates"] = sorted(trade_dates)
+    return result
+
+
+def latest_stock_daily_asset_date(*, db_path=None) -> Optional[str]:
+    """最新 ``stock_daily`` 资产行日期（单行 SQL，不解析 payload；只读、不建库）。"""
+
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return None
+    try:
+        _ensure_schema(conn, migrate=False)
+        row = conn.execute(
+            "SELECT trade_date FROM prep_assets WHERE asset_type = 'stock_daily' "
+            "ORDER BY trade_date DESC LIMIT 1",
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def stock_daily_last_bar_dates(codes=None, *, max_asset_days: int = 60,
+                               db_path=None) -> dict[str, str]:
+    """``{code: 本地最大 bar 日期}``（只读、不建库）。
+
+    从最新 ``trade_date`` 向旧扫描，每 code 只记首次命中（即最大日期）；``codes``
+    给定时收齐后提前结束。最多扫 ``max_asset_days`` 个资产日，避免全历史解析。
+    损坏 payload 跳过；从未出现的 code 不出现在结果中（调用方按「缺失」处理）。
+    """
+
+    wanted = {str(code) for code in (codes or []) if code}
+    limit = int(max_asset_days)
+    if limit < 1:
+        return {}
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {}
+    try:
+        _ensure_schema(conn, migrate=False)
+        payloads = conn.execute(
+            "SELECT payload_json FROM prep_assets WHERE asset_type = 'stock_daily' "
+            "ORDER BY trade_date DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    last: dict[str, str] = {}
+    for (payload_json,) in payloads:
+        if wanted and len(last) >= len(wanted):
+            break
+        payload, error = _load_json(payload_json, None)
+        if error is not None or not isinstance(payload, dict):
+            continue
+        rows = payload.get("rows")
+        if not isinstance(rows, dict):
+            continue
+        for code, bars in rows.items():
+            code = str(code)
+            if wanted and code not in wanted:
+                continue
+            if code in last or not isinstance(bars, list):
+                continue
+            dates = [str(bar.get("date") or "") for bar in bars
+                     if isinstance(bar, dict)]
+            dates = [day for day in dates if day]
+            if dates:
+                last[code] = max(dates)
+    return last
+
 
 def list_stock_daily_bar_dates(date_from: str | None = None,
                                date_to: str | None = None, *,

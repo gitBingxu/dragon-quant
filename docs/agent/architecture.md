@@ -128,7 +128,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 > `bs_eval.main.run_bs_eval`（BS 假想回放，写 `bs_*` 两表）；
 > `infra.factor.main` 13 个批准出口（`build/list_factors/query/status/export_matrix/evaluate_factor/
 > fin_sync/fin_calibrate/fin_status/parse_only/FactorModel/annotate_pool/CleanConfig`）；
-> `infra.assets.main.run`；`infra.factor.maintenance.plan_purge/apply_purge`（`assets purge-derived`，命令层取锁）；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；
+> `infra.assets.main.run`（同步/doctor/backfill-dragons/purge-derived）与 `infra.assets.main.backfill_stock_daily`（本地日 K 回填）；`infra.factor.maintenance.plan_purge/apply_purge`（`assets purge-derived`，命令层取锁）；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；
 > `infra.storage.main`（`init_db`/`DataCache`/`StorageManager`）与 `scan.storage.main`
 > （扫描/龙头/日志/黑名单持久化）为文档化公共契约，`infra/storage`、`scan/storage` 的
 > `__init__.py` 不做急切重导出；`web_ui.start_dashboard`（新入口）/ `web_ui.start_server`（deprecated 薄壳）。

@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (56), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (57), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 56,
+    "node_count": 57,
     "top_level_count": 18,
     "nodes": [
       {
@@ -339,6 +339,17 @@
           "--to",
           "--dry-run",
           "--prune",
+          "--json"
+        ]
+      },
+      {
+        "command": "assets backfill-stock-daily",
+        "flags": [
+          "-h",
+          "--help",
+          "--dry-run",
+          "--days",
+          "--codes",
           "--json"
         ]
       },
@@ -808,9 +819,10 @@
           "dragon_quant/tests/e2e/test_prep.py::test_p14_single_factor_failure_is_isolated_and_snapshot_still_written",
           "dragon_quant/tests/e2e/test_prep.py::test_p15_runtime_clock_mode_drives_the_1640_gate",
           "dragon_quant/tests/e2e/test_prep.py::test_p16_runtime_clock_mode_full_prep_matches_reviewed_golden",
+          "dragon_quant/tests/e2e/test_prep.py::test_p20_prep_stock_daily_includes_recent_plan_candidates",
           "dragon_quant/tests/e2e/test_prep.py::test_c18_fake_macro_response_covers_every_macro_spec"
         ],
-        "notes": "P1-P16 + C18 macro fallback protection; P15-P16 pin the runtime.clock prep gate and full golden."
+        "notes": "P1-P16 + P20 plan-candidate expansion + C18 macro fallback protection; P15-P16 pin the runtime.clock prep gate and full golden."
       },
       "auction": {
         "tests": [
@@ -895,6 +907,13 @@
           "dragon_quant/tests/e2e/test_assets.py::test_as15_backfill_prune_deletes_only_mirror_orphans"
         ],
         "notes": ""
+      },
+      "assets backfill-stock-daily": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_assets.py::test_as20_backfill_stock_daily_dry_run_reports_gap_without_write",
+          "dragon_quant/tests/e2e/test_assets.py::test_as21_backfill_stock_daily_merges_into_execution_day_and_is_idempotent"
+        ],
+        "notes": "AS20 pins dry-run zero-write/zero-fetch; AS21 pins merge into the execution-day row (unrelated code preserved), untouched review-scope fields, and idempotence (second run detected=0)."
       },
       "factor": {
         "tests": [
@@ -1366,7 +1385,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_56_nodes_and_18_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_57_nodes_and_18_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",

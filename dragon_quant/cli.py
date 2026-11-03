@@ -516,6 +516,31 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     assets_backfill.add_argument("--json", dest="json", action="store_true",
                                  help="输出完整 JSON（默认人读摘要）")
 
+    assets_backfill_sd = assets_subs.add_parser(
+        "backfill-stock-daily",
+        help="回填近 N 日计划候选的本地日 K（补 dashboard 评估缺口）",
+        usage="dragon-quant assets backfill-stock-daily [--dry-run] [--days N] "
+              "[--codes A,B] [--json]",
+        description="检测近 N 个「有快照交易日」的 review_candidates 候选，把本地"
+                    "stock_daily 缺失或落后的日 K 补到执行日（或周末的本地最新 bar 日）"
+                    "资产行。既有行的 requested_codes/coverage 一律不动，只扩 rows 并写"
+                    "backfill 审计块；绝不回写更早历史日。",
+        epilog="""Examples:
+  dragon-quant assets backfill-stock-daily --dry-run
+  dragon-quant assets backfill-stock-daily
+  dragon-quant assets backfill-stock-daily --days 20 --json
+  dragon-quant assets backfill-stock-daily --codes 600001,000002
+""",
+    )
+    assets_backfill_sd.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                    help="只体检并报告缺口，不触网、不写库")
+    assets_backfill_sd.add_argument("--days", type=int, default=10,
+                                    help="检测窗口：近 N 个有快照交易日（1..60，默认 10）")
+    assets_backfill_sd.add_argument("--codes", default=None,
+                                    help="显式补采代码（逗号分隔；给定时跳过自动检测）")
+    assets_backfill_sd.add_argument("--json", dest="json", action="store_true",
+                                    help="输出完整 JSON（默认人读摘要）")
+
     assets_purge = assets_subs.add_parser(
         "purge-derived",
         help="清理可重建的 prep 派生数据（默认 dry-run，不触云端）",

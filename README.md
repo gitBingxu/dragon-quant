@@ -66,6 +66,10 @@ dragon-quant premarket --json
 
 # BS 策略假想回放（批量回放 dragons_v2，生成 /bs 页面数据）
 dragon-quant bs-eval --limit 5
+
+# 补齐 dashboard 复盘评估所需的本地日 K（默认只体检）
+dragon-quant assets backfill-stock-daily --dry-run
+dragon-quant assets backfill-stock-daily
 ```
 
 `dashboard` 启动后会在后台增量生成 BS 派生数据（只写 `bs_*` 派生表），页面无需先手动跑

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -30,6 +31,13 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from dragon_quant.infra import clock
 from dragon_quant.infra.assets.dragons_mirror import BACKFILL_HINT, DragonsMirrorStale
+from dragon_quant.infra.assets.stock_daily import (
+    PLAN_CANDIDATE_MAX_BARS,
+    POOL_MAX_BARS,
+    STOCK_DAILY_DAYS,
+    daily_row as _daily_row,
+    merge_daily_rows,
+)
 
 from .compute import SHANGHAI, _PLAN_FEEDBACK_KEYS, _PLAN_POSITION_KEYS, _list_of_dicts
 from .rebuild import (
@@ -49,7 +57,7 @@ FG_BOARD_NAMES = ["昨日涨停", "昨日跌停", "昨日连板", "昨日首板"
 
 CNINFO_WINDOW_DAYS = 7   # 公告窗口：保留 [T-7, T] 内公告
 CNINFO_MAX_PAGES = 5     # 翻页上限保护；触顶且未到窗口 → truncated
-STOCK_DAILY_DAYS = 120   # 详细池日 K 回看根数（D5 60 日高点 + D6 20 日股性）
+# STOCK_DAILY_DAYS = 120 由 infra.assets.stock_daily 统一提供（C/B 共用同一根数）
 
 _LIMIT_TOL_UP = 0.999    # 涨停/炸板判定容差（涨停价的 0.1%）
 _LIMIT_TOL_DOWN = 1.001
@@ -539,33 +547,31 @@ def _collect_holdings(ctx: PrepContext) -> dict:
     }
 
 
-def _daily_row(bar) -> dict | None:
-    """KBar → 日 K 行（date/open/high/low/close/volume/amount/turnover）。"""
+_stock_daily_log = logging.getLogger("dragon_quant.prep.stock_daily")
 
-    timestamp = getattr(bar, "timestamp", 0) or 0
-    if not timestamp:
-        return None
+
+def _plan_candidate_window(trade_date: str) -> tuple[dict, Optional[str]]:
+    """读取近 N 日计划候选并集；异常降级为空窗口（绝不中断 prep）。"""
+
+    from dragon_quant.infra.assets import db as assets_db
+
     try:
-        day = datetime.fromtimestamp(timestamp / 1000.0, SHANGHAI).strftime("%Y-%m-%d")
-    except (OverflowError, OSError, ValueError):
-        return None
-    return {
-        "date": day,
-        "open": getattr(bar, "open", None),
-        "high": getattr(bar, "high", None),
-        "low": getattr(bar, "low", None),
-        "close": getattr(bar, "close", None),
-        "volume": getattr(bar, "volume", None),
-        "amount": getattr(bar, "amount", None),
-        "turnover": getattr(bar, "turnover", None),
-    }
+        return assets_db.list_recent_plan_candidate_codes(trade_date), None
+    except Exception as exc:  # 库损坏 / 权限等：按无扩池处理，行为等价现状
+        return {"codes": [], "trade_dates": [], "corrupt_dates": []}, \
+            f"{type(exc).__name__}: {exc}"
 
 
 def _collect_stock_daily(ctx: PrepContext) -> dict:
-    """详细池日 K（D5 位置/筹码 + D6 股性）；单 code 失败记 missing，不写假 K。
+    """详细池日 K（D5 位置/筹码 + D6 股性）+ 近 N 日计划候选扩池。
 
-    不允许以空池覆盖健康存量：dragons 由 ``_DRAGON_DEPENDENTS`` 拦截，涨停池
-    不可用直接抛错；review 修复模式只补 ``ctx.review_codes`` 并与存量按 code 合并。
+    清单 = 详细池 ∪ 近 N 日 ``review_candidates`` 并集：扩池只扩 ``rows`` 与
+    ``plan_window``，``requested_codes`` / ``coverage`` / ``missing_codes`` /
+    ``review_health`` 仍只描述详细池，守卫语义逐字段不变。单 code 失败记
+    missing，不写假 K；空池仍抛错，不允许以空池覆盖健康存量。
+
+    根数：池 code 存 ``POOL_MAX_BARS``（120）；扩池独有 code 只服务前向评估，
+    存 ``PLAN_CANDIDATE_MAX_BARS``（20）。
     """
 
     assets = _ctx_assets(ctx)
@@ -576,28 +582,35 @@ def _collect_stock_daily(ctx: PrepContext) -> dict:
         raise RuntimeError("涨停池为空，无法确定详细池日 K 代码")
 
     pool = derive_pool_codes(assets)
+    pool_codes = list(pool["codes"])
+    recent, window_error = _plan_candidate_window(ctx.trade_date)
+    recent_codes = list(recent.get("codes") or [])
+    fetch_codes = _dedupe_codes(pool_codes + recent_codes)   # 池序优先
+
     existing = assets.get("stock_daily")
     existing = existing if isinstance(existing, dict) else {}
     rows = dict(existing.get("rows") or {}) if ctx.review_only else {}
     if ctx.review_only:
-        requested_codes = list(pool["codes"])       # 换血后始终更新为最新池
+        # review 修复只补 review_codes（不扩池取数）；并入存量 requested_codes，
+        # 避免 cap 收缩裁掉扩池行。
+        requested_codes = _dedupe_codes(
+            pool_codes + list(existing.get("requested_codes") or []))
         to_fetch = _dedupe_codes(ctx.review_codes)
     else:
-        requested_codes = list(pool["codes"])
-        to_fetch = list(requested_codes)
+        requested_codes = pool_codes                   # ★ review 作用域，绝不扩
+        to_fetch = fetch_codes
 
     fetched = (ctx.tdx.batch_get_daily_klines(to_fetch, days=STOCK_DAILY_DAYS,
                                               end_date=ctx.trade_date)
                if to_fetch else {})
-    for code, bars in fetched.items():
-        converted = [row for row in (_daily_row(bar) for bar in bars or []) if row]
-        converted = [row for row in converted if row["date"] <= ctx.trade_date]
-        converted.sort(key=lambda row: row["date"])
-        if converted:
-            rows[code] = converted[-STOCK_DAILY_DAYS:]
+    pool_set = set(pool_codes)
+    limits = {code: (POOL_MAX_BARS if code in pool_set
+                     else PLAN_CANDIDATE_MAX_BARS)
+              for code in to_fetch}
+    rows = merge_daily_rows(rows, fetched, ctx.trade_date, limits=limits)
 
     requested_set = set(requested_codes)
-    cap = max(len(requested_codes) * 2, 1)
+    cap = max(len(fetch_codes) * 2, len(rows), 1)      # 保留扩池行，不被 review 修复裁掉
     if len(rows) > cap:
         ordered = [code for code in requested_codes if code in rows]
         ordered += [code for code in rows if code not in requested_set]
@@ -625,6 +638,21 @@ def _collect_stock_daily(ctx: PrepContext) -> dict:
                                  if code not in set(_dragon_codes(ctx.dragons_rows))],
     }
     payload["review_health"] = _review_health(payload, "rows")
+    # 无近 N 日快照时不写该键（旧 payload 形状不变）；异常时写 error 供观测。
+    if recent_codes:
+        payload["plan_window"] = {
+            "lookback_days": recent.get("lookback_days"),
+            "trade_dates": recent.get("trade_dates") or [],
+            "pool": len(pool_codes),
+            "recent": len(recent_codes),
+            "union": len(fetch_codes),
+            "fetched": sum(1 for code in fetch_codes if code in rows),
+            "missing": [code for code in fetch_codes if code not in rows],
+        }
+    elif window_error is not None:
+        payload["plan_window"] = {"error": window_error}
+    _stock_daily_log.info("stock_daily pool=%d recent=%d union=%d",
+                          len(pool_codes), len(recent_codes), len(fetch_codes))
     return payload
 
 
@@ -1022,6 +1050,10 @@ def asset_health(asset_type: str, payload, status, trade_date: str) -> Optional[
         return "malformed"
     if isinstance(status, str) and status in _BAD_STATUS:
         return status
+    if payload.get("partial") is True:
+        # B 回填新建的部分行：下次 prep 必须重新采集，`--recompute` 不得把它
+        # 当成完整池数据消费。这是对既有守卫的加严（非 partial 行为不变）。
+        return "partial_payload"
     if status == "empty" and asset_type in _MUST_NONEMPTY:
         return "empty"
     if asset_type == "dragons":

@@ -89,6 +89,12 @@ def _never_providers(args: Any) -> bool:
     return False
 
 
+def _assets_providers(args: Any) -> bool:
+    """Only the local stock_daily backfill touches TDX; every other action is offline."""
+    return (getattr(args, "assets_action", None) == "backfill-stock-daily"
+            and not getattr(args, "dry_run", False))
+
+
 COMMANDS: dict[str, LazyCommand] = {
     # scan keeps the feature's historical provider construction: passing a
     # pre-built bundle changes its api_stats accounting (the second
@@ -122,7 +128,7 @@ COMMANDS: dict[str, LazyCommand] = {
     "premarket": LazyCommand(
         "dragon_quant.commands.premarket", needs_providers=_never_providers),
     "assets": LazyCommand(
-        "dragon_quant.commands.assets", needs_providers=_never_providers),
+        "dragon_quant.commands.assets", needs_providers=_assets_providers),
     "factor": LazyCommand(
         "dragon_quant.commands.factor", needs_providers=_factor_providers),
     "buy": LazyCommand(

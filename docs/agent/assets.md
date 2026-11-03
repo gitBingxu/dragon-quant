@@ -12,6 +12,9 @@ python -m dragon_quant assets push [--from D] [--to D] [--all] [--dry-run] [--al
 python -m dragon_quant assets pull --from D --to D [--apply] [--force] [--pick latest] [--target-dir DIR]
 python -m dragon_quant assets status [--all] [--orphans]
 python -m dragon_quant assets verify [--from D --to D | --samples N] [--deep] [--md5]
+python -m dragon_quant assets backfill-dragons [--from D] [--to D] [--dry-run] [--prune] [--json]
+python -m dragon_quant assets backfill-stock-daily [--dry-run] [--days N] [--codes A,B] [--json]
+python -m dragon_quant assets purge-derived [--apply --yes] [--json]
 
 - 目标（**M6 全表同步**）：把 `assets.db` **全部 15 张表**的行级数据资产备份到 S3 兼容对象存储（Cloudflare R2 主选 / Backblaze B2 备选），粒度到行/身份键，不做整库文件直传；`dragon.db` 不同步，旧 `prep.db` 与 dragon.db 遗留竞价表不自动纳入（需先按 README 手工迁移）。行情缓存 / Cookie 不同步。
 - **dragons 镜像同步（`dragons:mirror`）**：date 分区、`volatile=True`（review 回写只 UPDATE 不刷新 `created_at`，水位不前进），push 每次强制重读、内容哈希判等保证无变化时零 blob PUT；`status.summary.tables` 覆盖 15 表，`not_synced` 保持 `{}`。
@@ -40,6 +43,25 @@ python -m dragon_quant assets verify [--from D --to D | --samples N] [--deep] [-
 - 保护：`prep_assets`（含 collection_report/prev_plan/auction_feedback/t1_intraday）、`auction_assets`/`auction_snapshots`/`auction_*` 因子、非目标因子、`factor_build_runs`；云端/manifest/state **零操作**（不 import sync.service、不调 provider）。
 - 回滚：apply 前 `sqlite3 .backup` 或文件副本；主库禁止 `pull --force`；迁移完成前禁止把云端旧派生恢复到主库。
 - 重建由用户显式执行（purge 自身不重建）：`prep --recompute` 升序逐日 → `factor build --only <23 名>` → `factor decision-review`。
+
+## `assets backfill-stock-daily`（本地日 K 回填，不触云端）
+
+用于补齐 dashboard「当前 T 日效果」评估所需的本地 `prep_assets.stock_daily`：计划候选出池后本地日 K 停在离池日，评估窗口跨出池即缺 bar。命令只写本地库，不 import 云端同步层。
+
+```bash
+python -m dragon_quant assets backfill-stock-daily --dry-run          # 只体检
+python -m dragon_quant assets backfill-stock-daily                    # 回填
+python -m dragon_quant assets backfill-stock-daily --days 20 --json
+python -m dragon_quant assets backfill-stock-daily --codes 600001,000002
+```
+
+- **检测口径**：目标集合 = `list_recent_plan_candidate_codes(before=执行日, days=N)` 的 codes 中，本地 `last_bar_date` 缺失（`missing`）或 `< 本地最新 bar 日`（`stale`）的 code。`--days` 默认 10、实现上限 60（逐 code 体检只扫最近 60 个资产日）；「最新 bar 日」取最新 `stock_daily` 资产行内 bar 最大日期（不扫全历史）。`--codes` 给定时跳过自动检测，但仍计算并报告 `missing`/`stale`，全部补采。
+- **目标日**：执行日已有 `stock_daily` 行 → 执行日；工作日 → 执行日；周末 → 本地最新 bar 日。**绝不回写更早的历史资产日**。
+- **合并与写入**：保留目标行既有 `rows`，新采 code 覆盖，未涉及 code 原样保留；空结果不覆盖、不写空行。既有行的 `requested_codes`/`returned_codes`/`missing_codes`/`coverage`/`review_health`/`as_of` 一律不动，只追加 `backfill` 审计块（时间、窗口、请求/成功/跳过清单）。新建行标 `partial=True` + `backfill`，`asset_health` 识别为 `partial_payload`（下次 prep 重新采集，`--recompute` 不消费）。
+- **根数上限与 C 一致**：code ∈ 目标行 `requested_codes`（池作用域）→ 120 根；否则 → 20 根（新建 partial 行无池清单 → 全部 20 根）。
+- **输出**：`--json` 到 stdout，人读摘要到 stderr；键序 `ok, command, dry_run, target_date, latest_bar_date, lookback_days, detected, missing, stale, fetched, updated, skipped, failed, warnings, window`。`window = {trade_dates, codes}` 是**自动检测窗口**（`--codes` 时仍照实报告，不代表显式目标集合）。
+- **退出码**：0 成功（含 `detected=0`）/ 1 transport 或写库失败 / 2 参数或环境（`assets.db` 不存在、无 provider、`--days` 越界、非法 code）。
+- **幂等**：补齐后再次运行 `detected=0`；停牌/退市 code 无新 bar 记 `skipped_no_new_bars`（`skipped` 列表），不写假 K，下次仍会重试。
 
 ## `dragons` 镜像表契约
 

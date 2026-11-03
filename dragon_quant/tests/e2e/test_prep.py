@@ -841,3 +841,79 @@ def test_c18_fake_macro_response_covers_every_macro_spec():
         assert_exit(result, 0)
         # Cross-check the reviewed fixture against the production spec source.
         assert result.stdout.strip() == ",".join(sb.MACRO_KEYS)
+
+
+# ─── P20: 计划候选扩池（C） ────────────────────────────────────────────────
+
+PLAN_CODE = "600999"
+
+
+def _plan_code_bars() -> list[dict]:
+    from datetime import datetime, timedelta, timezone
+
+    cst = timezone(timedelta(hours=8))
+    bars = []
+    for day in ("2026-09-07", "2026-09-08", "2026-09-09",
+                "2026-09-10", "2026-09-11"):
+        timestamp = int(datetime.fromisoformat(day + "T15:00:00")
+                        .replace(tzinfo=cst).timestamp() * 1000)
+        bars.append({
+            "timestamp": timestamp, "volume": 1000.0, "open": 10.0,
+            "high": 10.2, "low": 9.9, "close": 10.1, "chg": 0.1,
+            "pct": 1.0, "turnover": 1.0, "amount": 1000000.0,
+        })
+    return bars
+
+
+def plan_window_scenario(box: EnvSandbox) -> Path:
+    """scenario_prep 的临时副本：额外给池外计划候选提供 T 日日 K。"""
+
+    payload = json.loads(SCENARIO.read_text(encoding="utf-8"))
+    payload["providers"]["tdx"]["batch_get_daily_klines"][PLAN_CODE] = \
+        _plan_code_bars()
+    path = box.tmp / "scenario_prep_plan_window.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_p20_prep_stock_daily_includes_recent_plan_candidates():
+    with sandbox("p20") as box:
+        seed_full(box)
+        # 前一快照含池外候选（position_pct=0 也必须采集：评估样本=全量候选）。
+        exec_sql(
+            box, "assets.db",
+            "CREATE TABLE IF NOT EXISTS prep_snapshots ("
+            "trade_date TEXT NOT NULL, source TEXT NOT NULL, "
+            "result_json TEXT NOT NULL, created_at TEXT, "
+            "PRIMARY KEY (trade_date, source))")
+        exec_sql(
+            box, "assets.db",
+            "INSERT INTO prep_snapshots(trade_date, source, result_json) "
+            "VALUES (?, ?, ?)",
+            ("2026-09-10", "v2", json.dumps({
+                "review_candidates": [
+                    {"code": PLAN_CODE, "position_pct": 0},
+                ]}, ensure_ascii=False)))
+
+        result = run_prep(box, ["prep", "--date", DATE_ARG],
+                          scenario=plan_window_scenario(box))
+        assert_exit(result, 0)
+        daily = prep_assets(box)["stock_daily"]
+
+        # 扩池只体现在 rows / plan_window；review 作用域仍是详细池。
+        assert PLAN_CODE in daily["rows"]
+        assert PLAN_CODE not in daily["requested_codes"]
+        assert PLAN_CODE not in daily["returned_codes"]
+        assert daily["coverage"]["ratio"] == 1.0
+        assert daily["missing_codes"] == []
+        assert daily["plan_window"] == {
+            "lookback_days": 10,
+            "trade_dates": ["2026-09-10"],
+            "pool": len(daily["requested_codes"]),
+            "recent": 1,
+            "union": len(daily["requested_codes"]) + 1,
+            "fetched": len(daily["requested_codes"]) + 1,
+            "missing": [],
+        }
+        bar_dates = [bar["date"] for bar in daily["rows"][PLAN_CODE]]
+        assert bar_dates[-1] == "2026-09-11"      # C2：出池候选随 prep 续更到 T 日

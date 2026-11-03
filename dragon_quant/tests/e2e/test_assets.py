@@ -54,6 +54,7 @@ from dragon_quant.tests.e2e.harness.seed import seed_db
 REPO_ROOT = Path(__file__).resolve().parents[3]
 E2E_ROOT = Path(__file__).resolve().parent
 SCENARIO_PATH = E2E_ROOT / "fixtures" / "scenario_assets.json"
+STOCK_DAILY_SCENARIO = E2E_ROOT / "fixtures" / "scenario_stock_daily.json"
 GOLDEN = E2E_ROOT / "golden" / "assets"
 PACKAGE_VERSION = re.search(
     r'(?m)^version\s*=\s*"([^"]+)"',
@@ -80,6 +81,11 @@ BACKFILL_KEYS = [
     "ok", "mode", "dry_run", "from", "to", "dates", "rows_source",
     "inserted", "updated", "unchanged", "missing_rows", "orphan_rows",
     "pruned", "failed", "warnings",
+]
+STOCK_DAILY_BACKFILL_KEYS = [
+    "ok", "command", "dry_run", "target_date", "latest_bar_date",
+    "lookback_days", "detected", "missing", "stale", "fetched", "updated",
+    "skipped", "failed", "warnings", "window",
 ]
 
 
@@ -502,6 +508,52 @@ def seed_backfill_dbs(box: EnvSandbox) -> None:
         "2026-10-20", "600009", "孤儿Z", 3, 30.0, ["其他"])]
     seed_db(box, sb.dragon_db_seed(source_rows), db_name="dragon.db")
     seed_db(box, sb.mirror_db_seed(mirror_rows), db_name="assets.db")
+
+
+def backfill_stock_daily_seed_spec() -> dict:
+    """assets.db：既有 stock_daily 行（含未涉及 code）+ 前一快照的候选。"""
+
+    spec = assets_seed_spec()
+    spec["tables"]["prep_assets"]["rows"].append({
+        "trade_date": TRADE_DATE,
+        "asset_type": "stock_daily",
+        "payload_json": json.dumps({
+            "as_of": TRADE_DATE,
+            "trade_date": TRADE_DATE,
+            "requested_codes": ["600009"],
+            "returned_codes": ["600009"],
+            "missing_codes": [],
+            "rows": {"600009": [
+                {"date": "2026-10-20", "open": 9.0, "high": 9.2, "low": 8.9,
+                 "close": 9.1, "volume": 100.0, "amount": 1000000.0,
+                 "turnover": 1.0},
+            ]},
+            "coverage": {"requested": 1, "returned": 1, "missing": [],
+                         "ratio": 1.0},
+            "truncated": False,
+            "review_codes": [],
+            "review_health": {"status": "ok", "note": None, "missing": []},
+        }, ensure_ascii=False, sort_keys=True),
+        "created_at": f"{TRADE_DATE} 17:00:02",
+    })
+    spec["tables"]["prep_snapshots"]["rows"].append({
+        "trade_date": "2026-10-20",
+        "source": "v2",
+        "result_json": json.dumps({"review_candidates": [
+            {"code": "600001", "position_pct": 5},
+            {"code": "600002", "position_pct": 0},
+        ]}, ensure_ascii=False, sort_keys=True),
+        "created_at": "2026-10-20 17:05:00",
+    })
+    return spec
+
+
+def stock_daily_payload(box: EnvSandbox, trade_date: str) -> dict | None:
+    for row in sqlite_rows(box.data_dir / "assets.db", "prep_assets",
+                           order_by="trade_date, asset_type"):
+        if row["trade_date"] == trade_date and row["asset_type"] == "stock_daily":
+            return json.loads(row["payload_json"])
+    return None
 
 
 # ─── remote helpers ─────────────────────────────────────────────────────────
@@ -1469,3 +1521,78 @@ def test_as19_purge_derived_dry_run_and_apply_temp_db():
         assert result["deleted"]["prep_snapshots"] == 1
         assert sqlite_count(db_path, "prep_snapshots") == 0
         assert sqlite_count(db_path, "prep_assets") == 1
+
+
+# ─── AS20 / AS21: backfill-stock-daily（本地日 K 回填） ─────────────────────
+
+
+def test_as20_backfill_stock_daily_dry_run_reports_gap_without_write():
+    with sandbox("as20") as box:
+        seed_db(box, backfill_stock_daily_seed_spec(), db_name="assets.db")
+        before = sqlite_rows(box.data_dir / "assets.db", "prep_assets",
+                             order_by="trade_date, asset_type")
+        call_offset = len(call_log(box))
+
+        result = run_assets(box, ["backfill-stock-daily", "--dry-run", "--json"])
+        assert_exit(result, 0)
+        payload = payload_of(result)
+        assert_json_keys_in_order(payload, STOCK_DAILY_BACKFILL_KEYS)
+        assert payload["command"] == "assets backfill-stock-daily"
+        assert payload["ok"] is True and payload["dry_run"] is True
+        assert payload["target_date"] == TRADE_DATE
+        assert payload["latest_bar_date"] == "2026-10-20"
+        assert payload["lookback_days"] == 10
+        assert payload["detected"] == ["600001", "600002"]
+        assert payload["missing"] == ["600001", "600002"]
+        assert payload["stale"] == []
+        assert payload["fetched"] == [] and payload["updated"] == []
+        assert payload["failed"] == []
+        assert payload["window"] == {
+            "trade_dates": ["2026-10-20"], "codes": ["600001", "600002"]}
+
+        # 零写库、零取数：dry-run 不构造 tdx（仅可能有启动期依赖提示）。
+        after = sqlite_rows(box.data_dir / "assets.db", "prep_assets",
+                            order_by="trade_date, asset_type")
+        assert after == before
+        assert [entry for entry in call_log(box)[call_offset:]
+                if entry.get("method") == "batch_get_daily_klines"] == []
+
+
+def test_as21_backfill_stock_daily_merges_into_execution_day_and_is_idempotent():
+    with sandbox("as21") as box:
+        seed_db(box, backfill_stock_daily_seed_spec(), db_name="assets.db")
+        before = stock_daily_payload(box, TRADE_DATE)
+        assert before is not None
+        env = {"DQ_E2E_SCENARIO": str(STOCK_DAILY_SCENARIO)}
+
+        result = run_assets(box, ["backfill-stock-daily", "--json"], env=env)
+        assert_exit(result, 0)
+        payload = payload_of(result)
+        assert payload["ok"] is True and payload["dry_run"] is False
+        assert payload["target_date"] == TRADE_DATE
+        assert payload["fetched"] == ["600001", "600002"]
+        assert payload["updated"] == ["600001", "600002"]
+        assert payload["skipped"] == []
+        assert payload["failed"] == []
+
+        after = stock_daily_payload(box, TRADE_DATE)
+        # 未涉及 code（600009）原样保留；新采 code 覆盖进同一执行日行。
+        assert set(after["rows"]) == {"600009", "600001", "600002"}
+        assert after["rows"]["600009"] == before["rows"]["600009"]
+        assert [bar["date"] for bar in after["rows"]["600001"]] == [
+            "2026-10-19", "2026-10-20", "2026-10-21"]
+        # 既有行的 review 作用域字段一律不动。
+        for key in ("requested_codes", "returned_codes", "missing_codes",
+                    "coverage", "review_health", "as_of", "trade_date"):
+            assert after[key] == before[key], key
+        assert after["backfill"]["returned"] == ["600001", "600002"]
+        assert after["backfill"]["lookback_days"] == 10
+        assert "partial" not in after
+
+        # 幂等：补齐后再次运行 detected=0。
+        again = run_assets(box, ["backfill-stock-daily", "--json"], env=env)
+        assert_exit(again, 0)
+        second = payload_of(again)
+        assert second["detected"] == []
+        assert second["updated"] == []
+        assert second["failed"] == []

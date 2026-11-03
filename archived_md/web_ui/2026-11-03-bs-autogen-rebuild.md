@@ -3,7 +3,7 @@
 > 范围：在既有 BS 策略假想回放（`bs-eval` / `bs_*` / `/bs`）之上新增两件事：
 > **dashboard 启动时后台自动增量生成**、**页面「重置买点」按钮触发全量重生成**。
 > 本方案只覆盖增量，不重写既有回放口径、聚合口径与 CLI。
-> 本文结论取代 `docs/solutions/2026-11-02-bs-strategy-page.md` 中「页面只读 / 页面不提供重跑按钮 / 不做页内触发回放」的表述；回放与聚合口径仍以该文与 `docs/agent/bs_eval.md` 为准。
+> 本文结论取代 `archived_md/web_ui/2026-11-02-bs-strategy-page.md` 中「页面只读 / 页面不提供重跑按钮 / 不做页内触发回放」的表述；回放与聚合口径仍以该文与 `docs/agent/bs_eval.md` 为准。
 
 ## 0. 结论摘要
 
@@ -466,7 +466,7 @@ npm --prefix web_ui/frontend run build
 | `dragon_quant/commands/bs_eval.py` | 模块 docstring 与末尾人读提示「页面只读，重跑请再执行 bs-eval」改为「可再次执行 bs-eval，或在 `/bs` 页面点击「重置买点」」；冷启动提示「首次使用建议先 `--limit 5` 试跑」保留（E2E 断言依赖） |
 | `dragon_quant/tests/e2e/coverage-map.json` | dashboard flags + 新增测试映射 |
 
-> 根 `AGENTS.md` 不新增跨模块硬约束，不改；`docs/solutions/2026-11-02-bs-strategy-page.md` 是历史方案，不回写正文，由本文声明取代其页面只读表述。
+> 根 `AGENTS.md` 不新增跨模块硬约束，不改；`archived_md/web_ui/2026-11-02-bs-strategy-page.md` 是历史方案，不回写正文，由本文声明取代其页面只读表述。
 
 ## 10. 验收标准 → 实现位置 → 验证方式
 

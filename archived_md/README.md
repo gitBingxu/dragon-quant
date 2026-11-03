@@ -56,6 +56,7 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-11-03 | stock_daily 计划候选扩池 + assets backfill-stock-daily 回填（修复复盘页「缺本地日K」） | [2026-11-03-stock-daily-plan-window.md](prep/2026-11-03-stock-daily-plan-window.md) | `docs/solutions/2026-11-03-stock-daily-plan-window.md` |
 | 2026-10-30 | prep 新旧算法统一与派生清理（六维唯一决策 / prev / purge-derived） | [2026-10-30-prep-unified-review-technical-design.md](prep/2026-10-30-prep-unified-review-technical-design.md) | `docs/solutions/2026-10-30-prep-unified-review-technical-design.md` |
 | 2026-10-30 | prep 算法统一调研（双头推荐 / 兼容投影 / 精确清理边界） | [2026-10-30-prep-unified-review-research.md](prep/2026-10-30-prep-unified-review-research.md) | `docs/solutions/2026-10-30-prep-unified-review-research.md` |
 | 2026-10-21 | prep 宏观改日经225期指 + 富时A50期指（同日口径，16:40 门禁） | [2026-10-21-prep-macro-jp-a50-design.md](prep/2026-10-21-prep-macro-jp-a50-design.md) | `docs/solutions/2026-10-21-prep-macro-jp-a50-design.md` |
@@ -125,6 +126,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-11-03 | dashboard「BS策略」自动生成与手动重置（启动后台增量 / 「重置买点」全量重算 / 子进程委派） | [2026-11-03-bs-autogen-rebuild.md](web_ui/2026-11-03-bs-autogen-rebuild.md) | `docs/solutions/2026-11-03-bs-autogen-rebuild.md` |
+| 2026-11-02 | dashboard「BS策略」页（bs-eval 逐龙头假想回放 / 双口径入场 / `/bs` 只读页） | [2026-11-02-bs-strategy-page.md](web_ui/2026-11-02-bs-strategy-page.md) | `docs/solutions/2026-11-02-bs-strategy-page.md` |
 | 2026-10-31 | dashboard 前端固定 v2 + 三态主题 + 发布前前端构建 | [2026-10-31-dashboard-v2-theme-design.md](web_ui/2026-10-31-dashboard-v2-theme-design.md) | `docs/solutions/2026-10-31-dashboard-v2-theme-design.md` |
 | 2026-10-31 | web_ui FastAPI 重构技术方案（issue #24，dashboard 命令 / `[web]` extra / P0 五页 / Kraken 终端风前端） | [2026-10-31-web-ui-dashboard-design.md](web_ui/2026-10-31-web-ui-dashboard-design.md) | `docs/superpowers/specs/2026-10-31-web-ui-dashboard-design.md` |
 | 2026-10-31 | FastAPI + uvicorn + 运行期自装调研（版本选型 / SPA 托管 / 端口与 SIGTERM 契约 / pip extra 三环境行为） | [2026-10-31-fastapi-web-ui-research.md](web_ui/2026-10-31-fastapi-web-ui-research.md) | `docs/superpowers/specs/2026-10-31-fastapi-web-ui-research.md` |

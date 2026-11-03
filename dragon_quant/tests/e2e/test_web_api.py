@@ -659,7 +659,7 @@ def test_ra7_review_account_ui_only_needs_no_backtest():
 
 
 def test_w1b_spa_fallback_for_dashboard_routes():
-    """``/scans`` ``/factors`` ``/prep`` must serve index.html on browser Accept.
+    """``/scans`` ``/factors`` ``/prep`` ``/bs`` must serve index.html on browser Accept.
 
     The harness request helper sends ``Accept: text/html,application/json;q=0.9``
     (the production browser shape), so a 200 + identical index body proves the
@@ -670,7 +670,7 @@ def test_w1b_spa_fallback_for_dashboard_routes():
     with sandbox("m1f1-spa-dashboard") as box:
         seed_dragons(box, web_dragon_rows())
         with web_server(box, server_command(REVIEW_UI, 0)) as server:
-            for path in ("/scans", "/factors", "/prep"):
+            for path in ("/scans", "/factors", "/prep", "/bs"):
                 page = server.request("GET", path)
                 assert page.status == 200, path
                 assert page.body == index_html, path

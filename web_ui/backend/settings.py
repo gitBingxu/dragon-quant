@@ -19,6 +19,8 @@ class DashboardSettings:
     project_root: Path = PROJECT_ROOT
     default_source: str = "v2"
     default_page: str = "review"
+    # 启动时后台增量生成 BS 派生数据（程序化 / 测试默认安全关闭）。
+    bs_autogen: bool = False
 
     def normalized_source(self) -> str:
         return self.default_source if self.default_source in {"v1", "v2"} else "v2"

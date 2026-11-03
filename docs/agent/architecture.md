@@ -13,7 +13,11 @@ dragon_quant/
 │   ├── __init__.py              # lazy `COMMANDS` 注册表 + `dispatch(name, args)` 唯一分发入口
 │   ├── _shared.py               # CLI 纯 helper（策略 JSON / 日期 / 序列化）单一实现
 │   ├── scan.py / logs.py / data.py / blacklist.py / review.py / review_account.py
-│   └── dragons.py / prep.py / auction.py / premarket.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py
+│   └── dragons.py / prep.py / auction.py / premarket.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py / bs_eval.py
+├── bs_eval/                     # BS 策略假想回放（只读评测层；不改 buy/sell/review）
+│   ├── __init__.py              # 惰性门面：仅 __getattr__ 导出 run_bs_eval
+│   ├── constants.py / strategy_doc.py / candidates.py / sources.py
+│   └── evaluator.py / aggregate.py / storage.py / main.py
 ├── scan/                        # 扫描 feature（可调用包）
 │   ├── __init__.py              # 可调用包：scan(...) → scan.orchestrator.main.scan
 │   ├── sectors.py               # 板块身份 (source, category, code) + cache 键构造
@@ -97,7 +101,7 @@ dragon_quant/
 ├── tests/                        # 测试树（source-only，不入 wheel/sdist；命名空间 dragon_quant.tests）
 
 # 同级仓库包（不是 dragon_quant 的子包）
-web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static/presenters 纯投影）+ frontend/src/{pages,api,lib,components,router,theme} + dist（入库）
+web_ui/                          # 可视化面板：backend/（FastAPI app/serve/routers/deps/static/presenters 纯投影/bs_runner 子进程委派）+ frontend/src/{pages,api,lib,components,router,theme} + dist（入库）
 ```
 
 ## 命令导航与入口事实
@@ -106,7 +110,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 > 每个顶层命令的实现在 `commands/<name>.py` 的 `handle(args, services)`（buy/sell 共用
 > `commands/buy_sell.py` 的 `handle_buy`/`handle_sell`）。测试与脚本应直接走
 > `commands.dispatch` 或命令模块的公共 helper，不存在第二个转发层。真实导航链是
-> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 17 个（含 `dashboard` 长驻只读面板与 `premarket` 只读盘前上下文）；`app.py`（Composition Root）只是
+> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 18 个（含 `dashboard` 长驻面板——查询为主、BS 派生数据经子进程生成、`premarket` 只读盘前上下文与 `bs-eval` 只读回放）；`app.py`（Composition Root）只是
 > commands 按需调用的装配支路，不在链上多一跳。
 
 > **入口事实（实测）**：`python -m dragon_quant`（不带子命令）与 `-h` 一样**打印帮助并 exit 0**，
@@ -121,6 +125,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 > `review_account.live_trade.main.run_buy/run_sell`；
 > `review_account.auction.main.run_auction/run_auction_recompute`；
 > `review_account.premarket.main.run_premarket`（只读盘前上下文，T0）；
+> `bs_eval.main.run_bs_eval`（BS 假想回放，写 `bs_*` 两表）；
 > `infra.factor.main` 13 个批准出口（`build/list_factors/query/status/export_matrix/evaluate_factor/
 > fin_sync/fin_calibrate/fin_status/parse_only/FactorModel/annotate_pool/CleanConfig`）；
 > `infra.assets.main.run`；`infra.factor.maintenance.plan_purge/apply_purge`（`assets purge-derived`，命令层取锁）；`vpa.main`（`analyze` + `render` / `upsert_vpa`）；
@@ -163,6 +168,8 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 | `dragon_review_strict` | 严格口径 review 结果（侧表） | [review](review.md) |
 | `review_account_runs` / `_snapshots` / `_trades` / `_positions` / `_events` | 账户回测批次、每日快照、交割单、已平仓持仓、决策时间线 | [trading](trading.md) |
 | `buy_sell_signals` | 实盘辅助买卖信号（含半仓腿） | [trading](trading.md) |
+| `bs_runs` | BS 回放批次元数据（策略/评测器版本、计数器、note） | [bs_eval](bs_eval.md) |
+| `bs_signals` | BS 假想买卖点一行一只龙头（双口径入场、买卖后 5 日窗口、半仓腿） | [bs_eval](bs_eval.md) |
 | `prep_assets` / `prep_snapshots` | 复盘原始资产与计算结果 | [prep-auction](prep-auction.md) |
 | `auction_assets` / `auction_snapshots` | 竞价原始资产与强度快照 | [prep-auction](prep-auction.md) |
 | `dragons`（assets.db） | `dragons_v2` 全量镜像 | [assets](assets.md) |

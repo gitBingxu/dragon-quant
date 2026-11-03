@@ -118,6 +118,42 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestBsEvalBoundaries(unittest.TestCase):
+    """bs_eval 是只读评测层：被依赖方不得反向 import 它，它也不上溯 Web/命令层。"""
+
+    BS_DIR = REPO_ROOT / "dragon_quant" / "bs_eval"
+
+    def test_bs_eval_never_imports_upper_layers_or_pandas(self):
+        forbidden = ("dragon_quant.app", "dragon_quant.cli",
+                     "dragon_quant.commands", "web_ui", "pandas")
+        offenders = {}
+        for path in sorted(self.BS_DIR.rglob("*.py")):
+            hits = _hits(path, forbidden)
+            if hits:
+                offenders[path.name] = hits
+        self.assertEqual(offenders, {})
+
+    def test_review_account_review_scan_never_import_bs_eval(self):
+        targets = [
+            REPO_ROOT / "dragon_quant" / "review_account",
+            REPO_ROOT / "dragon_quant" / "review",
+            REPO_ROOT / "dragon_quant" / "scan",
+        ]
+        offenders = {}
+        for directory in targets:
+            for path in sorted(directory.rglob("*.py")):
+                hits = _hits(path, ("dragon_quant.bs_eval",))
+                if hits:
+                    offenders[path.relative_to(REPO_ROOT).as_posix()] = hits
+        self.assertEqual(offenders, {})
+
+    def test_bs_eval_package_root_is_lazy(self):
+        text = (self.BS_DIR / "__init__.py").read_text(encoding="utf-8")
+        self.assertNotIn("\nfrom dragon_quant.bs_eval.main import", text)
+        self.assertIn("\n        from dragon_quant.bs_eval.main import", text)
+        self.assertIn("__getattr__", text)
+
+
 class TestPremarketIsReadOnlyAndPure(unittest.TestCase):
     """premarket 只读：纯投影不触网/不 import provider/factor；CLI 薄入口。"""
 

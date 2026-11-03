@@ -11,7 +11,7 @@
 - **定位**：Skill 是面向「交易日助手」的窄接口，只开放九类稳定能力（个股行情 / 扫描与真龙 / 盘后复盘 / 集合竞价 / 盘前预案 / 龙头回测 / 账户回测 / 因子入库与读回 / 可视化面板）。未开放能力统一走固定话术 + issue 链接，不以命令、路由、表格或否定示例出现在 Skill 正文。
 - **布局**：`skills/dragon-quant/SKILL.md`（薄路由层）+ `references/{commands,outputs,reports,playbooks,operations,safety,premarket,evidence}.md`（按需加载）；根 `package.json`（`name=dragon-quant-skills`）+ `bin/dragon-quant-skills.mjs` + `lib/*.mjs`（安装器）；`test/*.test.mjs`（`node:test`，零依赖）；Python 侧 `dragon_quant/tests/test_skill_{package,content,routes}.py`。
 - **唯一白名单**：`references/commands.md` 的 `<!-- routes:start/end -->` 表是 Skill 侧唯一命令真源；`references/safety.md` 的 `<!-- safety:start/end -->` 只登记同一白名单的 T0/T1。每条 route 的顶层命令必须属于 `{data, scan, dragons, review, prep, auction, premarket, factor, review-account, dashboard}`；`data` 只允许 `quote/kline/minute/batch-quote`，`factor` 只允许 `build/query`。被排除的顶层命令与 `data`/`factor` 子命令由测试从 CLI `-h` 动态枚举并断言不出现；`scan_v2` 与 `--source v1` 禁止出现。
-- **路由纪律**：只对白名单叶子命令取 help（如 `data quote -h`、`factor build -h`），不要取父级 `data -h` / `factor -h`。默认安全分级只有 T0/T1；`dashboard` 是 T0 但长驻且可能初始化/校验本地 schema，且禁止 `--yes` 自动安装。
+- **路由纪律**：只对白名单叶子命令取 help（如 `data quote -h`、`factor build -h`），不要取父级 `data -h` / `factor -h`。默认安全分级只有 T0/T1；`dashboard` 是 T0 但长驻且可能初始化/校验本地 schema，启动后默认后台增量生成 BS 派生数据（`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 关闭），且禁止 `--yes` 自动安装。
 - **因子入库**：`references/operations.md` 的 `<!-- factor-groups:start/end -->` 块固定 scan 7 / prep 23 / auction 17 三组名单，测试与 `FACTOR_SPECS.source` 逐组比较；构建必须显式 `--only`，禁止默认 build 与 `--all`，逐因子核对 `status` 并读回代表因子。
 - **报告与 workflow**：`references/reports.md` 拥有 prep 九段 / auction 七段骨架与缺失回退；`operations.md` 拥有单能力 vs 每日复合、UI 生命周期、因子入库核对；`outputs.md` 拥有字段语义与 `strategy_context` 六段（盘前字段由 `premarket.md` 拥有）。
 - **安装目标与路径**：`bin/dragon-quant-skills.mjs` 消费 `lib/paths.mjs` 的 `AGENT_TARGETS` 唯一注册表；六个 harness 为 `claude-code` / `codex` / `openclaw` / `hermes` / `deepseek` / `pi`，`agents` 仅作 `.agents/skills` 兼容别名、不进 `all`。注册表字段：`projectBase`（`projectRoot` / `cwd` / `workspace`）、`projectRel`、`global`（`homeRel` 或 `env + defaultRel + rel`）、`hints`（按 scope）、`sameName`。`resolveSkillsRoot` 接受 `cwd` / `env` 注入：`--target-dir` 始终优先；Pi 用 cwd、OpenClaw 用 workspace（默认 cwd），不套用 git root；三个官方 env（`OPENCLAW_STATE_DIR` / `DSH_HOME` / `PI_CODING_AGENT_DIR`）只覆盖 global，空串回落默认、`~/` 展开 home、相对路径按 cwd。install 主循环、跨 scope 警告与 doctor `--all-scopes` 都必须传 `cwd` / `env`。
@@ -40,6 +40,17 @@
 
 **数据访问**：`web_ui` 内零 `sqlite3`、零自建连接、零建表写表；只经 `deps.py` 调用既有只读仓储（白名单见技术方案 §5.2）。`assets.db` 读函数一律 `create=False`，缺失返回空态；首次 `/api/dragons` 与今天一致幂等建 `dragon.db` schema（不违反 B1：只约束 import / `-h`）。
 
+**Web 写操作唯一例外（BS 派生数据，2026-11-03）**：`web_ui/backend/bs_runner.py` 是标准库-only 的
+单飞状态机（`idle → running → succeeded | failed`），只拼 argv 并 `subprocess.Popen` 委派
+`python -m dragon_quant bs-eval [--force]`；**不 import `bs_eval`、不建连接、不写库**，写入发生在子进程。
+`create_app` 只装配 `app.state.bs_runner`；`serve._serve` 在 `create_app` 后、`serve` 前按
+`DashboardSettings.bs_autogen` 触发 `start_incremental("auto")`（`lifespan="off"` 不变），`finally`
+调 `terminate()`。开关链：`dashboard --no-bs-autogen` / `DQ_BS_AUTOGEN` → `commands.dashboard._resolve_bs_autogen`
+→ `web_ui.server.start_server(bs_autogen=...)` → settings（字段默认 **False**，程序化/测试安全）。
+`GET /api/bs/jobs/status` 与 `POST /api/bs/rebuild`（202/409/500/403 非本机 Origin）见
+[bs_eval](bs_eval.md)。E2E `EnvSandbox.env()` 固定注入 `DQ_BS_AUTOGEN=0`；`procguard` 默认拒绝业务
+子进程，真实生成只在单元层用 fake spawn 覆盖。v1 无超时、多实例无跨进程锁（按单实例使用）。
+
 **前端 v2 与三态主题**：dashboard 前端固定 v2——旧 `?source=v1` 深链忽略 query、按 v2 渲染，页面与 `api/*` 不再产生 v1 请求（后端 v1 API / 表 / `--source v1` 完全保留）。主题为 system / light / dark 三态，偏好存 `localStorage["dq.theme"]`；`index.html` 的 head 内联同步脚本在首次绘制前设置 `html[data-theme]` / `color-scheme` / meta theme-color，避免闪烁。浅色只覆盖 `@theme` 语义 token（`[data-theme=light]`），不改布局、字体或红涨绿跌语义。**主题化颜色禁止使用 Tailwind 斜杠透明度**（如 `bg-white/5`、`border-critical/35`）：构建期会固化成字面量，不随 `[data-theme=light]` 变化；需要 alpha 时用显式 `-soft` / `-line` / `-focus` token 或 CSS `color-mix()`。`dragon_quant/tests/test_web_frontend_theme.py` 是零依赖构建契约测试，守护 dist 主题脚本、浅色 token、v1 文案清理与资产引用；改前端后必须 `npm run build`，让 `web_ui/dist` 与源码同批更新。发布时 `publish.sh` 会在写入版本号与任何 git add/commit/tag/push 之前先执行 `npm --prefix web_ui/frontend run build`，确保 dist 进入发布提交；发布机需有 Node/npm 且已安装前端 devDependencies（脚本不自动 npm install/ci）。
 
 **依赖**：`[project.optional-dependencies]` 的 `web = fastapi>=0.162 / uvicorn>=0.54`（裸 uvicorn），`dev` 额外含 `httpx` 供 `TestClient`。基础安装仍只有 playwright/tmdx。`import web_ui` / `web_ui.backend` / `web_ui.backend.serve` 零 fastapi import、零目录副作用。
@@ -61,7 +72,7 @@
 ## 测试与 E2E 细则
 
 - **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 55 个 parser 节点 / 17 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。
+- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 56 个 parser 节点 / 18 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。`bs-eval` 的 BS1–BS5 映射到 `test_bs_eval.py`，只读 Web API + SPA fallback（`/bs`）映射到 `cross_cutting.bs_eval_api` 与 `web_spa_fallback`；`dashboard` 节点 flags 含 `--no-bs-autogen`，D13 映射 BS 自动生成 fail-soft。计数（56/18）不变。
 - **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
 
 ## 打包边界

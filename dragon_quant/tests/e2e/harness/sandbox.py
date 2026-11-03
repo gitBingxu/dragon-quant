@@ -303,6 +303,7 @@ class EnvSandbox:
             "APPDATA": str(self.appdata),
             "XDG_DATA_HOME": str(self.xdg_data),
             "DQ_DATA_DIR": str(self.data_dir),
+            "DQ_BS_AUTOGEN": "0",
             "DQ_E2E_ROOT": str(self.root),
             "DQ_E2E_NOW": self.now,
             "DQ_E2E_CALL_LOG": str(self.call_log),

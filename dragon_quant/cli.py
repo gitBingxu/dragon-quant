@@ -817,6 +817,35 @@ Use \"dragon-quant <command> -h\" for command-specific help.
             "--force", action="store_true",
             help="非交易时段仍强制跑当日回放（09:30 前仍拒绝；15:00–15:06 宽限窗口无需 --force）")
 
+    # bs-eval 子命令（离线批量回放 dragons_v2，生成假想买卖点）
+    bs_p = sub.add_parser(
+        "bs-eval",
+        help="批量回放龙头买卖点，生成 BS 策略评测数据（只读页面消费）",
+        usage="dragon-quant bs-eval [--from D] [--to D] [--limit N] [--force] "
+              "[--source v2] [--json]",
+        description="对全部 dragons_v2 逐龙头回放四类买点与十条卖出规则，"
+                    "记录双口径入场与买后/卖后 5 日窗口指标，落库 bs_runs/bs_signals。"
+                    "重复运行幂等：终态行跳过，partial/未成熟行重估；--force 全量重算。",
+        epilog="""Examples:
+  dragon-quant bs-eval --limit 5
+  dragon-quant bs-eval --from 20260601 --to 20261102
+  dragon-quant bs-eval --force
+  dragon-quant bs-eval --json
+""",
+    )
+    bs_p.add_argument("--from", dest="date_from", default=None,
+                      help="入选日起始 (YYYYMMDD / YYYY-MM-DD)；不截断回放行情")
+    bs_p.add_argument("--to", dest="date_to", default=None,
+                      help="入选日结束 (YYYYMMDD / YYYY-MM-DD)")
+    bs_p.add_argument("--limit", type=int, default=None,
+                      help="增量选行后只处理最久未尝试的 N 行（canary）")
+    bs_p.add_argument("--force", action="store_true",
+                      help="忽略终态与 content_hash，区间内全量重算")
+    bs_p.add_argument("--source", default="v2", choices=["v2"],
+                      help="固定 v2（v1 已废弃，bs 结果只基于 dragons_v2）")
+    bs_p.add_argument("--json", dest="json", action="store_true",
+                      help="输出机器可读汇总（不输出逐行）")
+
     # vpa 子命令
     vpa_p = sub.add_parser(
         "vpa",
@@ -867,7 +896,7 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     dashboard_p = sub.add_parser(
         "dashboard",
         help="启动本地 Web 仪表盘（龙头/扫描/因子/复盘/账户）",
-        usage="dragon-quant dashboard [--port PORT] [--no-browser] [--yes]",
+        usage="dragon-quant dashboard [--port PORT] [--no-browser] [--yes] [--no-bs-autogen]",
         description="启动 127.0.0.1 上的可视化面板。首次使用时若未安装可选依赖 [web]，"
                     "会询问是否自动安装 fastapi/uvicorn；--yes 跳过询问。",
         epilog="""Examples:
@@ -882,6 +911,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                              help="不自动打开浏览器")
     dashboard_p.add_argument("--yes", action="store_true",
                              help="[web] 未安装时直接安装，不再询问（等同 DQ_WEB_AUTO_INSTALL=1）")
+    dashboard_p.add_argument("--no-bs-autogen", action="store_true",
+                             help="不后台增量生成 BS 派生数据（等同 DQ_BS_AUTOGEN=0）")
 
     argv = sys.argv[1:]
     if argv and argv[0] == "scan_v2":

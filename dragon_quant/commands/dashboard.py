@@ -11,6 +11,7 @@ import sys
 DEFAULT_UI_PORT = 8765
 _WINDOWS_ADDR_IN_USE = 10048
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
 
 MANUAL_HINT = """Web 仪表盘需要可选依赖 [web]（fastapi + uvicorn）：{reason}
 请先手动安装后重试：
@@ -46,6 +47,21 @@ def web_extra_status() -> tuple[bool, str | None]:
 
 def _env_auto_install() -> bool:
     return os.environ.get("DQ_WEB_AUTO_INSTALL", "").strip().lower() in _TRUE_VALUES
+
+
+def _resolve_bs_autogen(args) -> bool:
+    """BS 启动自动生成开关（高 → 低）：env 关闭 → flag 关闭 → env 开启 → 默认开启。
+
+    ``args`` 用 ``getattr`` 读取，兼容既有测试的 ``SimpleNamespace``。
+    """
+    raw = os.environ.get("DQ_BS_AUTOGEN", "").strip().lower()
+    if raw in _FALSE_VALUES:
+        return False
+    if getattr(args, "no_bs_autogen", False):
+        return False
+    if raw in _TRUE_VALUES:
+        return True
+    return True
 
 
 def _is_tty() -> bool:
@@ -118,7 +134,8 @@ def ensure_web_extra(*, auto: bool = False) -> bool:
     raise SystemExit(1)
 
 
-def _start_server(port: int, *, open_browser: bool, default_page: str):
+def _start_server(port: int, *, open_browser: bool, default_page: str,
+                  bs_autogen: bool):
     from web_ui.server import start_server
 
     return start_server(
@@ -126,6 +143,7 @@ def _start_server(port: int, *, open_browser: bool, default_page: str):
         open_browser=open_browser,
         default_source="v2",
         default_page=default_page,
+        bs_autogen=bs_autogen,
     )
 
 
@@ -135,9 +153,11 @@ def start_ui(args, *, default_page: str = "review") -> None:
     explicit = requested is not None
     port = requested if explicit else DEFAULT_UI_PORT
     open_browser = not getattr(args, "no_browser", False)
+    bs_autogen = _resolve_bs_autogen(args)
 
     try:
-        _start_server(port, open_browser=open_browser, default_page=default_page)
+        _start_server(port, open_browser=open_browser, default_page=default_page,
+                      bs_autogen=bs_autogen)
         return
     except OSError as exc:
         if not is_addr_in_use(exc):
@@ -154,7 +174,8 @@ def start_ui(args, *, default_page: str = "review") -> None:
         f"dashboard: Web UI 端口 {port} 已被占用，改用系统分配端口重试…",
         file=sys.stderr,
     )
-    _start_server(0, open_browser=open_browser, default_page=default_page)
+    _start_server(0, open_browser=open_browser, default_page=default_page,
+                  bs_autogen=bs_autogen)
 
 
 def handle(args, services) -> None:

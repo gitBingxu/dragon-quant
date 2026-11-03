@@ -11,7 +11,7 @@ from ..settings import DashboardSettings
 router = APIRouter(tags=["meta"])
 
 ROUTE_LIST = ["/", "/scans", "/scans/:scanId", "/factors", "/prep",
-              "/auction", "/account"]
+              "/auction", "/account", "/bs"]
 
 
 class Meta(BaseModel):

@@ -133,3 +133,29 @@ def review_assets_enabled() -> bool:
 def dashboard_settings(request: Request):
     """从 ``app.state`` 取 DashboardSettings（测试可直接 override）。"""
     return request.app.state.settings
+
+
+def bs_runner(request: Request):
+    """从 ``app.state`` 取 BS 生成任务状态机（子进程委派，无 I/O）。"""
+    return request.app.state.bs_runner
+
+
+def bs_repository():
+    """``bs_runs`` / ``bs_signals`` 只读仓储。"""
+    from dragon_quant.bs_eval import storage
+
+    return storage
+
+
+def bs_strategy_doc():
+    """四类买点 + 十条卖出规则 + 阈值（纯数据）。"""
+    from dragon_quant.bs_eval import strategy_doc
+
+    return strategy_doc
+
+
+def bs_aggregate():
+    """BS 汇总口径（纯函数）。"""
+    from dragon_quant.bs_eval import aggregate
+
+    return aggregate

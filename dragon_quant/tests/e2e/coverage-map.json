@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (55), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (56), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 55,
-    "top_level_count": 17,
+    "node_count": 56,
+    "top_level_count": 18,
     "nodes": [
       {
         "command": "scan",
@@ -572,7 +572,21 @@
           "--help",
           "--port",
           "--no-browser",
-          "--yes"
+          "--yes",
+          "--no-bs-autogen"
+        ]
+      },
+      {
+        "command": "bs-eval",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--limit",
+          "--force",
+          "--source",
+          "--json"
         ]
       }
     ]
@@ -1065,9 +1079,20 @@
           "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d3_yes_pip_failure_exits_with_manual_hint",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d4_static_cache_headers",
-          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke"
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d13_bs_autogen_fail_soft_when_unset"
         ],
-        "notes": ""
+        "notes": "D13: DQ_BS_AUTOGEN unset + procguard blocks subprocess; dashboard still serves, /api/bs/jobs/status reports failed with spawn error (B4 fail-soft)."
+      },
+      "bs-eval": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs1_buy_signal_dual_prices_and_metrics",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs2_idempotent_terminal_and_force",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs3_pending_no_signal_and_cannot_evaluate",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs4_sell_closed_half_leg_and_partial_window",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs5_daily_fallback_quality_is_observable"
+        ],
+        "notes": "BS1-BS5 drive the real bs-eval CLI with fake providers; BS6 (dashboard API + SPA fallback) lives in cross_cutting.bs_eval_api."
       }
     },
     "hidden_aliases": {
@@ -1341,7 +1366,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_55_nodes_and_17_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_56_nodes_and_18_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",
@@ -1355,7 +1380,13 @@
         "tests": [
           "dragon_quant/tests/e2e/test_web_api.py::test_w1b_spa_fallback_for_dashboard_routes"
         ],
-        "notes": "W1b: /scans /factors /prep 与带筛选 query 的深链在浏览器 Accept 下均回退到 index.html；复用 W1 的 sandbox/seed 与 Web 服务基建。"
+        "notes": "W1b: /scans /factors /prep /bs 与带筛选 query 的深链在浏览器 Accept 下均回退到 index.html；复用 W1 的 sandbox/seed 与 Web 服务基建。"
+      },
+      "bs_eval_api": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs6_dashboard_serves_bs_api_and_spa"
+        ],
+        "notes": "BS6: /api/bs/overview|buys|sells 返回真实回放结果；/bs 深链在浏览器 Accept 下回退到 index.html（只读 API + SPA fallback）。"
       },
       "dashboard_command": {
         "tests": [

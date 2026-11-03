@@ -40,7 +40,8 @@
 | `auction` 集合竞价强度判断 | 快速迭代中 | 2026 年 12 月初 |
 | `premarket` 盘前预案上下文（只读） | 快速迭代中 | 2026 年 12 月初 |
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
-| `dashboard` 可视化面板（龙头/扫描/因子/复盘/竞价/账户） | 快速迭代中 | 2026 年 12 月中 |
+| `bs-eval` BS 策略假想回放（只读页面消费） | 快速迭代中 | 2026 年 12 月中 |
+| `dashboard` 可视化面板（龙头/扫描/因子/复盘/竞价/账户/BS策略） | 快速迭代中 | 2026 年 12 月中 |
 | `agent-skill` Agent 交易日助手 | 快速迭代中 | 2026 年 12 月中 |
 
 ## 快速使用
@@ -62,7 +63,14 @@ dragon-quant dashboard --yes
 
 # 盘前只读上下文（T-1 复盘 + T 日竞价；缺数据结构化降级）
 dragon-quant premarket --json
+
+# BS 策略假想回放（批量回放 dragons_v2，生成 /bs 页面数据）
+dragon-quant bs-eval --limit 5
 ```
+
+`dashboard` 启动后会在后台增量生成 BS 派生数据（只写 `bs_*` 派生表），页面无需先手动跑
+`bs-eval`；`--no-bs-autogen` 或 `DQ_BS_AUTOGEN=0` 可关闭，`/bs` 页面的「重置买点」等价
+`bs-eval --force` 全量重算。
 
 `pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
 已弃用，仍可用但会提示改用 `dashboard`。面板顶部可切换主题（跟随系统 / 浅色 / 深色），
@@ -72,7 +80,10 @@ dragon-quant premarket --json
 `/prep`（盘后复盘：运行概况 → 上次计划复盘/成效 → 市场 → 主线 → 候选 → 数据资产）
 与 `/auction`（集合竞价：运行概况 → 竞价结果 → 成效 → 资产日历 → 当日逐股明细）；
 资产区改为近一年日历 + 当日表格，所有日期可点击（空日期展示全部应有资产缺失）。
-扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。全站字号统一 14px 基准
+扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。`/bs` 展示四类买点与
+十条卖出规则的假想回放：策略说明、汇总卡、buy/sell 列表（买后/卖后 5 日表现），
+数据由 `dragon-quant bs-eval` 离线生成；`dashboard` 启动时后台自动增量生成，
+页面「重置买点」可按需全量重算。全站字号统一 14px 基准
 （可见文字 ≥1rem），状态色收敛为 danger / warning / normal / positive。
 
 ## Agent Skill
@@ -159,6 +170,7 @@ dragon_quant/
 ├── scan/            # 龙头扫描、五维评分与结果持久化
 ├── review/          # 龙头回测
 ├── review_account/  # 盘后复盘、集合竞价、模拟账户与交易策略
+├── bs_eval/         # BS 策略假想回放（bs-eval / bs_* 表 / /api/bs）
 ├── vpa/             # 量价分析
 ├── infra/           # 行情数据源、SQLite、缓存、因子与资产同步
 └── tests/           # 单元、集成与离线 E2E 测试

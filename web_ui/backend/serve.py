@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import sys
 import threading
 import webbrowser
 from dataclasses import dataclass, field
@@ -83,6 +84,7 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
             yield
 
     app = create_app(settings)
+    runner = getattr(app.state, "bs_runner", None)
     config = uvicorn.Config(
         app,
         host="127.0.0.1",
@@ -109,8 +111,19 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
             except (NotImplementedError, RuntimeError, ValueError):
                 pass
 
-    task = asyncio.create_task(server.serve(sockets=[handle._sock]))
     try:
+        # ``lifespan="off"``：自动生成在 ``create_task`` 之前、服务开始接受请求
+        # 之前触发；``Popen`` 立即返回，页面首次加载必然看到 ``running`` 或
+        # 已完成态。任何失败 fail-soft，绝不阻塞启动。
+        if runner is not None and settings.bs_autogen:
+            try:
+                runner.start_incremental(trigger="auto")
+            except Exception as exc:  # noqa: BLE001 - 后台生成失败不得阻塞启动
+                print(
+                    f"dashboard: BS 自动生成启动失败：{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+        task = asyncio.create_task(server.serve(sockets=[handle._sock]))
         deadline = loop.time() + STARTUP_TIMEOUT_S
         while not server.started:
             if task.done():
@@ -132,6 +145,11 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
         except asyncio.CancelledError:
             pass
     finally:
+        if runner is not None:
+            try:
+                runner.terminate()
+            except Exception:  # noqa: BLE001 - 绝不让清理阻塞服务退出
+                pass
         for signum in installed:
             try:
                 loop.remove_signal_handler(signum)

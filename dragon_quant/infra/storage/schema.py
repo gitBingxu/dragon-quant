@@ -194,6 +194,87 @@ CREATE INDEX IF NOT EXISTS idx_dragon_review_strict_status
     ON dragon_review_strict(source, review_status, trade_date);
 CREATE INDEX IF NOT EXISTS idx_dragon_review_strict_code
     ON dragon_review_strict(code);
+
+CREATE TABLE IF NOT EXISTS bs_runs (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at            TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    finished_at           TEXT,
+    range_from            TEXT,
+    range_to              TEXT,
+    limit_n               INTEGER,
+    force                 INTEGER NOT NULL DEFAULT 0,
+    evaluator_version     TEXT NOT NULL,
+    strategy_name         TEXT NOT NULL,
+    strategy_params_json  TEXT,
+    strategy_hash         TEXT NOT NULL,
+    rows_scanned          INTEGER NOT NULL DEFAULT 0,
+    rows_skipped_terminal INTEGER NOT NULL DEFAULT 0,
+    rows_evaluated        INTEGER NOT NULL DEFAULT 0,
+    rows_no_signal        INTEGER NOT NULL DEFAULT 0,
+    rows_bought           INTEGER NOT NULL DEFAULT 0,
+    rows_sold             INTEGER NOT NULL DEFAULT 0,
+    rows_partial          INTEGER NOT NULL DEFAULT 0,
+    rows_error            INTEGER NOT NULL DEFAULT 0,
+    note                  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bs_signals (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                    INTEGER REFERENCES bs_runs(id) ON DELETE SET NULL,
+    trade_date                TEXT NOT NULL,
+    code                      TEXT NOT NULL,
+    name                      TEXT,
+    source                    TEXT NOT NULL DEFAULT 'v2',
+    strategy_hash             TEXT NOT NULL,
+    evaluator_version         TEXT NOT NULL,
+    eval_status               TEXT NOT NULL,
+    eval_note                 TEXT,
+    is_terminal               INTEGER NOT NULL DEFAULT 0,
+    data_quality              TEXT,
+    replay_days               INTEGER NOT NULL DEFAULT 0,
+    fallback_days             INTEGER NOT NULL DEFAULT 0,
+    suspended_days            INTEGER NOT NULL DEFAULT 0,
+    buy_date                  TEXT,
+    buy_rule_code             TEXT,
+    buy_rule_text             TEXT,
+    buy_loose_price           REAL,
+    buy_strict_price          REAL,
+    buy_data_quality          TEXT,
+    buy_loose_max_return_5d   REAL,
+    buy_loose_max_drawdown_5d REAL,
+    buy_strict_max_return_5d  REAL,
+    buy_strict_max_drawdown_5d REAL,
+    buy_max_return_hold_days  INTEGER,
+    buy_window_partial        INTEGER NOT NULL DEFAULT 0,
+    sell_date                 TEXT,
+    sell_rule_code            TEXT,
+    sell_rule_text            TEXT,
+    sell_price                REAL,
+    sell_hold_days            INTEGER,
+    sell_data_quality         TEXT,
+    sell_half_date            TEXT,
+    sell_half_price           REAL,
+    sell_half_qty             INTEGER,
+    sell_half_rule_code       TEXT,
+    sell_max_return_5d        REAL,
+    sell_max_drawdown_5d      REAL,
+    sell_max_return_hold_days INTEGER,
+    sell_window_partial       INTEGER NOT NULL DEFAULT 0,
+    content_hash              TEXT,
+    last_attempt_at           TEXT,
+    created_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(trade_date, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bs_signals_trade_date ON bs_signals(trade_date);
+CREATE INDEX IF NOT EXISTS idx_bs_signals_code ON bs_signals(code);
+CREATE INDEX IF NOT EXISTS idx_bs_signals_buy_date ON bs_signals(buy_date);
+CREATE INDEX IF NOT EXISTS idx_bs_signals_sell_date ON bs_signals(sell_date);
+CREATE INDEX IF NOT EXISTS idx_bs_signals_status ON bs_signals(eval_status, is_terminal);
+CREATE INDEX IF NOT EXISTS idx_bs_signals_attempt ON bs_signals(is_terminal, last_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_bs_signals_run ON bs_signals(run_id);
+CREATE INDEX IF NOT EXISTS idx_bs_runs_created ON bs_runs(started_at);
 """
 
 # 行业板块黑名单默认种子（行业板块为真实行业分类，默认无需屏蔽；

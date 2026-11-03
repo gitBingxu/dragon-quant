@@ -129,6 +129,7 @@ COMMANDS: dict[str, LazyCommand] = {
         "dragon_quant.commands.buy_sell", attribute="handle_buy"),
     "sell": LazyCommand(
         "dragon_quant.commands.buy_sell", attribute="handle_sell"),
+    "bs-eval": LazyCommand("dragon_quant.commands.bs_eval"),
 }
 
 

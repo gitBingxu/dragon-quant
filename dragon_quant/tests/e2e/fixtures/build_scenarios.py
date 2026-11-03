@@ -611,12 +611,145 @@ def build_account() -> dict:
     }
 
 
+def _bs_daily(day: date, *, open_px: float = 10.0, high: float = 10.2,
+              low: float = 9.8, close: float = 10.0) -> dict:
+    return {
+        "timestamp": int(datetime(day.year, day.month, day.day, 15, 0,
+                                  tzinfo=CHINA).timestamp() * 1000),
+        "volume": 1_000_000.0, "open": open_px, "high": high, "low": low,
+        "close": close, "chg": 0.0, "pct": 0.0, "turnover": 12.0,
+        "amount": 1_000_000_000.0,
+    }
+
+
+def _bs_5min(day: date, *, price: float = 10.0,
+             first_open: float | None = None,
+             special: dict[tuple[int, int], dict] | None = None) -> list[dict]:
+    """48 根 5 分钟 K；``special`` 以 (hour, minute) 覆盖单根。"""
+
+    bars: list[dict] = []
+    for hour, minute, count in ((9, 35, 24), (13, 5, 24)):
+        start = datetime(day.year, day.month, day.day, hour, minute,
+                         tzinfo=CHINA)
+        for index in range(count):
+            moment = start + timedelta(minutes=5 * index)
+            clock = (moment.hour, moment.minute)
+            bar = {
+                "timestamp": int(moment.timestamp() * 1000),
+                "volume": 10_000.0, "open": price, "high": price + 0.05,
+                "low": price - 0.05, "close": price, "chg": 0.0, "pct": 0.0,
+                "turnover": 1.0, "amount": 100_000.0,
+            }
+            if first_open is not None and clock == (9, 35):
+                bar.update(open=first_open, high=first_open + 0.05,
+                           low=first_open - 0.05, close=first_open)
+            bar.update((special or {}).get(clock, {}))
+            bars.append(bar)
+    return bars
+
+
+def build_bs_eval() -> dict:
+    """BS 回放 E2E：确定性买入/卖出/半仓/兜底/停牌/无法评估序列。
+
+    600001  入选 2026-09-02 → 09-03 开盘回踩 MA5 买入 → 09-04 首日止损清仓；
+    600002  入选 09-02，买入窗口开盘 +9% 远离 MA5 → no_signal；
+    600003  无日 K → cannot_evaluate；
+    600004  无 5 分钟 K，日 K 兜底买入/卖出 → daily_fallback；
+    600005  入选 09-09，买入窗口不足 → pending；
+    600006  09-03 买入 → 09-04 尾盘涨停减半 → 09-07 清剩余 → sell_window_partial。
+    """
+
+    calendar_dates = weekday_dates("2026-07-01", "2026-09-11")
+    calendar = [
+        {**_bs_daily(day, open_px=3000.0, high=3010.0, low=2990.0,
+                     close=3000.0), "volume": 0.0, "amount": 0.0,
+         "turnover": 0.0}
+        for day in calendar_dates
+    ]
+
+    def daily_series(overrides: dict[str, dict] | None = None,
+                     open_from: str | None = None,
+                     open_px: float = 10.0,
+                     dead: bool = False) -> list[dict]:
+        rows = []
+        for day in calendar_dates:
+            values = {}
+            if open_from and day.isoformat() >= open_from:
+                values = {"open_px": open_px, "high": open_px + 0.1,
+                          "low": open_px - 0.1, "close": open_px}
+            values.update((overrides or {}).get(day.isoformat(), {}))
+            bar = _bs_daily(day, **values)
+            if dead:
+                # 量能门槛不达标：开盘闸门每日失败，确保 no_signal 稳定。
+                bar.update(volume=0.0, amount=0.0, turnover=0.0)
+            rows.append(bar)
+        return rows
+
+    daily_600001 = daily_series({
+        "2026-09-04": {"open_px": 10.0, "high": 10.0, "low": 9.6,
+                       "close": 9.7},
+    })
+    daily_600002 = daily_series(dead=True)
+    daily_600004 = daily_series({
+        "2026-09-04": {"open_px": 10.0, "high": 10.0, "low": 9.6,
+                       "close": 9.7},
+    })
+    daily_600006 = daily_series({
+        "2026-09-04": {"open_px": 10.0, "high": 11.0, "low": 10.0,
+                       "close": 11.0},
+        "2026-09-07": {"open_px": 10.0, "high": 10.0, "low": 9.49,
+                       "close": 9.6},
+    })
+
+    five_min: dict[str, list[dict]] = {}
+    five_min["600001"] = (
+        _bs_5min(date(2026, 9, 3))
+        + _bs_5min(date(2026, 9, 4), special={
+            (9, 35): {"open": 10.0, "high": 10.0, "low": 9.6, "close": 9.7}})
+    )
+    five_min["600002"] = [
+        bar
+        for day in weekday_dates("2026-09-03", "2026-09-10")
+        for bar in _bs_5min(day)
+    ]
+    five_min["600004"] = []
+    five_min["600006"] = (
+        _bs_5min(date(2026, 9, 3))
+        + _bs_5min(date(2026, 9, 4), special={
+            (14, 55): {"open": 11.0, "high": 11.0, "low": 11.0,
+                       "close": 11.0}})
+        + _bs_5min(date(2026, 9, 7), special={
+            (9, 35): {"open": 9.7, "high": 9.8, "low": 9.49, "close": 9.6}})
+    )
+
+    return {
+        "case": "bs_eval",
+        "now": NOW,
+        "trade_date": TRADE_DATE,
+        "note": "BS 回放 E2E：双口径/半仓腿/partial/日K兜底/pending/no_signal/cannot_evaluate。",
+        "providers": {
+            "xueqiu": {
+                "get_kline": {"by_code": {
+                    "SH000001": calendar,
+                    "600001": daily_600001,
+                    "600002": daily_600002,
+                    "600003": [],
+                    "600004": daily_600004,
+                    "600006": daily_600006,
+                }},
+                "get_5min_kline_for": {"by_code": five_min},
+            }
+        },
+    }
+
+
 def main() -> None:
     write("scenario_scan.json", build_scan())
     write("scenario_review.json", build_review())
     write("scenario_prep.json", build_prep())
     write("scenario_auction.json", build_auction())
     write("scenario_account.json", build_account())
+    write("scenario_bs_eval.json", build_bs_eval())
 
 
 if __name__ == "__main__":

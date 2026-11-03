@@ -138,3 +138,57 @@ def test_handle_runs_bootstrap_before_start():
         dashboard.handle(args, object())
     ensure.assert_called_once_with(auto=True)
     start.assert_called_once_with(args, default_page="review")
+
+
+# ─── BS 启动自动生成开关（高 → 低：env 关闭 / flag 关闭 / env 开启 / 默认开启）───
+
+
+def test_resolve_bs_autogen_priority(monkeypatch):
+    monkeypatch.delenv("DQ_BS_AUTOGEN", raising=False)
+    assert dashboard._resolve_bs_autogen(SimpleNamespace()) is True
+    assert dashboard._resolve_bs_autogen(
+        SimpleNamespace(no_bs_autogen=False)) is True
+    assert dashboard._resolve_bs_autogen(
+        SimpleNamespace(no_bs_autogen=True)) is False
+
+    monkeypatch.setenv("DQ_BS_AUTOGEN", "1")
+    assert dashboard._resolve_bs_autogen(SimpleNamespace()) is True
+    monkeypatch.setenv("DQ_BS_AUTOGEN", "YES")
+    assert dashboard._resolve_bs_autogen(
+        SimpleNamespace(no_bs_autogen=True)) is False
+    monkeypatch.setenv("DQ_BS_AUTOGEN", "0")
+    assert dashboard._resolve_bs_autogen(SimpleNamespace()) is False
+    monkeypatch.setenv("DQ_BS_AUTOGEN", "off")
+    assert dashboard._resolve_bs_autogen(
+        SimpleNamespace(no_bs_autogen=False)) is False
+
+
+def test_start_ui_forwards_bs_autogen(monkeypatch):
+    monkeypatch.delenv("DQ_BS_AUTOGEN", raising=False)
+    calls = []
+
+    def fake_start(port, *, open_browser, default_page, bs_autogen):
+        calls.append((port, bs_autogen))
+
+    monkeypatch.setattr(dashboard, "_start_server", fake_start)
+    dashboard.start_ui(SimpleNamespace(port=0, no_browser=True))
+    assert calls == [(0, True)]
+
+    dashboard.start_ui(
+        SimpleNamespace(port=0, no_browser=True, no_bs_autogen=True))
+    assert calls[-1] == (0, False)
+
+    monkeypatch.setenv("DQ_BS_AUTOGEN", "0")
+    dashboard.start_ui(SimpleNamespace(port=0, no_browser=True))
+    assert calls[-1] == (0, False)
+
+
+def test_start_server_accepts_bs_autogen_keyword_only():
+    import inspect
+
+    from web_ui import server as web_server
+
+    signature = inspect.signature(web_server.start_server)
+    parameter = signature.parameters["bs_autogen"]
+    assert parameter.default is False
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY

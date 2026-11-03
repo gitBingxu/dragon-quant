@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -91,9 +92,11 @@ def seed_full(box: EnvSandbox) -> None:
     seed_db(box, assets_spec, db_name="assets.db")
 
 
-def start_dashboard(box: EnvSandbox, *extra: str, ready_path: str = "/"):
+def start_dashboard(box: EnvSandbox, *extra: str, ready_path: str = "/",
+                    env_override: dict | None = None):
     command = _dashboard_command(*extra)
-    return start_web_server(command, sandbox=box, port=0, ready_path=ready_path)
+    return start_web_server(command, sandbox=box, port=0, ready_path=ready_path,
+                            env_override=env_override)
 
 
 def test_d1_dashboard_starts_and_serves_meta():
@@ -109,6 +112,13 @@ def test_d1_dashboard_starts_and_serves_meta():
             assert meta.json()["version"]
             assert server.request("GET", "/api/scans").status == 200
             assert server.request("GET", "/api/prep/dates").status == 200
+            # E2E 沙箱统一注入 DQ_BS_AUTOGEN=0：默认关闭自动生成。
+            bs_status = server.request("GET", "/api/bs/jobs/status")
+            assert bs_status.status == 200
+            bs_body = bs_status.json()
+            assert bs_body["state"] == "idle"
+            assert bs_body["autogen_enabled"] is False
+            assert bs_body["last_run"] is None
         assert server.returncode is not None
         assert port_is_free(server.port)
 
@@ -851,3 +861,35 @@ def test_d12_prep_default_date_effect_and_accuracy():
             assert missing["reason"] == "snapshot_missing"
             bad = server.request("GET", "/api/prep/not-a-date/effect")
             assert bad.status == 400
+
+
+def test_d13_bs_autogen_fail_soft_when_unset():
+    """B4：开关打开但 procguard 禁止子进程 → 服务照常启动，状态可读 failed。"""
+
+    from dragon_quant.tests.e2e.harness.sentinel import RealDataSentinel
+
+    sentinel = RealDataSentinel()
+    before = sentinel.snapshot()
+    with sandbox("dashboard-d13-bs-autogen") as box:
+        with start_dashboard(
+            box, env_override={"DQ_BS_AUTOGEN": None},
+        ) as server:
+            assert server.request("GET", "/api/meta").status == 200
+            deadline = time.monotonic() + 10.0
+            body: dict | None = None
+            while time.monotonic() < deadline:
+                response = server.request("GET", "/api/bs/jobs/status")
+                assert response.status == 200
+                body = response.json()
+                if body["state"] == "failed":
+                    break
+                time.sleep(0.05)
+            assert body is not None
+            assert body["state"] == "failed"
+            assert body["autogen_enabled"] is True
+            assert body["last_run"]["trigger"] == "auto"
+            assert body["last_run"]["mode"] == "incremental"
+            assert "E2E 禁止创建子进程" in (body["last_run"]["output_tail"] or "")
+            # 失败不阻塞面板：只读端点仍正常。
+            assert server.request("GET", "/api/bs/overview").status == 200
+    sentinel.assert_unchanged(before, sentinel.snapshot())

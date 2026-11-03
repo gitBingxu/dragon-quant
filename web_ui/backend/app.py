@@ -11,6 +11,7 @@ def create_app(settings: DashboardSettings | None = None):
     from fastapi.responses import JSONResponse
     from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+    from .bs_runner import BsRunner
     from .errors import install_error_handlers
     from .routers import ROUTERS
     from .static import CacheControlMiddleware, mount_frontend
@@ -19,9 +20,11 @@ def create_app(settings: DashboardSettings | None = None):
 
     app = FastAPI(
         title="dragon-quant dashboard",
-        description="龙头战法量化筛选系统本地只读仪表盘",
+        description="本地面板（查询为主；BS 派生数据经子进程生成）",
     )
     app.state.settings = settings
+    # 只构造（无 I/O、不 spawn）；启动由 ``serve._serve`` 按开关触发。
+    app.state.bs_runner = BsRunner()
 
     # 纯 ASGI 中间件：在响应流上叠加 Cache-Control（不改路由实现）。
     app.add_middleware(CacheControlMiddleware)

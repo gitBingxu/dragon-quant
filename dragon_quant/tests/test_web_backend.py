@@ -6,8 +6,11 @@ prep/auction 投影、入选后表现端点与账户兼容端点。
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1769,3 +1772,280 @@ def test_prep_effect_local_bars_error_is_visible_in_warnings():
     assert body["stocks"]["rows"]
     assert {row["status"] for row in body["stocks"]["rows"]} <= {
         "cannot_evaluate", "pending"}
+
+
+# ─── BS 策略只读端点 ───────────────────────────────────────────────────────
+
+
+def _bs_row(**overrides):
+    base = {
+        "trade_date": "2026-09-01", "code": "600001", "name": "样本",
+        "eval_status": "closed", "is_terminal": 1,
+        "data_quality": "strict_5min", "replay_days": 5,
+        "fallback_days": 0, "suspended_days": 0,
+        "buy_date": "2026-09-02", "buy_rule_code": "buy_open_ma5_pullback",
+        "buy_rule_text": "开盘贴近上日MA5", "buy_loose_price": 9.8,
+        "buy_strict_price": 10.02, "buy_data_quality": "strict_5min",
+        "buy_loose_max_return_5d": 6.0, "buy_loose_max_drawdown_5d": -4.0,
+        "buy_strict_max_return_5d": 5.0, "buy_strict_max_drawdown_5d": -4.0,
+        "buy_max_return_hold_days": 3, "buy_window_partial": 0,
+        "sell_date": "2026-09-04", "sell_rule_code": "hard_stop_loss",
+        "sell_rule_text": "触及止损", "sell_price": 9.5,
+        "sell_hold_days": 2, "sell_data_quality": "strict_5min",
+        "sell_half_date": None, "sell_half_price": None,
+        "sell_half_qty": None, "sell_half_rule_code": None,
+        "sell_max_return_5d": 1.0, "sell_max_drawdown_5d": -1.0,
+        "sell_max_return_hold_days": 1, "sell_window_partial": 0,
+    }
+    base.update(overrides)
+    return base
+
+
+class FakeBsRepository:
+    def __init__(self, *, run=None, rows=None, stale=0):
+        self.run = run
+        self.rows = list(rows or [])
+        self.stale = stale
+        self.calls: list[dict] = []
+
+    def latest_run(self):
+        return self.run
+
+    def list_current(self, strategy_hash, evaluator_version):
+        return [row for row in self.rows
+                if row.get("strategy_hash", strategy_hash) == strategy_hash]
+
+    def count_stale(self, strategy_hash, evaluator_version):
+        return self.stale
+
+    def query_signals(self, *, side, filters=None, sort_by="", sort_dir="desc",
+                      strategy_hash=None, evaluator_version=None):
+        self.calls.append({"side": side, "filters": dict(filters or {}),
+                           "sort_by": sort_by, "sort_dir": sort_dir})
+        rows = [row for row in self.rows
+                if (row.get("buy_date") if side == "buy"
+                    else row.get("sell_date")) is not None]
+        rules = (filters or {}).get("rule_codes") or []
+        if rules:
+            key = "buy_rule_code" if side == "buy" else "sell_rule_code"
+            rows = [row for row in rows if row.get(key) in rules]
+        if (filters or {}).get("exclude_partial"):
+            key = "buy_window_partial" if side == "buy" else "sell_window_partial"
+            rows = [row for row in rows if not row.get(key)]
+        return rows
+
+
+BS_RUN = {
+    "id": 7, "started_at": "2026-11-02 15:30:00",
+    "finished_at": "2026-11-02 15:31:00", "range_from": None,
+    "range_to": None, "limit_n": None, "force": False,
+    "evaluator_version": "bs_eval/1", "strategy_name": "dragon_pullback_daily",
+    "strategy_params": {}, "strategy_hash": "abcdef123456",
+    "counters": {"rows_scanned": 1, "rows_skipped_terminal": 0,
+                 "rows_evaluated": 1, "rows_no_signal": 0,
+                 "rows_bought": 1, "rows_sold": 1, "rows_partial": 0,
+                 "rows_error": 0},
+    "note": None,
+}
+
+
+def _bs_client(repo):
+    from dragon_quant.bs_eval import aggregate as bs_aggregate
+    from dragon_quant.bs_eval import strategy_doc as bs_doc
+
+    return make_client(bs_repository=repo, bs_strategy_doc=bs_doc,
+                       bs_aggregate=bs_aggregate)
+
+
+def test_bs_overview_empty_and_populated():
+    empty = _bs_client(FakeBsRepository()).get("/api/bs/overview")
+    assert empty.status_code == 200
+    body = empty.json()
+    assert body["run"] is None
+    assert body["summary"]["rows_total"] == 0
+    assert body["stale_rows"] == 0
+    assert len(body["strategy"]["buy_signals"]) == 4
+    assert len(body["strategy"]["sell_rules"]) == 10
+
+    row = {**_bs_row(), "strategy_hash": "abcdef123456"}
+    client = _bs_client(FakeBsRepository(run=BS_RUN, rows=[row], stale=2))
+    body = client.get("/api/bs/overview").json()
+    assert body["run"]["id"] == 7
+    assert body["summary"]["rows_total"] == 1
+    assert body["summary"]["buy"]["strict"]["samples"] == 1
+    assert body["summary"]["sell"]["good"] == 0
+    assert body["stale_rows"] == 2
+    assert body["strategy"]["thresholds"]["max_replay_trading_days"] == 60
+
+
+def test_bs_buys_shape_rule_filter_and_stable_summary_base():
+    row = {**_bs_row(), "strategy_hash": "abcdef123456"}
+    repo = FakeBsRepository(run=BS_RUN, rows=[row])
+    body = _bs_client(repo).get(
+        "/api/bs/buys?rule=buy_open_ma5_pullback&sort_by=evil&sort_dir=drop"
+    ).json()
+    assert body["count"] == 1
+    item = body["data"][0]
+    assert item["buy_rule_label"] == "开盘回踩MA5"
+    assert item["strict_win"] is True
+    assert item["loose_win"] is True
+    assert item["buy_window_partial"] is False
+    assert body["summary"]["samples"] == 1
+    # data 查询带 rule，summary 基集不带 rule（切换买点时分母稳定）。
+    assert repo.calls[0]["filters"]["rule_codes"] == ["buy_open_ma5_pullback"]
+    assert repo.calls[1]["filters"].get("rule_codes", []) == []
+
+
+def test_bs_sells_verdict_partial_and_half_exit():
+    row = {**_bs_row(), "strategy_hash": "abcdef123456",
+           "sell_rule_code": "next_day_limit_up_half",
+           "sell_half_date": "2026-09-03", "sell_half_price": 10.4,
+           "sell_half_qty": 500, "sell_half_rule_code": "next_day_limit_up_half"}
+    item = _bs_client(FakeBsRepository(run=BS_RUN, rows=[row])).get(
+        "/api/bs/sells").json()["data"][0]
+    assert item["sell_rule_label"] == "次日涨停减半"
+    assert item["verdict"] == "neutral"
+    assert item["half_exit"]["qty"] == 500
+    assert item["half_exit"]["rule_label"] == "次日涨停减半"
+
+    partial_row = {**_bs_row(), "strategy_hash": "abcdef123456",
+                   "sell_window_partial": 1,
+                   "sell_max_return_5d": None, "sell_max_drawdown_5d": None}
+    item = _bs_client(FakeBsRepository(run=BS_RUN, rows=[partial_row])).get(
+        "/api/bs/sells").json()["data"][0]
+    assert item["verdict"] == "partial"
+    assert item["verdict_label"] == "窗口不足"
+
+
+def test_bs_invalid_date_is_400_and_repository_error_is_500():
+    client = _bs_client(FakeBsRepository(run=BS_RUN, rows=[]))
+    bad = client.get("/api/bs/buys?date_from=not-a-date")
+    assert bad.status_code == 400
+    assert bad.json()["error"] == "invalid_request"
+
+    class Boom(FakeBsRepository):
+        def query_signals(self, **_kwargs):
+            raise RuntimeError("db gone")
+
+    failed = _bs_client(Boom(run=BS_RUN, rows=[])).get("/api/bs/buys")
+    assert failed.status_code == 500
+    assert failed.json() == {"error": "db gone"}
+
+
+def test_bs_router_route_list_includes_bs():
+    from web_ui.backend.routers.meta import ROUTE_LIST
+
+    assert "/bs" in ROUTE_LIST
+
+
+# ─── BS 生成任务端点 ───────────────────────────────────────────────────────
+
+
+class _FakeProc:
+    def __init__(self, *, gate: threading.Event, output: str = "",
+                 returncode: int = 0) -> None:
+        self.gate = gate
+        self.output = output
+        self.final_code = returncode
+        self.returncode: int | None = None
+        self.terminated = 0
+
+    def communicate(self):
+        self.gate.wait(timeout=5)
+        if self.returncode is None:
+            self.returncode = self.final_code
+        return self.output, None
+
+    def wait(self, timeout: float | None = None):
+        if self.returncode is None:
+            self.gate.wait(timeout)
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated += 1
+        if self.returncode is None:
+            self.returncode = -15
+        self.gate.set()
+
+    def kill(self) -> None:
+        self.gate.set()
+
+
+def _wait_job_state(runner, expected: str, timeout: float = 3.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = runner.status()
+        if status["state"] == expected:
+            return status
+        time.sleep(0.01)
+    raise AssertionError(f"runner 未进入 {expected}: {runner.status()}")
+
+
+def test_bs_job_status_idle_and_autogen_enabled_from_settings():
+    from web_ui.backend.bs_runner import BsRunner
+
+    client = make_client(bs_runner=BsRunner())
+    body = client.get("/api/bs/jobs/status").json()
+    assert body == {"state": "idle", "autogen_enabled": False, "last_run": None}
+
+    enabled = make_client(
+        bs_runner=BsRunner(),
+        dashboard_settings=SimpleNamespace(bs_autogen=True),
+    )
+    assert enabled.get("/api/bs/jobs/status").json()["autogen_enabled"] is True
+
+
+def test_bs_rebuild_202_then_409_and_origin_guard():
+    from web_ui.backend.bs_runner import BsRunner
+
+    gate = threading.Event()
+    runner = BsRunner(popener=lambda argv, **kwargs: _FakeProc(gate=gate))
+    client = make_client(bs_runner=runner)
+
+    bad = client.post("/api/bs/rebuild",
+                      headers={"Origin": "https://evil.example"})
+    assert bad.status_code == 403
+    assert bad.json() == {"error": "invalid_origin"}
+    assert runner.status()["state"] == "idle"
+
+    ok = client.post("/api/bs/rebuild",
+                     headers={"Origin": "http://localhost:8765"})
+    assert ok.status_code == 202
+    body = ok.json()
+    assert body["state"] == "running"
+    assert body["autogen_enabled"] is False
+    assert body["last_run"]["mode"] == "force"
+    assert body["last_run"]["trigger"] == "manual"
+    assert body["last_run"]["finished_at"] is None
+    assert body["last_run"]["exit_code"] is None
+
+    busy = client.post("/api/bs/rebuild")
+    assert busy.status_code == 409
+    busy_body = busy.json()
+    assert busy_body["error"] == "job_running"
+    assert busy_body["state"] == "running"
+    assert busy_body["last_run"]["mode"] == "force"
+
+    gate.set()
+    assert _wait_job_state(runner, "succeeded")["last_run"]["exit_code"] == 0
+    assert client.get("/api/bs/jobs/status").json()["state"] == "succeeded"
+
+
+def test_bs_rebuild_spawn_failure_is_500_and_status_failed():
+    from web_ui.backend.bs_runner import BsRunner
+
+    def boom(argv, **kwargs):
+        raise OSError("blocked by sandbox")
+
+    client = make_client(bs_runner=BsRunner(popener=boom))
+    response = client.post("/api/bs/rebuild")
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"] == "spawn_failed"
+    assert body["detail"] == "OSError: blocked by sandbox"
+
+    status = client.get("/api/bs/jobs/status").json()
+    assert status["state"] == "failed"
+    assert status["last_run"]["output_tail"] == (
+        "spawn_failed: OSError: blocked by sandbox"
+    )

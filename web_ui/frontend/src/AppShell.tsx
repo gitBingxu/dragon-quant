@@ -8,7 +8,7 @@ import {
   IconSigma,
   IconWallet,
 } from "./components/icons";
-import { IconClock } from "./components/icons-extra";
+import { IconClock, IconTrendUp } from "./components/icons-extra";
 
 /** README 品牌图标（assets/icon.svg）：红渐变圆角方块 + 白色 K 线蜡烛。 */
 function BrandMark({ size = 28 }: { size?: number }) {
@@ -36,6 +36,7 @@ const NAV = [
   { to: "/prep", label: "复盘", icon: IconCalendar, match: (p: string) => p === "/prep" },
   { to: "/auction", label: "竞价", icon: IconClock, match: (p: string) => p === "/auction" },
   { to: "/account", label: "账户", icon: IconWallet, match: (p: string) => p === "/account" },
+  { to: "/bs", label: "BS策略", icon: IconTrendUp, match: (p: string) => p === "/bs" },
   { to: "/scans", label: "扫描", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
   { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
 ];

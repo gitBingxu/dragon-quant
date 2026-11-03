@@ -6,6 +6,7 @@ import { FactorsPage } from "./pages/factors/FactorsPage";
 import { PrepPage } from "./pages/prep/PrepPage";
 import { AuctionPage } from "./pages/auction/AuctionPage";
 import { AccountPage } from "./pages/account/AccountPage";
+import { BsPage } from "./pages/bs/BsPage";
 
 type RouteDef = {
   match: RegExp;
@@ -23,6 +24,7 @@ const ROUTES: RouteDef[] = [
   { match: /^\/prep$/, render: () => <PrepPage /> },
   { match: /^\/auction$/, render: () => <AuctionPage /> },
   { match: /^\/account$/, render: () => <AccountPage /> },
+  { match: /^\/bs$/, render: () => <BsPage /> },
 ];
 
 export function usePathname(): string {

@@ -97,7 +97,7 @@ def historical_day(day: str, now: datetime | None = None) -> bool:
 
 
 def historical_events(day: str, candidates: list[dict], codes: set[str], data: MarketData,
-                      until: int | None = None):
+                      until: int | None = None, daily_start: str | None = None):
     """生成当日事件流（按 code 三态可用性分类）。
 
     - 历史交易日：`intraday`（有完整5分钟K）/ `daily`（无分时但当日日K有效）/
@@ -111,13 +111,18 @@ def historical_events(day: str, candidates: list[dict], codes: set[str], data: M
 
     `until` 用于盘中（实时今日）只取到最新已完成的5分钟K。买卖决策始终复用同一
     evaluate_buy/evaluate_sell，本函数只决定数据可用性与成交口径。
+
+    `daily_start` 是新增可选参数（默认 ``None`` = 逐日按 ``day`` 取日K，行为
+    逐字不变）：同 code 多日回放传入固定起点时，``MarketData.daily`` 缓存键稳定，
+    避免回放窗口内每天用不同 ``days`` 重复拉取日K。
     """
     ordered_codes = sorted(codes)
     if not ordered_codes:
         yield from _daily_events(day, candidates, [], {}, {})
         return
     # 无日K历史仍抛错（数据源故障，不是停牌）；有历史但当日缺行由可用性判定处理。
-    histories = {code: data.daily(code, day) for code in ordered_codes}
+    daily_ref = daily_start or day
+    histories = {code: data.daily(code, daily_ref) for code in ordered_codes}
     intraday = {code: data.try_intraday(code, day, until) for code in ordered_codes}
 
     if not historical_day(day):

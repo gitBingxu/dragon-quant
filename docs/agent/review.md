@@ -71,6 +71,7 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 约束：共享核逐字迁移、**不得**改变数值或输出字段形状。`dragon_quant/tests/test_review_strict_metrics.py`
 以 parity 断言旧测试全部不变的数值语义；新公式或阈值必须改 owner 文档并补 parity。
+`bs_eval` 也复用本核计算买后/卖后 5 日窗口（不改 review 双口径），见 [bs_eval](bs_eval.md)。
 `review/performance.py` 的宽松「至最新日 K」口径与此核完全隔离。
 
 ## 只读投影说明（2026-11-01）

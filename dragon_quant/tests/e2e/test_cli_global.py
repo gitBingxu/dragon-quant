@@ -33,6 +33,7 @@ TOP_LEVEL_COMMANDS = (
     "vpa",
     "storage",
     "dashboard",
+    "bs-eval",
 )
 
 

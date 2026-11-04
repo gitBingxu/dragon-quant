@@ -12,6 +12,8 @@ export interface AccountRun {
   date_from: string;
   date_to: string;
   initial_cash: number;
+  /** 增量回测的收益率/指数曲线起点（基准最后收盘权益）；全量 run 为 null。 */
+  base_equity: number | null;
   final_equity: number;
   total_return: number;
   max_drawdown: number;
@@ -134,6 +136,27 @@ export async function createAccountRun(
   });
   if (!res.ok) {
     let message = `account run create ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = String(body.error);
+    } catch {
+      // keep the status-based fallback
+    }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+export async function createIncrementalAccountRun(
+  runId: number
+): Promise<{ data: AccountRun; run_id: number }> {
+  const res = await fetch("/api/account/runs/incremental", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run_id: runId }),
+  });
+  if (!res.ok) {
+    let message = `account run incremental ${res.status}`;
     try {
       const body = await res.json();
       if (body?.error) message = String(body.error);

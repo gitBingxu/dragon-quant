@@ -41,6 +41,13 @@ def run_account_backtest():
     return run_review_account
 
 
+def run_incremental_account_backtest():
+    """增量续算的惰性注入 seam（测试用 ``dependency_overrides`` 替换）。"""
+    from dragon_quant.review_account.main import run_incremental_review_account
+
+    return run_incremental_review_account
+
+
 def assets_repository():
     from dragon_quant.infra.assets import db as assets_db
 

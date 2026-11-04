@@ -1040,21 +1040,132 @@ def test_factor_runs_invalid_date_is_400():
 
 def test_account_invalid_json_body_keeps_legacy_shape():
     client = make_client()
-    malformed = client.post(
-        "/api/account/runs",
-        content=b"{not json",
-        headers={"Content-Type": "application/json"},
-    )
-    assert malformed.status_code == 400
-    assert malformed.json() == {"error": "invalid json body"}
+    for path in ("/api/account/runs", "/api/account/runs/incremental"):
+        malformed = client.post(
+            path,
+            content=b"{not json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert malformed.status_code == 400
+        assert malformed.json() == {"error": "invalid json body"}
 
-    not_object = client.post(
-        "/api/account/runs",
-        content=b"[]",
-        headers={"Content-Type": "application/json"},
-    )
-    assert not_object.status_code == 400
-    assert not_object.json() == {"error": "json body must be an object"}
+        not_object = client.post(
+            path,
+            content=b"[]",
+            headers={"Content-Type": "application/json"},
+        )
+        assert not_object.status_code == 400
+        assert not_object.json() == {"error": "json body must be an object"}
+
+
+# ─── 增量回测端点（201/400/404/409） ───────────────────────────────────────
+
+BASE_RUN = {
+    "id": 1, "source": "v2", "display_name": "基准", "strategy_name": "dragon_pullback_daily",
+    "strategy_params": {}, "date_from": "2026-09-04", "date_to": "2026-09-08",
+    "initial_cash": 100_000.0, "base_equity": None, "final_equity": 101_000.0,
+    "total_return": 1.0, "max_drawdown": 0.0, "trade_count": 0, "win_rate": None,
+    "created_at": "2026-09-08 15:30:00",
+}
+NEW_RUN = {**BASE_RUN, "id": 7, "date_from": "2026-09-09", "date_to": "2026-09-11",
+           "base_equity": 101_000.0, "display_name": "基准 · 增量 2026-09-09"}
+
+
+class FakeIncrementalAccount:
+    """``get_review_account_run``：1=基准，7=增量新记录，其余不存在。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_review_account_run(self, run_id):
+        self.calls.append(run_id)
+        if run_id == 1:
+            return dict(BASE_RUN)
+        if run_id == 7:
+            return dict(NEW_RUN)
+        return None
+
+
+def _incremental_client(account, run_incremental):
+    return make_client(account_repository=account,
+                       run_incremental_account_backtest=run_incremental)
+
+
+def test_incremental_run_created_with_base_equity():
+    account = FakeIncrementalAccount()
+    calls = []
+
+    def fake_incremental(run_id, *, verbose=True, services=None):
+        calls.append((run_id, verbose))
+        return {"run_id": 7, "base_equity": 101_000.0}
+
+    client = _incremental_client(account, fake_incremental)
+    response = client.post("/api/account/runs/incremental", json={"run_id": 1})
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["run_id"] == 7
+    assert body["data"]["base_equity"] == 101_000.0
+    assert calls == [(1, False)]  # 注入服务只被调用一次且 CLI 输出关闭
+
+
+def test_incremental_run_missing_base_is_404():
+    called = []
+
+    def fake_incremental(run_id, **kwargs):  # pragma: no cover - 不应被调用
+        called.append(run_id)
+        return {"run_id": 7}
+
+    client = _incremental_client(FakeIncrementalAccount(), fake_incremental)
+    response = client.post("/api/account/runs/incremental", json={"run_id": 999})
+    assert response.status_code == 404
+    assert response.json() == {"error": "run not found"}
+    assert called == []
+
+
+def test_incremental_run_param_errors_are_400():
+    def fake_incremental(run_id, **kwargs):  # pragma: no cover - 不应被调用
+        raise AssertionError("参数错误应先于服务调用")
+
+    client = _incremental_client(FakeIncrementalAccount(), fake_incremental)
+    missing = client.post("/api/account/runs/incremental", json={})
+    assert missing.status_code == 400
+    assert missing.json() == {"error": "missing run_id"}
+
+    invalid = client.post("/api/account/runs/incremental", json={"run_id": "abc"})
+    assert invalid.status_code == 400
+    assert invalid.json() == {"error": "invalid run_id"}
+
+
+def test_incremental_run_domain_error_passes_through_as_400():
+    message = "基准记录已覆盖最近已收盘交易日（2026-09-08），无新增数据"
+
+    def fake_incremental(run_id, **kwargs):
+        raise ValueError(message)
+
+    client = _incremental_client(FakeIncrementalAccount(), fake_incremental)
+    response = client.post("/api/account/runs/incremental", json={"run_id": 1})
+    assert response.status_code == 400
+    assert response.json() == {"error": message}
+
+
+def test_incremental_run_conflict_while_lock_held():
+    from web_ui.backend.routers.account import _account_run_lock
+
+    called = []
+
+    def fake_incremental(run_id, **kwargs):  # pragma: no cover - 不应被调用
+        called.append(run_id)
+        return {"run_id": 7}
+
+    client = _incremental_client(FakeIncrementalAccount(), fake_incremental)
+    with _account_run_lock:
+        response = client.post("/api/account/runs/incremental", json={"run_id": 1})
+    assert response.status_code == 409
+    assert response.json() == {"error": "account run already in progress"}
+    assert called == []
+    # 锁已在 finally 释放：下一次请求正常进入（404 由 fake 仓储决定）。
+    assert client.post("/api/account/runs/incremental",
+                       json={"run_id": 999}).status_code == 404
 
 
 # ─── 扫描运行态 / 日志端点（方案 §9.3） ────────────────────────────────────

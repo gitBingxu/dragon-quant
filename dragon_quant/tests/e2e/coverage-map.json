@@ -1174,6 +1174,7 @@
           "dragon_quant/tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
           "dragon_quant/tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
           "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series",
+          "dragon_quant/tests/e2e/test_web_api.py::test_w5_incremental_run_matches_full_replay",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
@@ -1188,7 +1189,7 @@
           "dragon_quant/tests/e2e/test_dashboard.py::test_d11_prep_plan_followup_local_returns",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d12_prep_default_date_effect_and_accuracy"
         ],
-        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network. D11 covers prep plan-followup (plan-day samples, local daily bars, 1/3/5 net returns, invalid params) and the same-day market verification."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network. D11 covers prep plan-followup (plan-day samples, local daily bars, 1/3/5 net returns, invalid params) and the same-day market verification. W5 also covers incremental replay: A(09-04~09-08)+incremental(→09-11) must equal the one-shot full run on overlapping days (snapshots/trades/positions), plus 400 no-new-data, 404 missing base and base_equity-anchored benchmark."
       },
       "npm": {
         "tests": [

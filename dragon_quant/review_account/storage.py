@@ -21,8 +21,13 @@ def create_review_account_run(source: str,
                               max_drawdown: float,
                               trade_count: int,
                               win_rate: Optional[float],
-                              display_name: Optional[str] = None) -> int:
-    """创建一条账户级 review run，返回 run_id。"""
+                              display_name: Optional[str] = None,
+                              base_equity: Optional[float] = None) -> int:
+    """创建一条账户级 review run，返回 run_id。
+
+    ``base_equity`` 仅增量 run 写入（基准最后收盘权益，作为收益率与指数曲线
+    起点）；全量 run 保持 NULL，读取侧 ``base_equity or initial_cash`` 逐位不变。
+    """
     with _lock:
         conn = _connect()
         try:
@@ -31,10 +36,11 @@ def create_review_account_run(source: str,
             cur = conn.execute(
                 "INSERT INTO review_account_runs("
                 "source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
-                "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (source, display_name, strategy_name, strategy_params_json, date_from, date_to,
-                 initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate),
+                 initial_cash, base_equity, final_equity, total_return, max_drawdown,
+                 trade_count, win_rate),
             )
             conn.commit()
             return int(cur.lastrowid or 0)
@@ -161,7 +167,8 @@ def query_review_account_runs(limit: int = 20, source: str = "v2") -> list[dict]
         source = _normalize_source(source)
         rows = conn.execute(
             "SELECT id, source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
-            "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate, created_at "
+            "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
+            "created_at "
             "FROM review_account_runs WHERE source = ? ORDER BY id DESC LIMIT ?",
             (source, limit),
         ).fetchall()
@@ -171,10 +178,10 @@ def query_review_account_runs(limit: int = 20, source: str = "v2") -> list[dict]
                 "strategy_name": r[3],
                 "strategy_params": json.loads(r[4]) if r[4] else {},
                 "date_from": r[5], "date_to": r[6],
-                "initial_cash": r[7], "final_equity": r[8],
-                "total_return": r[9], "max_drawdown": r[10],
-                "trade_count": r[11], "win_rate": r[12],
-                "created_at": r[13],
+                "initial_cash": r[7], "base_equity": r[8], "final_equity": r[9],
+                "total_return": r[10], "max_drawdown": r[11],
+                "trade_count": r[12], "win_rate": r[13],
+                "created_at": r[14],
             }
             for r in rows
         ]
@@ -188,7 +195,8 @@ def get_review_account_run(run_id: int) -> Optional[dict]:
         _ensure_schema(conn)
         row = conn.execute(
             "SELECT id, source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
-            "initial_cash, final_equity, total_return, max_drawdown, trade_count, win_rate, created_at "
+            "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
+            "created_at "
             "FROM review_account_runs WHERE id = ?",
             (run_id,),
         ).fetchone()
@@ -199,10 +207,10 @@ def get_review_account_run(run_id: int) -> Optional[dict]:
             "strategy_name": row[3],
             "strategy_params": json.loads(row[4]) if row[4] else {},
             "date_from": row[5], "date_to": row[6],
-            "initial_cash": row[7], "final_equity": row[8],
-            "total_return": row[9], "max_drawdown": row[10],
-            "trade_count": row[11], "win_rate": row[12],
-            "created_at": row[13],
+            "initial_cash": row[7], "base_equity": row[8], "final_equity": row[9],
+            "total_return": row[10], "max_drawdown": row[11],
+            "trade_count": row[12], "win_rate": row[13],
+            "created_at": row[14],
         }
     finally:
         conn.close()
@@ -280,6 +288,33 @@ def query_review_account_positions(run_id: int) -> list[dict]:
                 "realized_return": r[11], "hold_days": r[12], "status": r[13],
                 "post_exit_max_return": r[14], "post_exit_max_drawdown": r[15],
                 "post_exit_window_days": r[16],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def query_review_account_closed_positions(run_id: int) -> list[dict]:
+    """基准 run 的已平仓记录（只读，按成交完成序）。
+
+    供增量续算恢复 ``consecutive_losses``：``review_account_positions`` 只在
+    整清仓时写入一行（半仓腿不单独成行），``id`` 自增序即成交完成序，与运行时
+    ``TradingEngine._fill`` 的连亏记账口径一致。
+    """
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT id, code, exit_date, realized_return, status "
+            "FROM review_account_positions WHERE run_id = ? "
+            "ORDER BY exit_date ASC, id ASC",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0], "code": r[1], "exit_date": r[2],
+                "realized_return": r[3], "status": r[4],
             }
             for r in rows
         ]

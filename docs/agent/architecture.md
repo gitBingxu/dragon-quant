@@ -120,7 +120,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 ## 模块公共入口
 
 > **模块公共入口**：`scan`（可调用包）；`review.main.run_review/review_dragon`；
-> `review_account.main`（`run_review_account` + `StrategyConfig` / `MarketData`）；
+> `review_account.main`（`run_review_account` / `run_incremental_review_account` + `StrategyConfig` / `MarketData`）；
 > `review_account.prep.main`（`run_prep` + `format_advice_lines` / `format_candidate_lines`）；
 > `review_account.live_trade.main.run_buy/run_sell`；
 > `review_account.auction.main.run_auction/run_auction_recompute`；

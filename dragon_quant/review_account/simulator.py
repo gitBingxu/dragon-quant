@@ -47,13 +47,22 @@ def annotate_post_exit(positions: list[ClosedPosition], data: MarketData) -> Non
 
 
 class AccountSimulator:
-    def __init__(self, cfg: StrategyConfig, provider=None, data=None):
+    def __init__(self, cfg: StrategyConfig, provider=None, data=None, *,
+                 initial_state=None, base_equity=None, peak_equity=None):
+        """``initial_state`` / ``base_equity`` / ``peak_equity`` 是增量续算入口。
+
+        三者缺省时与旧行为逐位一致：``AccountState(cfg.initial_cash)``、
+        ``_base_equity = _peak = _previous = cfg.initial_cash``。买卖/成交/风控
+        规则仍全部由 ``TradingEngine`` 复用，本类不复制任何规则。
+        """
         self.cfg = StrategyConfig.from_dict(cfg.to_json_dict())
         self.data = data or MarketData(provider=provider)
-        self.state = AccountState(cfg.initial_cash)
+        self.state = initial_state or AccountState(cfg.initial_cash)
         self.engine = TradingEngine(cfg, self.state)
         self.trades, self.snapshots, self.closed_positions, self.events = [], [], [], []
-        self._peak = self._previous = cfg.initial_cash
+        self._base_equity = cfg.initial_cash if base_equity is None else base_equity
+        self._peak = cfg.initial_cash if peak_equity is None else peak_equity
+        self._previous = self._base_equity
         self._calendar = []
         self._day_quality = {}
         self._ranking_modes = {}
@@ -161,7 +170,7 @@ class AccountSimulator:
         cost = sum(p.cost for p in state.positions)
         snapshot = Snapshot(day, state.cash, market_value, equity,
                             (equity / self._previous - 1) * 100,
-                            (equity / self.cfg.initial_cash - 1) * 100,
+                            (equity / self._base_equity - 1) * 100,
                             (equity / self._peak - 1) * 100,
                             p.code if p else "MULTI" if state.positions else "",
                             p.name if p else f"{len(state.positions)}只持仓" if state.positions else "",
@@ -201,7 +210,8 @@ class AccountSimulator:
                     if any(r != UNAVAILABLE_SUSPENDED for r in m.values())
                 },
                 "data_degraded": list(self._data_degraded),
-                "final_equity": final, "total_return": (final / self.cfg.initial_cash - 1) * 100,
+                "final_equity": final, "total_return": (final / self._base_equity - 1) * 100,
+                "base_equity": self._base_equity,
                 "max_drawdown": min(s.drawdown for s in self.snapshots), "trade_count": len(self.trades),
                 "win_rate": sum(p.realized_return > 0 for p in self.closed_positions) / count * 100 if count else None,
                 "trades": self.trades, "snapshots": self.snapshots, "positions": positions, "events": self.events,

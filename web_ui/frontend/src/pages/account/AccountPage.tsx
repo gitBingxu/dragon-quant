@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  createIncrementalAccountRun,
   deleteAccountRun,
   fetchAccountBenchmark,
   fetchAccountEvents,
@@ -16,7 +17,8 @@ import {
   type AccountTrade,
 } from "../../api/account";
 import { PageHeader } from "../../components/PageHeader";
-import { IconPlus } from "../../components/icons";
+import { HintIcon } from "../../components/HintIcon";
+import { IconPlus, IconRefresh } from "../../components/icons";
 import { IconAlert } from "../../components/icons-extra";
 import { AccountStats } from "./AccountStats";
 import { EntryReasonStats } from "./EntryReasonStats";
@@ -58,7 +60,9 @@ export function AccountPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [incrementing, setIncrementing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === runId) ?? null,
@@ -134,6 +138,31 @@ export function AccountPage() {
     };
   }, [runId]);
 
+  const selectRun = useCallback((id: number) => {
+    setActionError(null);
+    setRunId(id);
+  }, []);
+
+  const runIncremental = useCallback(async () => {
+    if (!runId || incrementing) return;
+    setIncrementing(true);
+    setActionError(null);
+    try {
+      const resp = await createIncrementalAccountRun(runId);
+      try {
+        await loadRuns(resp.data.id);
+      } catch {
+        // 新记录已生成但列表刷新失败：至少让用户看到并选中它。
+        setRuns([resp.data]);
+        setRunId(resp.data.id);
+      }
+    } catch (exc) {
+      setActionError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setIncrementing(false);
+    }
+  }, [runId, incrementing, loadRuns]);
+
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -160,7 +189,7 @@ export function AccountPage() {
               <RunPicker
                 runs={runs}
                 runId={runId}
-                onSelect={setRunId}
+                onSelect={selectRun}
                 onDelete={setDeleteTarget}
               />
             ) : null}
@@ -168,6 +197,20 @@ export function AccountPage() {
               <IconPlus size={15} />
               生成回测记录
             </button>
+            <span className="inline-flex items-center gap-1.5">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={runIncremental}
+                disabled={!runId || incrementing}
+              >
+                <IconRefresh size={15} />
+                {incrementing ? "增量回测中…" : "增量回测"}
+              </button>
+              <HintIcon label="增量回测说明">
+                在当前回测记录与操盘策略的基础上对增量数据执行回测
+              </HintIcon>
+            </span>
           </>
         }
       />
@@ -176,6 +219,13 @@ export function AccountPage() {
         <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
           <IconAlert size={15} />
           加载失败：{error}
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
+          <IconAlert size={15} />
+          {actionError}
         </div>
       ) : null}
 

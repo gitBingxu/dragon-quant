@@ -23,7 +23,7 @@ class ApiError(Exception):
 
 
 def _legacy_body_error(exc: RequestValidationError) -> str | None:
-    """兼容 POST /api/account/runs 的旧 body 解析文案（单键 ``{"error"}``）。
+    """兼容 POST /api/account/runs（含增量端点）的旧 body 解析文案（单键 ``{"error"}``）。
 
     旧 stdlib 实现区分「非法 JSON」与「JSON 不是对象」；FastAPI 的
     ``RequestValidationError`` 把两者都变成 422/400 新形状。这里只在该端点
@@ -45,6 +45,12 @@ def _legacy_body_error(exc: RequestValidationError) -> str | None:
     return None
 
 
+LEGACY_ACCOUNT_RUN_PATHS = {
+    "/api/account/runs",
+    "/api/account/runs/incremental",
+}
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
@@ -57,7 +63,7 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _validation_error(request: Request,
                                 exc: RequestValidationError) -> JSONResponse:
         path = (request.url.path or "").rstrip("/")
-        if request.method == "POST" and path == "/api/account/runs":
+        if request.method == "POST" and path in LEGACY_ACCOUNT_RUN_PATHS:
             legacy = _legacy_body_error(exc)
             if legacy is not None:
                 return JSONResponse(status_code=400, content={"error": legacy})

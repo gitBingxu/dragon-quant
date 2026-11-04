@@ -187,6 +187,27 @@ def create_account_run(payload: dict, *, default_source: str,
     return {"data": run, "run_id": result["run_id"]}
 
 
+def create_incremental_account_run(payload: dict, *, account,
+                                   run_incremental) -> dict:
+    """增量续算：只解析 run_id、查基准、注入服务、回读新 run。
+
+    与 ``create_account_run`` 一样不写库、不 import 仓储实现；服务层的域错误
+    由 ``ValueError`` 透传给路由层映射 400，基准不存在返回 404 单键。
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    run_id = parse_run_id(payload)
+    try:
+        base = account.get_review_account_run(run_id)
+    except ValueError:
+        # 行存在但 JSON 坏行：交给服务层给出中文域错误（仍是 400）。
+        base = {}
+    if base is None:
+        return {"error": "run not found"}
+    result = run_incremental(run_id, verbose=False)
+    run = account.get_review_account_run(int(result["run_id"]))
+    return {"data": run, "run_id": result["run_id"]}
+
+
 def delete_account_run(account, params) -> dict:
     run_id = parse_run_id(params)
     deleted = account.delete_review_account_run(run_id)
@@ -229,16 +250,23 @@ def account_benchmark(account, provider, params) -> dict:
         provider,
         code=code,
         dates=[s["trade_date"] for s in snapshots],
-        initial_cash=run["initial_cash"] or 0,
+        # 增量 run 的账户曲线从 base_equity（基准最后权益）起算；全量 run
+        # 该列为 NULL，回落 initial_cash 后与旧行为逐位一致。
+        start_equity=run.get("base_equity") or run["initial_cash"] or 0,
     )
     return {"data": rows, "code": code, "name": "上证指数"}
 
 
 def build_benchmark_series(provider, code: str, dates: list[str],
-                           initial_cash: float) -> list[dict]:
-    """按账户快照日期生成指数等效权益曲线（原样搬运）。"""
-    if not dates or initial_cash <= 0:
+                           start_equity: float) -> list[dict]:
+    """按账户快照日期生成指数等效权益曲线（原样搬运）。
+
+    ``start_equity`` 是账户曲线的起点权益：全量 run 为 ``initial_cash``，
+    增量 run 为基准最后收盘权益 ``base_equity``。
+    """
+    if not dates or start_equity <= 0:
         return []
+
     from datetime import datetime
 
     days = max(60, len(dates) + 30)
@@ -261,7 +289,7 @@ def build_benchmark_series(provider, code: str, dates: list[str],
         rows.append({
             "trade_date": d,
             "close": close,
-            "total_equity": initial_cash * close / first_close if first_close else initial_cash,
+            "total_equity": start_equity * close / first_close if first_close else start_equity,
             "cumulative_return": cumulative_return,
         })
     return rows

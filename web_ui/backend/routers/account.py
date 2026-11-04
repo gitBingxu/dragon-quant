@@ -1,4 +1,4 @@
-"""账户回测端点：7 个兼容端点（含 POST/DELETE）+ 单飞锁。
+"""账户回测端点：9 个账户端点（含增量 201）与单飞锁。
 
 错误语义与旧 ``ReviewHandler`` 逐字一致：
 - GET 端点的 ``ValueError`` 落到 500 单键（基线冻结）；
@@ -21,6 +21,7 @@ from ..deps import (
     dashboard_settings,
     evaluation_module,
     run_account_backtest,
+    run_incremental_account_backtest,
 )
 
 router = APIRouter(tags=["account"])
@@ -79,6 +80,29 @@ def create_account_run(payload: dict | None = Body(default=None),
         )
     finally:
         _account_run_lock.release()
+    return JSONResponse(status_code=201, content=result)
+
+
+@router.post("/api/account/runs/incremental", response_model=None)
+@mutation_errors
+def create_incremental_account_run(
+        payload: dict | None = Body(default=None),
+        account=Depends(account_repository),
+        run_incremental=Depends(run_incremental_account_backtest)):
+    """基于既有 run 的最后收盘状态续算；与生成回测共用单飞锁。"""
+    if not _account_run_lock.acquire(blocking=False):
+        return JSONResponse(
+            status_code=409,
+            content={"error": "account run already in progress"},
+        )
+    try:
+        result = compat.create_incremental_account_run(
+            payload or {}, account=account, run_incremental=run_incremental,
+        )
+    finally:
+        _account_run_lock.release()
+    if "error" in result:
+        return JSONResponse(status_code=404, content=result)
     return JSONResponse(status_code=201, content=result)
 
 

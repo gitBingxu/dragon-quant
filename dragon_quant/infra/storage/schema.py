@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS review_account_runs (
     date_from            TEXT NOT NULL,
     date_to              TEXT NOT NULL,
     initial_cash         REAL,
+    base_equity          REAL,
     final_equity         REAL,
     total_return         REAL,
     max_drawdown         REAL,
@@ -332,6 +333,9 @@ def _ensure_review_account_columns(conn: sqlite3.Connection):
     run_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_runs)")}
     if "display_name" not in run_cols:
         conn.execute("ALTER TABLE review_account_runs ADD COLUMN display_name TEXT")
+    # 增量回测的收益率/指数曲线起点（基准最后收盘权益）；全量 run 保持 NULL。
+    if "base_equity" not in run_cols:
+        conn.execute("ALTER TABLE review_account_runs ADD COLUMN base_equity REAL")
     snapshot_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_snapshots)")}
     if "positions_json" not in snapshot_cols:
         conn.execute("ALTER TABLE review_account_snapshots ADD COLUMN positions_json TEXT DEFAULT '[]'")

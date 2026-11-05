@@ -423,17 +423,22 @@ def run_review(trade_date: Optional[str] = None,
                             if s["review_status"] == "completed")
             cannot_evaluate = sum(1 for s in strict_results
                                   if s["review_status"] == "cannot_evaluate")
-            failed = processed - completed - cannot_evaluate
+            # 窗口不完整不是失败：单列 partial（可展示、不入正式分母）。
+            partial = sum(1 for s in strict_results
+                          if s["review_status"] == "partial")
+            # failed 只剩真错误：K 线拉取失败 / 历史不足导致没有严格结果。
+            failed = (processed - completed - cannot_evaluate - partial)
             skipped = skipped_existing + maturity_skipped
             print(f"\n{'═'*56}")
             print(f"📊 重算完成: processed={processed}")
             print(f"   completed={completed}")
             print(f"   cannot_evaluate={cannot_evaluate}")
+            print(f"   partial={partial}")
             print(f"   failed={failed}")
             print(f"   skipped={skipped}"
                   f"（已有严格 {skipped_existing} / 未成熟 {maturity_skipped}）")
-            print(f"   汇总校验: processed == completed + cannot_evaluate + failed"
-                  f" -> {processed == completed + cannot_evaluate + failed}")
+            print(f"   汇总校验: processed == completed + cannot_evaluate + "
+                  f"partial + failed -> {processed == completed + cannot_evaluate + partial + failed}")
         else:
             print(f"\n{'═'*56}")
             print(f"📊 回测完成: completed="

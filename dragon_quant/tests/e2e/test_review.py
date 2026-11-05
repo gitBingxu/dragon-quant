@@ -538,8 +538,10 @@ def test_r17_recompute_all_summary_separates_failed_and_skipped():
         assert "📊 重算完成: processed=3" in result.stdout
         assert "   completed=2" in result.stdout
         assert "   cannot_evaluate=0" in result.stdout
+        assert "   partial=0" in result.stdout
         assert "   failed=1" in result.stdout
         assert "   skipped=0" in result.stdout
-        assert "汇总校验: processed == completed + cannot_evaluate + failed -> True" in result.stdout
+        assert ("汇总校验: processed == completed + cannot_evaluate + "
+                "partial + failed -> True") in result.stdout
         assert sqlite_count(box.data_dir / "dragon.db",
                             "dragon_review_strict") == 2

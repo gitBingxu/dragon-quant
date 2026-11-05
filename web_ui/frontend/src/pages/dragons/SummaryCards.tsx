@@ -10,6 +10,9 @@ const LOOSE_HINT =
 const STRICT_HINT =
   "严格口径：入选后首个交易日按开盘价买入；次日一字板按涨停价成交，不顺延（假设价）。"
   + "收益为事后最大潜在涨幅；回撤是峰值前相对入场的不利波动，不是权益曲线峰谷回撤。";
+const PENDING_HINT =
+  "待回测口径：只统计收益窗口已走完（买入后已满 5 个交易日）且尚无严格结果的记录；"
+  + "未成熟记录等窗口走完后自动进入待回测。";
 
 export function SummaryCards({
   summary,
@@ -39,6 +42,10 @@ export function SummaryCards({
   const bestReturn = isStrict ? s?.best_return_strict : s?.best_return;
 
   const caliberLabel = isStrict ? "严格口径" : "宽松口径";
+  const partialWindow = s?.partial_window ?? s?.partial ?? 0;
+  const partialMissing = s?.partial_missing_bars ?? 0;
+  const covPartialWindow = coverage?.partial_window ?? coverage?.partial ?? 0;
+  const covPartialMissing = coverage?.partial_missing_bars ?? 0;
 
   return (
     <div className="grid gap-2">
@@ -48,12 +55,19 @@ export function SummaryCards({
           （固定分母，不随筛选变化）：总记录 {coverage?.total ?? "—"} ·
           已回测 {coverage?.derived_completed ?? coverage?.completed ?? "—"} ·
           待回测 {coverage?.derived_pending ?? coverage?.pending ?? "—"}
-          {(coverage?.partial ?? 0) > 0 ? ` · 窗口未成熟 ${coverage?.partial}` : ""}
+          {(coverage?.derived_pending_immature ?? 0) > 0
+            ? ` · 未成熟 ${coverage?.derived_pending_immature}`
+            : ""}
+          {covPartialWindow > 0 ? ` · 窗口未成熟 ${covPartialWindow}` : ""}
+          {covPartialMissing > 0 ? ` · 窗口缺K线 ${covPartialMissing}` : ""}
         </div>
         <div>
           <span className="font-semibold text-ink">当前筛选</span>：
           {s?.total ?? 0} 条 · 已回测 {s?.derived_completed ?? s?.completed ?? 0} ·
           待回测 {s?.derived_pending ?? s?.pending ?? 0}
+          {(s?.derived_pending_immature ?? 0) > 0
+            ? ` · 未成熟 ${s?.derived_pending_immature}`
+            : ""}
         </div>
       </div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
@@ -62,9 +76,13 @@ export function SummaryCards({
       <StatCard
         label="待回测"
         value={s?.derived_pending ?? s?.pending ?? 0}
-        sub="完整收益窗口（入选后约 6 个交易日）"
         tone={(s?.derived_pending ?? s?.pending ?? 0) > 0 ? "warning" : "neutral"}
         headerAction={pendingHeader}
+        labelExtra={
+          <HintIcon label="待回测口径" align="start">
+            {PENDING_HINT}
+          </HintIcon>
+        }
         footer={pendingFooter}
       />
       <StatCard
@@ -87,7 +105,8 @@ export function SummaryCards({
         sub={
           `n=${strictN ?? 0}` +
           ((s?.cannot_evaluate ?? 0) > 0 ? ` · 无法评估 ${s?.cannot_evaluate}` : "") +
-          ((s?.partial ?? 0) > 0 ? ` · 窗口未成熟 ${s?.partial}` : "")
+          (partialWindow > 0 ? ` · 窗口未成熟 ${partialWindow}` : "") +
+          (partialMissing > 0 ? ` · 窗口缺K线 ${partialMissing}` : "")
         }
         tone="neutral"
       />

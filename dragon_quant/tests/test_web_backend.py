@@ -151,7 +151,8 @@ class FakeDragons:
         return [dict(ROW)]
 
     def summarize_review_rows(self, rows, source="v2", *,
-                              include_derived_counts=False, caliber=None):
+                              include_derived_counts=False, caliber=None,
+                              maturity_cutoff=None):
         summary = dict(SUMMARY)
         if include_derived_counts:
             summary.update({"derived_completed": 1, "derived_pending": 0})
@@ -213,6 +214,55 @@ class FakeScans:
              "dim_liquidity": 5.0, "is_true_dragon": True,
              "reject_reason": None, "report_text": "r"},
         ]
+
+
+def test_dragons_summary_uses_local_calendar_for_pending_maturity():
+    """待回测口径必须由本地已确认交易日派生成熟度上界（入选中日 ≤ 上界）。
+
+    8 个交易日降序第 7 个（index 6）是 2026-09-22，即端点应传入的 cutoff。
+    """
+
+    dragons = FakeDragons()
+    seen: list[str | None] = []
+    original = dragons.summarize_review_rows
+
+    def spy(rows, source="v2", *, include_derived_counts=False, caliber=None,
+            maturity_cutoff=None):
+        seen.append(maturity_cutoff)
+        return original(rows, source=source,
+                        include_derived_counts=include_derived_counts,
+                        caliber=caliber)
+
+    dragons.summarize_review_rows = spy
+    dates = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24",
+             "2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30"]
+    client = make_client(
+        dragon_repository=dragons,
+        bar_calendar_loader=_calendar_loader(dates),
+        clock_module=FixedClock(datetime(2026, 10, 9, 16, 0,
+                                         tzinfo=ZoneInfo("Asia/Shanghai"))),
+    )
+    client.get("/api/dragons")
+    # /api/dragons 同时算 summary 与 coverage，两者使用同一 cutoff。
+    assert seen and seen[0] == "2026-09-22"
+    assert len(set(seen)) == 1
+
+
+def test_legacy_partial_window_on_mature_rows_reads_as_missing_bars():
+    """旧数据把停牌缺 bar 写成 partial_window；成熟行展示层改回缺 K 线。"""
+
+    from web_ui.backend.compat import _normalize_legacy_partial_reason
+
+    rows = [
+        {"trade_date": "2026-09-04", "strict_review_status": "partial",
+         "strict_review_reason": "partial_window"},
+        {"trade_date": "2026-10-30", "strict_review_status": "partial",
+         "strict_review_reason": "partial_window"},
+    ]
+    _normalize_legacy_partial_reason(rows, "2026-09-30")
+    assert rows[0]["strict_review_reason"] == "partial_missing_bars"
+    # 未成熟行保持原样（等窗口走完）。
+    assert rows[1]["strict_review_reason"] == "partial_window"
 
 
 def test_dragons_frozen_contract_and_new_endpoints():

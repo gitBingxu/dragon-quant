@@ -41,8 +41,8 @@ def default_command(mode: JobMode = "incremental") -> list[str]:
     ]
 
 
-_SUMMARY_KEYS = ("processed", "completed", "cannot_evaluate", "failed",
-                 "skipped")
+_SUMMARY_KEYS = ("processed", "completed", "cannot_evaluate", "partial",
+                 "failed", "skipped")
 
 
 def parse_review_summary(output: str | None) -> Optional[dict[str, int]]:

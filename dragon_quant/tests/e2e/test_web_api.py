@@ -261,6 +261,9 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
             legacy_summary = dict(dragons_summary)
             legacy_summary.pop("derived_completed")
             legacy_summary.pop("derived_pending")
+            legacy_summary.pop("derived_pending_immature")
+            legacy_summary.pop("partial_window")
+            legacy_summary.pop("partial_missing_bars")
             # 未筛选时与 legacy /api/summary 逐键等值（旧键冻结）。
             assert legacy_summary == summary
 

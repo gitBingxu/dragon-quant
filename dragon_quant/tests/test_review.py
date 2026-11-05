@@ -898,10 +898,11 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         assert "📊 重算完成: processed=3" in out
         assert "   completed=2" in out
         assert "   cannot_evaluate=0" in out
+        assert "   partial=0" in out
         assert "   failed=1" in out
         assert "   skipped=0" in out
-        assert ("汇总校验: processed == completed + cannot_evaluate + failed"
-                " -> True") in out
+        assert ("汇总校验: processed == completed + cannot_evaluate + "
+                "partial + failed -> True") in out
 
     def test_invalid_flag_combinations_raise(self):
         with self.assertRaises(ValueError):

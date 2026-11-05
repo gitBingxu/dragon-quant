@@ -107,7 +107,30 @@ def parse_filters(params) -> dict:
 # ─── dragons ───────────────────────────────────────────────────────────────
 
 
-def dragons_payload(dragons, params, default_source: str = "v2") -> dict:
+def _normalize_legacy_partial_reason(rows: list[dict],
+                                     maturity_cutoff: str | None) -> None:
+    """旧数据的 ``partial_window`` 在成熟行上必然是「窗口内缺 K 线」。
+
+    老版本把停牌缺 bar 也写成 ``partial_window``；入选日已过成熟度上界时不可能
+    是「时间未成熟」，展示层按 ``partial_missing_bars`` 归类，避免状态列和卡片
+    继续显示「窗口未成熟」。只改响应行，不回写库（下次重算会落新 reason）。
+    """
+    if not maturity_cutoff:
+        return
+    from dragon_quant.review.strict_metrics import (
+        PARTIAL_MISSING_BARS_REASON,
+        PARTIAL_WINDOW_REASON,
+    )
+
+    for row in rows:
+        if (row.get("strict_review_status") == "partial"
+                and row.get("strict_review_reason") == PARTIAL_WINDOW_REASON
+                and (row.get("trade_date") or "") <= maturity_cutoff):
+            row["strict_review_reason"] = PARTIAL_MISSING_BARS_REASON
+
+
+def dragons_payload(dragons, params, default_source: str = "v2", *,
+                    maturity_cutoff: str | None = None) -> dict:
     filters = parse_filters(params)
     sort_by = _first(params, "sort_by") or "composite_score"
     sort_dir = _first(params, "sort_dir") or "desc"
@@ -116,16 +139,19 @@ def dragons_payload(dragons, params, default_source: str = "v2") -> dict:
     rows = dragons.query_dragons(
         filters, sort_by=sort_by, sort_dir=sort_dir, source=source, caliber=caliber,
     )
+    _normalize_legacy_partial_reason(rows, maturity_cutoff)
     # summary 必须基于筛选后的完整 rows（分页在客户端进行）。
     summary = dragons.summarize_review_rows(
         rows, source=source, include_derived_counts=True, caliber=caliber,
+        maturity_cutoff=maturity_cutoff,
     )
     # 全量覆盖是独立数据源，不随筛选变化（main R6）；前端必须分区展示。
     coverage_rows = dragons.query_dragons(
         {}, source=source, caliber=caliber)
+    _normalize_legacy_partial_reason(coverage_rows, maturity_cutoff)
     coverage = dragons.summarize_review_rows(
         coverage_rows, source=source, include_derived_counts=True,
-        caliber=caliber,
+        caliber=caliber, maturity_cutoff=maturity_cutoff,
     )
     return {"data": rows, "count": len(rows), "summary": summary,
             "coverage": coverage}

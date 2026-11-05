@@ -18,7 +18,14 @@ WINDOW_SKIP = 1
 WINDOW_SIZE = 4
 
 CANNOT_EVALUATE_REASON = "停牌或数据缺失无法区分"
+#: 收益窗口还没走完（时间未成熟）——后续交易日会补齐。
 PARTIAL_WINDOW_REASON = "partial_window"
+#: 窗口日期已过，但个股缺日 K（停牌 / 数据缺失）——等待不会自愈。
+PARTIAL_MISSING_BARS_REASON = "partial_missing_bars"
+#: 所有「窗口不完整」原因；均展示但不进正式分母。
+PARTIAL_REASONS = frozenset({
+    PARTIAL_WINDOW_REASON, PARTIAL_MISSING_BARS_REASON,
+})
 
 #: 可成交研究口径（``tradable_open_v1``）的默认成本（买卖双边，bp）。
 TRADABLE_OPEN_COST_BPS = 13.0
@@ -26,6 +33,8 @@ TRADABLE_OPEN_HORIZONS = (1, 3, 5)
 
 __all__ = [
     "CANNOT_EVALUATE_REASON",
+    "PARTIAL_MISSING_BARS_REASON",
+    "PARTIAL_REASONS",
     "PARTIAL_WINDOW_REASON",
     "TRADABLE_OPEN_COST_BPS",
     "TRADABLE_OPEN_HORIZONS",
@@ -87,11 +96,20 @@ def window_metrics(klines: list[dict], calendar: set[str],
     hold_days = sum(1 for d in calendar if buy_date < d <= peak_date)
     partial = (len(future_dates) < WINDOW_SIZE
                or len(future_klines) < len(future_dates))
+    # 两种不完整要分开：时间未到会自愈；缺 K 线（停牌）不会。
+    partial_reason = None
+    if partial:
+        partial_reason = (
+            PARTIAL_WINDOW_REASON
+            if len(future_dates) < WINDOW_SIZE
+            else PARTIAL_MISSING_BARS_REASON
+        )
     return {
         "max_return_5d": round((max_high - buy_price) / buy_price * 100, 2),
         "max_drawdown_5d": round((min_low - buy_price) / buy_price * 100, 2),
         "max_return_hold_days": hold_days,
         "partial": partial,
+        "partial_reason": partial_reason,
     }
 
 
@@ -152,9 +170,10 @@ def evaluate_strict(klines: list[dict], calendar: set[str],
         return _cannot_evaluate()
 
     # 窗口不完整 → ``partial``：可展示，但不得进入正式成效分母（A1/KR1）。
+    # reason 区分「时间未到」与「窗口内缺 K 线（停牌）」，前者会自愈、后者不会。
     return _strict_result(
         "partial" if metrics["partial"] else "completed",
-        reason=PARTIAL_WINDOW_REASON if metrics["partial"] else None,
+        reason=metrics["partial_reason"],
         buy_date=buy_date,
         buy_price=buy_price,
         max_return_5d=metrics["max_return_5d"],

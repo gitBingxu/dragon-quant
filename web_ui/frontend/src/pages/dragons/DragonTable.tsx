@@ -150,7 +150,11 @@ function renderCell(row: Dragon, col: Col, caliber: ReviewCaliber) {
         </span>
       );
     case "status": {
-      const meta = statusMeta(displayStatus(row));
+      const status = displayStatus(row);
+      // 只用与展示状态同源的原因码，避免宽松 partial 误用严格侧 reason。
+      const reason =
+        row.strict_review_status === status ? row.strict_review_reason : null;
+      const meta = statusMeta(status, reason);
       return <Badge tone={meta.tone}>{meta.label}</Badge>;
     }
     default:

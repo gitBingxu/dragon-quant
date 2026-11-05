@@ -167,6 +167,42 @@ def test_derived_counts_only_present_when_requested(tmp_path):
     # E error 与 F cannot_evaluate 不计入。
     assert counted["derived_completed"] == 2
     assert counted["derived_pending"] == 2
+    # 未给成熟度上界时保持旧口径：全部待回测都计入。
+    assert counted["derived_pending_immature"] == 0
+
+
+def test_derived_pending_excludes_partial_and_immature_rows(tmp_path):
+    """待回测只算「成熟且尚无严格结果」；partial（含停牌缺 K 线）一律不计。"""
+
+    stack, dragon_path = _init(tmp_path)
+    try:
+        conn = _conn(dragon_path)
+        try:
+            # 时间型 partial：已有结果，不计入待回测。
+            _insert_loose(conn, "2026-09-01", "600001")
+            _insert_strict(conn, "2026-09-01", "600001", status="partial",
+                           reason="partial_window")
+            # 缺 K 线型 partial（停牌）：不会自愈，同样不计入。
+            _insert_loose(conn, "2026-09-02", "600002")
+            _insert_strict(conn, "2026-09-02", "600002", status="partial",
+                           reason="partial_missing_bars")
+            # 未成熟 pending：等窗口走完。
+            _insert_loose(conn, "2026-09-06", "600003", status="pending")
+            # 成熟 pending：唯一可回测的待处理记录。
+            _insert_loose(conn, "2026-09-04", "600004", status="pending")
+        finally:
+            conn.close()
+        rows = _rows(dragon_path)
+        summary = dragon_store.summarize_review_rows(
+            rows, source="v2", include_derived_counts=True,
+            maturity_cutoff="2026-09-05")
+    finally:
+        stack.close()
+
+    assert summary["derived_pending"] == 1  # 600004
+    assert summary["derived_pending_immature"] == 1  # 600003
+    assert summary["partial_window"] == 1
+    assert summary["partial_missing_bars"] == 1
 
 
 # ─── 空集 / 无赢家 / NULL ───────────────────────────────────────────────────

@@ -186,15 +186,22 @@ export interface Summary {
   win_rate_loose_n: number;
   win_rate_strict_n: number;
   cannot_evaluate: number;
-  /** 窗口未成熟（可展示，不入正式分母）。 */
+  /** 窗口不完整（可展示，不入正式分母）。 */
   partial?: number;
+  /** 窗口不完整：收益窗口尚未走完（时间未成熟）。 */
+  partial_window?: number;
+  /** 窗口不完整：窗口内个股缺日 K（停牌/数据缺失）。 */
+  partial_missing_bars?: number;
   pending_recompute: number;
   failed_recompute: number;
   best_stock_code_strict: string | null;
   best_stock_name_strict: string | null;
   best_return_strict: number | null;
   derived_completed?: number;
+  /** 可回测待回测数：只统计收益窗口已走完的成熟记录。 */
   derived_pending?: number;
+  /** 尚未成熟（等收益窗口走完）的记录数，不计入 derived_pending。 */
+  derived_pending_immature?: number;
 }
 
 export interface DragonFilters {

@@ -98,6 +98,16 @@ class TestEvaluateStrict(unittest.TestCase):
         self.assertEqual(result["max_drawdown_5d"], -5.0)
         self.assertEqual(result["max_return_hold_days"], 3)
 
+    def test_missing_bars_inside_mature_window_gets_own_reason(self):
+        """窗口日期已齐但个股缺 bar（停牌）≠ 时间未成熟，两者文案必须分开。"""
+        calendar = CALENDAR | {"2026-09-18"}
+        klines = [bar for bar in _klines() if bar["date"] != "2026-09-15"]
+        klines.append(_bar("2026-09-18", high=11.0, low=9.8, close=10.5))
+        result = strict_metrics.evaluate_strict(klines, calendar, "2026-09-10")
+        self.assertEqual(result["review_status"], "partial")
+        self.assertEqual(result["reason"],
+                         strict_metrics.PARTIAL_MISSING_BARS_REASON)
+
     def test_no_next_trading_day(self):
         result = strict_metrics.evaluate_strict(
             _klines(), {"2026-09-10"}, "2026-09-10")

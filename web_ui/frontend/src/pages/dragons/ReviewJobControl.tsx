@@ -85,6 +85,7 @@ export function composeSummaryText(
   const failed = summary?.failed ?? 0;
   const completed = summary?.completed ?? 0;
   const cannot = summary?.cannot_evaluate ?? 0;
+  const partial = summary?.partial ?? 0;
   const skipped = summary?.skipped ?? 0;
   const processed = summary?.processed;
   const tail =
@@ -102,12 +103,14 @@ export function composeSummaryText(
         "，请查看状态/错误。",
     };
   }
+  // 只有 failed（K 线拉取失败 / 历史不足）才是失败；窗口不完整单列。
   if (failed > 0) {
     return {
       tone: "warn",
       text:
         `任务部分失败：失败 ${failed} 条（完成 ${completed}、` +
-        `无法评估 ${cannot}、跳过 ${skipped}）。请检查错误后重试。${tail}`,
+        `无法评估 ${cannot}、窗口不完整 ${partial}、跳过 ${skipped}）。` +
+        `请检查错误后重试。${tail}`,
     };
   }
   if (processed === 0) {
@@ -117,6 +120,15 @@ export function composeSummaryText(
         "任务执行结束：没有需要补算的成熟标的" +
         (skipped ? `（跳过 ${skipped} 条未成熟/已完成）` : "") +
         `。${tail}`,
+    };
+  }
+  if (partial > 0) {
+    return {
+      tone: "info",
+      text:
+        `任务执行结束：完成 ${completed} 条、无法评估 ${cannot} 条；` +
+        `另有 ${partial} 条收益窗口不完整（未走完或窗口内缺 K 线/停牌），` +
+        `已排除在正式统计之外。${tail}`,
     };
   }
   return {

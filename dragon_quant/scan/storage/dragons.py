@@ -20,7 +20,10 @@ from typing import Optional
 
 from dragon_quant.infra.storage import dragons_rows
 from dragon_quant.infra.storage._base import _connect, _ensure_schema, _lock, _normalize_source, _tables
-from dragon_quant.review.strict_metrics import PARTIAL_WINDOW_REASON
+from dragon_quant.review.strict_metrics import (
+    PARTIAL_MISSING_BARS_REASON,
+    PARTIAL_REASONS,
+)
 from dragon_quant.scan.storage import review_strict
 
 
@@ -911,7 +914,8 @@ def summarize_review_rows(rows: list[dict],
                           source: str = "v2",
                           *,
                           include_derived_counts: bool = False,
-                          caliber: Optional[str] = None) -> dict:
+                          caliber: Optional[str] = None,
+                          maturity_cutoff: Optional[str] = None) -> dict:
     """从 ``query_dragons`` 的完整 rows 计算汇总统计（筛选后同源）。
 
     Web UI 的 7 张卡片必须与列表使用同一份筛选结果，因此汇总只消费同一批
@@ -929,6 +933,10 @@ def summarize_review_rows(rows: list[dict],
     ``include_derived_counts`` 为 True 时附加 ``derived_completed`` /
     ``derived_pending``（``pending`` + ``pending_recompute``）——仅供 UI 卡片
     在同一响应内展示派生状态计数，不属于 legacy ``/api/summary`` 契约。
+    ``maturity_cutoff`` 给出时，``derived_pending`` 只统计入选日不晚于该日
+    （收益窗口已走完、可回测）的记录，其余进 ``derived_pending_immature``；
+    与 CLI ``review --recompute-all`` 的成熟度筛选同源（缺日历时传 None，
+    保持旧口径）。
     ``caliber`` 只影响这两个派生计数使用的状态口径（缺省 strict；宽松直接取
     ``review_status``），旧键与 ``*_strict`` 键均不随口径变化，供前端按键选择。
     """
@@ -967,7 +975,7 @@ def summarize_review_rows(rows: list[dict],
             r for r in rows
             if r.get("strict_reviewed")
             and r.get("strict_review_status") == "completed"
-            and r.get("strict_review_reason") != PARTIAL_WINDOW_REASON
+            and r.get("strict_review_reason") not in PARTIAL_REASONS
         ]
         strict_wins = sum(1 for r in strict_completed
                           if _win(r, "strict_max_return_5d",
@@ -976,7 +984,7 @@ def summarize_review_rows(rows: list[dict],
             r for r in loose_completed
             if r.get("strict_reviewed")
             and r.get("strict_review_status") == "completed"
-            and r.get("strict_review_reason") != PARTIAL_WINDOW_REASON
+            and r.get("strict_review_reason") not in PARTIAL_REASONS
         ]
         loose_den_wins = sum(1 for r in loose_den
                              if _win(r, "max_return_5d", "max_drawdown_5d"))
@@ -995,12 +1003,12 @@ def summarize_review_rows(rows: list[dict],
             "cannot_evaluate": sum(
                 1 for r in rows
                 if r.get("strict_review_status") == "cannot_evaluate"),
-            # 窗口未走完（含旧数据 reason=partial_window）：仅展示，不入正式分母；
-            # 下次默认 review 会重新补算。
+            # 窗口不完整（含旧数据 reason=partial_window）：仅展示，不入正式
+            # 分母；下次默认 review 会重新补算。
             "partial": sum(
                 1 for r in rows
                 if r.get("strict_review_status") == "partial"
-                or r.get("strict_review_reason") == PARTIAL_WINDOW_REASON),
+                or r.get("strict_review_reason") in PARTIAL_REASONS),
             "pending_recompute": sum(
                 1 for r in rows
                 if not r.get("strict_reviewed")
@@ -1039,8 +1047,28 @@ def summarize_review_rows(rows: list[dict],
         statuses = [_row_derived_status(r, source, caliber) for r in rows]
         summary["derived_completed"] = sum(
             1 for s in statuses if s == "completed")
-        summary["derived_pending"] = sum(
-            1 for s in statuses if s in ("pending", "pending_recompute"))
+        # 两种窗口不完整原因分开计数：仅 UI 需要，不进冻结的 legacy 汇总。
+        summary["partial_window"] = sum(
+            1 for r in rows
+            if r.get("strict_review_status") == "partial"
+            and r.get("strict_review_reason") != PARTIAL_MISSING_BARS_REASON)
+        summary["partial_missing_bars"] = sum(
+            1 for r in rows
+            if r.get("strict_review_status") == "partial"
+            and r.get("strict_review_reason") == PARTIAL_MISSING_BARS_REASON)
+        # 待回测 = 尚无严格结果、且窗口已走完可回测的记录。任何 ``partial``
+        # （时间未到 / 窗口内停牌缺 K 线）都已经有结果，且停牌型永远不会自愈，
+        # 不计入待回测，避免按钮和数字被不可回测的记录长期占住。
+        pending_rows = [
+            r for r, s in zip(rows, statuses)
+            if s in ("pending", "pending_recompute")
+        ]
+        mature_n = sum(
+            1 for r in pending_rows
+            if maturity_cutoff is None
+            or (r.get("trade_date") or "") <= maturity_cutoff)
+        summary["derived_pending"] = mature_n
+        summary["derived_pending_immature"] = len(pending_rows) - mature_n
 
     return summary
 

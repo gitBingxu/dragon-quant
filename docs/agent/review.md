@@ -22,9 +22,9 @@ python -m dragon_quant review --ui-only               # 仅看结果
 **双口径**（共享收益/回撤窗口与公式；胜利条件均为 `max_return_5d > 0 且 max_drawdown_5d > -5`，0 / -5 都不算赢）：
 
 - **宽松口径**（历史行为，写 `dragons_*` 现有 review 字段）：入选后首个 `high != low` 日按**最低价**买入。
-- **严格口径**（写侧表 `dragon_review_strict`，`UNIQUE(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位 → `cannot_evaluate`（原因固定「停牌或数据缺失无法区分」）；传输失败不写/不覆盖严格结果；严格窗口为空 `cannot_evaluate`；部分窗口写 `partial`（原因 `partial_window`），可展示但不进入正式分母；宽松窗口为空同样写 `partial`（不再 0/0 completed）。
+- **严格口径**（写侧表 `dragon_review_strict`，`UNIQUE(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位 → `cannot_evaluate`（原因固定「停牌或数据缺失无法区分」）；传输失败不写/不覆盖严格结果；严格窗口为空 `cannot_evaluate`；部分窗口写 `partial`，原因区分 `partial_window`（窗口还没走完，时间未成熟）与 `partial_missing_bars`（窗口日期已过但个股缺日 K / 停牌），两者都可展示但不进入正式分母；宽松窗口为空同样写 `partial`（不再 0/0 completed）。
 
-`review` 默认处理 `pending + partial`、取消 20 交易日上限（完整收益窗口约需 6 个交易日，由 `maturity_cutoff()` 派生），显式 `--date` 可返回 partial；`--force` 重算所有成熟状态并覆盖严格。按 code 聚合拉 K（每 code 一次，深度覆盖最老记录）、日历一次；拉取后校验 `min(k.date) <= trade_date`，否则报「历史数据不足」而不是拿最近窗口冒充。`--recompute-all` 仅 v2、最老优先、默认跳过**非 partial** 的已有严格行（partial 必须补算，`--force` 覆盖）、跳过 VPA；`--dry-run` / `--limit` 只能与其组合（非法组合 exit 2）；dry-run 是未过滤成熟度的上界，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。`--source v1` 保持旧 5~20 窗口与旧口径，不写严格结果。Web UI 默认严格口径，可通过 `review_caliber` 切到宽松；v1 强制旧口径并明确标注。
+`review` 默认处理 `pending + partial`、取消 20 交易日上限（完整收益窗口约需 6 个交易日，由 `maturity_cutoff()` 派生），显式 `--date` 可返回 partial；`--force` 重算所有成熟状态并覆盖严格。按 code 聚合拉 K（每 code 一次，深度覆盖最老记录）、日历一次；拉取后校验 `min(k.date) <= trade_date`，否则报「历史数据不足」而不是拿最近窗口冒充。`--recompute-all` 仅 v2、最老优先、默认跳过**非 partial** 的已有严格行（partial 必须补算，`--force` 覆盖）、跳过 VPA；`--dry-run` / `--limit` 只能与其组合（非法组合 exit 2）；dry-run 是未过滤成熟度的上界，正式运行结束输出 processed/completed/cannot_evaluate/partial/failed/skipped 聚合汇总（`failed` 只统计 K 线拉取失败 / 历史不足等真错误，窗口不完整单列 `partial`，恒等式为 processed = completed + cannot_evaluate + partial + failed）。`--source v1` 保持旧 5~20 窗口与旧口径，不写严格结果。Web UI 默认严格口径，可通过 `review_caliber` 切到宽松；v1 强制旧口径并明确标注。
 
 ## 严格口径侧表 `dragon_review_strict`
 
@@ -51,7 +51,7 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 - `GET /api/review/jobs/status`：纯只读 `{state, last_run, summary}`，**不启动任何任务**。
   `summary` 从既有 `--recompute-all` 输出块解析（processed / completed /
-  cannot_evaluate / failed / skipped / skipped_immature），解析不到为 `null`。
+  cannot_evaluate / partial / failed / skipped / skipped_immature），解析不到为 `null`。
   **作业状态 ≠ 业务结果**：CLI 对单条 error 仍 exit 0，前端不得把 succeeded 当全部成功。
 - `POST /api/review/jobs/incremental`：单飞启动
   `python -m dragon_quant review --source v2 --recompute-all`（**固定不带 `--force`**）。
@@ -60,17 +60,20 @@ python -m dragon_quant review --ui-only               # 仅看结果
   进程退出时服务 `terminate()` 清理。
 - 语义复用 CLI：成熟 `pending`、`partial` 与严格侧表缺失行补算，已有非 partial 严格结果
   跳过，未成熟保留（约 6 个交易日后才能补算），不把全量强制重算伪装成增量。
-- 前端：`SummaryCards` 的「待回测」卡片在 `derived_pending > 0` 时渲染「回测」文本按钮；
-  计数未知（加载中/失败）不渲染。首次出现自动弹说明（只有点击「我知道了」才写版本化
+- 前端：`SummaryCards` 的「待回测」卡片在 `derived_pending > 0` 时在标签行渲染 primary
+  「回测」按钮（`ReviewJobControl` 以状态 hook + action/status/overlay 插槽提供）；计数未知
+  （加载中/失败）不渲染。首次出现自动弹说明（只有点击「我知道了」才写版本化
   localStorage；展示不写、storage 异常不崩溃），按钮运行期间禁用防双击。
 - **恢复与轮询**：挂载仅 GET status——运行中立即挂接现有作业、禁用按钮且不重复 POST；
   最近 10 分钟内完成的作业恢复结果（包括待回测归零后刷新）；父级在页面加载时只读探测运行中或最近终态，保持卡片状态区
   挂载（筛选 pending=0 也不丢状态）。轮询用串行 `setTimeout`（2s，不重叠），按
   `started_at` 作业身份守卫，过期 running 不得覆盖终态；网络失败只提示重试并继续，
   **不暗示后端任务被取消**。
-- **结果展示**：有 `summary` 时展示 completed/cannot_evaluate/skipped；`failed > 0`
-  显示「任务部分失败」；`processed=0` 明确「没有需要补算的成熟标的」；没有汇总时只给
-  「任务执行结束，仍有 N 条待处理，请查看状态/错误」，不推断剩余全是未成熟。成功刷新
+- **结果展示**：有 `summary` 时展示 completed/cannot_evaluate/partial/skipped；只有
+  `failed > 0`（K 线拉取失败 / 历史不足）才显示「任务部分失败」；`partial > 0` 提示
+  「收益窗口不完整（未走完或窗口内缺 K 线/停牌），已排除在正式统计之外」；`processed=0`
+  明确「没有需要补算的成熟标的」；没有汇总时只给「任务执行结束，仍有 N 条待处理，请查看
+  状态/错误」，不推断剩余全是未成熟。成功刷新
   按**最近一次提交的筛选**进行；刷新请求失败时显示「任务已结束，但列表刷新失败…已保留
   上次有效数据」，绝不伪报已刷新（刷新被更新的查询接管时单独提示）。
 - 测试 owner：`test_dashboard_followup_20261105.py`、`test_web_frontend_dashboard_followup.py`；
@@ -91,7 +94,7 @@ python -m dragon_quant review --ui-only               # 仅看结果
 - **明细回退**：`GET /api/dragons/{date}/{code}` 优先按口径查 `dragons_v2`；缺行时回退当日扫描最佳贡献（`dims` / `reject_reason` 仍经 `get_scan_stocks`，`review_loose` / `review_strict` / `derived_status` 为空，`dims_source` 为 `scan_stocks`）。
 - **抽屉展示**：移除双口径对照卡片，保留真伪/否决/当前口径徽标、Meta、概念、五维、否决原因与扫描报告原文（默认展开）；绩效卡独立请求、失败卡内降级并可重试，不阻塞明细。
 
-**Web UI 指标联动**：顶部 7 张卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表同源。`GET /api/dragons` 成功响应为 `{data, count, summary}`：`summary` 由筛选后的完整 rows 经 `dragons.summarize_review_rows(rows, source, include_derived_counts=True, caliber=caliber)` 计算（客户端分页不影响统计，未来若服务端分页必须先汇总再切片），`data` / `count` 不变；`caliber` 只影响 `derived_completed` / `derived_pending` 的状态来源（宽松直接取 `review_status`），旧键与 `*_strict` 键不随口径变化。`GET /api/summary` 保留为无筛选参数的 legacy 端点，其实现是 `get_review_summary` 兼容 wrapper（同样从 `query_dragons` 全量 rows 汇总），**不接收口径参数、完全不变**。`summary` 在 legacy 键之外附加 `derived_completed` / `derived_pending`（`pending` + `pending_recompute`）；row 只增返回 `derived_status`。前端仅在初始 / 出错时允许 `Summary | null`，修改筛选不自动请求，点击「查询」或回车同时刷新卡片与列表；「重置」保留 source、口径回到该体系默认，并清空其余筛选、立即恢复全量；慢旧响应由请求序号丢弃。空集或无可评测样本显示 `—`，真实无赢家显示 `0.0%`。
+**Web UI 指标联动**：顶部 7 张卡片（总记录 / 已完成 / 待回测 / 平均收益 / 宽松胜率 / 严格胜率 / 最佳）与列表同源。`GET /api/dragons` 成功响应为 `{data, count, summary}`：`summary` 由筛选后的完整 rows 经 `dragons.summarize_review_rows(rows, source, include_derived_counts=True, caliber=caliber, maturity_cutoff=…)` 计算（客户端分页不影响统计，未来若服务端分页必须先汇总再切片），`data` / `count` 不变；`caliber` 只影响 `derived_completed` / `derived_pending` 的状态来源（宽松直接取 `review_status`），旧键与 `*_strict` 键均不随口径变化。`maturity_cutoff` 由端点用本地已确认交易日（`prep_assets.stock_daily` bar 日期并集，只读不触网）经 `maturity_cutoff()` 计算；日历缺失时传 `None` 退回旧口径。`GET /api/summary` 保留为无筛选参数的 legacy 端点，其实现是 `get_review_summary` 兼容 wrapper（同样从 `query_dragons` 全量 rows 汇总），**不接收口径参数、完全不变**。`summary` 在 legacy 键之外附加 `derived_completed` / `derived_pending` / `derived_pending_immature`，以及 `partial_window` / `partial_missing_bars` 分项计数：`derived_pending` 只统计**收益窗口已走完**（入选日 ≤ 成熟度上界）且**尚无严格结果**的记录（`pending` + `pending_recompute`）；未成熟记录进 `derived_pending_immature`；所有 `partial`（时间未到或窗口内停牌缺 K 线）都已经有结果、且停牌型不会自愈，一律不计入待回测，避免按钮/数字被不可回测的记录长期占住。旧数据把停牌缺 bar 写成 `partial_window` 的成熟行，由 `compat._normalize_legacy_partial_reason` 在响应里改判为 `partial_missing_bars`（只改展示，不回写库；下次重算落新 reason）。row 只增返回 `derived_status`。前端仅在初始 / 出错时允许 `Summary | null`，修改筛选不自动请求，点击「查询」或回车同时刷新卡片与列表；「重置」保留 source、口径回到该体系默认，并清空其余筛选、立即恢复全量；慢旧响应由请求序号丢弃。空集或无可评测样本显示 `—`，真实无赢家显示 `0.0%`。
 
 ## 严格指标共享核（2026-11-02）
 
@@ -115,9 +118,17 @@ python -m dragon_quant review --ui-only               # 仅看结果
 - 收益窗口仍是「买入后第 2~5 个交易日」（`WINDOW_SKIP=1` / `WINDOW_SIZE=4`），由此派生
   **所需交易日数 = 1 + WINDOW_SKIP + WINDOW_SIZE = 6**；成熟度上界由
   `review.strict_metrics.maturity_cutoff()` 统一计算，不再硬编码「入选满 5 日」。
-- 窗口未走完时严格侧表与宽松 `review_status` 都写 `partial`（原因 `partial_window`）：
-  可展示，**不进入正式成效分母**；`summarize_review_rows` 的 `partial` 计数与
-  `avg_return_strict/win_rate_strict` 分母均已排除。
+- 窗口未走完时严格侧表与宽松 `review_status` 都写 `partial`（原因 `partial_window`）；
+  窗口日期已过但个股缺日 K（停牌 / 数据缺失）写 `partial`（原因
+  `partial_missing_bars`）：两者都可展示，**不进入正式成效分母**；
+  `summarize_review_rows` 的 `partial` / `partial_window` / `partial_missing_bars`
+  计数与 `avg_return_strict` / `win_rate_strict` 分母均已排除。列表状态列据此区分
+  「窗口未成熟」与「窗口缺K线」。
+- 「待回测」口径：只统计**收益窗口已走完**（入选中日 ≤ `maturity_cutoff()`）且**尚无
+  严格结果**的记录（`pending` + `pending_recompute`）；未成熟记录进
+  `derived_pending_immature`。任何 `partial`（时间未到 / 窗口内停牌缺 K 线）已有结果、
+  且停牌型重试不会自愈，**不计入待回测**；成熟行上的旧 `partial_window` 在展示层按
+  `partial_missing_bars` 归类。
 - 默认 `review` 选择 `pending + partial`，partial 不是终态，下次可合法补算；
   `--recompute-all` 只跳过非 partial 的已有严格行。
 - 新增独立研究口径 `tradable_open_v1`（`evaluate_tradable_open`）：T+1 开盘入场，

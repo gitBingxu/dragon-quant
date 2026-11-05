@@ -64,7 +64,10 @@ export interface StatusMeta {
   tone: StatusTone;
 }
 
-export function statusMeta(status: string | null | undefined): StatusMeta {
+export function statusMeta(
+  status: string | null | undefined,
+  reason?: string | null
+): StatusMeta {
   switch (status) {
     case "completed":
       return { label: "已完成", tone: "normal" };
@@ -75,7 +78,10 @@ export function statusMeta(status: string | null | undefined): StatusMeta {
     case "cannot_evaluate":
       return { label: "无法评估", tone: "neutral" };
     case "partial":
-      return { label: "窗口未成熟", tone: "warning" };
+      // 窗口日期已过但个股缺日 K（停牌/数据缺失），等多久都不会自愈。
+      return reason === "partial_missing_bars"
+        ? { label: "窗口缺K线", tone: "warning" }
+        : { label: "窗口未成熟", tone: "warning" };
     case "no_entry":
       return { label: "无介入", tone: "neutral" };
     case "error":

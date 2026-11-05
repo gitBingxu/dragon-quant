@@ -427,15 +427,16 @@ def test_parse_review_summary_reads_existing_cli_block():
         "📊 重算完成: processed=3\n"
         "   completed=2\n"
         "   cannot_evaluate=0\n"
+        "   partial=0\n"
         "   failed=1\n"
         "   skipped=1（已有严格 0 / 未成熟 1）\n"
-        "   汇总校验: processed == completed + cannot_evaluate + failed -> True\n"
+        "   汇总校验: processed == completed + cannot_evaluate + partial + failed -> True\n"
     )
     summary = parse_review_summary(output)
     assert summary == {
         "processed": 3, "completed": 2, "cannot_evaluate": 0,
-        "failed": 1, "skipped": 1, "skipped_existing": 0,
-        "skipped_immature": 1,
+        "partial": 0, "failed": 1, "skipped": 1,
+        "skipped_existing": 0, "skipped_immature": 1,
     }
     assert parse_review_summary("") is None
     assert parse_review_summary("没有汇总输出") is None

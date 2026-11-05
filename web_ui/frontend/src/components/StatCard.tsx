@@ -54,8 +54,8 @@ export function StatCard({
         <span className="text-caption font-semibold uppercase tracking-[0.09em] text-ink-2">
           {label}
         </span>
-        {labelExtra}
         {headerAction}
+        {labelExtra}
         {hint ? (
           <span title={hint} className="text-ink-3 transition-colors hover:text-ink-2">
             <IconInfo size={14} />

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .. import compat, params
 from ..deps import (
+    bar_calendar_loader,
     clock_module,
     dragon_repository,
     kline_provider,
@@ -37,12 +38,37 @@ def frozen_500(fn):
     return wrapper
 
 
+def _pending_maturity_cutoff(load_calendar, clock) -> str | None:
+    """本地已确认交易日 → 可回测入选日上界（与 CLI 成熟度口径同源）。
+
+    复用 ``review.strict_metrics.maturity_cutoff``（纯函数），本地交易日取
+    ``stock_daily`` bar 日期并集（只读、不建库、不触网）。日历缺失时返回
+    ``None``，汇总层退回旧口径而不是把全部未成熟记录算成待回测。
+    """
+    from datetime import timedelta
+
+    from dragon_quant.review.strict_metrics import maturity_cutoff
+
+    now = clock.now()
+    today = now.strftime("%Y-%m-%d")
+    start = (now - timedelta(days=45)).strftime("%Y-%m-%d")
+    try:
+        days = load_calendar(start, today)
+    except Exception:  # noqa: BLE001 - 日历只影响计数口径，不阻断列表
+        return None
+    calendar = {str(day) for day in (days or []) if str(day) <= today}
+    return maturity_cutoff(calendar)
+
+
 @router.get("/api/dragons", response_model=None, include_in_schema=True)
 @frozen_500
-def list_dragons(request: Request, dragons=Depends(dragon_repository)):
+def list_dragons(request: Request, dragons=Depends(dragon_repository),
+                 load_calendar=Depends(bar_calendar_loader),
+                 clock=Depends(clock_module)):
     """冻结契约：``{data, count, summary}`` 键集不变（不设 response_model）。"""
     return compat.dragons_payload(
         dragons, request.query_params, request.app.state.settings.default_source,
+        maturity_cutoff=_pending_maturity_cutoff(load_calendar, clock),
     )
 
 

@@ -16,6 +16,8 @@ export interface ReviewJobSummary {
   processed?: number;
   completed?: number;
   cannot_evaluate?: number;
+  /** 窗口不完整（时间未到 / 窗口内缺 K 线）；可展示但不入正式分母，不是失败。 */
+  partial?: number;
   failed?: number;
   skipped?: number;
   skipped_existing?: number;

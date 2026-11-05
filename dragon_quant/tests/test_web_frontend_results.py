@@ -90,12 +90,14 @@ def test_prep_page_drops_raw_json_and_uses_new_sections() -> None:
     assert positions == sorted(positions)
 
 
-def test_market_evidence_keys_are_index_qualified() -> None:
-    """重复证据文案不能产生重复 React key。"""
+def test_market_strip_drops_duplicated_evidence_copy() -> None:
+    """指标卡已覆盖原文案；仅「分数环比」补成指标卡，evidence 列表删除。"""
 
     text = _read(SRC / "pages" / "prep" / "MarketStrip.tsx")
-    assert "market.evidence.map((item, index)" in text
-    assert "key={`${item}-${index}`}" in text
+    assert "market.evidence" not in text
+    assert "分数环比" in text and "market.scoreChange" in text
+    model = _read(SRC / "pages" / "prep" / "prepModel.ts")
+    assert "scoreChange" in model and "parseScoreChange" in model
 
 
 def test_hint_icon_clamps_to_card_edges() -> None:

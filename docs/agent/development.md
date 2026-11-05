@@ -101,7 +101,7 @@
   不复制买卖/撮合算法，fixed 60/20/20 时间切分与双倍滑点压力，样本不足显式
   `insufficient_evidence`，不自动推广参数。
 - `dashboard` **默认只读**：BS 启动自动生成改为显式 opt-in（`--bs-autogen` 或
-  `DQ_BS_AUTOGEN=1`；`--no-bs-autogen`/`DQ_BS_AUTOGEN=0` 优先）。页面「重新计算买卖点评估」
+  `DQ_BS_AUTOGEN=1`；`--no-bs-autogen`/`DQ_BS_AUTOGEN=0` 优先）。页面「重新计算买卖点」
   仍是显式写操作，纯查看不触发。
 - `doctor` 增加实际发现路径/版本来源（manifest vs frontmatter）、同名候选路径提示
   （不推断宿主实际加载）与 CLI 叶子能力探测。

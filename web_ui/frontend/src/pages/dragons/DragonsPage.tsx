@@ -16,7 +16,7 @@ import { FilterBar } from "./FilterBar";
 import { DragonTable } from "./DragonTable";
 import { DragonDetailDrawer } from "./DragonDetailDrawer";
 import {
-  ReviewJobControl,
+  useIncrementalReview,
   type ReviewRefreshResult,
 } from "./ReviewJobControl";
 
@@ -171,6 +171,16 @@ export function DragonsPage() {
     };
   }, [load]);
 
+  // 待回测入口：按钮进「待回测」标签行，状态文案留在卡片底部。
+  // 本次会话启动过作业时即使 pending 归零也保持挂接与结果反馈。
+  const review = useIncrementalReview({
+    pending: pendingCount,
+    onFinished: onReviewFinished,
+    onSessionStart: () => setReviewSessionActive(true),
+    enabled:
+      reviewSessionActive || (pendingCount != null && pendingCount > 0),
+  });
+
   return (
     <>
       <PageHeader
@@ -190,15 +200,12 @@ export function DragonsPage() {
           summary={summary}
           coverage={coverage}
           caliber={responseCaliber}
-          pendingAction={
-            reviewSessionActive ||
-            (pendingCount != null && pendingCount > 0) ? (
-              <ReviewJobControl
-                pending={pendingCount}
-                onSessionStart={() => setReviewSessionActive(true)}
-                onFinished={onReviewFinished}
-              />
-            ) : undefined
+          pendingHeader={review.action}
+          pendingFooter={
+            <>
+              {review.status}
+              {review.overlay}
+            </>
           }
         />
         <RecentDragons

@@ -14,7 +14,7 @@
 
 - 数据来源：只读 `dragons_v2`（v1 已废弃，`--source` 仅接受 `v2`）。
 - 存储：`bs_runs`（批次元数据）+ `bs_signals`（一行 = 一只龙头，`UNIQUE(trade_date, code)`），与实盘 `buy_sell_signals` 完全隔离。
-- 页面：`/bs` 查询为主，**默认只读**；`dashboard` 启动时默认不生成 BS 派生数据，需显式 `--bs-autogen` / `DQ_BS_AUTOGEN=1`。页面「重新计算买卖点评估」按钮等价 `bs-eval --force` 全量重算；生成由 Web 后端子进程委派，写入仍只发生在 `bs_eval.storage`。
+- 页面：`/bs` 查询为主，**默认只读**；`dashboard` 启动时默认不生成 BS 派生数据，需显式 `--bs-autogen` / `DQ_BS_AUTOGEN=1`。页面「重新计算买卖点」按钮等价 `bs-eval --force` 全量重算；生成由 Web 后端子进程委派，写入仍只发生在 `bs_eval.storage`。
 
 ## 命令契约
 
@@ -108,11 +108,11 @@ stateDiagram-v2
 | `POST /api/bs/rebuild` | 启动全量重算（`--force`）：202 启动 / 409 已在运行 / 500 spawn 失败 / 403 非本机 `Origin` |
 
 页面 `/bs` 固定区块：页头 → 汇总卡 → 筛选 → buy 列表 → sell 列表 → 策略说明（默认折叠）。无 run 显示空态并提示 `python -m dragon_quant bs-eval`；
-`stale_rows > 0` 显示旧策略版本提示条（可点「重新计算买卖点评估」或执行 `bs-eval --force`）。
+`stale_rows > 0` 显示旧策略版本提示条（可点「重新计算买卖点」或执行 `bs-eval --force`）。
 运行中显示 `role="status"` 横幅并每 ~3s 轮询 status；成功后自动重拉 overview/buys/sells；
 失败显示 `exit_code` 与折叠的 `output_tail`，按钮可重试。连续 5 次轮询失败停止轮询并提示。
 
-## 自动生成与「重新计算买卖点评估」（`dashboard`，默认只读）
+## 自动生成与「重新计算买卖点」（`dashboard`，默认只读）
 
 ```mermaid
 flowchart LR
@@ -120,7 +120,7 @@ flowchart LR
     SET --> SERVE["serve._serve<br/>create_app 后、serve 前"]
     SERVE -->|"true"| RUN["BsRunner.start_incremental('auto')"]
     SERVE -->|"false"| SKIP["跳过（按钮仍可用）"]
-    BTN["/bs 「重新计算买卖点评估」"] --> POST["POST /api/bs/rebuild"]
+    BTN["/bs 「重新计算买卖点」"] --> POST["POST /api/bs/rebuild"]
     POST --> RUNNER["BsRunner.start_force('manual')"]
     RUN --> PROC["subprocess: python -m dragon_quant bs-eval [--force]"]
     RUNNER --> PROC
@@ -175,7 +175,7 @@ web_ui.serve / routers.bs → bs_runner.BsRunner（标准库 only）
 - **两轴独立**：`missed_upside`（卖后最高涨幅 ≥ 阈值）与 `avoided_downside`
   （卖后最低跌幅 ≤ 阈值）可同时成立；旧互斥 verdict 仅兼容。半仓腿独立样本
   （`sell_half_*`），不混入整笔交易盈利分母。
-- 版本升到 `bs_eval/2`：旧行自动 stale，UI 用显式「重新计算买卖点评估」重算；
+- 版本升到 `bs_eval/2`：旧行自动 stale，UI 用显式「重新计算买卖点」重算；
   查看面板不会隐式重算。
 
 - **字段语义（2026-11-05 返工）**：`sell_max_return_hold_days` 保持「卖出日到窗口最高价的天数」，

@@ -1,6 +1,9 @@
 /**
  * 龙头总览「待回测」卡片内的增量回测入口（KR1 / KR2）。
  *
+ * 以状态 hook + 插槽（action / status / overlay）暴露，按钮渲染在「待回测」
+ * 文案后面，状态文案留在卡片底部；浮层用 fixed 定位锚定按钮，不受插槽位置影响。
+ *
  * - 只在卡片对应待回测计数 > 0 时显示「回测」按钮（loading / 未知不显示）；
  * - 首次出现自动弹说明；只有点击「我知道了」才写版本化 localStorage 键，
  *   读取/写入异常都不崩溃；**从不**在仅展示时记已读；
@@ -13,7 +16,14 @@
  * - 作业状态（进程退出码）与业务结果（processed/failed/...）分开展示：
  *   CLI 对单条 error 仍正常退出，exit 0 不能当作业务全部成功。
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   fetchReviewJobStatus,
   ReviewJobHttpError,
@@ -117,10 +127,20 @@ export function composeSummaryText(
   };
 }
 
-export function ReviewJobControl({
+export interface ReviewJobParts {
+  /** 「回测」按钮（待回测 > 0 时）；放在「待回测」文案后面。 */
+  action: ReactNode;
+  /** 卡片底部的说明 / 进度 / 结果文案。 */
+  status: ReactNode;
+  /** 首次说明浮层（fixed 定位，渲染位置不影响位置）。 */
+  overlay: ReactNode;
+}
+
+export function useIncrementalReview({
   pending,
   onFinished,
   onSessionStart,
+  enabled = true,
 }: {
   /** 卡片对应的当前筛选待回测数；null = 未知（加载中/失败）。 */
   pending: number | null;
@@ -128,7 +148,9 @@ export function ReviewJobControl({
   onFinished: () => Promise<ReviewRefreshResult>;
   /** 启动/挂接作业时通知父级：即使 pending 归零也保留组件与结果反馈。 */
   onSessionStart?: () => void;
-}) {
+  /** 入口未启用时跳过快照恢复探针（页面按 pending / 会话状态传入）。 */
+  enabled?: boolean;
+}): ReviewJobParts {
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [tone, setTone] = useState<MessageTone>("info");
@@ -200,14 +222,13 @@ export function ReviewJobControl({
       const rect = anchor.getBoundingClientRect();
       const width = Math.min(300, window.innerWidth - 16);
       const height = popRef.current?.offsetHeight ?? 176;
+      // 优先放在「回测」按钮右上方：底边贴按钮上沿，从按钮左缘向右展开。
+      let top = rect.top - height - 6;
+      if (top < 8) top = rect.bottom + 6; // 上方空间不足 → 退回下方
       const left = Math.min(
         Math.max(8, rect.left),
         Math.max(8, window.innerWidth - width - 8)
       );
-      let top = rect.bottom + 6;
-      if (top + height > window.innerHeight - 8) {
-        top = Math.max(8, rect.top - height - 6);
-      }
       setPosition({ left, top, width });
     };
     update();
@@ -396,6 +417,7 @@ export function ReviewJobControl({
 
   // 挂载只读恢复：运行中 → 挂接并禁用按钮（绝不重复 POST）；最近完成 → 展示结果。
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     fetchReviewJobStatus()
       .then((payload) => {
@@ -432,8 +454,8 @@ export function ReviewJobControl({
     return () => {
       active = false;
     };
-    // 仅在挂载时执行一次；回调通过 ref 读取最新值。
-  }, [applyTerminal, schedulePoll]);
+    // 入口启用时执行一次；回调通过 ref 读取最新值。
+  }, [applyTerminal, enabled, schedulePoll]);
 
   const start = useCallback(async () => {
     if (busy || startLock.current || !showButton) return;
@@ -487,90 +509,92 @@ export function ReviewJobControl({
         ? "text-warning"
         : "text-ink-2";
 
-  return (
-    <div className="mt-1 grid gap-1">
-      <div className="flex flex-wrap items-center gap-2">
+  const action = showButton ? (
+    <button
+      ref={anchorRef}
+      type="button"
+      onClick={start}
+      disabled={busy}
+      aria-label="对全量待处理池执行增量回测"
+      aria-haspopup="dialog"
+      aria-expanded={introOpen}
+      aria-controls={introOpen ? "review-intro-popover" : undefined}
+      className="btn btn-primary btn-sm"
+    >
+      {busy ? "回测中…" : "回测"}
+    </button>
+  ) : null;
+
+  const status =
+    showButton || message ? (
+      <div className="mt-1 grid gap-1">
         {showButton ? (
-          <>
-            <button
-              ref={anchorRef}
-              type="button"
-              onClick={start}
-              disabled={busy}
-              aria-label="对全量待处理池执行增量回测"
-              aria-haspopup="dialog"
-              aria-expanded={introOpen}
-              aria-controls={introOpen ? "review-intro-popover" : undefined}
-              className="btn btn-ghost btn-sm"
-            >
-              {busy ? "回测中…" : "回测"}
-            </button>
-            <span className="text-caption text-ink-3">
-              {busy ? "运行中，勿重复点击" : "增量补算，任务针对全量待处理池"}
-            </span>
-          </>
+          <div className="text-caption text-ink-3">
+            {busy ? "运行中，勿重复点击" : "增量补算，任务针对全量待处理池"}
+          </div>
+        ) : null}
+        {message ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`text-caption ${toneClass}`}
+          >
+            {message}
+          </div>
         ) : null}
       </div>
-      {message ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className={`text-caption ${toneClass}`}
-        >
-          {message}
-        </div>
-      ) : null}
+    ) : null;
 
-      {introOpen ? (
-        <div
-          ref={popRef}
-          id="review-intro-popover"
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="review-intro-title"
-          aria-describedby="review-intro-desc"
-          style={
-            position
-              ? {
-                  position: "fixed",
-                  left: position.left,
-                  top: position.top,
-                  width: position.width,
-                }
-              : {
-                  position: "fixed",
-                  left: 8,
-                  top: 8,
-                  width: 300,
-                  visibility: "hidden",
-                }
-          }
-          className="panel z-50 p-3 text-caption text-ink-2"
+  const overlay = introOpen ? (
+    <div
+      ref={popRef}
+      id="review-intro-popover"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="review-intro-title"
+      aria-describedby="review-intro-desc"
+      style={
+        position
+          ? {
+              position: "fixed",
+              left: position.left,
+              top: position.top,
+              width: position.width,
+            }
+          : {
+              position: "fixed",
+              left: 8,
+              top: 8,
+              width: 300,
+              visibility: "hidden",
+            }
+      }
+      className="panel z-50 p-3 text-caption text-ink-2"
+    >
+      <p
+        id="review-intro-title"
+        className="text-body font-semibold text-ink"
+      >
+        增量回测说明
+      </p>
+      <p id="review-intro-desc" className="mt-1">
+        点击「回测」只补算可回测的新标的与缺失结果，不覆盖已完成结果；
+        未成熟记录会保留，约 6 个交易日后才能补算。任务始终针对
+        <strong className="text-ink">全量待处理池</strong>
+        ，不受当前筛选影响。
+      </p>
+      <div className="mt-2 flex justify-end">
+        <button
+          ref={ackRef}
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={() => closeIntro(true)}
         >
-          <p
-            id="review-intro-title"
-            className="text-body font-semibold text-ink"
-          >
-            增量回测说明
-          </p>
-          <p id="review-intro-desc" className="mt-1">
-            点击「回测」只补算可回测的新标的与缺失结果，不覆盖已完成结果；
-            未成熟记录会保留，约 6 个交易日后才能补算。任务始终针对
-            <strong className="text-ink">全量待处理池</strong>
-            ，不受当前筛选影响。
-          </p>
-          <div className="mt-2 flex justify-end">
-            <button
-              ref={ackRef}
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => closeIntro(true)}
-            >
-              我知道了
-            </button>
-          </div>
-        </div>
-      ) : null}
+          我知道了
+        </button>
+      </div>
     </div>
-  );
+  ) : null;
+
+  return { action, status, overlay };
 }

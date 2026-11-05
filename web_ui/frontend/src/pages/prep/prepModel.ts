@@ -62,10 +62,10 @@ export interface MarketInputs {
 export interface MarketView {
   state: string | null;
   score: number | null;
+  scoreChange: number | null;
   coeff: number | null;
   positionAdvice: string | null;
   positionPct: number | null;
-  evidence: string[];
   warnings: string[];
   partial: boolean;
   unknownReason: string | null;
@@ -74,21 +74,16 @@ export interface MarketView {
   inputs: MarketInputs;
 }
 
-function sentimentEvidence(sentiment: Dict, height: number | null): string[] {
-  const evidence: string[] = [];
-  const up = num(sentiment.limit_up_cnt);
-  const down = num(sentiment.limit_down_cnt);
-  if (up != null) {
-    evidence.push(`涨停 ${up} 家${down != null ? ` / 跌停 ${down} 家` : ""}`);
+/** 旧快照没有结构化 score_change 时，从 evidence 文案里取「分数环比」一项。 */
+function parseScoreChange(lines: string[]): number | null {
+  for (const line of lines) {
+    const match = /分数环比\s*([+-]?\d+(?:\.\d+)?)/.exec(line);
+    if (match) {
+      const value = Number(match[1]);
+      if (Number.isFinite(value)) return value;
+    }
   }
-  const broken = num(sentiment.broken_rate);
-  if (broken != null) evidence.push(`炸板率 ${(broken * 100).toFixed(1)}%`);
-  if (height != null) evidence.push(`最高 ${height} 板`);
-  const premium = num(sentiment.yesterday_premium_pct);
-  if (premium != null) evidence.push(`昨日涨停溢价 ${premium > 0 ? "+" : ""}${premium}%`);
-  const promotion = num(sentiment.promotion_rate);
-  if (promotion != null) evidence.push(`晋级率 ${(promotion * 100).toFixed(1)}%`);
-  return evidence;
+  return null;
 }
 
 export function buildMarketView(snapshot: PrepSnapshotView): MarketView | null {
@@ -101,15 +96,10 @@ export function buildMarketView(snapshot: PrepSnapshotView): MarketView | null {
   const portfolio = asDict(review?.portfolio);
   const derivedEvidence = derived?.evidence ?? [];
   const reviewEvidence = market ? textList(market.evidence) : [];
-  const fallbackEvidence = sentiment
-    ? sentimentEvidence(sentiment, derived?.max_board_height ?? null)
-    : [];
-  // 服务端 derived 已把「最高 N 板」改写为展示板数；优先用它。
-  const evidence = derivedEvidence.length
-    ? derivedEvidence
-    : reviewEvidence.length
-      ? reviewEvidence
-      : fallbackEvidence;
+  // 「分数环比」是原 evidence 文案里唯一未进指标卡的一项；其余指标卡已覆盖。
+  const scoreChange =
+    num(market?.score_change) ??
+    parseScoreChange(derivedEvidence.length ? derivedEvidence : reviewEvidence);
 
   // 单票 position_pct 与 sentiment.position_pct 同名不同义：后者是 0~1 的市场
   // 参考仓位，展示前转成百分比；review.market 若直接给百分比则原样使用。
@@ -144,11 +134,11 @@ export function buildMarketView(snapshot: PrepSnapshotView): MarketView | null {
   return {
     state: text(market?.state),
     score: num(market?.score) ?? num(sentiment?.temperature_score),
+    scoreChange,
     coeff: num(market?.coeff),
     positionAdvice:
       text(market?.position_advice) ?? text(sentiment?.position_advice),
     positionPct,
-    evidence,
     warnings: textList(portfolio?.warnings).concat(text(portfolio?.warning) ?? []),
     partial: bool(market?.partial) ?? false,
     unknownReason: text(market?.unknown_reason),

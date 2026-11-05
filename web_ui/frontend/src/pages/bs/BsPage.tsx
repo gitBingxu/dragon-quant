@@ -245,11 +245,11 @@ function RebuildButton({
   return (
     <button
       type="button"
-      className="btn btn-ghost"
+      className="btn btn-primary"
       disabled={running || submitting}
       onClick={onClick}
     >
-      {running ? "生成中…" : "重新计算买卖点评估"}
+      {running ? "生成中…" : "重新计算买卖点"}
     </button>
   );
 }
@@ -481,7 +481,7 @@ export function BsPage() {
       <PageHeader
         eyebrow="BS · 策略回放"
         title="BS策略"
-        description="假想买卖点回放：每只龙头入选后逐日评估四类买点与十条卖出规则，统计买后/卖后 5 日表现，为策略优化提供样本。查看面板默认只读；需要重算时点击「重新计算买卖点评估」显式运行。"
+        description="假想买卖点回放：每只龙头入选后逐日评估四类买点与十条卖出规则，统计买后/卖后 5 日表现，为策略优化提供样本。查看面板默认只读；需要重算时点击「重新计算买卖点」显式运行。"
       />
 
       {running ? (
@@ -557,7 +557,7 @@ export function BsPage() {
             description={
               loading
                 ? "读取最近一次 bs-eval 批次与全量样本。"
-                : "查看面板不会隐式生成；需要时点击「重新计算买卖点评估」，或在终端显式执行 python -m dragon_quant bs-eval。"
+                : "查看面板不会隐式生成；需要时点击「重新计算买卖点」，或在终端显式执行 python -m dragon_quant bs-eval。"
             }
             action={
               !loading ? (
@@ -574,7 +574,7 @@ export function BsPage() {
         <Section>
           <EmptyState
             title={running ? "数据生成中…" : "暂无 BS 回放数据"}
-            description="查看面板不会隐式生成/重算；需要时点击「重新计算买卖点评估」，或在终端显式执行 python -m dragon_quant bs-eval。"
+            description="查看面板不会隐式生成/重算；需要时点击「重新计算买卖点」，或在终端显式执行 python -m dragon_quant bs-eval。"
             action={
               <RebuildButton
                 running={running}
@@ -589,7 +589,7 @@ export function BsPage() {
           {overview.stale_rows > 0 ? (
             <div className="flex items-center gap-2 rounded-lg border border-warning-line bg-warning-soft px-3.5 py-2.5 text-body text-warning-text">
               <IconAlert size={15} />
-              有 {overview.stale_rows} 行来自旧策略版本，未计入当前统计；可点击「重新计算买卖点评估」
+              有 {overview.stale_rows} 行来自旧策略版本，未计入当前统计；可点击「重新计算买卖点」
               全量重算，或在终端执行 python -m dragon_quant bs-eval --force。
             </div>
           ) : null}
@@ -774,7 +774,7 @@ export function BsPage() {
       <Modal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title="重新计算买卖点评估？"
+        title="重新计算买卖点？"
         description="范围：全部 dragons_v2 行；版本：新评测器（旧行将标记 stale）；副作用：写入 bs_runs / bs_signals 派生表并可能耗时数分钟。纯查看不会触发重算。"
         footer={
           <>

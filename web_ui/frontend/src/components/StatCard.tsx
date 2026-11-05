@@ -31,6 +31,7 @@ export function StatCard({
   sub,
   hint,
   labelExtra,
+  headerAction,
   footer,
   tone = "neutral",
   icon,
@@ -40,6 +41,8 @@ export function StatCard({
   sub?: ReactNode;
   hint?: string;
   labelExtra?: ReactNode;
+  /** 标签行内的操作（如「待回测」后面紧跟的「回测」按钮）。 */
+  headerAction?: ReactNode;
   /** 卡片底部附加操作（如「待回测」卡片内的增量回测入口）。 */
   footer?: ReactNode;
   tone?: StatTone;
@@ -52,6 +55,7 @@ export function StatCard({
           {label}
         </span>
         {labelExtra}
+        {headerAction}
         {hint ? (
           <span title={hint} className="text-ink-3 transition-colors hover:text-ink-2">
             <IconInfo size={14} />

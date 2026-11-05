@@ -15,13 +15,16 @@ export function SummaryCards({
   summary,
   coverage,
   caliber,
-  pendingAction,
+  pendingHeader,
+  pendingFooter,
 }: {
   summary: Summary | null;
   coverage?: Summary | null;
   caliber: ReviewCaliber;
-  /** 「待回测」卡片内的增量回测入口；仅待回测 > 0 时由页面传入。 */
-  pendingAction?: ReactNode;
+  /** 「待回测」标签行内的增量回测入口；仅待回测 > 0 时由页面传入。 */
+  pendingHeader?: ReactNode;
+  /** 「待回测」卡片底部的状态/说明文案。 */
+  pendingFooter?: ReactNode;
 }) {
   const s = summary;
   const isStrict = caliber === "strict";
@@ -61,7 +64,8 @@ export function SummaryCards({
         value={s?.derived_pending ?? s?.pending ?? 0}
         sub="完整收益窗口（入选后约 6 个交易日）"
         tone={(s?.derived_pending ?? s?.pending ?? 0) > 0 ? "warning" : "neutral"}
-        footer={pendingAction}
+        headerAction={pendingHeader}
+        footer={pendingFooter}
       />
       <StatCard
         label="平均最大潜在涨幅"

@@ -40,11 +40,14 @@ def test_review_entry_only_when_pending_positive_and_full_pool_copy():
     page = _read(DRAGONS_PAGE)
     assert "pendingCount != null && pendingCount > 0" in page
     assert "derived_pending ?? summary.pending ?? 0" in page
-    assert "ReviewJobControl" in page
+    assert "useIncrementalReview" in page
     # 完成后按最近一次提交的筛选刷新（筛选不被重置）。
     assert "appliedFilters.current" in page
     cards = _read(SUMMARY_CARDS)
-    assert "footer={pendingAction}" in cards
+    # 按钮进「待回测」标签行，状态文案留在卡片底部。
+    assert "pendingHeader={review.action}" in page
+    assert "headerAction={pendingHeader}" in cards
+    assert "footer={pendingFooter}" in cards
 
 
 def test_review_popover_persists_only_on_acknowledge():

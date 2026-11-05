@@ -94,16 +94,13 @@ export function MarketStrip({ market }: { market: MarketView | null }) {
             value={inputs.totalAmountYi == null ? "—" : fmtNum(inputs.totalAmountYi, 0)}
             unit="亿"
           />
+          <Metric
+            label="分数环比"
+            value={signed(market.scoreChange, "")}
+            hint="相对上一份复盘快照（上一交易日）的市场情绪评分变化。"
+          />
         </div>
       </div>
-
-      {market.evidence.length ? (
-        <ul className="grid gap-0.5 text-body text-ink-2">
-          {market.evidence.map((item, index) => (
-            <li key={`${item}-${index}`}>· {item}</li>
-          ))}
-        </ul>
-      ) : null}
 
       {market.warnings.length ? (
         <div className="rounded-md border border-warning-line bg-warning-soft px-2.5 py-1.5 text-body text-warning">

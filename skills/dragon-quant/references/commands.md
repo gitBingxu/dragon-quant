@@ -33,6 +33,6 @@
 - **`prep` 当日门禁 16:40**，`--force` 不绕过；`--recompute` 不触网但仍写快照。
 - **`auction` 没有 `--date`**；快照命中时本次只读，`--force` 才重采，`--recompute DATE` 用已存资产重算。
 - **`factor build` 的 exit 0 不等于全部成功**：必须解析 `reports[0].factors[].status` 并逐因子核对。
-- **`dashboard` 只起面板、不回测、不写业务记录**；**默认只读**，不生成 BS 派生数据；只有显式 `--bs-autogen` / `DQ_BS_AUTOGEN=1` 才增量生成 `bs_*`，`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先。页面「重新计算买卖点评估」是显式写操作。缺 `[web]` 依赖时给出手动安装指令，不要加 `--yes`。
+- **`dashboard` 只起面板、不回测、不写业务记录**；**默认只读**，不生成 BS 派生数据；只有显式 `--bs-autogen` / `DQ_BS_AUTOGEN=1` 才增量生成 `bs_*`，`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先。页面「重新计算买卖点」是显式写操作。缺 `[web]` 依赖时给出手动安装指令，不要加 `--yes`。
 - **复合意图“回测并打开面板”** 默认按 CLI 正常行为尝试打开浏览器；只有用户明确只要 URL/不要浏览器，或宿主无浏览器能力时才加 `--no-browser`。
 - **`review-account` 终端没有 JSON**：只读人读摘要，详细结果在面板；`--config` 不接受用户自定义参数。生命周期胜率与本段权益贡献不可混读；旧批次精确归因缺失时显示 unknown/legacy。

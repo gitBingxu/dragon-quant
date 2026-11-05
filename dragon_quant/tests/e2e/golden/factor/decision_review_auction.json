@@ -223,6 +223,152 @@
       }
     }
   ],
+  "groups_basis": "legacy_level_effect",
+  "direction_groups": [
+    {
+      "group": "bull",
+      "label": "偏多",
+      "expected_direction": "up",
+      "horizons": {
+        "1": {
+          "observations": 0,
+          "valid": 0,
+          "excluded": 0,
+          "coverage": null,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 0,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "not_evaluable",
+          "expected_direction": "up"
+        }
+      }
+    },
+    {
+      "group": "bear",
+      "label": "偏空",
+      "expected_direction": "down",
+      "horizons": {
+        "1": {
+          "observations": 0,
+          "valid": 0,
+          "excluded": 0,
+          "coverage": null,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 0,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "not_evaluable",
+          "expected_direction": "down"
+        }
+      }
+    },
+    {
+      "group": "neutral",
+      "label": "中性",
+      "expected_direction": null,
+      "horizons": {
+        "1": {
+          "observations": 0,
+          "valid": 0,
+          "excluded": 0,
+          "coverage": null,
+          "up": 0,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 0,
+          "days_with_observations": 0,
+          "effective_independent_days": 0,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": null,
+          "median_net_return_pct": null,
+          "p25_net_return_pct": null,
+          "p75_net_return_pct": null,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "not_evaluable",
+          "expected_direction": null
+        }
+      }
+    },
+    {
+      "group": "unknown",
+      "label": "不可评价",
+      "expected_direction": null,
+      "horizons": {
+        "1": {
+          "observations": 5,
+          "valid": 5,
+          "excluded": 0,
+          "coverage": 1.0,
+          "up": 5,
+          "down": 0,
+          "flat": 0,
+          "direction_evaluable": false,
+          "direction_hit_rate": null,
+          "direction_hit_denominator": "valid_including_flat",
+          "daily_hit_rate_mean": null,
+          "days": 1,
+          "days_with_observations": 1,
+          "effective_independent_days": 1,
+          "wilson95": null,
+          "wilson_n": null,
+          "wilson_caveat": "date_correlated_descriptive_only",
+          "mean_net_return_pct": 2.8700000000000028,
+          "median_net_return_pct": 2.8700000000000028,
+          "p25_net_return_pct": 1.8700000000000019,
+          "p75_net_return_pct": 3.8700000000000037,
+          "reference_line": 0.65,
+          "above_reference": null,
+          "quality": "ok",
+          "expected_direction": null
+        }
+      }
+    }
+  ],
+  "axes": {
+    "medium": 1,
+    "strong": 2,
+    "unknown": 5,
+    "vetoed": 1,
+    "weak": 2
+  },
   "spreads": {
     "1": {
       "pair": [
@@ -262,6 +408,7 @@
       "code": "600001",
       "name": null,
       "group": "strong",
+      "direction_group": "unknown",
       "expected_direction": "up",
       "available_at": "2026-09-09T09:25:00+08:00",
       "horizon": 1,
@@ -284,6 +431,7 @@
       "code": "600002",
       "name": null,
       "group": "medium",
+      "direction_group": "unknown",
       "expected_direction": null,
       "available_at": "2026-09-09T09:25:00+08:00",
       "horizon": 1,
@@ -306,6 +454,7 @@
       "code": "600003",
       "name": null,
       "group": "weak",
+      "direction_group": "unknown",
       "expected_direction": "down",
       "available_at": "2026-09-09T09:25:00+08:00",
       "horizon": 1,
@@ -328,6 +477,7 @@
       "code": "600004",
       "name": null,
       "group": "vetoed",
+      "direction_group": "unknown",
       "expected_direction": "down",
       "available_at": "2026-09-09T09:25:00+08:00",
       "horizon": 1,
@@ -350,6 +500,7 @@
       "code": "600005",
       "name": null,
       "group": "unavailable",
+      "direction_group": "unknown",
       "expected_direction": null,
       "available_at": "2026-09-09T09:25:00+08:00",
       "horizon": 1,

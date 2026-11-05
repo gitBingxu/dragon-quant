@@ -323,7 +323,7 @@ def _vpa_rows() -> list[dict]:
             "signal": "healthy",
             "summary": f"{code} summary",
             "factors_json": json.dumps(factors, ensure_ascii=False),
-            "version": "0.7.2",
+            "version": "0.7.4",
             "created_at": SCAN_CREATED_AT,
         })
     rows.append({
@@ -336,7 +336,7 @@ def _vpa_rows() -> list[dict]:
         "signal": "healthy",
         "summary": "cross-day backfill",
         "factors_json": json.dumps([{"name": "vol_amount", "score": 30.0}]),
-        "version": "0.7.2",
+        "version": "0.7.4",
         "created_at": VPA_BACKFILLED["created_at"],
     })
     return rows

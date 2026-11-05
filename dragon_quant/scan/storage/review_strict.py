@@ -23,7 +23,8 @@ from dragon_quant.infra.storage._base import _connect, _ensure_schema
 COLUMNS = (
     "trade_date", "code", "source", "buy_date", "buy_price",
     "max_return_5d", "max_drawdown_5d", "max_return_hold_days",
-    "review_status", "reason", "review_version", "computed_at",
+    "review_status", "reason", "review_version", "tradable_open_json",
+    "computed_at",
 )
 
 
@@ -38,14 +39,15 @@ def upsert(conn, *,
            max_return_hold_days: Optional[int],
            review_status: str,
            reason: Optional[str] = None,
-           review_version: str = __version__) -> None:
+           review_version: str = __version__,
+           tradable_open_json: Optional[str] = None) -> None:
     """按 ``(trade_date, code, source)`` UPSERT；调用方负责事务与提交。"""
     conn.execute(
         "INSERT INTO dragon_review_strict("
         "trade_date, code, source, buy_date, buy_price, max_return_5d, "
         "max_drawdown_5d, max_return_hold_days, review_status, reason, "
-        "review_version"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "review_version, tradable_open_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(trade_date, code, source) DO UPDATE SET "
         "buy_date=excluded.buy_date, "
         "buy_price=excluded.buy_price, "
@@ -55,10 +57,11 @@ def upsert(conn, *,
         "review_status=excluded.review_status, "
         "reason=excluded.reason, "
         "review_version=excluded.review_version, "
+        "tradable_open_json=excluded.tradable_open_json, "
         "computed_at=datetime('now', 'localtime')",
         (trade_date, code, source, buy_date, buy_price, max_return_5d,
          max_drawdown_5d, max_return_hold_days, review_status, reason,
-         review_version),
+         review_version, tradable_open_json),
     )
 
 
@@ -70,7 +73,8 @@ def get(trade_date: str, code: str, source: str = "v2") -> Optional[dict]:
         row = conn.execute(
             "SELECT trade_date, code, source, buy_date, buy_price, "
             "max_return_5d, max_drawdown_5d, max_return_hold_days, "
-            "review_status, reason, review_version, computed_at "
+            "review_status, reason, review_version, tradable_open_json, "
+            "computed_at "
             "FROM dragon_review_strict "
             "WHERE trade_date = ? AND code = ? AND source = ?",
             (trade_date, code, source),
@@ -84,14 +88,28 @@ def get(trade_date: str, code: str, source: str = "v2") -> Optional[dict]:
 
 def list_keys(source: str = "v2") -> set[tuple[str, str]]:
     """返回已有严格结果的 ``(trade_date, code)`` 集合（重算跳过用）。"""
+    return set(list_statuses(source))
+
+
+def list_statuses(source: str = "v2") -> dict[tuple[str, str], str]:
+    """``(trade_date, code)`` → 有效状态；历史 ``reason=partial_window`` 归一为 partial。
+
+    ``list_keys`` 保持既有返回形状；增量/重算需要区分 partial（非终态，须补算）
+    时用本函数。
+    """
     conn = _connect()
     try:
         _ensure_schema(conn)
         rows = conn.execute(
-            "SELECT trade_date, code FROM dragon_review_strict WHERE source = ?",
+            "SELECT trade_date, code, review_status, reason "
+            "FROM dragon_review_strict WHERE source = ?",
             (source,),
         ).fetchall()
-        return {(row[0], row[1]) for row in rows}
+        return {
+            (row[0], row[1]):
+                "partial" if row[3] == "partial_window" else (row[2] or "")
+            for row in rows
+        }
     finally:
         conn.close()
 

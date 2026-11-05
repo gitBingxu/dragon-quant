@@ -40,6 +40,8 @@
 | `auction` 集合竞价强度判断 | 快速迭代中 | 2026 年 12 月初 |
 | `premarket` 盘前预案上下文（只读） | 快速迭代中 | 2026 年 12 月初 |
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
+| `bs-eval` BS 策略假想回放（只读页面消费） | 快速迭代中 | 2026 年 12 月中 |
+| `dashboard` 可视化面板（龙头/扫描/因子/复盘/竞价/账户/BS策略） | 快速迭代中 | 2026 年 12 月中 |
 | `agent-skill` Agent 交易日助手 | 快速迭代中 | 2026 年 12 月中 |
 
 ## 快速使用
@@ -52,14 +54,47 @@ pipx install dragon-quant
 # 当日收盘后扫描龙头
 dragon-quant scan --top 5
 
-# 回测扫描结果并打开面板
-dragon-quant review --ui
+# 启动本地可视化面板（龙头/扫描/因子/复盘/竞价/账户）
+dragon-quant dashboard
+
+# 不自动打开浏览器 / 首次安装 [web] 时不询问
+dragon-quant dashboard --no-browser
+dragon-quant dashboard --yes
 
 # 盘前只读上下文（T-1 复盘 + T 日竞价；缺数据结构化降级）
 dragon-quant premarket --json
+
+# BS 策略假想回放（批量回放 dragons_v2，生成 /bs 页面数据）
+dragon-quant bs-eval --limit 5
+
+# 补齐 dashboard 复盘评估所需的本地日 K（默认只体检）
+dragon-quant assets backfill-stock-daily --dry-run
+dragon-quant assets backfill-stock-daily
 ```
 
-只需查看已有回测结果时，运行 `dragon-quant review --ui-only`。
+`dashboard` **默认只读**：不会在启动时自动生成 BS 派生数据；需要自动生成时显式加
+`--bs-autogen`（或 `DQ_BS_AUTOGEN=1`），`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先。
+`/bs` 页面的「重新计算买卖点」等价
+`bs-eval --force` 全量重算。
+
+`pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
+已弃用，仍可用但会提示改用 `dashboard`。面板顶部可切换主题（跟随系统 / 浅色 / 深色），
+偏好保存在当前浏览器；界面固定 v2 五维，旧 `?source=v1` 链接按 v2 展示。总览支持
+近几日榜单内展开与「入选后表现」（至最新日 K）——榜单展示**当日原始扫描真龙**（含被
+回测池 5 日去重排除项），总览与回测统计仍只认 `dragons_v2`。待回测 > 0 时，「待回测」
+卡片内提供**增量回测**入口：显式 POST 触发 `review --recompute-all`（不覆盖已完成严格
+结果、跳过未成熟），任务针对全量待处理池；首次出现弹说明，点「我知道了」后同源浏览器
+不再自动提示，查看页面绝不自动回测。复盘与竞价拆成
+`/prep`（盘后复盘：年度日历 → 核心结果 → 当前 T 日效果 → 当日资产明细 → 全历史准确率；
+日历默认选最近有复盘快照的日期，可折叠并吸顶在真实顶栏下）
+与 `/auction`（集合竞价：年度日历 → 竞价结果 → 当日资产采集 → 全历史准确率）；
+资产区为近一年日历 + 当日表格，所有日期可点击（空日期展示全部应有资产缺失）。
+次级入口「扫描研究」（`/research`）只读对比通过/否决、评分与 rank、首次/重复入榜对
+scan 质量的反馈。扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。`/bs` 展示四类买点与
+十条卖出规则的假想回放：策略说明、汇总卡、buy/sell 列表（买后/卖后 5 日表现），
+数据由 `dragon-quant bs-eval` 离线生成；需自动增量时显式 `--bs-autogen`，
+页面「重新计算买卖点」可按需全量重算。全站字号统一 14px 基准
+（可见文字 ≥1rem），状态色收敛为 danger / warning / normal / positive。
 
 ## Agent Skill
 
@@ -97,7 +132,7 @@ npx dragon-quant-skills doctor                     # 检查安装完整性、CLI
 - 安装成功后按目标输出提示：Hermes 项目运行 `hermes skills trust <projectRoot>`，Pi 编辑后 `/reload`，DeepSeek 自动发现 skills 根的直接子项，其余按客户端重载。安装器不自动修改任何 trust 或客户端配置，也不宣称客户端已完成真实加载验证。
 - 在 dragon-quant 仓库根使用 `--agent openclaw` 会命中包内 `skills/` 源目录，install / uninstall 会直接拒绝（`--force` 也不能绕过）；请到消费项目运行，或用 `--target-dir` 指向临时 workspace。`all` 会在项目根创建 OpenClaw 的 `skills/`，不希望时请显式列出目标。
 
-Agent 可用的能力限定为八类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
+Agent 可用的能力限定为九类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回、可视化面板。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
 
 仓库内 Skill 版本可能高于 npm registry 已发布版本；安装后用 `npx dragon-quant-skills doctor` 核对实际安装的 Skill 版本、来源与最低 CLI 版本，不要假定 `npx` 拉到的就是仓库中的最新内容。
 
@@ -117,14 +152,14 @@ dragon-quant scan --top 5
 
 ## 龙头回测
 
-这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计后续最多 5 个交易日的最大收益与回撤。
+这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计**买入后第 2~5 个交易日**的最大潜在涨幅与峰值前不利波动；窗口未走完标 `partial`，只展示、不进入正式分母。
 
 ```bash
 # 回测已到观察期的扫描结果
 dragon-quant review
 
-# 打开龙头回测面板
-dragon-quant review --ui-only
+# 打开龙头回测面板（dashboard 默认落在复盘页）
+dragon-quant dashboard
 ```
 
 ![龙头回测面板](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/review.png)
@@ -145,10 +180,11 @@ dragon_quant/
 ├── scan/            # 龙头扫描、五维评分与结果持久化
 ├── review/          # 龙头回测
 ├── review_account/  # 盘后复盘、集合竞价、模拟账户与交易策略
+├── bs_eval/         # BS 策略假想回放（bs-eval / bs_* 表 / /api/bs）
 ├── vpa/             # 量价分析
 ├── infra/           # 行情数据源、SQLite、缓存、因子与资产同步
 └── tests/           # 单元、集成与离线 E2E 测试
-web_ui/              # 回测与账户可视化面板
+web_ui/              # 可视化面板（FastAPI + React，dist 入库）
 assets/              # 图标与 README 截图
 docs/                # 模块与开发文档
 archived_md/         # 已落地的调研与技术方案

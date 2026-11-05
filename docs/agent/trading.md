@@ -33,6 +33,9 @@ python -m dragon_quant review-account --ui-only --source v2
 - 数据分级：历史交易日按 code 三态判定——完整 48 根 5 分钟 K → 严格盘中撮合；无分时但当日日K有效 → 整日**日K兜底**（开盘价买、当日 OHLC 判卖，分时相关规则自然跳过）；当日日K缺行或 `volume` / `amount` 双零且无分时 → **停牌**（不进 `rows`、不评估买卖、按最近可得收盘价估值）。剔除停牌后再判整日兜底；分时可用但当日日K缺行记 `daily_unavailable`（不建行、不静默消失）。日K无历史/预热不足/无效 OHLC 仍报 `DataCoverageError`，不持久化部分结果；当日（盘中与收盘后）不做停牌分类，保持旧契约硬报错。兜底成交价保守近似，结果标 `data_quality`（`strict_5min` / `mixed` / `daily_fallback`）、`fallback_days`、`suspended_days` / `suspended_codes` / `suspended_days_count` / `unavailable_days` / `data_degraded`；停牌候选仍在 `details` 带 `reason_code=suspended`。行情按日期/周期/不复权口径隔离缓存；`SH000001` 用于交易日历，个股 `000001` 仍是平安银行。状态机与回测↔实盘一致性见 [策略规则 §5](../../dragon_quant/review_account/strategy/STRATEGY.md)。
 
 - `/account` 生成/删除和历史批次查询保持不变；API可传 `strategy_params`，快照增量补 `positions_json` 存全部持仓（查询返回 `positions`），旧数据仍可读取；已平仓表保持原语义。完整规则见 `review_account/strategy/STRATEGY.md`。
+- **增量回测（`POST /api/account/runs/incremental`）**：请求 `{"run_id": N}`，从基准 run 的最后收盘快照恢复 `cash` / `positions` / 峰值 / 连亏，在**原有 `TradingEngine` 与买卖成交规则**上续算基准 `date_to` 之后、`infra.clock` 15:05 口径下最近已收盘交易日之间的交易日；成功 201 与生成回测同形状 `{data, run_id}`，并写入**新 run**（不改基准记录）。基准必须是 `source=="v2"`，否则 400「仅支持对 v2 回测记录做增量」；成功之外的域错误一律 400 中文文案（快照缺失/不一致/旧数据缺持仓明细/策略快照缺失/初始资金无效/无新增交易日「基准记录已覆盖最近已收盘交易日（YYYY-MM-DD），无新增数据」/落库前行情未覆盖解析终点「增量日历与行情快照不一致（终点 X，最后快照 Y），请重试」，该场景不写入任何 run 与子表），基准不存在 404，生成与增量共用单飞锁（并发 409）。增量 run 继承基准 `source` / `strategy_name` / 冻结的 `strategy_params_json`（不使用当前默认配置），`display_name` 为 `<基准名或区间> · 增量 <date_from>`。语义要点：`initial_cash` 仅作追溯，`total_return` 与首个快照 `cumulative_return` 的分母是基准最后权益 `base_equity`；`max_drawdown` 相对继承峰值（可能含基准期峰值）；峰值 = 基准快照权益最大值与 `drawdown` 反推峰值的较大者；连亏按 `review_account_positions` 已平仓行尾部计数（半仓腿不单独成行，与运行时记账一致）。**已知限制**：链式增量不跨 run 延续连亏（无 `base_run_id` 列）、基准期盘中峰值未落库，`streak_delevel_enabled` / `drawdown_delevel_pct` 默认关时无影响；前后端均不因此新增配置。
+- **`review_account_runs.base_equity`**：可空列（幂等 ALTER 迁移）。增量 run 写入基准最后快照 `total_equity`，全量 run 保持 NULL；`/api/account/runs` 行返回该键（旧 run 为 null）。`/api/account/benchmark` 的指数等效权益起点改为 `base_equity or initial_cash`，旧 run 逐位不变，增量 run 的指数线与账户曲线对齐同一续算起点。
+- `/account` 前端：`PageHeader` 在「生成回测记录」后提供「增量回测」按钮（问号提示逐字「在当前回测记录与操盘策略的基础上对增量数据执行回测」），成功后自动选中新记录，失败在独立 `actionError` 条展示；按钮无选中记录或运行中禁用。
 - **清仓后窗口指标**：回测结束后由 `service.run_review_account` 调用 `simulator.annotate_post_exit`（**不在 `AccountSimulator.run()` 内**，回测核心保持纯 as-of），对每条已平仓记录按 code 取一次日K计算 `post_exit_max_return` / `post_exit_max_drawdown` / `post_exit_window_days`，失败逐条降级为 NULL/0、不中断回测。窗口为清仓日**之后**的 5 根有效日K（停牌占位行不计入、不足按实际、无 bar 为 NULL/0 天），允许越出 `date_to`（事后评估）；最高盈利 =（窗口最高−卖出）/卖出×100，最大回撤 = min(0,（窗口最低−卖出）/卖出×100)。旧 run 不回溯，三列为 NULL。
 - **买点统计**：`evaluation.entry_reason_stats(positions, initial_cash)` 按 `BUY_SIGNAL_CODES` 四类（开盘回踩MA5/弱转强/分歧买龙/龙回头，0 笔也输出）+ 未知 code + 合计行，输出笔数/盈利笔数/胜率/平均每笔收益/累计贡献；胜率与 `_result()["win_rate"]` 同源（`realized_return > 0`）。累计贡献为近似值 `Σ(realized_return/100×entry_price×qty)/initial_cash×100`（忽略买入佣金）。`GET /api/account/positions` 返回 `{"data": [...], "stats": {...}}`（只增键），旧 run 也可实时聚合。
 - `/account` 前端：`AccountStats` 之后新增「买点统计」卡片；「单票收益汇总」新增「清仓5日内最高盈利」「清仓5日内最大回撤」两列（NULL 显示 `—`，窗口不足 5 根标注实际天数，表头提示可能含回测区间外数据）。
@@ -72,3 +75,29 @@ python -m dragon_quant sell --force
 | `review_account_positions` | 已平仓持仓 | 保存买入/卖出价、退出原因、持有天数、实现收益；`post_exit_max_return` / `post_exit_max_drawdown` / `post_exit_window_days` 为清仓后 5 个交易日的窗口指标（事后评估，不参与交易决策；窗口可越出回测区间；旧记录三列为 NULL，不回溯重算） |
 | `review_account_events` | 账户决策时间线 | 保存买入、卖出、持仓和空仓原因，供 UI 解释每日决策 |
 | `buy_sell_signals` | 实盘辅助买卖信号 | buy 记录买入、sell 按规则平仓；未平仓 code 唯一（部分唯一索引 `idx_buy_sell_open`），含最高浮盈/价、`qty`（买入日冻结）、半仓腿（`half_exit_date/price/qty/reason_*/signal_json`）、平仓原因与持有天数 |
+
+> **边界**：`bs_*`（`bs_runs` / `bs_signals`）是 BS 策略假想回放的派生表，与
+> `buy_sell_signals` 完全隔离；`bs-eval` 不改实盘/回测行为、不写本表。契约见
+> [bs_eval](bs_eval.md)。
+
+## 运行追溯与本段归因（2026-11-05，A7/A8/D2）
+
+- `review_account_runs` 幂等新增可空列：`base_run_id` / `start_equity` /
+  `start_positions_json` / `start_realized_pnl` / `run_meta_json`。旧 run 保持 NULL（unknown），
+  不推断历史业务值。
+- `review_account_positions` 新增 `initial_cost` / `realized_pnl` / `period_pnl` /
+  `period_start_value` / `inherited`。继承持仓以**期初盯市价值**为成本基准计算本段盈亏；
+  本段新仓取含费用整笔净盈亏。旧批次无金额字段时贡献显式标 `legacy_approximation`。
+- 生命周期胜率（整笔 `realized_return>0`）与「本段权益贡献」（分母 = 本段起点权益）分区；
+  `/api/account/positions` 的 `stats.start_equity/contribution_basis` 与
+  `GET /api/account/summary` 提供已平仓/未平仓、平均盈亏、净盈亏比、期望、费用、
+  已实现/未实现、最大单笔亏损、Sharpe；0/全赢/全亏返回不可计算（None）。
+- 链式增量沿 `base_run_id` 保留追溯与期初状态；旧快照缺盯市价时
+  `attribution_quality=legacy_approximation`。
+- **旧 run 缺字段（2026-11-05 修复）**：旧版本 `positions_json` 可能没有 `mark` 字段，
+  期末盯市价值未知。`period_ledger` 遇到 `end_value is None` 时把该批次 `unrealized_part /
+  period_pnl` 置 `None`、整段 `quality="unknown"`，**绝不与浮点相减、也绝不 fill 0**；
+  `/api/account/positions` 与 `/api/account/summary` 对旧 run 均返回 200，前端明确显示
+  「未知（旧数据缺期初估值 / 盯市价）」与「旧数据近似」。`AccountPage` 的四个核心请求
+  改为 `Promise.allSettled` 逐项降级：单个统计端点失败只显示「部分数据暂不可用」，
+  已加载的快照/交割单/持仓不被清空；请求序号仍防串批。

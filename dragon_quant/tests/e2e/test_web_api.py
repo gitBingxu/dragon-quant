@@ -244,6 +244,7 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
                 "win_rate_loose_n": 1,
                 "win_rate_strict_n": 1,
                 "cannot_evaluate": 0,
+                "partial": 0,
                 "pending_recompute": 0,
                 "failed_recompute": 0,
                 "best_stock_code_strict": "600001",
@@ -260,6 +261,9 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
             legacy_summary = dict(dragons_summary)
             legacy_summary.pop("derived_completed")
             legacy_summary.pop("derived_pending")
+            legacy_summary.pop("derived_pending_immature")
+            legacy_summary.pop("partial_window")
+            legacy_summary.pop("partial_missing_bars")
             # 未筛选时与 legacy /api/summary 逐键等值（旧键冻结）。
             assert legacy_summary == summary
 
@@ -512,6 +516,130 @@ def test_w5_w6_account_run_lifecycle_and_series():
                                   payload={"date_from": "2026-09-04"}).status == 400
 
 
+# ─── W5 增量回测：链式增量必须与一次性全量逐值一致 ─────────────────────────
+
+
+def _run_rows(server, endpoint: str, run_id: int) -> list[dict]:
+    response = server.request("GET", f"/api/account/{endpoint}?run_id={run_id}")
+    assert response.status == 200, response.text
+    return response.json()["data"]
+
+
+def _assert_float_fields(actual: dict, expected: dict, keys: tuple[str, ...]) -> None:
+    for key in keys:
+        assert floats_close(actual[key], expected[key], rel=0, abs_tol=1e-6), (
+            key, actual.get("trade_date"), actual[key], expected[key])
+
+
+def test_w5_incremental_run_matches_full_replay():
+    """D2 强证据：A(09-04~09-08) + 增量 → C 与 B(09-04~09-11) 重叠日期逐值一致。"""
+    with sandbox("m1f1-account-incremental") as box:
+        seed_account(box)
+        with web_server(box, server_command(REVIEW_UI, 0),
+                        scenario=ACCOUNT_SCENARIO) as server:
+            assert server.request("GET", "/account").status == 200
+
+            base_resp = server.request("POST", "/api/account/runs", payload={
+                "date_from": "2026-09-04",
+                "date_to": "2026-09-08",
+                "initial_cash": 100000,
+                "name": "基准",
+            }, timeout=60.0)
+            assert base_resp.status == 201, base_resp.text
+            base = base_resp.json()
+            base_id = base["run_id"]
+            assert base["data"]["base_equity"] is None  # 全量 run 保持 NULL
+
+            full_resp = server.request("POST", "/api/account/runs", payload={
+                "date_from": "2026-09-04",
+                "date_to": "2026-09-11",
+                "initial_cash": 100000,
+                "name": "全量",
+            }, timeout=60.0)
+            assert full_resp.status == 201, full_resp.text
+            full_id = full_resp.json()["run_id"]
+
+            inc_resp = server.request("POST", "/api/account/runs/incremental",
+                                      payload={"run_id": base_id}, timeout=60.0)
+            assert inc_resp.status == 201, inc_resp.text
+            inc_body = inc_resp.json()
+            inc_id = inc_body["run_id"]
+            inc_run = inc_body["data"]
+            assert inc_run["date_from"] == "2026-09-09"
+            assert inc_run["date_to"] == "2026-09-11"
+            assert inc_run["initial_cash"] == 100000
+            assert floats_close(inc_run["base_equity"], base["data"]["final_equity"],
+                                rel=0, abs_tol=1e-6)
+            assert "增量 2026-09-09" in inc_run["display_name"]
+
+            inc_snapshots = _run_rows(server, "snapshots", inc_id)
+            full_snapshots = [row for row in _run_rows(server, "snapshots", full_id)
+                              if row["trade_date"] >= "2026-09-09"]
+            assert [row["trade_date"] for row in inc_snapshots] == [
+                "2026-09-09", "2026-09-10", "2026-09-11"]
+            assert len(inc_snapshots) == len(full_snapshots)
+            for actual, expected in zip(inc_snapshots, full_snapshots):
+                _assert_float_fields(actual, expected,
+                                     ("cash", "market_value", "total_equity"))
+
+            inc_trades = _run_rows(server, "trades", inc_id)
+            full_trades = [row for row in _run_rows(server, "trades", full_id)
+                           if row["trade_date"] >= "2026-09-09"]
+            assert inc_trades, "增量期应至少有一笔成交，否则 oracle 不成立"
+            assert len(inc_trades) == len(full_trades)
+            for actual, expected in zip(inc_trades, full_trades):
+                assert actual["trade_date"] == expected["trade_date"]
+                assert actual["code"] == expected["code"]
+                assert actual["side"] == expected["side"]
+                assert actual["qty"] == expected["qty"]
+                assert actual["reason_code"] == expected["reason_code"]
+                _assert_float_fields(actual, expected,
+                                     ("price", "amount", "fee", "realized_pnl",
+                                      "cash_after"))
+
+            inc_positions = _run_rows(server, "positions", inc_id)
+            full_positions = [row for row in _run_rows(server, "positions", full_id)
+                              if (row["exit_date"] or "") >= "2026-09-09"]
+            assert len(inc_positions) == len(full_positions)
+            for actual, expected in zip(inc_positions, full_positions):
+                for key in ("code", "entry_date", "qty", "exit_date", "status"):
+                    assert actual[key] == expected[key], key
+                _assert_float_fields(actual, expected,
+                                     ("entry_price", "exit_price", "realized_return"))
+
+            # D7：指数等效权益与账户曲线从同一起点（base_equity）起算。
+            inc_bench = server.request(
+                "GET", f"/api/account/benchmark?run_id={inc_id}").json()
+            base_bench = server.request(
+                "GET", f"/api/account/benchmark?run_id={base_id}").json()
+            assert floats_close(inc_bench["data"][0]["total_equity"],
+                                base["data"]["final_equity"], rel=0, abs_tol=1e-6)
+            assert floats_close(base_bench["data"][0]["total_equity"],
+                                100000.0, rel=0, abs_tol=1e-6)
+
+            # D3：已经覆盖最近已收盘日 → 400 中文原因。
+            again = server.request("POST", "/api/account/runs/incremental",
+                                   payload={"run_id": inc_id}, timeout=60.0)
+            assert again.status == 400
+            assert "无新增数据" in again.json()["error"]
+
+            # D4：基准不存在 404；缺 run_id 400。
+            missing_base = server.request("POST", "/api/account/runs/incremental",
+                                          payload={"run_id": 999999})
+            assert missing_base.status == 404
+            assert missing_base.json() == {"error": "run not found"}
+            missing_id = server.request("POST", "/api/account/runs/incremental",
+                                        payload={})
+            assert missing_id.status == 400
+            assert missing_id.json() == {"error": "missing run_id"}
+
+            for run_id in (inc_id, full_id, base_id):
+                deleted = server.request(
+                    "DELETE", f"/api/account/runs?run_id={run_id}")
+                assert deleted.status == 200, deleted.text
+            assert server.request("GET", "/api/account/runs").json()["count"] == 0
+
+
 # ─── R9: --ui-only starts the review server and stops cleanly ───────────────
 
 
@@ -653,3 +781,35 @@ def test_ra7_review_account_ui_only_needs_no_backtest():
         assert "账户级回测" not in server.stdout
         assert server.returncode is not None
         assert port_is_free(server.port)
+
+
+# ─── W1b: dashboard SPA fallback for deep-link routes ──────────────────────
+
+
+def test_w1b_spa_fallback_for_dashboard_routes():
+    """``/scans`` ``/factors`` ``/prep`` ``/bs`` must serve index.html on browser Accept.
+
+    The harness request helper sends ``Accept: text/html,application/json;q=0.9``
+    (the production browser shape), so a 200 + identical index body proves the
+    SPA fallback — not a JSON API fallback — handles these top-level routes.
+    """
+
+    index_html = DIST_INDEX.read_bytes()
+    with sandbox("m1f1-spa-dashboard") as box:
+        seed_dragons(box, web_dragon_rows())
+        with web_server(box, server_command(REVIEW_UI, 0)) as server:
+            for path in ("/scans", "/factors", "/prep", "/bs"):
+                page = server.request("GET", path)
+                assert page.status == 200, path
+                assert page.body == index_html, path
+                assert page.headers["content-type"].startswith("text/html"), path
+
+            # Query-string deep links are client-side state; the server still
+            # must fall back to the same index document.
+            deep = server.request(
+                "GET",
+                "/factors?date=2026-09-11&factor=five_dim_composite&code=600001",
+            )
+            assert deep.status == 200
+            assert deep.body == index_html
+            assert deep.headers["content-type"].startswith("text/html")

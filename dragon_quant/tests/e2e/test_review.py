@@ -77,7 +77,7 @@ def dragon_row(code: str, trade_date: str, *, status: str = "pending",
         "close_px": 10.5, "high_px": 10.8, "low_px": 9.9, "pct": 5.0,
         "turnover_rate": 3.0, "amount": 10_000_000.0,
         "market_cap": 1_000_000_000.0, "concepts_json": '["测试"]',
-        "report_text": "report", "is_true_dragon": 1, "version": "0.7.2",
+        "report_text": "report", "is_true_dragon": 1, "version": "0.7.4",
         "created_at": f"{trade_date} 15:30:00", "buy_date": None,
         "buy_price": None, "max_return_5d": None, "max_drawdown_5d": None,
         "max_return_hold_days": None, "review_status": status, "source": source,
@@ -288,7 +288,7 @@ def test_r5_auto_window_skips_recent_and_processes_stale_rows():
         seed_sandbox(box, base_seed(extra))
         result = run_review(box, ["review"])
         assert_exit(result, 0)
-        assert "🔍 自动筛选：跳过 1 条（距当日不足 5 个交易日）" in result.stdout
+        assert "🔍 自动筛选：跳过 1 条（完整收益窗口尚未走完，留待下次补算）" in result.stdout
         assert "共 4 条待处理" in result.stdout
         rows = {row["code"]: row for row in review_fields(box)}
         assert rows["600001"]["review_status"] == "completed"
@@ -412,7 +412,7 @@ def test_r12_runtime_clock_mode_drives_the_auto_window():
         assert payload["runtime_clock_type"] == "FixedClock"
         assert payload["runtime_clock_now"].startswith("2026-09-11T15:30")
 
-        assert "🔍 自动筛选：跳过 1 条（距当日不足 5 个交易日）" in result.stdout
+        assert "🔍 自动筛选：跳过 1 条（完整收益窗口尚未走完，留待下次补算）" in result.stdout
         assert "共 4 条待处理" in result.stdout
 
         rows = {row["code"]: row for row in review_fields(box)}
@@ -538,8 +538,10 @@ def test_r17_recompute_all_summary_separates_failed_and_skipped():
         assert "📊 重算完成: processed=3" in result.stdout
         assert "   completed=2" in result.stdout
         assert "   cannot_evaluate=0" in result.stdout
+        assert "   partial=0" in result.stdout
         assert "   failed=1" in result.stdout
         assert "   skipped=0" in result.stdout
-        assert "汇总校验: processed == completed + cannot_evaluate + failed -> True" in result.stdout
+        assert ("汇总校验: processed == completed + cannot_evaluate + "
+                "partial + failed -> True") in result.stdout
         assert sqlite_count(box.data_dir / "dragon.db",
                             "dragon_review_strict") == 2

@@ -16,9 +16,11 @@ M3 切片只产出评分与角色证据；闸门 / 仓位 / ``strategy_context``
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
+
+from dragon_quant.infra.board_height import parse_board_height
+from dragon_quant.review_account.verdicts import find_risk_announcement
 
 from .config import (
     CONFIG, CONFIG_VERSION, DIAGNOSTIC_PROFILE, ReviewConfig, config_hash,
@@ -32,14 +34,10 @@ from .roles import assign_roles
 from .scoring import score_candidate
 from .sizing import portfolio_summary, size_position
 
-from dragon_quant.review_account.verdicts import find_risk_announcement
-
 # 复盘分快照版本（config 之外的算法契约版本，便于回放时区分实现代次）。
 REVIEW_VERSION = "review_v1"
 
 _CST = timezone(timedelta(hours=8))
-_LIANBAN_RE = re.compile(r"(\d+)天(\d+)板")
-
 # 日 K 派生 D5/D6 所需的最少行数；不足即 unknown（不用短样本硬算）。
 _MIN_DAILY_BARS = 20
 _LIMIT_UP_PCT = 9.5
@@ -68,14 +66,9 @@ def _num(value: Any) -> float | None:
 
 
 def _row_height(row: Mapping[str, Any]) -> int | None:
-    high_num = _num(row.get("high_num"))
-    if high_num is not None and high_num > 0:
-        return int(high_num)
-    for key in ("high_days", "high"):
-        match = _LIANBAN_RE.search(str(row.get(key) or ""))
-        if match:
-            return int(match.group(2))
-    return None
+    """板数（含 THS 打包值解码）；唯一实现见 ``infra.board_height``。"""
+
+    return parse_board_height(row)
 
 
 def _hhmmss(timestamp: Any) -> str | None:

@@ -275,9 +275,24 @@ class TradingEngine:
         closed = None
         if not fill["partial"]:
             days = sum(p.entry_date < r["date"] < day for r in row["hist_rows"]) + 1
+            # 跨段归因：继承持仓以「期初盯市价值」为成本基准，只归本段盈亏；
+            # 本段新仓取整笔净盈亏（含费用）。绝不把生命周期收益当本段贡献。
+            if p.inherited and p.period_start_qty > 0:
+                start_value = p.period_start_qty * (
+                    p.period_start_mark or p.entry_price)
+                pnl_this_run = p.realized_pnl - p.period_start_realized_pnl
+                period_pnl = pnl_this_run + p.period_start_cost - start_value
+            else:
+                start_value = None
+                period_pnl = p.realized_pnl
             closed = ClosedPosition(p.code, p.name, p.entry_date, p.entry_price, p.initial_qty,
                                     p.entry_reason_code, p.entry_signal, day, price, order["code"], signal,
-                                    p.realized_pnl / p.initial_cost * 100, days)
+                                    p.realized_pnl / p.initial_cost * 100, days,
+                                    realized_pnl=p.realized_pnl,
+                                    initial_cost=p.initial_cost,
+                                    period_pnl=period_pnl,
+                                    period_start_value=start_value,
+                                    inherited=p.inherited)
             state.positions.remove(p)
             state.consecutive_losses = state.consecutive_losses + 1 if closed.realized_return < 0 else 0
         return Trade(day, code, p.name, side, price, fill["qty"], fill["amount"], fill["fee"],

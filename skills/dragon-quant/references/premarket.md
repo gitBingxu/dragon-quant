@@ -7,9 +7,9 @@
 1. `dragon-quant premarket [--date D] --json`。T0：不写库、不触网、不重算、不新增表。
 2. 先读闸门：`data_quality.status / plan_usable / auction_usable / degraded`；`prep.strictness` 与 `prep.proven_gap`；`auction.state`。
 3. **信息截止** `info_cutoff` = 本次运行；三个时点分开：`prep.frozen_at`（T-1 决策）、`prep.created_at`（快照写入）、`auction.as_of`（09:25 语义时点）；`auction.positions[].created_at` 是快照写入时间，`evidence.last_time` 才是盘口末笔。
-4. 09:25 前只出无竞价版，写「竞价尚未形成」；结尾主动建议 09:25 后先运行 `auction` 采集竞价终态，再重生成。09:25 后先跑 `premarket` 检查 `auction.state`：`ready / partial` 直接生成；缺失 / 不可用则按下方「09:25 竞价流程」主动建议运行 `auction`（T1，需本轮确认），成功后重跑 `premarket`；**不得倒填**。
+4. 09:25 前只出无竞价版，写「竞价尚未形成」；结尾主动建议 09:25 后先运行 `auction` 采集竞价终态，再重生成。09:25 后先跑 `premarket` 检查 `auction.state`：`ready / partial` 直接生成；缺失 / 不可用则按下方「09:25 竞价流程」主动建议运行 `auction`（T1，需用户授权该动作），成功后重跑 `premarket`；**不得倒填**。
 5. 外部证据按 `references/evidence.md` 采集；缺失只降低情景覆盖。
-6. 按下方八段模板输出，事实 / 工作假设 / 行动分栏，每段末尾写「待验证/证伪」。
+6. 默认一屏结论；用户要求完整报告时按下方八段模板输出，事实 / 工作假设 / 行动分栏，每段末尾写「待验证/证伪」。
 7. 用户问「盘中怎么做」时，只按第 5 段时间表解释当前时点该看什么；不新造行情、不新造阈值、不宣布未验证的 confirmed。
 
 ## 09:25 竞价流程（主动建议 + 用户确认）
@@ -19,7 +19,7 @@
   1. 先运行 `premarket`（T0）检查 `auction.state`。
   2. `ready / partial` → 直接生成有竞价版。
   3. 缺失 / 不可用 → **主动建议**运行 `auction`（T1，会写 `assets.db`），话术：「将执行 auction，会写入本地数据库 assets.db，范围 <日期> 的 09:25 竞价终态。是否继续？」
-  4. 只有用户**本轮明确确认**后才执行；不自动加 `--force`；成功后重跑 `premarket`，确认 `auction.state` 可用，再生成最终预案。
+  4. 只有用户明确授权该动作后才执行；不自动加 `--force`；成功后重跑 `premarket`，确认 `auction.state` 可用，再生成最终预案。
   5. 用户拒绝，或用户自行执行 `! dragon-quant auction` → 输出无竞价版，写明「竞价缺失」。
 - **失败/降级**：`auction` 失败、空池、部分数据 → 如实报告并回退无竞价版；不伪造竞价事实；不自动重试 `--force`。
 - **顺序**：最终预案必须在 `auction` 完成后生成；先出的无竞价版不能直接套用竞价结果，必须重跑 `premarket`。

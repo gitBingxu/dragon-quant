@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (54), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (57), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 54,
-    "top_level_count": 16,
+    "node_count": 57,
+    "top_level_count": 18,
     "nodes": [
       {
         "command": "scan",
@@ -343,6 +343,17 @@
         ]
       },
       {
+        "command": "assets backfill-stock-daily",
+        "flags": [
+          "-h",
+          "--help",
+          "--dry-run",
+          "--days",
+          "--codes",
+          "--json"
+        ]
+      },
+      {
         "command": "factor",
         "flags": [
           "-h",
@@ -562,6 +573,31 @@
           "--help",
           "--apply",
           "--yes",
+          "--json"
+        ]
+      },
+      {
+        "command": "dashboard",
+        "flags": [
+          "--bs-autogen",
+          "--help",
+          "--no-browser",
+          "--no-bs-autogen",
+          "--port",
+          "--yes",
+          "-h"
+        ]
+      },
+      {
+        "command": "bs-eval",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--limit",
+          "--force",
+          "--source",
           "--json"
         ]
       }
@@ -784,9 +820,10 @@
           "dragon_quant/tests/e2e/test_prep.py::test_p14_single_factor_failure_is_isolated_and_snapshot_still_written",
           "dragon_quant/tests/e2e/test_prep.py::test_p15_runtime_clock_mode_drives_the_1640_gate",
           "dragon_quant/tests/e2e/test_prep.py::test_p16_runtime_clock_mode_full_prep_matches_reviewed_golden",
+          "dragon_quant/tests/e2e/test_prep.py::test_p20_prep_stock_daily_includes_recent_plan_candidates",
           "dragon_quant/tests/e2e/test_prep.py::test_c18_fake_macro_response_covers_every_macro_spec"
         ],
-        "notes": "P1-P16 + C18 macro fallback protection; P15-P16 pin the runtime.clock prep gate and full golden."
+        "notes": "P1-P16 + P20 plan-candidate expansion + C18 macro fallback protection; P15-P16 pin the runtime.clock prep gate and full golden."
       },
       "auction": {
         "tests": [
@@ -871,6 +908,13 @@
           "dragon_quant/tests/e2e/test_assets.py::test_as15_backfill_prune_deletes_only_mirror_orphans"
         ],
         "notes": ""
+      },
+      "assets backfill-stock-daily": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_assets.py::test_as20_backfill_stock_daily_dry_run_reports_gap_without_write",
+          "dragon_quant/tests/e2e/test_assets.py::test_as21_backfill_stock_daily_merges_into_execution_day_and_is_idempotent"
+        ],
+        "notes": "AS20 pins dry-run zero-write/zero-fetch; AS21 pins merge into the execution-day row (unrelated code preserved), untouched review-scope fields, and idempotence (second run detected=0)."
       },
       "factor": {
         "tests": [
@@ -1047,6 +1091,28 @@
           "dragon_quant/tests/e2e/test_premarket.py::test_pm8_help_creates_nothing"
         ],
         "notes": "T0 read-only premarket: full snapshot golden, structured degradation, runtime clock gate, exit codes, B1."
+      },
+      "dashboard": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d3_yes_pip_failure_exits_with_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d4_static_cache_headers",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d13_bs_autogen_fail_soft_when_unset"
+        ],
+        "notes": "D13: DQ_BS_AUTOGEN unset + procguard blocks subprocess; dashboard still serves, /api/bs/jobs/status reports failed with spawn error (B4 fail-soft)."
+      },
+      "bs-eval": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs1_buy_signal_dual_prices_and_metrics",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs2_idempotent_terminal_and_force",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs3_pending_no_signal_and_cannot_evaluate",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs4_sell_closed_half_leg_and_partial_window",
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs5_daily_fallback_quality_is_observable"
+        ],
+        "notes": "BS1-BS5 drive the real bs-eval CLI with fake providers; BS6 (dashboard API + SPA fallback) lives in cross_cutting.bs_eval_api."
       }
     },
     "hidden_aliases": {
@@ -1108,9 +1174,23 @@
           "dragon_quant/tests/e2e/test_web_api.py::test_w9_review_caliber_switch",
           "dragon_quant/tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
           "dragon_quant/tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
-          "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series"
+          "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series",
+          "dragon_quant/tests/e2e/test_web_api.py::test_w5_incremental_run_matches_full_replay",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d3_yes_pip_failure_exits_with_manual_hint",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d4_static_cache_headers",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d5_p0_endpoints_smoke",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d6_performance_endpoint_uses_fake_kline_only",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d7_recent_cards_use_raw_scan_true_dragons",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d8_prep_calendar_review_context_and_missing_day",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d9_scan_runtime_states_and_logs",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d10_auction_calendar_day_and_local_effect",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d11_prep_plan_followup_local_returns",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d12_prep_default_date_effect_and_accuracy"
         ],
-        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network. D11 covers prep plan-followup (plan-day samples, local daily bars, 1/3/5 net returns, invalid params) and the same-day market verification. W5 also covers incremental replay: A(09-04~09-08)+incremental(→09-11) must equal the one-shot full run on overlapping days (snapshots/trades/positions), plus 400 no-new-data, 404 missing base and base_equity-anchored benchmark."
       },
       "npm": {
         "tests": [
@@ -1307,7 +1387,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_54_nodes_and_16_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_57_nodes_and_18_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",
@@ -1316,6 +1396,26 @@
           "dragon_quant/tests/e2e/test_coverage_map.py::test_lock_packaging_and_ui_cross_cutting_notes_are_explicit"
         ],
         "notes": "The audit module itself is mapped here so no dragon_quant/tests/e2e test function is silently unmapped; it reads only stdlib JSON/AST and never launches a business process."
+      },
+      "web_spa_fallback": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_web_api.py::test_w1b_spa_fallback_for_dashboard_routes"
+        ],
+        "notes": "W1b: /scans /factors /prep /bs 与带筛选 query 的深链在浏览器 Accept 下均回退到 index.html；复用 W1 的 sandbox/seed 与 Web 服务基建。"
+      },
+      "bs_eval_api": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_eval.py::test_bs6_dashboard_serves_bs_api_and_spa"
+        ],
+        "notes": "BS6: /api/bs/overview|buys|sells 返回真实回放结果；/bs 深链在浏览器 Accept 下回退到 index.html（只读 API + SPA fallback）。"
+      },
+      "dashboard_command": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
+          "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint"
+        ],
+        "notes": "dashboard 自装引导 + 端口 + SIGTERM；D2 非 TTY 不执行 pip，D3 由 procguard 拒绝子进程等价安装失败。"
       }
     }
   },

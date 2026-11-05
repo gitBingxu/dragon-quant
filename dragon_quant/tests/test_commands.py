@@ -57,6 +57,8 @@ TOP_LEVEL_COMMANDS = (
     "sell",
     "vpa",
     "storage",
+    "dashboard",
+    "bs-eval",
 )
 
 # Every top-level command runs through its own handler module.
@@ -68,6 +70,7 @@ MODULE_NAMES = {
     "review-account": "review_account",
     "buy": "buy_sell",
     "sell": "buy_sell",
+    "bs-eval": "bs_eval",
 }
 HANDLER_ATTRIBUTES = {
     "buy": "handle_buy",
@@ -76,8 +79,8 @@ HANDLER_ATTRIBUTES = {
 
 # Commands whose providers are decided per invocation.
 CONDITIONAL_PROVIDER_COMMANDS = ("review-account", "prep", "factor")
-PROVIDER_ALWAYS = ("vpa", "buy", "sell")
-PROVIDER_NEVER = ("scan", "logs", "blacklist", "dragons", "storage", "assets", "premarket")
+PROVIDER_ALWAYS = ("vpa", "buy", "sell", "bs-eval")
+PROVIDER_NEVER = ("scan", "logs", "blacklist", "dragons", "storage", "assets", "dashboard", "premarket")
 
 
 def _args_for(name: str) -> SimpleNamespace:
@@ -151,7 +154,7 @@ class TestCommandRegistry(unittest.TestCase):
     def test_every_top_level_command_has_its_own_handler_module(self):
         from dragon_quant import commands
 
-        self.assertEqual(len(MIGRATED_COMMANDS), 16)
+        self.assertEqual(len(MIGRATED_COMMANDS), 18)
         for name in MIGRATED_COMMANDS:
             with self.subTest(command=name):
                 entry = commands.COMMANDS[name]
@@ -424,7 +427,7 @@ class TestDispatchAndServices(unittest.TestCase):
 
 
     def test_every_command_dispatches_to_its_handler(self):
-        """M11B: ``dispatch`` is the single entry for all 15 top-level commands."""
+        """M11B: ``dispatch`` is the single entry for all top-level commands."""
         from dragon_quant import commands
 
         for name in TOP_LEVEL_COMMANDS:
@@ -665,7 +668,7 @@ class TestMigratedHandlers(unittest.TestCase):
     def test_every_migrated_handler_accepts_args_and_services(self):
         from dragon_quant import commands
 
-        self.assertEqual(len(MIGRATED_COMMANDS), 16)
+        self.assertEqual(len(MIGRATED_COMMANDS), 18)
         for name in MIGRATED_COMMANDS:
             with self.subTest(command=name):
                 handler = commands.COMMANDS[name].load()

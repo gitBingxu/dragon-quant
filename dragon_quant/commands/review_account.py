@@ -38,8 +38,16 @@ def handle(args, services):
 
 
 def _start_ui(args):
-    """启动账户级 review Web UI。"""
+    """启动账户级 review Web UI（deprecated 别名，转发 dashboard 语义）。"""
+    from dragon_quant.commands.dashboard import ensure_web_extra
     from web_ui.server import start_server
+
+    ensure_web_extra(auto=False)
+    print(
+        "review-account: --ui/--ui-only 已弃用，"
+        "请改用 dragon-quant dashboard（后续版本将移除）",
+        file=sys.stderr,
+    )
     start_server(
         port=args.port,
         open_browser=not args.no_browser,

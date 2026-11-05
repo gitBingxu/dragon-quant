@@ -519,8 +519,11 @@ class THSProvider(StockProvider):
     def get_block_top(self, date: str) -> dict:
         """THS 题材主线榜（题材涨停家数/最高板/成分名单），date=YYYYMMDD。
 
-        返回 {'rows': [原始行]}；行含 name/limit_up_num/high/high_num/
-        continuous_plate_num/stock_list。
+        返回 {'rows': [原始行]}；上游真实行含
+        ``name / code / change / limit_up_num / high / high_num /
+        continuous_plate_num / stock_list``。``code`` 为板块代码、``change`` 为
+        板块涨跌幅（百分数），采集器原样保存，dashboard 单日效果依赖二者做
+        T+1 板块匹配与涨跌计算；旧资产可能缺这两个字段，消费方必须显式降级。
         """
         raw = _fetch_with_retry(BLOCK_TOP_URL.format(date=date),
                                 referer=DATAAPI_REFERER, raise_on_exhaust=True)

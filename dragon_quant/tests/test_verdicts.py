@@ -178,6 +178,66 @@ class TestSnapshotConsumption(unittest.TestCase):
         self.assertIs(by_code["A"]["entry_priority"]["prep"]["state"], False)
 
 
+class TestReviewPoolFullCandidates(unittest.TestCase):
+    """0.8 共享入口：默认只取推荐集合；auction 才显式开启完整池。"""
+
+    def _snapshot(self):
+        return {
+            "version": "0.8",
+            "candidates": [{"code": c, "name": c, "facts": {}}
+                           for c in ("A", "B", "C")],
+            "review_candidates": [
+                {"code": "A", "name": "A", "review_score": 75.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 4.0, "reason_code": None, "gate_trace": []},
+                {"code": "B", "name": "B", "review_score": 70.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 0.0, "reason_code": "illiquid",
+                 "gate_trace": []},
+                {"code": "C", "name": "C", "review_score": 60.0,
+                 "review_grade": "D", "eligibility": "not_qualified",
+                 "position_pct": 0.0, "reason_code": "not_mainline",
+                 "gate_trace": []},
+            ],
+        }
+
+    def _collect(self, **kwargs):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from dragon_quant.review_account.market import collect_candidates_ex
+
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
+                   return_value=self._snapshot()):
+            return collect_candidates_ex(
+                ["2026-10-19", "2026-10-20"], "2026-10-20",
+                SimpleNamespace(source="v2", min_score=50),
+                lambda *a, **k: [], **kwargs)
+
+    def test_default_keeps_recommended_only(self):
+        """buy / review-account 默认口径逐字段不变（T7）。"""
+        out, ctx = self._collect()
+
+        self.assertEqual([c["code"] for c in out], ["A"])
+        self.assertEqual(ctx["recommended_count"], 1)
+        self.assertEqual(ctx["filtered_ignore"], 2)
+        self.assertEqual(len(ctx["ignore_reasons"]), 2)
+        self.assertIsNone(ctx["fallback_reason"])
+
+    def test_opt_in_collects_every_review_candidate(self):
+        """auction 显式开启 → 主集合全部有效 code（T8）。"""
+        out, ctx = self._collect(include_all_review_candidates=True)
+
+        self.assertEqual([c["code"] for c in out], ["A", "B", "C"])
+        self.assertEqual(ctx["recommended_count"], 1)
+        self.assertEqual(ctx["filtered_ignore"], 0)
+        self.assertEqual(ctx["ignore_reasons"], [])
+        self.assertIsNone(ctx["fallback_reason"])
+        # 夹具防漂移：position_pct / review_score 必须经投影进入视图
+        by_code = {c["code"]: c for c in out}
+        self.assertEqual(by_code["B"]["position_pct"], 0.0)
+        self.assertEqual(by_code["A"]["composite_score"], 75.0)
+
+
 class TestCandidateLines(unittest.TestCase):
     def _result(self):
         return {"candidates": [

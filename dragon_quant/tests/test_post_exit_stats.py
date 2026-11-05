@@ -125,9 +125,10 @@ class TestEntryReasonStats(unittest.TestCase):
         self.assertEqual(rows[""]["label"], "未知")
         self.assertEqual(rows[TOTAL_ROW_CODE]["label"], "合计")
         self.assertEqual(stats["total_trades"], 5)
-        # 贡献近似：Σ(return/100 × price × qty) / 100000 × 100
-        expected = ((10 - 5 + 3 + 1 + 2) / 100 * 10 * 1000) / 100000 * 100
-        self.assertAlmostEqual(rows[TOTAL_ROW_CODE]["contribution"], expected)
+        # D4：生命周期列不再用 realized_return 估算贡献；无 ledger → 期间列 None。
+        self.assertIsNone(rows[TOTAL_ROW_CODE]["contribution"])
+        self.assertIsNone(rows[TOTAL_ROW_CODE]["period_pnl"])
+        self.assertEqual(stats["contribution_basis"], "not_provided")
 
     def test_zero_trades_rows_have_none_ratios_and_zero_contribution(self):
         stats = entry_reason_stats([], 100000)
@@ -137,7 +138,7 @@ class TestEntryReasonStats(unittest.TestCase):
             self.assertEqual(row["trades"], 0)
             self.assertIsNone(row["win_rate"])
             self.assertIsNone(row["avg_return"])
-            self.assertEqual(row["contribution"], 0.0)
+            self.assertIsNone(row["contribution"])
         self.assertEqual(stats["total_trades"], 0)
 
     def test_initial_cash_non_positive_makes_contribution_none(self):

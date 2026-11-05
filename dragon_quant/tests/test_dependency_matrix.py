@@ -279,6 +279,7 @@ _COMMAND_PUBLIC_EXACT = frozenset({
     "dragon_quant.review_account.premarket",
     "dragon_quant.review_account.premarket.main",
     "dragon_quant.review_account.live_trade.main",
+    "dragon_quant.bs_eval.main",
     "dragon_quant.vpa.main",
 })
 _COMMAND_PUBLIC_TREES = (

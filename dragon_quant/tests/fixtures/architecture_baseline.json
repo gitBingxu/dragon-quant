@@ -252,6 +252,97 @@
     }
   },
   "dragon_schema": {
+    "bs_runs": {
+      "columns": [
+        "id",
+        "started_at",
+        "finished_at",
+        "range_from",
+        "range_to",
+        "limit_n",
+        "force",
+        "evaluator_version",
+        "strategy_name",
+        "strategy_params_json",
+        "strategy_hash",
+        "rows_scanned",
+        "rows_skipped_terminal",
+        "rows_evaluated",
+        "rows_no_signal",
+        "rows_bought",
+        "rows_sold",
+        "rows_partial",
+        "rows_error",
+        "note"
+      ],
+      "indexes": [
+        "idx_bs_runs_created"
+      ]
+    },
+    "bs_signals": {
+      "columns": [
+        "id",
+        "run_id",
+        "trade_date",
+        "code",
+        "name",
+        "source",
+        "strategy_hash",
+        "evaluator_version",
+        "eval_status",
+        "eval_note",
+        "is_terminal",
+        "data_quality",
+        "replay_days",
+        "fallback_days",
+        "suspended_days",
+        "fault_days",
+        "buy_date",
+        "buy_rule_code",
+        "buy_rule_text",
+        "buy_loose_price",
+        "buy_strict_price",
+        "buy_data_quality",
+        "buy_loose_max_return_5d",
+        "buy_loose_max_drawdown_5d",
+        "buy_strict_max_return_5d",
+        "buy_strict_max_drawdown_5d",
+        "buy_max_return_hold_days",
+        "buy_window_partial",
+        "sell_date",
+        "sell_rule_code",
+        "sell_rule_text",
+        "sell_price",
+        "sell_hold_days",
+        "sell_data_quality",
+        "sell_half_date",
+        "sell_half_price",
+        "sell_half_qty",
+        "sell_half_rule_code",
+        "sell_half_max_return_5d",
+        "sell_half_max_drawdown_5d",
+        "sell_half_window_days",
+        "sell_max_return_5d",
+        "sell_max_drawdown_5d",
+        "sell_max_return_hold_days",
+        "sell_post_exit_window_days",
+        "sell_window_partial",
+        "content_hash",
+        "last_attempt_at",
+        "created_at",
+        "updated_at"
+      ],
+      "indexes": [
+        "idx_bs_signals_attempt",
+        "idx_bs_signals_buy_date",
+        "idx_bs_signals_code",
+        "idx_bs_signals_run",
+        "idx_bs_signals_sell_date",
+        "idx_bs_signals_status",
+        "idx_bs_signals_trade_date",
+        "sqlite_autoindex_bs_signals_1"
+      ]
+    },
     "buy_sell_signals": {
       "columns": [
         "id",
@@ -302,6 +393,7 @@
         "review_status",
         "reason",
         "review_version",
+        "tradable_open_json",
         "computed_at"
       ],
       "indexes": [
@@ -405,6 +497,20 @@
         "idx_review_account_events_run"
       ]
     },
+    "review_account_experiments": {
+      "columns": [
+        "id",
+        "base_run_id",
+        "created_at",
+        "experiment_version",
+        "status",
+        "request_json",
+        "report_json"
+      ],
+      "indexes": [
+        "idx_review_account_experiments_run"
+      ]
+    },
     "review_account_positions": {
       "columns": [
         "id",
@@ -425,7 +531,12 @@
         "status",
         "post_exit_max_return",
         "post_exit_max_drawdown",
-        "post_exit_window_days"
+        "post_exit_window_days",
+        "initial_cost",
+        "realized_pnl",
+        "period_pnl",
+        "period_start_value",
+        "inherited"
       ],
       "indexes": [
         "idx_review_account_positions_run"
@@ -441,12 +552,22 @@
         "date_from",
         "date_to",
         "initial_cash",
+        "base_equity",
         "final_equity",
         "total_return",
         "max_drawdown",
         "trade_count",
         "win_rate",
-        "created_at"
+        "created_at",
+        "base_run_id",
+        "start_equity",
+        "start_positions_json",
+        "start_realized_pnl",
+        "start_cash",
+        "start_peak_equity",
+        "start_consecutive_losses",
+        "start_marks_json",
+        "run_meta_json"
       ],
       "indexes": [
         "idx_review_account_runs_created"
@@ -917,8 +1038,8 @@
     "auction/stdout_collect.txt": "a24e8accb674a8633d7576c7581e3fd84a0d3e5906537ea151e1120d1403d4aa",
     "auction/stdout_snapshot.txt": "e5d727004160676def2f51a03db41d587dbc32a4b9fc712ccacf860647dcc066",
     "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
-    "factor/decision_review_auction.json": "79a3846164797875375840c86dcc2ac4d9443bb0104f72fb9e35c2576f10403f",
-    "factor/decision_review_prep.json": "005aa8f35abad7c98b00c6941b9f0dac4ba72c1c1c07fa1c143c74942a76e066",
+    "factor/decision_review_auction.json": "a9da955e4a1240277d29e863cb585527032315811c7744a795c6e3148c34308e",
+    "factor/decision_review_prep.json": "fcf2e414bbcc1609b3eb63dec055d2bc56d28b09f254aee54fec77864caf28b0",
     "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",
     "factor/export_matrix.csv": "46655b3c09b4aaf6fc0c6281a74d6694dca6d302968b79eb9d2682c104682a1c",
     "factor/export_meta.json": "7e931a536c92a65d740586bbe5621420be6fa668da207ffd84b3e908a8958e40",
@@ -931,13 +1052,13 @@
     "live_trade/signal_closed.json": "c4cbb6774d6c1b33c1d55c19d6004c14b9f8f8bcf1793751a296d20fe9ffb283",
     "live_trade/signal_open.json": "1a58a08ecd0b69bbe6b42a90a3d67b5df0adadef331c6968f423c520a6b62f65",
     "local/data.json": "5f493284c3cbee2b4c79a636e6a7740abcb30f18f2e8d3a882d37b4f7fd4f64c",
-    "local/dragons.json": "1e9d0c5fee98d7265a994075da49140e583af9087242e60a5f95873bfeeeffb5",
+    "local/dragons.json": "43c8f5078bacb5acf05b5aaad86cb3a594518e0e30564c12a6a3514ce2eb6272",
     "local/logs.json": "0a865278c1880c8083b4858e0888e5c5898e439b7e324dd0c223cc253d69de85",
     "local/vpa.json": "4fa2979932c9e5ea88503ed1107998c94857b94e4fa54ab3a96a2f26ce44cbcf",
     "premarket/context.json": "c0d3cac97cb8bb80a6d5d2263062af53be08301b11bf9bdf1e600647d1273bb1",
-    "prep/assets.json": "a008adac8d46b489e410f882d27a5294e3ceb5462d67f95f3da591331ad45281",
+    "prep/assets.json": "fc6532973653954a3750f1b7dc862539c35ad2a9e532e2a7dad402a7c5db5309",
     "prep/calls.json": "5e6da0f4086a213c7692709be96205a251c3401b9cc6109afa78563d58f4a0b7",
-    "prep/snapshot.json": "c0dc0b697e561c329ac5b9885b2a1a0a73c992a7087198b4e23a47eb29d19071",
+    "prep/snapshot.json": "93be59b9eae4a2d23c45db1012a4e46494d3439c83f43a8d488eb322677d465f",
     "prep/stdout.txt": "30756ed1a49ee1d49b387086bbbc298712241b85c958a1022802acd1fe0ad7b9",
     "review/db.json": "25a8fc2e83bc4b2d870992a6131982bb9b93cc2c2fbc9e2231b96ef1d3bd6f1d",
     "review/stdout_lines.json": "ef65201ffb463d2fff50f9d99e2e6e2dbe4a50466274d093bd9f19bde15b949e",

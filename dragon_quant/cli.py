@@ -8,6 +8,7 @@ CLI 入口 — dragon-quant 命令行工具
   dragon-quant data {sector,components,kline,minute,quote,batch-quote} [options]
   dragon-quant review [--date DATE] [--top N] [--force]
   dragon-quant dragons [--date DATE] [--true-only]
+  dragon-quant dashboard [--port PORT] [--no-browser] [--yes]
   dragon-quant storage {status,size,clear} [options]
 """
 
@@ -84,6 +85,7 @@ def main():
   dragon-quant data kline --code 600172 --days 20
   dragon-quant review --ui-only --source v2
   dragon-quant review-account --from 20260501 --to 20260601 --ui
+  dragon-quant dashboard --no-browser --port 9000
 
 Use \"dragon-quant <command> -h\" for command-specific help.
 """,
@@ -514,6 +516,31 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     assets_backfill.add_argument("--json", dest="json", action="store_true",
                                  help="输出完整 JSON（默认人读摘要）")
 
+    assets_backfill_sd = assets_subs.add_parser(
+        "backfill-stock-daily",
+        help="回填近 N 日计划候选的本地日 K（补 dashboard 评估缺口）",
+        usage="dragon-quant assets backfill-stock-daily [--dry-run] [--days N] "
+              "[--codes A,B] [--json]",
+        description="检测近 N 个「有快照交易日」的 review_candidates 候选，把本地"
+                    "stock_daily 缺失或落后的日 K 补到执行日（或周末的本地最新 bar 日）"
+                    "资产行。既有行的 requested_codes/coverage 一律不动，只扩 rows 并写"
+                    "backfill 审计块；绝不回写更早历史日。",
+        epilog="""Examples:
+  dragon-quant assets backfill-stock-daily --dry-run
+  dragon-quant assets backfill-stock-daily
+  dragon-quant assets backfill-stock-daily --days 20 --json
+  dragon-quant assets backfill-stock-daily --codes 600001,000002
+""",
+    )
+    assets_backfill_sd.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                    help="只体检并报告缺口，不触网、不写库")
+    assets_backfill_sd.add_argument("--days", type=int, default=10,
+                                    help="检测窗口：近 N 个有快照交易日（1..60，默认 10）")
+    assets_backfill_sd.add_argument("--codes", default=None,
+                                    help="显式补采代码（逗号分隔；给定时跳过自动检测）")
+    assets_backfill_sd.add_argument("--json", dest="json", action="store_true",
+                                    help="输出完整 JSON（默认人读摘要）")
+
     assets_purge = assets_subs.add_parser(
         "purge-derived",
         help="清理可重建的 prep 派生数据（默认 dry-run，不触云端）",
@@ -815,6 +842,35 @@ Use \"dragon-quant <command> -h\" for command-specific help.
             "--force", action="store_true",
             help="非交易时段仍强制跑当日回放（09:30 前仍拒绝；15:00–15:06 宽限窗口无需 --force）")
 
+    # bs-eval 子命令（离线批量回放 dragons_v2，生成假想买卖点）
+    bs_p = sub.add_parser(
+        "bs-eval",
+        help="批量回放龙头买卖点，生成 BS 策略评测数据（只读页面消费）",
+        usage="dragon-quant bs-eval [--from D] [--to D] [--limit N] [--force] "
+              "[--source v2] [--json]",
+        description="对全部 dragons_v2 逐龙头回放四类买点与十条卖出规则，"
+                    "记录双口径入场与买后/卖后 5 日窗口指标，落库 bs_runs/bs_signals。"
+                    "重复运行幂等：终态行跳过，partial/未成熟行重估；--force 全量重算。",
+        epilog="""Examples:
+  dragon-quant bs-eval --limit 5
+  dragon-quant bs-eval --from 20260601 --to 20261102
+  dragon-quant bs-eval --force
+  dragon-quant bs-eval --json
+""",
+    )
+    bs_p.add_argument("--from", dest="date_from", default=None,
+                      help="入选日起始 (YYYYMMDD / YYYY-MM-DD)；不截断回放行情")
+    bs_p.add_argument("--to", dest="date_to", default=None,
+                      help="入选日结束 (YYYYMMDD / YYYY-MM-DD)")
+    bs_p.add_argument("--limit", type=int, default=None,
+                      help="增量选行后只处理最久未尝试的 N 行（canary）")
+    bs_p.add_argument("--force", action="store_true",
+                      help="忽略终态与 content_hash，区间内全量重算")
+    bs_p.add_argument("--source", default="v2", choices=["v2"],
+                      help="固定 v2（v1 已废弃，bs 结果只基于 dragons_v2）")
+    bs_p.add_argument("--json", dest="json", action="store_true",
+                      help="输出机器可读汇总（不输出逐行）")
+
     # vpa 子命令
     vpa_p = sub.add_parser(
         "vpa",
@@ -860,6 +916,31 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     clear_p.add_argument("--results", action="store_true", help="清理结果")
     clear_p.add_argument("--logs", action="store_true", help="清理日志")
     clear_p.add_argument("--days", type=int, default=None, help="保留最近N天")
+
+    # dashboard 子命令（本地 Web 仪表盘：龙头 / 扫描 / 因子 / 复盘 / 账户）
+    dashboard_p = sub.add_parser(
+        "dashboard",
+        help="启动本地 Web 仪表盘（龙头/扫描/因子/复盘/账户）",
+        usage="dragon-quant dashboard [--port PORT] [--no-browser] [--yes] [--no-bs-autogen]",
+        description="启动 127.0.0.1 上的可视化面板。首次使用时若未安装可选依赖 [web]，"
+                    "会询问是否自动安装 fastapi/uvicorn；--yes 跳过询问。",
+        epilog="""Examples:
+  dragon-quant dashboard
+  dragon-quant dashboard --port 9000 --no-browser
+  dragon-quant dashboard --yes
+""",
+    )
+    dashboard_p.add_argument("--port", type=int, default=None,
+                             help="监听端口 (默认 8765；被占用时自动改用系统分配端口)")
+    dashboard_p.add_argument("--no-browser", action="store_true",
+                             help="不自动打开浏览器")
+    dashboard_p.add_argument("--yes", action="store_true",
+                             help="[web] 未安装时直接安装，不再询问（等同 DQ_WEB_AUTO_INSTALL=1）")
+    dashboard_p.add_argument("--bs-autogen", action="store_true",
+                             help="显式启用启动时后台增量生成 BS 派生数据"
+                                  "（默认只读；也可用 DQ_BS_AUTOGEN=1）")
+    dashboard_p.add_argument("--no-bs-autogen", action="store_true",
+                             help="关闭后台生成（兼容旧开关；优先级高于 DQ_BS_AUTOGEN=1）")
 
     argv = sys.argv[1:]
     if argv and argv[0] == "scan_v2":

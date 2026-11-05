@@ -119,7 +119,7 @@ class TestAuctionPool(unittest.TestCase):
         self.assertNotIn("无 v2 龙头", err)
 
 
-    def test_review_pool_uses_eligibility_and_position(self):
+    def test_review_pool_uses_all_review_candidates(self):
         snapshot = {
             "version": "0.8",
             "candidates": [
@@ -150,12 +150,13 @@ class TestAuctionPool(unittest.TestCase):
         self.assertIsNone(code)
         self.assertEqual(out["pool_source"], "prep")
         self.assertIsNone(out["fallback_reason"])
+        # 全池：不再按 prep 资格/仓位过滤；recommended_count 仍是实际推荐只数
         self.assertEqual(out["recommended_count"], 1)
-        # 只取 eligible ∧ position>0；不叠加旧 min_score / 旧身份 / 旧 verdict
-        self.assertEqual(calls["auction"], ["A"])
-        self.assertEqual(saved, ["A"])
+        self.assertEqual(out["candidate_codes"], 3)
+        self.assertEqual(calls["auction"], ["A", "B", "C"])
+        self.assertEqual(saved, ["A", "B", "C"])
 
-    def test_review_pool_empty_does_not_fallback(self):
+    def test_position_zero_candidate_is_collected_without_fallback(self):
         snapshot = {
             "version": "0.8",
             "candidates": [{"code": "A", "name": "甲", "facts": {}}],
@@ -166,14 +167,33 @@ class TestAuctionPool(unittest.TestCase):
                  "gate_trace": []},
             ],
         }
-        # legacy 有 A，但 0.8 有效决策为空 → 不得回退 legacy 重新推荐
+        # 0.8 有效快照：position 0 仍进竞价采集，不因「无推荐」回退 legacy
         out, err, code, calls, saved = self._run(
             snapshot=snapshot, dragons=[{"code": "A", "name": "甲"}])
         self.assertIsNone(code)
         self.assertEqual(out["pool_source"], "prep")
-        self.assertEqual(out["fallback_reason"], "all_ignored")
+        self.assertIsNone(out["fallback_reason"])
+        self.assertEqual(out["candidate_codes"], 1)
+        self.assertEqual(out["recommended_count"], 0)
+        self.assertEqual(calls["auction"], ["A"])
+        self.assertEqual(saved, ["A"])
+
+    def test_empty_review_candidates_keeps_empty_pool(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": "A", "name": "甲", "facts": {}}],
+            "review_candidates": [],
+        }
+        # 有效 0.8 决策但无有效 code 条目 → 空池 + no_eligible，绝不回落 legacy
+        out, err, code, calls, saved = self._run(
+            snapshot=snapshot, dragons=[{"code": "A", "name": "甲"}])
+        self.assertIsNone(code)
+        self.assertEqual(out["pool_source"], "prep")
+        self.assertEqual(out["fallback_reason"], "no_eligible")
         self.assertTrue(out["pool_empty"])
+        self.assertEqual(out["candidate_codes"], 0)
         self.assertEqual(calls["auction"], [])
+        self.assertEqual(calls["quotes"], 0)
         self.assertEqual(saved, [])
 
     def test_review_missing_does_not_fallback(self):
@@ -364,6 +384,154 @@ class TestAuctionPool(unittest.TestCase):
             _, ctx = collect_candidates_ex(
                 [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])
         self.assertTrue(ctx["prep_degraded"])
+
+
+class TestReviewFullPoolMarket(unittest.TestCase):
+    """``market.collect_candidates_ex`` 的 0.8 完整池口径（market 层）。"""
+
+    def _collect(self, snapshot, **kwargs):
+        from dragon_quant.review_account.market import collect_candidates_ex
+        from dragon_quant.review_account.models import StrategyConfig
+
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
+                   return_value=snapshot):
+            return collect_candidates_ex(
+                [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [],
+                **kwargs)
+
+    @staticmethod
+    def _review_item(code, *, eligibility, position, score=70.0, reason=None):
+        return {"code": code, "name": code, "review_score": score,
+                "review_grade": "B", "eligibility": eligibility,
+                "position_pct": position, "reason_code": reason,
+                "gate_trace": []}
+
+    def test_full_pool_includes_zero_position_and_ineligible(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": c, "name": c, "facts": {}}
+                           for c in ("A", "B", "C", "D")],
+            "review_candidates": [
+                self._review_item("A", eligibility="eligible",
+                                  position=4.0, score=80.0),
+                self._review_item("B", eligibility="eligible",
+                                  position=0.0, reason="illiquid"),
+                self._review_item("C", eligibility="not_qualified",
+                                  position=0.0, reason="not_mainline"),
+                self._review_item("D", eligibility="unknown", position=None,
+                                  reason="data_insufficient"),
+            ],
+        }
+        for item in snapshot["review_candidates"]:
+            for key in ("eligibility", "position_pct", "review_score",
+                        "gate_trace"):
+                self.assertIn(key, item)
+
+        pool, ctx = self._collect(snapshot, include_all_review_candidates=True)
+
+        self.assertEqual({c["code"] for c in pool}, {"A", "B", "C", "D"})
+        self.assertEqual(ctx["recommended_count"], 1)
+        self.assertEqual(ctx["filtered_ignore"], 0)
+        self.assertEqual(ctx["ignore_reasons"], [])
+        self.assertIsNone(ctx["fallback_reason"])
+        self.assertEqual(ctx["pool_source"], "prep")
+
+    def test_full_pool_dedupes_and_skips_invalid_codes(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": "A", "name": "甲", "facts": {}}],
+            "review_candidates": [
+                self._review_item("A", eligibility="eligible",
+                                  position=4.0, score=70.0),
+                self._review_item("A", eligibility="eligible",
+                                  position=2.0, score=60.0),
+                {"code": "", "eligibility": "eligible", "position_pct": 1.0},
+                {"code": None, "eligibility": "eligible", "position_pct": 1.0},
+                {"code": 123, "eligibility": "eligible", "position_pct": 1.0},
+                "not-a-dict", None,
+                self._review_item("B", eligibility="unknown", position=None,
+                                  score=50.0, reason="data_insufficient"),
+            ],
+        }
+        pool, ctx = self._collect(snapshot, include_all_review_candidates=True)
+
+        self.assertEqual([c["code"] for c in pool], ["A", "B"])
+        self.assertEqual(ctx["recommended_count"], 1)
+
+    def test_full_pool_excludes_raw_only_truncated_rows(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [
+                {"code": "A", "name": "甲", "facts": {}},
+                {"code": "X", "name": "截断兜底", "facts": {}},
+            ],
+            "review_candidates": [
+                self._review_item("A", eligibility="eligible", position=4.0),
+            ],
+        }
+        pool, ctx = self._collect(snapshot, include_all_review_candidates=True)
+
+        self.assertEqual([c["code"] for c in pool], ["A"])
+        self.assertEqual(ctx["recommended_count"], 1)
+        self.assertIsNone(ctx["fallback_reason"])
+        # 夹具防漂移：真实 review 字段必须经投影进入视图
+        self.assertEqual(pool[0]["position_pct"], 4.0)
+        self.assertEqual(pool[0]["composite_score"], 70.0)
+
+    def test_full_pool_treats_string_position_as_null(self):
+        """position_pct 为字符串 → 进池，但不计入推荐只数（§6）。"""
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": "A", "name": "甲", "facts": {}}],
+            "review_candidates": [
+                self._review_item("A", eligibility="eligible", position="0"),
+            ],
+        }
+        pool, ctx = self._collect(snapshot, include_all_review_candidates=True)
+
+        self.assertEqual([c["code"] for c in pool], ["A"])
+        self.assertIsNone(pool[0]["position_pct"])
+        self.assertEqual(ctx["recommended_count"], 0)
+
+    def test_full_pool_empty_review_candidates_stays_empty(self):
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": "X", "name": "截断兜底", "facts": {}}],
+            "review_candidates": [],
+        }
+        pool, ctx = self._collect(snapshot, include_all_review_candidates=True)
+
+        self.assertEqual(pool, [])
+        self.assertEqual(ctx["fallback_reason"], "no_eligible")
+        self.assertEqual(ctx["recommended_count"], 0)
+
+
+class TestAuctionPoolEntrypoints(unittest.TestCase):
+    """兼容入口：``collect_candidates`` 包装不带完整池参数。"""
+
+    def test_collect_candidates_wrapper_keeps_default_pool(self):
+        from dragon_quant.review_account.market import collect_candidates
+        from dragon_quant.review_account.models import StrategyConfig
+
+        snapshot = {
+            "version": "0.8",
+            "candidates": [{"code": c, "name": c, "facts": {}}
+                           for c in ("A", "B")],
+            "review_candidates": [
+                {"code": "A", "name": "A", "review_score": 80.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 4.0, "reason_code": None, "gate_trace": []},
+                {"code": "B", "name": "B", "review_score": 70.0,
+                 "review_grade": "B", "eligibility": "eligible",
+                 "position_pct": 0.0, "reason_code": "illiquid",
+                 "gate_trace": []},
+            ],
+        }
+        with patch("dragon_quant.infra.assets.db.get_prep_snapshot",
+                   return_value=snapshot):
+            pool = collect_candidates(
+                [PREV, DAY], DAY, StrategyConfig(), lambda *a, **k: [])
+        self.assertEqual([c["code"] for c in pool], ["A"])
 
 
 if __name__ == "__main__":

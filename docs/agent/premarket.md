@@ -94,4 +94,4 @@ Python 不接外网、不做 Cookie 登录、不逆向私有 APP；外部政策 
 ## 测试
 
 - 单元：`dragon_quant/tests/test_premarket_{snapshot,context,actions,cli}.py`。
-- E2E：`dragon_quant/tests/e2e/test_premarket.py` + `golden/premarket/context.json`；coverage-map 固定 54 节点 / 16 顶层命令。
+- E2E：`dragon_quant/tests/e2e/test_premarket.py` + `golden/premarket/context.json`；coverage-map 固定 55 节点 / 17 顶层命令。

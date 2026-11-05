@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Mapping, Optional, Sequence
 
+from . import signal_adapter
 from . import stats as fstats
 from .review_shadow import DEFAULT_COST_BPS, _bar_date, build_tradable_labels
 
@@ -49,10 +50,25 @@ class GroupSpec:
     expected_direction: Optional[str]       # "up" | "down" | None
 
 
+DIRECTION_GROUP_SPECS: dict[str, tuple[GroupSpec, ...]] = {
+    "prep": (
+        GroupSpec("recommended", "推荐", "up"),
+        GroupSpec("not_recommended", "明确不推荐", None),
+        GroupSpec("data_insufficient", "数据不足", None),
+    ),
+    "auction": (
+        GroupSpec("bull", "偏多", "up"),
+        GroupSpec("bear", "偏空", "down"),
+        GroupSpec("neutral", "中性", None),
+        GroupSpec("unknown", "不可评价", None),
+    ),
+}
+
 SOURCE_GROUP_SPECS: dict[str, tuple[GroupSpec, ...]] = {
     "prep": (
         GroupSpec("recommended", "推荐", "up"),
-        GroupSpec("not_recommended", "明确不推荐", "down"),
+        # D5：不推荐不是看跌；只有推荐组有方向预期。
+        GroupSpec("not_recommended", "明确不推荐", None),
         GroupSpec("data_insufficient", "数据不足", None),
     ),
     "auction": (
@@ -103,6 +119,8 @@ class DecisionObservation:
     level: Optional[str]
     veto: bool
     data_quality_status: Optional[str]
+    direction: Optional[str] = None
+    direction_group: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -254,20 +272,11 @@ class PrepSnapshotAdapter:
             seen.add(code)
 
             position = candidate.get("position_pct")
-            numeric: Optional[float] = None
-            if isinstance(position, (int, float)) and not isinstance(position, bool):
-                numeric = _finite(position)
-            if numeric is not None:
-                if numeric == 0:
-                    group = "not_recommended"
-                elif numeric > 0 and candidate.get("eligibility") == "eligible":
-                    group = "recommended"
-                else:
-                    group = "data_insufficient"
-            else:
-                group = "data_insufficient"
-                if position is not None:
-                    counters["unparsed_position_pct"] += 1
+            group = signal_adapter.prep_group(candidate)
+            numeric = _finite(position) if isinstance(
+                position, (int, float)) and not isinstance(position, bool) else None
+            if numeric is None and position is not None:
+                counters["unparsed_position_pct"] += 1
 
             observations.append(DecisionObservation(
                 source=self.source,
@@ -282,6 +291,8 @@ class PrepSnapshotAdapter:
                 level=_text_or_none(candidate.get("review_grade")),
                 veto=False,
                 data_quality_status=None,
+                direction=None,
+                direction_group=group,
             ))
 
         if not observations:
@@ -358,6 +369,7 @@ class AuctionSnapshotAdapter:
             group, unmapped = _auction_group(row)
             if unmapped:
                 counters["unmapped_level"] += 1
+            auction = signal_adapter.auction_signal(row)
             quality = row.get("data_quality")
             status = quality.get("status") if isinstance(quality, Mapping) else None
             observations.append(DecisionObservation(
@@ -373,6 +385,8 @@ class AuctionSnapshotAdapter:
                 level=_text_or_none(row.get("level")),
                 veto=row.get("is_weak") is True,
                 data_quality_status=_text_or_none(status),
+                direction=auction["direction"],
+                direction_group=auction["direction"],
             ))
         return SnapshotDay(snapshot_date, None, None, tuple(observations), counters)
 
@@ -577,6 +591,7 @@ def _ledger_row(observation: DecisionObservation, horizon: int,
         "code": observation.code,
         "name": observation.name,
         "group": observation.group,
+        "direction_group": observation.direction_group,
         "expected_direction": expected_direction,
         "available_at": observation.available_at,
         "horizon": horizon,
@@ -721,6 +736,37 @@ def _assemble(*, adapter, date_from: str, date_to: str, horizons: list[int],
         })
         group_lookup[spec.key] = horizon_map
 
+    direction_specs = DIRECTION_GROUP_SPECS[adapter.source]
+    direction_groups: list[dict] = []
+    for spec in direction_specs:
+        horizon_map: dict[str, dict] = {}
+        for horizon in horizons:
+            rows = [row for row in ledger
+                    if row.get("direction_group") == spec.key
+                    and row["horizon"] == horizon]
+            horizon_map[str(horizon)] = _aggregate_horizon(
+                rows, spec.expected_direction, horizon, min_days,
+                min_group_samples)
+        direction_groups.append({
+            "group": spec.key,
+            "label": spec.label,
+            "expected_direction": spec.expected_direction,
+            "horizons": horizon_map,
+        })
+    axes: dict[str, int] = {}
+    for observation in [obs for day in days for obs in day.observations]:
+        direction = observation.direction or (
+            "recommended" if observation.group == "recommended"
+            else "not_recommended" if observation.group == "not_recommended"
+            else "unknown")
+        axes[direction] = axes.get(direction, 0) + 1
+        if observation.veto:
+            axes["vetoed"] = axes.get("vetoed", 0) + 1
+        if observation.level in ("强", "中", "弱"):
+            key = {"强": "strong", "中": "medium", "弱": "weak"}[
+                observation.level]
+            axes[key] = axes.get(key, 0) + 1
+
     pair = SPREAD_PAIRS[adapter.source]
     spreads: dict[str, dict] = {}
     for horizon in horizons:
@@ -790,6 +836,10 @@ def _assemble(*, adapter, date_from: str, date_to: str, horizons: list[int],
             "unsupported_units": unsupported,
         },
         "groups": groups,
+        "groups_basis": ("prep_recommendation" if adapter.source == "prep"
+                          else "legacy_level_effect"),
+        "direction_groups": direction_groups,
+        "axes": dict(sorted(axes.items())),
         "spreads": spreads,
         "exclusions": {
             "sample": sample_exclusions,

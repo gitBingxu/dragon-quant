@@ -25,6 +25,7 @@ python -m dragon_quant                    # 不带子命令只打印帮助（exi
 python -m dragon_quant scan --top 25 --candidates 5 --workers 2
 python -m dragon_quant scan --date 20260519 --top 5   # 只读历史扫描记录，不触网
 python -m dragon_quant prep               # 盘后复盘
+python -m dragon_quant dashboard          # 本地可视化面板（[web] 可选依赖）
 ```
 
 [README](README.md) 只保留项目定位、核心链路与 `scan` / `review` 快速使用；完整命令与参数以各命令 `-h` 为准，本文不重复第二份。
@@ -36,7 +37,7 @@ python -m dragon_quant prep               # 盘后复盘
 ## 必须遵守的约束
 
 - **存储惰性初始化（B1）**：`import dragon_quant` / `import dragon_quant.infra.storage.paths` / `-h` / `-v` **不得创建**任何数据目录、`dragon.db` / `assets.db`、WAL/SHM、缓存、报告或 Cookie 文件；包根 `scan` / `run_review` 为 PEP 562 惰性导出。首次真实存储访问（`infra.storage.connection._connect`、`infra.assets.db._connect(create=True)`、`app.ensure_storage`、扫描报告写入、`DataCache` 落盘）才按 `DQ_DATA_DIR` 幂等建目录与 schema；`connection._connect` 首次连接带锁建 schema（失败不置 ready，可重试），`init_db()` 保持公开幂等 API。
-- **运行时依赖**：`playwright`（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）为必选；`tmdx`（通达信 TDX 首选数据链路）为**默认依赖**（`pip install dragon-quant` 自动安装；缺失时每次 CLI 命令除 -h/--help/-v/--version 在 stderr 提示补装）。新增第三方依赖不受限，但须满足：许可证与 MIT 兼容、包仍活跃维护、引入时同步更新本段与 README 的依赖说明。注意 `tmdx` 自身已硬依赖 pandas/numpy（传递安装在 venv 中，项目代码不直接 import）。项目要求 Python≥3.10。
+- **运行时依赖**：`playwright`（Cookie 自动获取 + 浏览器辅助；chromium 内核首次 `cookie-fetch` 时自动下载，走国内镜像）为必选；`tmdx`（通达信 TDX 首选数据链路）为**默认依赖**（`pip install dragon-quant` 自动安装；缺失时每次 CLI 命令除 -h/--help/-v/--version 在 stderr 提示补装）。新增第三方依赖不受限，但须满足：许可证与 MIT 兼容、包仍活跃维护、引入时同步更新本段与 README 的依赖说明。**`[web]` 可选 extra**（`fastapi>=0.162` MIT / `uvicorn>=0.54` BSD-3）仅 `dashboard` 使用，未装不影响其它命令；`dev` extra 另含 `httpx` 供 TestClient。注意 `tmdx` 自身已硬依赖 pandas/numpy（传递安装在 venv 中，项目代码不直接 import）。项目要求 Python≥3.10。
 - **跨平台**：数据目录用 `DQ_DATA_DIR` 覆盖，默认按平台存。
 - **线程安全**：DataCache 操作持 `threading.Lock`；DB 每次操作独立连接 + WAL。
 - **历史兼容**：旧 `*_v1` 表可显式查询；新扫描固定使用 `scan/scores/` 与 `*_v2` 表，不再保留旧四维评分代码。
@@ -55,6 +56,7 @@ python -m dragon_quant prep               # 盘后复盘
 | [scan](docs/agent/scan.md) | 改 `scan` 编排或五维评分器、cache 键、板块口径、数据源与回退、扫描侧表 | Phase A–F / 数据模型 / 评分器契约 / cache 键 / v2 分表 |
 | [review](docs/agent/review.md) | 改龙头回测、双口径、严格口径侧表、回测 Web UI 的 API 与指标卡片 | 双口径规则 / 严格侧表 / Web UI 汇总契约 |
 | [trading](docs/agent/trading.md) | 改 `review-account` / `buy` / `sell`、候选池消费、数据分级、信号表、`/account` API、费用与评估 | 账户与实盘的产品/运维契约 |
+| [bs_eval](docs/agent/bs_eval.md) | 改 `bs-eval`、`bs_*` 表、`/bs` 页、`/api/bs/*`、买卖点回放与窗口聚合口径 | `bs-eval` 命令 / 状态机 / 幂等 / 聚合 / 只读 API 契约 |
 | [prep-auction](docs/agent/prep-auction.md) | 改 `prep` 复盘、`auction` 竞价、快照口径、`prep_*` / `auction_*` 资产 | 两段式 / 时点门禁 / 资产类型 / 快照与竞价口径 |
 | [premarket](docs/agent/premarket.md) | 改 `premarket`、盘前只读上下文、三锚/行动上限、盘前 JSON 契约 | 只读语义 / 严格 T-1 / 降级原因码 / 行动上限 |
 | [assets](docs/agent/assets.md) | 改 `assets push/pull/status/verify`、分区与水位、恢复回填、`dragons` 镜像 | 同步运维语义 / 分区 / 水位 / 恢复 / 退出码 |
@@ -111,7 +113,7 @@ python -m dragon_quant prep               # 盘后复盘
 npm test
 ```
 - **E2E 安全边界**：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，每命令在独立临时根下运行并隔离网络 / Cookie / 云端；真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射与 golden**：`coverage-map.json` 固定 53 个 parser 节点 / 15 个顶层命令，新增命令必须同步；golden 只在批准的行为变更时更新，结构重构不得改 golden。
+- **覆盖映射与 golden**：`coverage-map.json` 固定 57 个 parser 节点 / 18 个顶层命令，新增命令必须同步；golden 只在批准的行为变更时更新，结构重构不得改 golden。
 - 细则（哨兵比对、fake provider 注入、打包边界）见 [development](docs/agent/development.md)。
 
 ### Git 规范

@@ -1,12 +1,39 @@
-"""账户级回测用例实现（公共入口见 :mod:`dragon_quant.review_account.main`）。"""
+"""账户级回测用例实现（公共入口见 :mod:`dragon_quant.review_account.main`）。
 
+包含两条用例：全量回测 :func:`run_review_account` 与增量续算
+:func:`run_incremental_review_account`。二者共用同一落库管线
+:func:`_persist_result`，避免两条持久化路径漂移；买卖/成交规则仍全部由
+``AccountSimulator`` / ``TradingEngine`` 复用，本模块只做编排与状态恢复。
+"""
+
+import copy
 import json
+from dataclasses import asdict, fields
 from typing import Optional
 
+from dragon_quant.infra import clock
 from . import storage as account_store
-from dragon_quant.review_account.models import StrategyConfig
+from dragon_quant.review_account.models import AccountState, Position, StrategyConfig
+# 导入顺序：strategy.priority 先于 market/data，避免既有
+# ``market ↔ strategy.buy`` 的循环导入在部分初始化阶段取不到 ``bar_times``。
 from dragon_quant.review_account.strategy.priority import RANKING_MODE_LABELS
+from dragon_quant.review_account.data import MarketData
+from dragon_quant.review_account.market import SHANGHAI, calendar_start
 from dragon_quant.review_account.simulator import AccountSimulator, annotate_post_exit
+
+# 恢复基准持仓时的字段白名单（= Position 的全部字段）。
+_POSITION_FIELDS = frozenset(f.name for f in fields(Position))
+
+_ERR_POSITIONS_UNPARSABLE = "基准记录持仓明细无法解析，请重新生成基准记录"
+_ERR_POSITIONS_LEGACY = "基准记录快照缺少持仓明细（旧数据），请重新生成基准记录"
+_ERR_BASE_MISSING = "基准记录不存在，无法增量续算"
+_ERR_STRATEGY_PARAMS = "基准记录缺少可用的策略参数快照，无法增量续算"
+_ERR_INITIAL_CASH = "基准记录初始资金无效，无法增量续算"
+_ERR_SNAPSHOTS_MISSING = "基准记录缺少每日快照，无法增量续算"
+_ERR_SNAPSHOT_MISMATCH = "基准记录快照与结束日期不一致，数据不完整"
+_ERR_EQUITY_INVALID = "基准记录最终权益无效，无法增量续算"
+_ERR_SOURCE_NOT_V2 = "仅支持对 v2 回测记录做增量"
+_ERR_SNAPSHOT_END = "增量日历与行情快照不一致（终点 {expected}，最后快照 {actual}），请重试"
 
 
 def _xueqiu_from_services(services):
@@ -48,10 +75,304 @@ def run_review_account(date_from: str,
     # 事后评估：清仓后窗口指标。放在 run() 之外，回测核心保持纯 as-of；失败逐条降级。
     annotate_post_exit(result["positions"], sim.data)
 
-    run_id = account_store.create_review_account_run(
+    run_id = _persist_result(
+        result,
         source=source,
         strategy_name=strategy_name,
         strategy_params_json=json.dumps(cfg.to_json_dict(), ensure_ascii=False),
+        date_from=date_from,
+        date_to=date_to,
+        display_name=display_name,
+        start_positions=[],
+        start_realized_pnl=0.0,
+        start_cash=initial_cash,
+        start_peak_equity=initial_cash,
+        start_consecutive_losses=0,
+        start_marks={},
+        attribution_quality="full_run",
+    )
+    result["run_id"] = run_id
+    result["display_name"] = display_name
+
+    if verbose:
+        _print_summary(result, source, strategy_name)
+    return result
+
+
+def run_incremental_review_account(base_run_id: int, *,
+                                   verbose: bool = True,
+                                   services=None) -> dict:
+    """在基准 run 的最后收盘状态上续算到最近已收盘交易日。
+
+    基准记录只读：恢复入口 ``restore_incremental_seed`` 是纯函数（快照/已平仓
+    行由调用方传入），模拟器只接受注入的初始状态与收益率分母。任何状态口径
+    不满足完整性校验都抛 ``ValueError``（Web 层映射 400），绝不回落到「当前
+    默认配置」或用未来数据。
+    """
+    try:
+        base = account_store.get_review_account_run(base_run_id)
+    except ValueError as exc:  # strategy_params_json 坏行 → 域错误而非 500
+        raise ValueError(_ERR_STRATEGY_PARAMS) from exc
+    if base is None:
+        raise ValueError(_ERR_BASE_MISSING)
+
+    source = base.get("source") or "v2"
+    if source != "v2":
+        raise ValueError(_ERR_SOURCE_NOT_V2)
+
+    initial_cash = base.get("initial_cash")
+    if initial_cash is None or initial_cash <= 0:
+        raise ValueError(_ERR_INITIAL_CASH)
+
+    params = base.get("strategy_params")
+    if not isinstance(params, dict) or not params:
+        raise ValueError(_ERR_STRATEGY_PARAMS)
+    try:
+        # 冻结基准策略快照：不使用当前默认配置，也不允许缺字段静默回落。
+        cfg = StrategyConfig.from_dict({
+            **params,
+            "source": source,
+            "strategy_name": base.get("strategy_name") or "",
+            "initial_cash": initial_cash,
+        })
+    except (TypeError, ValueError) as exc:
+        raise ValueError(_ERR_STRATEGY_PARAMS) from exc
+
+    try:
+        snapshots = account_store.query_review_account_snapshots(base_run_id)
+    except ValueError as exc:  # positions_json 解析失败：旧数据坏行 → 400 而非 500
+        raise ValueError(_ERR_POSITIONS_UNPARSABLE) from exc
+    closed_rows = account_store.query_review_account_closed_positions(base_run_id)
+    seed = restore_incremental_seed(base, snapshots, closed_rows)
+
+    data = MarketData(provider=_xueqiu_from_services(services))
+    date_from, date_to = resolve_incremental_window(data, cfg, base["date_to"])
+
+    # 运行前深冻结期初持仓：模拟器会原地修改 Position，保存的 start_* 必须
+    # 是真正的期初状态（main R3），不能等 run 结束后再序列化同一批对象。
+    start_positions_snapshot = [asdict(p) for p in seed["state"].positions]
+    sim = AccountSimulator(cfg, data=data,
+                           initial_state=copy.deepcopy(seed["state"]),
+                           base_equity=seed["base_equity"],
+                           peak_equity=seed["peak_equity"],
+                           start_realized_pnl=seed["start_realized_pnl"])
+    result = sim.run(date_from, date_to)
+    _assert_snapshot_end(result, date_to)
+    annotate_post_exit(result["positions"], sim.data)
+
+    base_label = base.get("display_name") or f"{base['date_from']} ~ {base['date_to']}"
+    display_name = f"{base_label} · 增量 {date_from}"
+    run_id = _persist_result(
+        result,
+        source=source,
+        strategy_name=cfg.strategy_name,
+        strategy_params_json=json.dumps(cfg.to_json_dict(), ensure_ascii=False),
+        date_from=date_from,
+        date_to=date_to,
+        display_name=display_name,
+        base_equity=seed["base_equity"],
+        base_run_id=base_run_id,
+        start_positions=start_positions_snapshot,
+        start_realized_pnl=seed["start_realized_pnl"],
+        start_cash=seed["state"].cash,
+        start_peak_equity=seed["state"].peak_equity,
+        start_consecutive_losses=seed["state"].consecutive_losses,
+        start_marks={p.code: p.mark for p in seed["state"].positions
+                     if p.mark is not None},
+        attribution_quality=seed["attribution_quality"],
+    )
+    result["run_id"] = run_id
+    result["display_name"] = display_name
+    result["base_equity"] = seed["base_equity"]
+
+    if verbose:
+        _print_summary(result, source, cfg.strategy_name)
+    return result
+
+
+def restore_incremental_seed(base_run: dict,
+                             snapshots: list[dict],
+                             closed_rows: list[dict]) -> dict:
+    """从基准 run 的已落库状态恢复增量续算种子（纯函数，不读写数据库）。
+
+    返回 ``{"state": AccountState, "base_equity": float, "peak_equity": float}``。
+    任一完整性校验失败抛 ``ValueError``（中文域错误，Web 层直接展示）。
+    """
+    if not snapshots:
+        raise ValueError(_ERR_SNAPSHOTS_MISSING)
+    last = snapshots[-1]
+    if last.get("trade_date") != base_run.get("date_to"):
+        raise ValueError(_ERR_SNAPSHOT_MISMATCH)
+
+    cash = last.get("cash")
+    total_equity = last.get("total_equity")
+    if cash is None or total_equity is None or total_equity <= 0:
+        raise ValueError(_ERR_EQUITY_INVALID)
+
+    market_value = last.get("market_value") or 0
+    positions = _restore_positions(last.get("positions"))
+    if not positions and market_value > 0:
+        # 旧数据缺持仓明细时静默续算会丢掉真实持仓，必须拒绝。
+        raise ValueError(_ERR_POSITIONS_LEGACY)
+
+    peak_equity = _restore_peak(snapshots, total_equity)
+    # 冻结本段期初状态：继承持仓以期初盯市价值为归因成本基准。
+    single_mark = last.get("position_market_price")
+    legacy_mark = 0
+    for p in positions:
+        p.inherited = True
+        p.period_start_qty = p.qty
+        mark = p.mark
+        if mark is None and len(positions) == 1 and single_mark is not None:
+            mark = single_mark
+        if mark is None:
+            legacy_mark += 1
+            mark = p.entry_price
+        p.period_start_mark = mark
+        p.period_start_realized_pnl = p.realized_pnl
+        p.period_start_cost = p.cost
+
+    state = AccountState(
+        cash=cash,
+        positions=positions,
+        consecutive_losses=_consecutive_losses(closed_rows),
+        peak_equity=peak_equity,
+    )
+    return {
+        "state": state,
+        "base_equity": total_equity,
+        "peak_equity": peak_equity,
+        "start_realized_pnl": _start_realized_pnl(base_run),
+        # 旧快照无盯市价 → 期初价值只能是近似（明示，不冒充精确）。
+        "attribution_quality": ("legacy_approximation"
+                                if legacy_mark else "precise"),
+    }
+
+
+def _start_realized_pnl(base_run: dict) -> float:
+    """基准 run 的累计已实现盈亏（新元数据）；旧 run 缺失按 0 起算并标记。"""
+    meta = base_run.get("run_meta")
+    if isinstance(meta, dict):
+        value = meta.get("realized_pnl_total")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return 0.0
+
+
+def resolve_incremental_window(data, cfg: StrategyConfig,
+                               base_date_to: str) -> tuple[str, str]:
+    """增量区间 = 基准结束日之后、最近已收盘交易日（含）的交易日序列首尾。
+
+    ``MarketData.calendar`` 已实现「当日 15:05 前不含当日」，与 BS 回放同口径；
+    区间为空时抛中文域错误（400）。
+    """
+    today = clock.now(SHANGHAI).strftime("%Y-%m-%d")
+    days = data.calendar(calendar_start(base_date_to, cfg.candidate_lookback_days), today)
+    future = [d for d in days if d > base_date_to]
+    if not future:
+        raise ValueError(f"基准记录已覆盖最近已收盘交易日（{base_date_to}），无新增数据")
+    return future[0], future[-1]
+
+
+def _assert_snapshot_end(result: dict, expected: str) -> None:
+    """落库前校验行情覆盖：最后一条快照必须落在解析出的增量终点。
+
+    区间解析与 ``sim.run`` 各自取一次日历；若两次取数之间数据源异常变短，
+    落库后 run.date_to 会大于实际快照日期，导致下一次增量被完整性校验拒绝。
+    这里在写任何 run/快照/交割单之前直接以中文域错误中止。
+    """
+    snapshots = result.get("snapshots") or []
+    actual = snapshots[-1].trade_date if snapshots else "无"
+    if actual != expected:
+        raise ValueError(_ERR_SNAPSHOT_END.format(expected=expected, actual=actual))
+
+
+def _restore_positions(raw_positions) -> list[Position]:
+    """``positions_json`` → ``Position`` 全字段还原；坏行/字段漂移 → 400。"""
+    if raw_positions is None:
+        return []
+    if not isinstance(raw_positions, list):
+        raise ValueError(_ERR_POSITIONS_UNPARSABLE)
+    positions = []
+    for item in raw_positions:
+        if not isinstance(item, dict) or set(item) - _POSITION_FIELDS:
+            raise ValueError(_ERR_POSITIONS_UNPARSABLE)
+        try:
+            positions.append(Position(**item))
+        except TypeError as exc:
+            raise ValueError(_ERR_POSITIONS_UNPARSABLE) from exc
+    return positions
+
+
+def _restore_peak(snapshots: list[dict], fallback: float) -> float:
+    """失败峰值恢复：快照权益最大值 ∪ 由 ``drawdown`` 反推的峰值。
+
+    对首代全量基准二者逐值相同；链式增量时基准 run 的峰值由更早 run 继承，
+    只取快照权益最大值会「洗掉」历史峰值，用 ``drawdown = equity / peak - 1``
+    反推可精确还原且不新增列。
+    """
+    peaks: list[float] = []
+    for snap in snapshots:
+        equity, drawdown = snap.get("total_equity"), snap.get("drawdown")
+        if isinstance(equity, (int, float)) and not isinstance(equity, bool):
+            peaks.append(float(equity))
+        if (isinstance(equity, (int, float)) and not isinstance(equity, bool)
+                and isinstance(drawdown, (int, float)) and not isinstance(drawdown, bool)):
+            denominator = 1 + drawdown / 100
+            if denominator > 0:
+                peaks.append(equity / denominator)
+    return max(peaks) if peaks else fallback
+
+
+def _consecutive_losses(closed_rows: list[dict]) -> int:
+    """已平仓记录尾部连续亏损笔数（``None`` 停止计数，不臆造亏损）。"""
+    streak = 0
+    for row in reversed(list(closed_rows or [])):
+        realized = row.get("realized_return")
+        if realized is None or realized >= 0:
+            break
+        streak += 1
+    return streak
+
+
+def _persist_result(result: dict, *,
+                    source: str,
+                    strategy_name: str,
+                    strategy_params_json: str,
+                    date_from: str,
+                    date_to: str,
+                    display_name: Optional[str],
+                    base_equity: Optional[float] = None,
+                    base_run_id: Optional[int] = None,
+                    start_positions: Optional[list[dict]] = None,
+                    start_realized_pnl: float = 0.0,
+                    start_cash: Optional[float] = None,
+                    start_peak_equity: Optional[float] = None,
+                    start_consecutive_losses: Optional[int] = None,
+                    start_marks: Optional[dict] = None,
+                    attribution_quality: str = "full_run") -> int:
+    """全量 / 增量共用的落库管线（Template Method，行为与原全量路径逐位一致）。"""
+    run_meta = {
+        "data_quality": result.get("data_quality"),
+        "fallback_days": result.get("fallback_days"),
+        "total_days": result.get("total_days"),
+        "ranking_mode": result.get("ranking_mode"),
+        "pool_sources": result.get("pool_sources") or {},
+        "fallback_reasons": result.get("fallback_reasons") or {},
+        "priority_degraded": result.get("priority_degraded") or [],
+        "suspended_days_count": result.get("suspended_days_count"),
+        "suspended_codes": result.get("suspended_codes") or [],
+        "data_degraded": result.get("data_degraded") or [],
+        "strategy_name": strategy_name,
+        "initial_cash": result["initial_cash"],
+        "base_equity": base_equity if base_equity is not None else result["initial_cash"],
+        "realized_pnl_total": result.get("realized_pnl_total"),
+        "attribution_quality": attribution_quality,
+    }
+    run_id = account_store.create_review_account_run(
+        source=source,
+        strategy_name=strategy_name,
+        strategy_params_json=strategy_params_json,
         date_from=date_from,
         date_to=date_to,
         initial_cash=result["initial_cash"],
@@ -61,6 +382,17 @@ def run_review_account(date_from: str,
         trade_count=result["trade_count"],
         win_rate=result["win_rate"],
         display_name=display_name,
+        base_equity=base_equity,
+        base_run_id=base_run_id,
+        start_equity=(base_equity if base_equity is not None
+                      else result["initial_cash"]),
+        start_positions_json=json.dumps(start_positions or [], ensure_ascii=False),
+        start_realized_pnl=start_realized_pnl,
+        start_cash=start_cash,
+        start_peak_equity=start_peak_equity,
+        start_consecutive_losses=start_consecutive_losses,
+        start_marks_json=json.dumps(start_marks or {}, ensure_ascii=False),
+        run_meta_json=json.dumps(run_meta, ensure_ascii=False),
     )
     account_store.save_review_account_results(
         run_id,
@@ -85,12 +417,7 @@ def run_review_account(date_from: str,
             for e in result.get("events", [])
         ],
     )
-    result["run_id"] = run_id
-    result["display_name"] = display_name
-
-    if verbose:
-        _print_summary(result, source, strategy_name)
-    return result
+    return run_id
 
 
 def _print_summary(result: dict, source: str, strategy_name: str):

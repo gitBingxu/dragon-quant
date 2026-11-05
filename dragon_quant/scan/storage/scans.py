@@ -233,7 +233,8 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
             "  ss.code, ss.name, ss.rank, ss.composite_score, ss.board_count, "
             "  ss.concepts_json, ss.report_text, "
             "  ss.open_px, ss.close_px, ss.high_px, ss.low_px, ss.pct, "
-            "  ss.turnover_rate, ss.amount, ss.market_cap, ss.is_true_dragon "
+            "  ss.turnover_rate, ss.amount, ss.market_cap, ss.is_true_dragon, "
+            "  ss.reject_reason "
             f"FROM {t['scans']} s "
             f"JOIN {t['scan_stocks']} ss ON ss.scan_id = s.id "
             "WHERE s.scan_date = ?",
@@ -262,6 +263,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
                 "amount": r[16],
                 "market_cap": r[17],
                 "is_true_dragon": bool(r[18]) if r[18] is not None else None,
+                "reject_reason": r[19],
                 "source": source,
             })
         return result
@@ -309,6 +311,39 @@ def has_scan(scan_id: str, source: str = "v2") -> bool:
         t = _tables(source)
         row = conn.execute(f"SELECT 1 FROM {t['scans']} WHERE id = ?", (scan_id,)).fetchone()
         return row is not None
+    finally:
+        conn.close()
+
+
+def summarize_scan_stocks(scan_ids: list[str], source: str = "v2") -> dict[str, dict]:
+    """批量聚合 ``scan_stocks``：``{scan_id: {stock_n, true_dragon_n}}``（只读）。
+
+    列表页一次查询拿到当日榜单规模与真龙数，避免逐行 N+1（方案 §5.6）。
+    不存在的 scan_id 不出现在结果里，由调用方按 ``None`` / 0 处理。
+    """
+    ids = [str(scan_id) for scan_id in (scan_ids or []) if scan_id]
+    if not ids:
+        return {}
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            "SELECT scan_id, COUNT(*), "
+            "SUM(CASE WHEN is_true_dragon = 1 THEN 1 ELSE 0 END) "
+            f"FROM {t['scan_stocks']} WHERE scan_id IN ({placeholders}) "
+            "GROUP BY scan_id",
+            ids,
+        ).fetchall()
+        return {
+            row[0]: {
+                "stock_n": int(row[1] or 0),
+                "true_dragon_n": int(row[2] or 0),
+            }
+            for row in rows
+        }
     finally:
         conn.close()
 

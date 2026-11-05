@@ -227,6 +227,31 @@ def _run_backfill(args) -> AssetsOutcome:
     return AssetsOutcome(command, result, exit_code)
 
 
+def _run_backfill_stock_daily(args, services) -> AssetsOutcome:
+    """``assets backfill-stock-daily``：本地日 K 回填（非 dry-run 才需要 tdx）。
+
+    参数/环境失败（含非法 code、``--days`` 越界、无 assets.db、无 provider）→ exit 2；
+    transport/写库失败 → exit 1；其余 exit 0。
+    """
+
+    from dragon_quant.infra.assets.stock_daily_backfill import backfill_stock_daily
+
+    command = "assets backfill-stock-daily"
+    try:
+        result = backfill_stock_daily(args, services)
+    except Exception as exc:  # 未预期错误按环境错误处理（不吞成成功）
+        return AssetsOutcome(
+            command, {"ok": False, "command": command,
+                      "failed": [{"reason": f"{type(exc).__name__}: {exc}",
+                                  "kind": "env"}]}, 2, completed=False)
+
+    fatal = any(isinstance(item, dict)
+                and item.get("kind") in ("args", "env")
+                for item in result.get("failed") or [])
+    exit_code = 2 if fatal else (0 if result.get("ok") else 1)
+    return AssetsOutcome(command, result, exit_code)
+
+
 def _run_purge_derived(args) -> AssetsOutcome:
     """``assets purge-derived``：默认 dry-run；``--apply --yes`` 单事务删除。
 
@@ -295,13 +320,16 @@ def run(action, args, *, backend=None, services=None) -> AssetsOutcome:
     """执行一个 assets 动作并返回 JSON 载荷 + 退出码。
 
     ``backend`` 为 None 时按 ``--profile``/``--timeout`` 构造 ``S3Backend``；
-    注入后覆盖 doctor/push/pull/status/verify（``backfill-dragons`` 纯本地，
-    不使用后端）。``services`` 目前仅保留组合根注入位，未参与装配。
+    注入后覆盖 doctor/push/pull/status/verify（``backfill-dragons`` / ``purge-derived``
+    纯本地，不使用后端）。``services`` 供 ``backfill-stock-daily`` 取 ``tdx``；
+    只有该动作且非 ``--dry-run`` 才会构造 provider。
     """
     if action == "purge-derived":
         return _run_purge_derived(args)
     if action == "backfill-dragons":
         return _run_backfill(args)
+    if action == "backfill-stock-daily":
+        return _run_backfill_stock_daily(args, services)
     if action in SYNC_ACTIONS:
         return _run_sync(action, args, backend)
     if action == "doctor":

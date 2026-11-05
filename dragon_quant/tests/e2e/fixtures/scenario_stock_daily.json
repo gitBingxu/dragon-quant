@@ -1,0 +1,74 @@
+{
+  "now": "2026-10-21T18:30:00+08:00",
+  "trade_date": "2026-10-21",
+  "providers": {
+    "tdx": {
+      "batch_get_daily_klines": {
+        "600001": [
+          {
+            "timestamp": 1792393200000,
+            "volume": 10000.0,
+            "open": 9.95,
+            "high": 10.1,
+            "low": 9.9,
+            "close": 10.0,
+            "chg": 0.01,
+            "pct": 0.1,
+            "turnover": 1.0,
+            "amount": 10000000.0
+          },
+          {
+            "timestamp": 1792479600000,
+            "volume": 10000.0,
+            "open": 10.0,
+            "high": 10.2,
+            "low": 9.95,
+            "close": 10.1,
+            "chg": 0.1,
+            "pct": 1.0,
+            "turnover": 1.1,
+            "amount": 11000000.0
+          },
+          {
+            "timestamp": 1792566000000,
+            "volume": 10000.0,
+            "open": 10.1,
+            "high": 10.3,
+            "low": 10.0,
+            "close": 10.2,
+            "chg": 0.1,
+            "pct": 1.0,
+            "turnover": 1.2,
+            "amount": 12000000.0
+          }
+        ],
+        "600002": [
+          {
+            "timestamp": 1792479600000,
+            "volume": 20000.0,
+            "open": 20.0,
+            "high": 20.4,
+            "low": 19.8,
+            "close": 20.2,
+            "chg": 0.2,
+            "pct": 1.0,
+            "turnover": 2.0,
+            "amount": 20000000.0
+          },
+          {
+            "timestamp": 1792566000000,
+            "volume": 20000.0,
+            "open": 20.2,
+            "high": 20.6,
+            "low": 20.1,
+            "close": 20.5,
+            "chg": 0.3,
+            "pct": 1.5,
+            "turnover": 2.1,
+            "amount": 21000000.0
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,257 @@
+import { getJson, qs } from "./client";
+
+// ─── 前端固定 v2：旧 ?source=v1 深链忽略 query，页面不产生 v1 请求 ─────────
+export const DRAGON_SOURCE = "v2" as const;
+
+export interface DragonPreview {
+  code: string;
+  name: string;
+  rank: number | null;
+  composite_score: number | null;
+  is_true_dragon: boolean | null;
+}
+
+export interface DragonDateEntry {
+  trade_date: string;
+  count: number;
+  preview: DragonPreview[];
+  /** 全量（同一排序）；旧后端缺失时前端回退 preview。 */
+  items?: DragonPreview[];
+}
+
+export interface Dims {
+  drive: number | null;
+  leadership: number | null;
+  anti_drop: number | null;
+  liquidity: number | null;
+  absorption: number | null;
+}
+
+export interface ReviewFields {
+  buy_date: string | null;
+  buy_price: number | null;
+  max_return_5d: number | null;
+  max_drawdown_5d: number | null;
+  max_return_hold_days: number | null;
+  review_status: string | null;
+}
+
+export interface DragonDetail {
+  trade_date: string;
+  code: string;
+  name: string;
+  source: string;
+  scan_id: string | null;
+  rank: number | null;
+  composite_score: number | null;
+  board_count: number | null;
+  concepts: string[];
+  report_text: string;
+  is_true_dragon: boolean | null;
+  quote: Record<string, number | null>;
+  review_loose: ReviewFields;
+  review_strict: ReviewFields | null;
+  derived_status: string | null;
+  caliber: string;
+  dims: Dims | null;
+  dims_source: "scan_stocks" | "scan_stocks_missing" | "scan_missing";
+  reject_reason: string | null;
+  strict_tradable_open?: {
+    status: string;
+    reason?: string | null;
+    entry_date?: string | null;
+    entry_price?: number | null;
+    horizons?: Record<string, {
+      status: string;
+      exit_date?: string | null;
+      net_return_pct?: number | null;
+    }>;
+  } | null;
+}
+
+export function fetchDragonTradeDates(limit = 5) {
+  return getJson<{ data: DragonDateEntry[]; count: number }>(
+    `/api/dragons/trade-dates${qs({ source: DRAGON_SOURCE, limit })}`
+  );
+}
+
+export function fetchDragonDetail(tradeDate: string, code: string, caliber?: string) {
+  return getJson<DragonDetail>(
+    `/api/dragons/${encodeURIComponent(tradeDate)}/${encodeURIComponent(code)}` +
+      qs({ source: DRAGON_SOURCE, caliber })
+  );
+}
+
+// ─── 入选后表现（宽松口径，至最新有效日 K） ────────────────────────────────
+
+export type PerformanceStatus = "ok" | "no_entry" | "empty_window" | "error";
+
+export interface DragonPerformance {
+  trade_date: string;
+  code: string;
+  caliber: "loose";
+  status: PerformanceStatus;
+  as_of: string;
+  buy_date: string | null;
+  buy_price: number | null;
+  max_return_since_entry: number | null;
+  max_drawdown_since_entry: number | null;
+  peak_date: string | null;
+  latest_bar_date: string | null;
+  bars_in_window: number | null;
+  bars_after_entry: number | null;
+  error: string | null;
+}
+
+export function fetchDragonPerformance(tradeDate: string, code: string, asOf?: string) {
+  return getJson<DragonPerformance>(
+    `/api/dragons/${encodeURIComponent(tradeDate)}/${encodeURIComponent(code)}/performance` +
+      qs({ as_of: asOf })
+  );
+}
+
+// ─── 龙头总览（冻结的 /api/dragons 契约） ──────────────────────────────────
+
+/** Review 口径：strict=严格（首个交易日开盘价买入），loose=宽松（旧口径）。 */
+export type ReviewCaliber = "strict" | "loose";
+
+export interface Dragon {
+  source: "v1" | "v2";
+  trade_date: string;
+  code: string;
+  name: string;
+  scan_id: string;
+  rank: number | null;
+  composite_score: number | null;
+  board_count: number | null;
+  open_px: number | null;
+  close_px: number | null;
+  high_px: number | null;
+  low_px: number | null;
+  pct: number | null;
+  turnover_rate: number | null;
+  amount: number | null;
+  market_cap: number | null;
+  concepts: string[];
+  report_text: string;
+  is_true_dragon: boolean | null;
+  buy_date: string | null;
+  buy_price: number | null;
+  max_return_5d: number | null;
+  max_drawdown_5d: number | null;
+  max_return_hold_days: number | null;
+  review_status: string | null;
+  version: string;
+  // 严格口径（入选后首个交易日按开盘价买入）；v1 为 null。
+  strict_buy_date: string | null;
+  strict_buy_price: number | null;
+  strict_max_return_5d: number | null;
+  strict_max_drawdown_5d: number | null;
+  strict_max_return_hold_days: number | null;
+  strict_review_status: string | null;
+  strict_review_reason: string | null;
+  /** 可成交研究口径（tradable_open_v1）：T+1 开盘、固定 1/3/5 日、扣成本。 */
+  strict_tradable_open?: {
+    status: string;
+    reason?: string | null;
+    entry_date?: string | null;
+    entry_price?: number | null;
+    horizons?: Record<string, {
+      status: string;
+      exit_date?: string | null;
+      net_return_pct?: number | null;
+    }>;
+  } | null;
+  strict_reviewed: boolean;
+  // 服务端统一派生状态（completed / pending / pending_recompute /
+  // cannot_evaluate / error）；v1 等于旧 review_status。
+  derived_status?: string | null;
+}
+
+export interface Summary {
+  source: "v1" | "v2";
+  // 旧键：宽松口径兼容。
+  total: number;
+  completed: number;
+  pending: number;
+  avg_return: number | null;
+  win_rate: number | null;
+  best_stock_code: string | null;
+  best_stock_name: string | null;
+  best_return: number | null;
+  // 双口径 / 重算进度。
+  avg_return_strict: number | null;
+  win_rate_loose: number | null;
+  win_rate_strict: number | null;
+  win_rate_loose_n: number;
+  win_rate_strict_n: number;
+  cannot_evaluate: number;
+  /** 窗口不完整（可展示，不入正式分母）。 */
+  partial?: number;
+  /** 窗口不完整：收益窗口尚未走完（时间未成熟）。 */
+  partial_window?: number;
+  /** 窗口不完整：窗口内个股缺日 K（停牌/数据缺失）。 */
+  partial_missing_bars?: number;
+  pending_recompute: number;
+  failed_recompute: number;
+  best_stock_code_strict: string | null;
+  best_stock_name_strict: string | null;
+  best_return_strict: number | null;
+  derived_completed?: number;
+  /** 可回测待回测数：只统计收益窗口已走完的成熟记录。 */
+  derived_pending?: number;
+  /** 尚未成熟（等收益窗口走完）的记录数，不计入 derived_pending。 */
+  derived_pending_immature?: number;
+}
+
+export interface DragonFilters {
+  review_caliber?: ReviewCaliber;
+  code?: string;
+  name?: string;
+  date_from?: string;
+  date_to?: string;
+  score_min?: string;
+  score_max?: string;
+  return_min?: string;
+  return_max?: string;
+  drawdown_min?: string;
+  drawdown_max?: string;
+  version_min?: string;
+  version_max?: string;
+  status?: string;
+  sort_by: string;
+  sort_dir: string;
+}
+
+export async function fetchDragons(
+  filters: DragonFilters
+): Promise<{ data: Dragon[]; count: number; summary: Summary;
+  coverage?: Summary }> {
+  const params = new URLSearchParams();
+  params.set("source", DRAGON_SOURCE);
+  const keys: (keyof DragonFilters)[] = [
+    "review_caliber",
+    "code",
+    "name",
+    "date_from",
+    "date_to",
+    "score_min",
+    "score_max",
+    "return_min",
+    "return_max",
+    "drawdown_min",
+    "drawdown_max",
+    "version_min",
+    "version_max",
+    "status",
+    "sort_by",
+    "sort_dir",
+  ];
+  for (const k of keys) {
+    const v = filters[k];
+    if (v != null && String(v).trim() !== "") params.set(k, String(v).trim());
+  }
+  const res = await fetch("/api/dragons?" + params.toString());
+  if (!res.ok) throw new Error(`龙头列表加载失败（${res.status}）`);
+  return res.json();
+}

@@ -12,7 +12,7 @@ import { loadSkillPackage, readPackageVersion } from "../lib/skill-package.mjs";
 import { install, InstallerError } from "../lib/install.mjs";
 import { uninstall } from "../lib/uninstall.mjs";
 import { runDoctor } from "../lib/doctor.mjs";
-import { detectCli, compareVersions, meetsMinVersion } from "../lib/python.mjs";
+import { detectCli, compareVersions, meetsMinVersion, probeCliCapabilities } from "../lib/python.mjs";
 import { shouldPromptInstall, selectAgents } from "../lib/agent-select.mjs";
 
 const NODE_FLOOR = "22.20.0";
@@ -65,6 +65,15 @@ function detectCliSafe(pythonArg, env) {
     return detectCli({ pythonArg, env });
   } catch (err) {
     return { found: false, command: null, version: null, source: null, error: err.message };
+  }
+}
+
+function probeCapabilitiesSafe(cli, pythonArg, env) {
+  if (!cli?.found) return null;
+  try {
+    return probeCliCapabilities({ command: cli.command, pythonArg, env });
+  } catch (err) {
+    return { ok: false, found: [], missing: [], error: err.message };
   }
 }
 
@@ -391,13 +400,15 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     if (shouldInclude) targets.push({ agent, scope: otherScope, skillDir: otherDir });
   }
 
+  const cliForProbe = detectCliSafe(values.python, env);
   const report = runDoctor({
     targets,
     packageFiles: pkg.files,
     packageVersion: pkg.packageVersion,
     meta: pkg.meta,
-    detect: () => detectCliSafe(values.python, env),
+    detect: () => cliForProbe,
     projectRoot,
+    capabilities: probeCapabilitiesSafe(cliForProbe, values.python, env),
   });
 
   if (jsonMode) {

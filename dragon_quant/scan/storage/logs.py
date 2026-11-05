@@ -114,6 +114,108 @@ def list_scan_log_folders(source: str = "v2") -> list[dict]:
         conn.close()
 
 
+def get_scan_logs_page(scan_id: str, level: Optional[str] = None,
+                       offset: int = 0, limit: int = 200,
+                       source: str = "v2") -> dict:
+    """日志正文分页（``ORDER BY ts DESC``），**不返回 ``data_json``**。
+
+    返回 ``{"total": 过滤后总条数, "entries": [{ts, category, level, message, code}]}``；
+    无日志返回 ``{"total": 0, "entries": []}``，不是错误（方案 §4.1）。
+    """
+    total = count_scan_logs_filtered(scan_id, level=level, source=source)
+    if total == 0:
+        return {"total": 0, "entries": []}
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        conditions = ["scan_id = ?"]
+        params: list = [scan_id]
+        if level:
+            conditions.append("level = ?")
+            params.append(level)
+        params.extend([max(1, int(limit)), max(0, int(offset))])
+        rows = conn.execute(
+            "SELECT ts, category, level, message, code "
+            f"FROM {t['scan_logs']} WHERE {' AND '.join(conditions)} "
+            "ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?",
+            params,
+        ).fetchall()
+        return {
+            "total": total,
+            "entries": [
+                {
+                    "ts": row[0],
+                    "category": row[1] or "",
+                    "level": row[2] or "",
+                    "message": row[3] or "",
+                    "code": row[4] or "",
+                }
+                for row in rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
+def count_scan_logs_filtered(scan_id: str, level: Optional[str] = None,
+                             source: str = "v2") -> int:
+    """按级别过滤后的日志条数（分页总数；不解析 ``data_json``）。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        conditions = ["scan_id = ?"]
+        params: list = [scan_id]
+        if level:
+            conditions.append("level = ?")
+            params.append(level)
+        return conn.execute(
+            f"SELECT COUNT(*) FROM {t['scan_logs']} WHERE {' AND '.join(conditions)}",
+            params,
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def summarize_scan_logs(scan_ids: list[str], source: str = "v2") -> dict[str, dict]:
+    """批量聚合 ``scan_logs``：``{scan_id: {log_entries, error_n, first_ts, last_ts}}``。
+
+    列表页状态推导的唯一来源：无日志的 scan 不出现在结果里（调用方按 0/null 处理），
+    不逐行调用 :func:`log_summary`（方案 §5.6，避免 N+1）。
+    """
+    ids = [str(scan_id) for scan_id in (scan_ids or []) if scan_id]
+    if not ids:
+        return {}
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        source = _normalize_source(source)
+        t = _tables(source)
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            "SELECT scan_id, COUNT(*), "
+            "SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END), "
+            "MIN(ts), MAX(ts) "
+            f"FROM {t['scan_logs']} WHERE scan_id IN ({placeholders}) "
+            "GROUP BY scan_id",
+            ids,
+        ).fetchall()
+        return {
+            row[0]: {
+                "log_entries": int(row[1] or 0),
+                "error_n": int(row[2] or 0),
+                "first_ts": row[3],
+                "last_ts": row[4],
+            }
+            for row in rows
+        }
+    finally:
+        conn.close()
+
+
 def log_summary(scan_id: Optional[str] = None, source: str = "v2") -> dict:
     source = _normalize_source(source)
     entries = get_scan_logs(scan_id=scan_id, tail=99999, source=source)

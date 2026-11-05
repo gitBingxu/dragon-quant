@@ -23,6 +23,7 @@ from dragon_quant.infra.assets.db import (
     save_prep_snapshot,
 )
 from dragon_quant.infra.assets.dragons_mirror import backfill_dragons, diff_dragons
+from dragon_quant.infra.assets.stock_daily_backfill import backfill_stock_daily
 from dragon_quant.infra.assets.sync.cli_service import SYNC_ACTIONS, run
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "get_auction_snapshot",
     "diff_dragons",
     "backfill_dragons",
+    "backfill_stock_daily",
 ]

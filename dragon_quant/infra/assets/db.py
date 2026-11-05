@@ -885,6 +885,433 @@ def list_auction_snapshot_dates(date_from=None, date_to=None, *,
                                 db_path=db_path)
 
 
+# ─── dashboard 日历 / 本地日 K 只读投影 ────────────────────────────────────
+#
+# 全部为读路径：单连接内完成聚合，只投影日期/类型/code 等轻量字段，**不读大
+# payload**（prep 的 rows / auction 的 items_json）；库不存在返回空、不建库。
+# 三态与合法豁免规则在 ``web_ui.backend.presenters``，本层只给事实。
+
+
+def prep_calendar_rows(date_from: str, date_to: str, *, source: str = "v2",
+                       db_path=None) -> dict[str, dict]:
+    """近一年日历批量投影：``{trade_date: {asset_types, report, report_error, has_snapshot}}``。
+
+    3 条只读查询（资产类型 / collection_report 小对象 / 快照日期），无逐日请求。
+    ``collection_report`` 行损坏时只标 ``report_error``，不中断整批。
+    """
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {}
+    try:
+        _ensure_schema(conn, migrate=False)
+        dates: dict[str, dict] = {}
+
+        def entry(day: str) -> dict:
+            return dates.setdefault(day, {
+                "asset_types": [],
+                "report": None,
+                "report_error": None,
+                "has_snapshot": False,
+            })
+
+        for trade_date, asset_type in conn.execute(
+            "SELECT trade_date, asset_type FROM prep_assets "
+            "WHERE trade_date >= ? AND trade_date <= ? ORDER BY trade_date",
+            (date_from, date_to),
+        ):
+            entry(trade_date)["asset_types"].append(asset_type)
+
+        for trade_date, payload_json in conn.execute(
+            "SELECT trade_date, payload_json FROM prep_assets "
+            "WHERE asset_type = 'collection_report' "
+            "AND trade_date >= ? AND trade_date <= ? ORDER BY trade_date",
+            (date_from, date_to),
+        ):
+            payload, error = _load_json(payload_json, None)
+            target = entry(trade_date)
+            if error is not None or not isinstance(payload, dict):
+                target["report_error"] = error or "collection_report 不是对象"
+            else:
+                target["report"] = payload
+
+        for (trade_date,) in conn.execute(
+            "SELECT DISTINCT trade_date FROM prep_snapshots "
+            "WHERE source = ? AND trade_date >= ? AND trade_date <= ? "
+            "ORDER BY trade_date",
+            (source, date_from, date_to),
+        ):
+            entry(trade_date)["has_snapshot"] = True
+
+        return dates
+    finally:
+        conn.close()
+
+
+def auction_calendar_rows(date_from: str, date_to: str, *, source: str = "v2",
+                          db_path=None) -> dict[str, dict]:
+    """竞价日历批量投影：``{trade_date: {asset_codes, snapshot_codes}}``。
+
+    只取 ``auction_assets(trade_date, code)`` 与 ``auction_snapshots(trade_date, code)``
+    两个轻量投影，**不读 ``items_json``**。
+    """
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {}
+    try:
+        _ensure_schema(conn, migrate=False)
+        dates: dict[str, dict] = {}
+
+        def entry(day: str) -> dict:
+            return dates.setdefault(day, {"asset_codes": [], "snapshot_codes": []})
+
+        for trade_date, code in conn.execute(
+            "SELECT trade_date, code FROM auction_assets "
+            "WHERE trade_date >= ? AND trade_date <= ? ORDER BY trade_date, code",
+            (date_from, date_to),
+        ):
+            entry(trade_date)["asset_codes"].append(code)
+
+        for trade_date, code in conn.execute(
+            "SELECT trade_date, code FROM auction_snapshots "
+            "WHERE source = ? AND trade_date >= ? AND trade_date <= ? "
+            "ORDER BY trade_date, code",
+            (source, date_from, date_to),
+        ):
+            entry(trade_date)["snapshot_codes"].append(code)
+
+        return dates
+    finally:
+        conn.close()
+
+
+def first_prep_record_date(source: str = "v2", *, db_path=None) -> str | None:
+    """最早一条 prep 记录日（资产或快照；``first_record_day`` 的一次标量读）。"""
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return None
+    try:
+        _ensure_schema(conn, migrate=False)
+        row = conn.execute(
+            "SELECT MIN(trade_date) FROM ("
+            "SELECT trade_date FROM prep_assets UNION ALL "
+            "SELECT trade_date FROM prep_snapshots WHERE source = ?)",
+            (source,),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def first_prep_snapshot_date(source: str = "v2", *, db_path=None) -> str | None:
+    """最早一盘快照日期（日历判 ``first_day_no_plan`` 的一次标量读，无 payload）。"""
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return None
+    try:
+        _ensure_schema(conn, migrate=False)
+        row = conn.execute(
+            "SELECT MIN(trade_date) FROM prep_snapshots WHERE source = ?",
+            (source,),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def list_auction_asset_names(trade_date: str, *, db_path=None) -> dict[str, str]:
+    """单日竞价原始资产的 ``{code: name}``；不读 ``items_json``/``quote_json``。"""
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {}
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = conn.execute(
+            "SELECT code, name FROM auction_assets WHERE trade_date = ? ORDER BY code",
+            (trade_date,),
+        ).fetchall()
+        return {row[0]: (row[1] or "") for row in rows}
+    finally:
+        conn.close()
+
+
+# 本地日 K 加载上限（bars）；超限按「最近日期优先、整组保留」截断并告警。
+STOCK_DAILY_MAX_BARS = 200_000
+
+#: 计划候选回看窗口：近 N 个「有快照的交易日」（无快照日不占位，非交易所日历）。
+PLAN_CANDIDATE_LOOKBACK_DAYS = 10
+
+
+def list_recent_plan_candidate_codes(
+    before_date: str,
+    days: int = PLAN_CANDIDATE_LOOKBACK_DAYS,
+    *,
+    source: str = "v2",
+    db_path=None,
+) -> dict:
+    """严格早于 ``before_date`` 的最近 ``days`` 个快照日的候选 code 并集。
+
+    这是「读取现有快照的投影」，不落任何派生资产：C（prep 扩池）与 B
+    （assets backfill-stock-daily）共用同一份读取口径。
+
+    返回::
+
+        {
+          "codes": [...],          # 去重；日序由新到旧，日内按 review_candidates 顺序
+          "trade_dates": [...],    # 实际读取的快照日（升序）
+          "corrupt_dates": [...],  # result_json 损坏/缺 review_candidates 的日期
+          "lookback_days": days,
+        }
+
+    取 ``review_candidates`` 的**全部**带 code 候选，不按 ``eligibility`` /
+    ``position_pct`` 过滤（dashboard 评估样本正是全量候选）。库不存在 → 空结构且
+    不建库；单日 JSON 损坏 → 记 ``corrupt_dates`` 并跳过，不中断。
+    """
+
+    days = int(days)
+    if days < 1:
+        raise ValueError("days 必须 >= 1")
+    result = {"codes": [], "trade_dates": [], "corrupt_dates": [],
+              "lookback_days": days}
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return result
+    try:
+        _ensure_schema(conn, migrate=False)
+        rows = conn.execute(
+            "SELECT trade_date, result_json FROM prep_snapshots "
+            "WHERE trade_date < ? AND source = ? "
+            "ORDER BY trade_date DESC LIMIT ?",
+            (before_date, source, days),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    seen: set[str] = set()
+    trade_dates: list[str] = []
+    for trade_date, payload_json in rows:
+        payload, error = _load_json(payload_json, None)
+        candidates = (payload.get("review_candidates")
+                      if isinstance(payload, dict) else None)
+        if error is not None or not isinstance(candidates, list):
+            result["corrupt_dates"].append(trade_date)
+            continue
+        trade_dates.append(trade_date)
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("code")
+            if isinstance(code, str) and code and code not in seen:
+                seen.add(code)
+                result["codes"].append(code)
+    result["trade_dates"] = sorted(trade_dates)
+    return result
+
+
+def latest_stock_daily_asset_date(*, db_path=None) -> Optional[str]:
+    """最新 ``stock_daily`` 资产行日期（单行 SQL，不解析 payload；只读、不建库）。"""
+
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return None
+    try:
+        _ensure_schema(conn, migrate=False)
+        row = conn.execute(
+            "SELECT trade_date FROM prep_assets WHERE asset_type = 'stock_daily' "
+            "ORDER BY trade_date DESC LIMIT 1",
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def stock_daily_last_bar_dates(codes=None, *, max_asset_days: int = 60,
+                               db_path=None) -> dict[str, str]:
+    """``{code: 本地最大 bar 日期}``（只读、不建库）。
+
+    从最新 ``trade_date`` 向旧扫描，每 code 只记首次命中（即最大日期）；``codes``
+    给定时收齐后提前结束。最多扫 ``max_asset_days`` 个资产日，避免全历史解析。
+    损坏 payload 跳过；从未出现的 code 不出现在结果中（调用方按「缺失」处理）。
+    """
+
+    wanted = {str(code) for code in (codes or []) if code}
+    limit = int(max_asset_days)
+    if limit < 1:
+        return {}
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {}
+    try:
+        _ensure_schema(conn, migrate=False)
+        payloads = conn.execute(
+            "SELECT payload_json FROM prep_assets WHERE asset_type = 'stock_daily' "
+            "ORDER BY trade_date DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    last: dict[str, str] = {}
+    for (payload_json,) in payloads:
+        if wanted and len(last) >= len(wanted):
+            break
+        payload, error = _load_json(payload_json, None)
+        if error is not None or not isinstance(payload, dict):
+            continue
+        rows = payload.get("rows")
+        if not isinstance(rows, dict):
+            continue
+        for code, bars in rows.items():
+            code = str(code)
+            if wanted and code not in wanted:
+                continue
+            if code in last or not isinstance(bars, list):
+                continue
+            dates = [str(bar.get("date") or "") for bar in bars
+                     if isinstance(bar, dict)]
+            dates = [day for day in dates if day]
+            if dates:
+                last[code] = max(dates)
+    return last
+
+
+def list_stock_daily_bar_dates(date_from: str | None = None,
+                               date_to: str | None = None, *,
+                               db_path=None) -> list[str]:
+    """本地 ``stock_daily`` 资产的 bar 日期并集（升序去重；只读、不建库）。
+
+    这是「本地已确认交易日」序列（``bars_union``），**不是**交易所日历。扫描
+    区间内每份 ``stock_daily`` payload 的 ``rows[*][*].date`` 并集；损坏 payload
+    跳过不中断。供日历默认日期、单日效果与全历史准确率共用。
+    """
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return []
+    try:
+        _ensure_schema(conn, migrate=False)
+        clauses = ["asset_type = 'stock_daily'"]
+        params: list = []
+        if date_from is not None:
+            clauses.append("trade_date >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            clauses.append("trade_date <= ?")
+            params.append(date_to)
+        payloads = conn.execute(
+            "SELECT payload_json FROM prep_assets "
+            f"WHERE {' AND '.join(clauses)} ORDER BY trade_date",
+            tuple(params),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    dates: set[str] = set()
+    for (payload_json,) in payloads:
+        payload, error = _load_json(payload_json, None)
+        if error is not None or not isinstance(payload, dict):
+            continue
+        rows = payload.get("rows")
+        if not isinstance(rows, dict):
+            continue
+        for bars in rows.values():
+            if not isinstance(bars, list):
+                continue
+            for bar in bars:
+                if not isinstance(bar, dict):
+                    continue
+                day = str(bar.get("date") or "")
+                if not day:
+                    continue
+                if date_from is not None and day < date_from:
+                    continue
+                if date_to is not None and day > date_to:
+                    continue
+                dates.add(day)
+    return sorted(dates)
+
+
+def list_stock_daily_bars(codes, date_from: str, date_to: str,
+                          max_bars: int = STOCK_DAILY_MAX_BARS, *,
+                          db_path=None) -> dict:
+    """合并窗口内多日 ``stock_daily`` 资产为 ``{code: [bar]}``（只读、不触网）。
+
+    - 只保留请求 ``codes``；按 ``(code, date)`` 去重，**后日期资产覆盖同日期 bar**；
+    - 只保留 ``date_from <= date <= date_to`` 的 bar；
+    - 超过 ``max_bars`` 时按「最近 bar 日期优先、按 code 整组保留」截断并标
+      ``truncated``（不静默丢弃，不留半只票的 bar 集合）。
+
+    返回 ``{"rows": {code: [bar]}, "truncated": bool, "bar_dates": [...], "codes": [...]}``。
+    """
+    wanted = {str(code) for code in (codes or []) if code}
+    if not wanted:
+        return {"rows": {}, "truncated": False, "bar_dates": [], "codes": []}
+    conn = _connect(create=False, path=db_path)
+    if conn is None:
+        return {"rows": {}, "truncated": False, "bar_dates": [], "codes": []}
+    try:
+        _ensure_schema(conn, migrate=False)
+        payloads = conn.execute(
+            "SELECT trade_date, payload_json FROM prep_assets "
+            "WHERE asset_type = 'stock_daily' "
+            "AND trade_date >= ? AND trade_date <= ? ORDER BY trade_date",
+            (date_from, date_to),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    merged: dict[tuple[str, str], dict] = {}
+    for _trade_date, payload_json in payloads:
+        payload, error = _load_json(payload_json, None)
+        if error is not None or not isinstance(payload, dict):
+            continue
+        rows = payload.get("rows")
+        if not isinstance(rows, dict):
+            continue
+        for code, bars in rows.items():
+            if str(code) not in wanted or not isinstance(bars, list):
+                continue
+            for bar in bars:
+                if not isinstance(bar, dict):
+                    continue
+                day = str(bar.get("date") or "")
+                if not day or day < date_from or day > date_to:
+                    continue
+                # 后日期资产覆盖同日期 bar（ORDER BY trade_date 递增）。
+                merged[(str(code), day)] = bar
+
+    grouped: dict[str, list[dict]] = {}
+    for (code, _day), bar in merged.items():
+        grouped.setdefault(code, []).append(bar)
+    for bars in grouped.values():
+        bars.sort(key=lambda item: str(item.get("date") or ""))
+
+    total = sum(len(bars) for bars in grouped.values())
+    truncated = total > int(max_bars)
+    if truncated:
+        limit = max(0, int(max_bars))
+        ordered = sorted(
+            grouped,
+            key=lambda code: (str(grouped[code][-1].get("date") or ""), code),
+            reverse=True,
+        )
+        kept: dict[str, list[dict]] = {}
+        budget = limit
+        for code in ordered:
+            bars = grouped[code]
+            if len(bars) <= budget:
+                kept[code] = bars
+                budget -= len(bars)
+        grouped = kept
+
+    bar_dates = sorted({str(bar.get("date") or "") for bars in grouped.values()
+                        for bar in bars})
+    return {
+        "rows": grouped,
+        "truncated": truncated,
+        "bar_dates": bar_dates,
+        "codes": sorted(grouped),
+    }
+
+
 def _watermarks(table: str, size_expr: str, *, db_path=None) -> dict[str, str]:
     conn = _connect(create=False, path=db_path)
     if conn is None:

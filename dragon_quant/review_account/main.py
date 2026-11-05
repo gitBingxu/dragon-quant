@@ -9,8 +9,16 @@ from __future__ import annotations
 # ``service`` first: its import chain finishes loading ``market``/``strategy``
 # before ``data`` is bound here, avoiding the pre-existing
 # ``market ↔ strategy.buy`` import-order sensitivity (Task 15 re-export).
-from dragon_quant.review_account.service import run_review_account
+from dragon_quant.review_account.service import (
+    run_incremental_review_account,
+    run_review_account,
+)
 from dragon_quant.review_account.data import MarketData
 from dragon_quant.review_account.models import StrategyConfig
 
-__all__ = ["run_review_account", "StrategyConfig", "MarketData"]
+__all__ = [
+    "run_review_account",
+    "run_incremental_review_account",
+    "StrategyConfig",
+    "MarketData",
+]

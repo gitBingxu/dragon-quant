@@ -30,7 +30,7 @@
         "max_drawdown_5d": null,
         "max_return_hold_days": null,
         "review_status": "pending",
-        "version": "0.7.2",
+        "version": "0.7.4",
         "is_true_dragon": true,
         "source": "v2"
       },
@@ -60,7 +60,7 @@
         "max_drawdown_5d": null,
         "max_return_hold_days": null,
         "review_status": "pending",
-        "version": "0.7.2",
+        "version": "0.7.4",
         "is_true_dragon": false,
         "source": "v2"
       }
@@ -97,7 +97,7 @@
         "max_drawdown_5d": null,
         "max_return_hold_days": null,
         "review_status": "pending",
-        "version": "0.7.2",
+        "version": "0.7.4",
         "is_true_dragon": true,
         "source": "v2"
       },
@@ -127,7 +127,7 @@
         "max_drawdown_5d": null,
         "max_return_hold_days": null,
         "review_status": "pending",
-        "version": "0.7.2",
+        "version": "0.7.4",
         "is_true_dragon": false,
         "source": "v2"
       }
@@ -164,7 +164,7 @@
         "max_drawdown_5d": null,
         "max_return_hold_days": null,
         "review_status": "pending",
-        "version": "0.7.2",
+        "version": "0.7.4",
         "is_true_dragon": true,
         "source": "v2"
       }
@@ -201,7 +201,7 @@
         "max_drawdown_5d": null,
         "max_return_hold_days": null,
         "review_status": "pending",
-        "version": "0.7.2",
+        "version": "0.7.4",
         "is_true_dragon": true,
         "source": "v2"
       }

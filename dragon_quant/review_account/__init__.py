@@ -3,6 +3,9 @@
 公共入口在 :mod:`dragon_quant.review_account.main`；本包根做轻量显式重导出。
 """
 
-from dragon_quant.review_account.main import run_review_account
+from dragon_quant.review_account.main import (
+    run_incremental_review_account,
+    run_review_account,
+)
 
-__all__ = ["run_review_account"]
+__all__ = ["run_review_account", "run_incremental_review_account"]

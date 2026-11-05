@@ -75,5 +75,5 @@ def test_assets_main_exports_public_facade():
         "get_prep_assets", "get_prep_snapshot", "save_prep_snapshot",
         "save_auction_asset", "list_auction_assets", "replace_auction_snapshots",
         "list_auction_snapshots", "get_auction_snapshot", "diff_dragons",
-        "backfill_dragons",
+        "backfill_dragons", "backfill_stock_daily",
     }

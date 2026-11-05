@@ -74,8 +74,10 @@ def evaluate_buy(candidate: dict, row: dict, cfg: StrategyConfig,
     veto = entry_veto(cfg, candidate, row)
     if veto:
         raise BuyRejected("vetoed", veto)
-    if is_review_pool(candidate) and not is_review_eligible(candidate):
+    if (is_review_pool(candidate) and not is_review_eligible(candidate)
+            and not getattr(cfg, "research_prep_bypass", False)):
         # 0.8 兼容视图但未达 eligible ∧ 仓位>0：直接拒绝，绝不进入买点形态。
+        # 研究消融显式 bypass 时才允许进入共享形态/成交判断（生产默认 False）。
         raise BuyRejected(
             "review_not_eligible", "复盘候选未达可买条件（eligible 且仓位>0）")
     if not is_review_eligible(candidate) \

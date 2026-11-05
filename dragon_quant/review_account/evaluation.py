@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Optional
+from typing import Mapping, Optional
 
 from dragon_quant.review_account.market import DataCoverageError
 from dragon_quant.review_account.models import BUY_SIGNAL_CODES, StrategyConfig
@@ -22,46 +22,43 @@ def _num(value) -> float:
         return 0.0
 
 
-def entry_reason_stats(positions: list[dict], initial_cash: float) -> dict:
-    """按买点类型聚合已平仓记录（纯函数，供 API / 测试复用）。
+def entry_reason_stats(positions: list[dict], initial_cash: float, *,
+                       start_equity: Optional[float] = None,
+                       ledger: Optional[dict] = None) -> dict:
+    """买点统计：**生命周期列**与**本段归因列**严格分离（main D4）。
 
-    - 固定按 ``BUY_SIGNAL_CODES`` 顺序输出四类（0 笔也输出），未知 reason_code 追加在后，
-      最后一行合计（``reason_code="__total__"``）；
-    - 胜率口径与 ``AccountSimulator._result()["win_rate"]`` 同源：同一批已平仓记录、
-      ``realized_return > 0`` 计为盈利；
-    - 累计贡献为近似值：``Σ(realized_return/100 × entry_price × qty) / initial_cash × 100``，
-      用 ``entry_price × qty`` 近似初始成本（忽略买入佣金），``realized_return`` 已含半仓与买卖费用；
-    - 0 笔且 ``initial_cash>0`` 时 contribution 为 0.0（可计算的「无贡献」）；
-      ``initial_cash<=0`` 时 contribution 为 None（不可计算）。
+    - ``trades / wins / win_rate / avg_return`` 只来自已平仓持仓（closed），
+      与 ``AccountSimulator.win_rate`` 同源；未平仓浮盈亏绝不参与“盈利笔数”。
+    - ``period_pnl / contribution / realized_part / unrealized_part`` 来自
+      ``period_ledger`` 的持仓批次（含未平仓、半卖），按 ``entry_reason_code``
+      聚合；分母 = 本段起点权益。
+    - 账本 unknown（期初缺 mark/数据不一致）时期间列全部 None，
+      ``contribution_basis="unknown"``，不退回旧近似、不显示伪精确合计。
     """
     closed = [p for p in positions if (p.get("status") or "closed") == "closed"]
+    denominator = initial_cash if start_equity is None else start_equity
 
     def realized(p: dict) -> float:
         return _num(p.get("realized_return"))
 
-    def contribution(items: list[dict]):
-        try:
-            cash = float(initial_cash)
-        except (TypeError, ValueError):
-            return None
-        if not (cash > 0):
-            return None
-        pnl = sum(realized(p) / 100 * _num(p.get("entry_price")) * _num(p.get("qty"))
-                  for p in items)
-        return pnl / cash * 100
-
-    def row(code: str, label: str, items: list[dict]) -> dict:
+    def lifecycle_row(code: str, label: str, items: list[dict]) -> dict:
         trades = len(items)
         wins = sum(1 for p in items if realized(p) > 0)
         return {
-            "reason_code": code, "label": label, "trades": trades, "wins": wins,
+            "reason_code": code, "label": label,
+            "trades": trades, "wins": wins,
             "win_rate": wins / trades * 100 if trades else None,
-            "avg_return": sum(realized(p) for p in items) / trades if trades else None,
-            "contribution": contribution(items),
+            "avg_return": (sum(realized(p) for p in items) / trades
+                           if trades else None),
+            # 期间列默认 None，由 ledger 覆盖。
+            "period_pnl": None, "period_codes": 0,
+            "contribution": None, "realized_part": None,
+            "unrealized_part": None, "has_open": False,
         }
 
-    rows = [row(code, BUY_CHECK_LABELS.get(code, code),
-                [p for p in closed if (p.get("entry_reason_code") or "") == code])
+    rows = [lifecycle_row(code, BUY_CHECK_LABELS.get(code, code),
+                          [p for p in closed
+                           if (p.get("entry_reason_code") or "") == code])
             for code in BUY_SIGNAL_CODES]
     unknown: dict[str, list[dict]] = {}
     for p in closed:
@@ -69,13 +66,88 @@ def entry_reason_stats(positions: list[dict], initial_cash: float) -> dict:
         if code in BUY_SIGNAL_CODES:
             continue
         unknown.setdefault(code, []).append(p)
-    rows.extend(row(code, code or "未知", items) for code, items in unknown.items())
-    rows.append(row(TOTAL_ROW_CODE, "合计", closed))
+    rows.extend(lifecycle_row(code, code or "未知", items)
+                for code, items in unknown.items())
+    total = lifecycle_row(TOTAL_ROW_CODE, "合计", closed)
+    rows.append(total)
+
+    period_basis = None
+    period_complete = False
+    reconciliation = None
+    unknown_rows = 0
+    if ledger is not None:
+        period_basis = ledger.get("quality") or "unknown"
+        period_complete = period_basis != "unknown"
+        reconciliation = ledger.get("reconciliation")
+        unknown_rows = int(ledger.get("unknown_rows") or 0)
+        buckets: dict[str, list[dict]] = {}
+        for lot in ledger.get("rows") or []:
+            code = lot.get("entry_reason_code") or "未知"
+            buckets.setdefault(code, []).append(lot)
+
+        # 先填充已有买点行的期间列，再追加仅期间出现的买点。
+        by_code = {row["reason_code"]: row for row in rows}
+        period_total = {
+            "period_pnl": None, "contribution": None,
+            "realized_part": None, "unrealized_part": None,
+            "period_codes": 0, "has_open": False,
+        }
+        for code, items in buckets.items():
+            known = [item for item in items
+                     if item.get("period_pnl") is not None]
+            target = by_code.get(code)
+            if target is None:
+                target = lifecycle_row(code, BUY_CHECK_LABELS.get(code, code), [])
+                rows.insert(len(rows) - 1, target)
+                by_code[code] = target
+            if not period_complete or len(known) != len(items):
+                target["has_open"] = any(item.get("status") == "open"
+                                         for item in items)
+                continue
+            amounts = [float(item["period_pnl"]) for item in known]
+            target.update({
+                "period_pnl": sum(amounts),
+                "period_codes": len(items),
+                "realized_part": sum(float(item.get("realized_part") or 0.0)
+                                     for item in known),
+                "unrealized_part": sum(float(item.get("unrealized_part") or 0.0)
+                                       for item in known),
+                "contribution": (sum(amounts) / float(denominator) * 100
+                                 if denominator else None),
+                "has_open": any(item.get("status") == "open" for item in items),
+            })
+        if period_complete:
+            totals = ledger.get("totals") or {}
+            period_total.update({
+                "period_pnl": totals.get("ledger_period_pnl"),
+                "realized_part": totals.get("realized_part"),
+                "unrealized_part": totals.get("unrealized_part"),
+                "period_codes": sum(1 for lot in ledger.get("rows") or []
+                                    if lot.get("period_pnl") is not None),
+                "contribution": (totals["ledger_period_pnl"]
+                                 / float(denominator) * 100
+                                 if totals.get("ledger_period_pnl") is not None
+                                 and denominator else None),
+            })
+        total.update(period_total)
+
     try:
         cash = float(initial_cash)
     except (TypeError, ValueError):
         cash = 0.0
-    return {"initial_cash": cash, "total_trades": len(closed), "rows": rows}
+    return {
+        "initial_cash": cash,
+        "start_equity": denominator,
+        "total_trades": len(closed),
+        "contribution_basis": period_basis or "not_provided",
+        "precise_attribution_count": (sum(
+            1 for lot in (ledger or {}).get("rows") or []
+            if lot.get("period_pnl") is not None) if ledger else 0),
+        "reconciliation": reconciliation,
+        "period_complete": period_complete,
+        "unknown_rows": unknown_rows,
+        "rows": rows,
+    }
 
 
 def sharpe_ratio(equities, *, periods_per_year: int = 252,
@@ -214,7 +286,26 @@ def metrics(result: dict) -> dict:
     losses = -sum(min(0, p.realized_return) for p in closed)
     sell_pnl = [t.realized_pnl for t in result["trades"] if t.side == "SELL"]
     profit = sum(max(0, v) for v in sell_pnl)
+    loss = -sum(min(0, v) for v in sell_pnl)
     equities = [snapshot.total_equity for snapshot in result.get("snapshots") or []]
+    closed_returns = [p.realized_return for p in closed]
+    period_amounts = [
+        getattr(p, "period_pnl", None)
+        if getattr(p, "period_pnl", None) is not None
+        else getattr(p, "realized_pnl", None)
+        for p in closed]
+    period_amounts = [float(v) for v in period_amounts if v is not None]
+    wins = [v for v in closed_returns if v > 0]
+    losses_only = [v for v in closed_returns if v < 0]
+    # 期末未实现：持仓盯市价值 − 剩余成本（不再用 0 冒充）。
+    open_rows = result["account_state"].get("positions") or []
+    marks = result["account_state"].get("marks") or {}
+    unrealized_known = all(row.get("code") in marks for row in open_rows)
+    unrealized = sum(
+        row.get("qty", 0) * marks.get(row.get("code"), row.get("entry_price") or 0)
+        - (row.get("cost") or 0)
+        for row in open_rows)
+    realized_amount = sum(t.realized_pnl for t in result["trades"] if t.side == "SELL")
     return {"total_return": result["total_return"], "max_drawdown": result["max_drawdown"],
             "sharpe": sharpe_ratio(equities),
             "trade_count": result["trade_count"], "closed_count": len(closed),
@@ -222,7 +313,317 @@ def metrics(result: dict) -> dict:
             "fees": sum(t.fee for t in result["trades"]),
             "turnover": sum(t.amount for t in result["trades"]) / result["initial_cash"],
             "largest_win_share": max(sell_pnl, default=0) / profit if profit else None,
-            "open_positions": len(result["account_state"]["positions"])}
+            "open_positions": len(open_rows),
+            # ── A8：胜率之外的收益/风险证据（0/全赢/全亏 → None，不除 0）──
+            "wins": len(wins),
+            "losses": len(losses_only),
+            "avg_win_pct": (sum(wins) / len(wins)) if wins else None,
+            "avg_loss_pct": (sum(losses_only) / len(losses_only)) if losses_only else None,
+            "net_profit_ratio": (profit / loss) if loss > 0 else None,
+            "expectancy_amount": (sum(period_amounts) / len(period_amounts)
+                                  if period_amounts else None),
+            "largest_loss_amount": min(period_amounts) if period_amounts else None,
+            "realized_amount": realized_amount,
+            "unrealized_amount": unrealized if unrealized_known else None,
+            "unrealized_basis": "mark" if unrealized_known else "unknown",
+            # 本段 vs 生命周期：两者口径不同，页面必须分区展示。
+            "contribution_basis": ("period_pnl"
+                                   if all(getattr(p, "period_pnl", None) is not None
+                                          for p in closed) and closed
+                                   else "legacy_approximation")}
+
+
+def _num_or_none(value) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def period_ledger(run: dict, snapshots: list[dict],
+                  trades: list[dict]) -> dict:
+    """本段**按持仓批次/买点**的现金/盯市归因账本（main D4）。
+
+    使用期初批次 + 有序成交做 FIFO 分摊，逐批次保留 ``entry_reason_code``：
+
+    ``period_pnl = 该批次卖出净额 + 期末盯市 − 本段买入成本 − 期初盯市价值``
+
+    * 继承批次期初价值 = qty × 冻结 mark；本段新仓期初价值 = 0；
+    * 卖出按成交顺序 FIFO 消耗批次，半卖/全清/期末未平仓都落到对应买点；
+    * 期末估值只用期末快照 mark；缺 mark / 期初缺 mark 的批次标 unknown，
+      **不跳过、不用成本价冒充**，合计相应返回 None；
+    * ``reconciliation.diff = 期末权益 − 期初权益 − Σperiod_pnl``。
+    """
+    start_equity = _num_or_none(run.get("start_equity"))
+    if start_equity is None:
+        start_equity = _num_or_none(run.get("base_equity"))
+    if start_equity is None:
+        start_equity = _num_or_none(run.get("initial_cash")) or 0.0
+    end_equity = (_num_or_none(snapshots[-1].get("total_equity"))
+                  if snapshots else None)
+    last_positions = snapshots[-1].get("positions") if snapshots else []
+    end_marks: dict[str, float | None] = {}
+    for row in last_positions or []:
+        code = str(row.get("code") or "")
+        if code:
+            end_marks[code] = _num_or_none(row.get("mark"))
+
+    lots: list[dict] = []
+    unknown = False
+    start_positions = run.get("start_positions") or []
+    if (run.get("base_run_id") and not run.get("start_state_recorded")
+            and not start_positions):
+        # 旧增量 run 没有冻结期初持仓：整段归因 unknown，不用空期初伪算。
+        unknown = True
+    for row in start_positions if isinstance(start_positions, list) else []:
+        if not isinstance(row, Mapping):
+            continue
+        code = str(row.get("code") or "")
+        if not code:
+            continue
+        qty = int(row.get("qty") or 0)
+        if qty <= 0:
+            continue
+        mark = _num_or_none(row.get("mark"))
+        if mark is None:
+            unknown = True
+            basis = None
+        else:
+            basis = qty * mark
+        lots.append({
+            "code": code,
+            "entry_reason_code": row.get("entry_reason_code") or "",
+            "entry_date": row.get("entry_date"),
+            "qty": qty,
+            "initial_qty": qty,
+            "basis": basis,
+            "start_value": basis,
+            "buy_cost": 0.0,
+            "sell_net": 0.0,
+            "realized_part": 0.0,
+            "inherited": True,
+        })
+
+    ordered_trades = sorted(
+        enumerate(trades or []),
+        key=lambda item: (str(item[1].get("trade_date") or ""), item[0]))
+    for _index, trade in ordered_trades:
+        code = str(trade.get("code") or "")
+        if not code:
+            continue
+        qty = int(trade.get("qty") or 0)
+        amount = _num_or_none(trade.get("amount")) or 0.0
+        fee = _num_or_none(trade.get("fee")) or 0.0
+        if trade.get("side") == "BUY":
+            cost = amount + fee
+            lots.append({
+                "code": code,
+                "entry_reason_code": trade.get("reason_code") or "",
+                "entry_date": trade.get("trade_date"),
+                "qty": qty,
+                "initial_qty": qty,
+                "basis": cost,
+                "start_value": 0.0,
+                "buy_cost": cost,
+                "sell_net": 0.0,
+                "realized_part": 0.0,
+                "inherited": False,
+            })
+            continue
+        if trade.get("side") != "SELL" or qty <= 0:
+            continue
+        proceeds = amount - fee
+        per_share = proceeds / qty
+        remaining = qty
+        for lot in [item for item in lots
+                    if item["code"] == code and item["qty"] > 0]:
+            take = min(remaining, lot["qty"])
+            if take <= 0:
+                continue
+            lot_proceeds = per_share * take
+            if lot["basis"] is None:
+                unknown = True
+                lot_basis = None
+            else:
+                lot_basis = lot["basis"] * take / lot["qty"]
+            lot["qty"] -= take
+            lot["sell_net"] += lot_proceeds
+            if lot_basis is not None:
+                lot["realized_part"] += lot_proceeds - lot_basis
+                lot["basis"] -= lot_basis
+            else:
+                lot["basis"] = None
+            remaining -= take
+            if remaining <= 0:
+                break
+        if remaining > 0:
+            # 卖出数量大于已知批次（数据不一致）：单独 unknown 批次，不伪造成本。
+            unknown = True
+            lots.append({
+                "code": code,
+                "entry_reason_code": "unknown",
+                "entry_date": trade.get("trade_date"),
+                "qty": 0,
+                "initial_qty": 0,
+                "basis": None,
+                "start_value": 0.0,
+                "buy_cost": 0.0,
+                "sell_net": per_share * remaining,
+                "realized_part": None,
+                "inherited": False,
+            })
+
+    rows: list[dict] = []
+    for lot in lots:
+        qty = lot["qty"]
+        mark = end_marks.get(lot["code"])
+        if qty > 0 and mark is None:
+            unknown = True
+            end_value = None
+        else:
+            end_value = qty * float(mark) if qty > 0 else 0.0
+        if lot["basis"] is None:
+            unrealized = None
+        elif qty > 0:
+            # 旧 run 的期末快照可能没有 mark（老版本 positions_json 无该字段）：
+            # 期末价值未知 → 未实现盈亏 unknown，绝不把 None 当 0 或直接相减。
+            unrealized = (None if end_value is None
+                          else end_value - lot["basis"])
+        else:
+            unrealized = None if lot["realized_part"] is None else 0.0
+        period_pnl = None
+        if lot["realized_part"] is not None and unrealized is not None:
+            period_pnl = lot["realized_part"] + unrealized
+        elif qty == 0 and lot["realized_part"] is not None:
+            period_pnl = lot["realized_part"]
+        rows.append({
+            "code": lot["code"],
+            "entry_reason_code": lot["entry_reason_code"],
+            "entry_date": lot["entry_date"],
+            "start_qty": lot["initial_qty"] if lot["inherited"] else 0,
+            "start_value": lot["start_value"],
+            "buy_qty": 0 if lot["inherited"] else lot["initial_qty"],
+            "buy_cost": lot["buy_cost"],
+            "sell_qty": lot["initial_qty"] - qty,
+            "sell_net": lot["sell_net"],
+            "end_qty": qty,
+            "end_value": end_value,
+            "period_pnl": period_pnl,
+            "realized_part": lot["realized_part"],
+            "unrealized_part": unrealized,
+            "inherited": lot["inherited"],
+            "status": "open" if qty > 0 else "closed",
+        })
+
+    known_rows = [row for row in rows if row["period_pnl"] is not None]
+    complete = len(known_rows) == len(rows) and not unknown
+    ledger_sum = sum(row["period_pnl"] for row in known_rows) if complete else None
+    realized_total = (sum(row["realized_part"] for row in known_rows)
+                      if complete else None)
+    unrealized_total = (sum(row["unrealized_part"] for row in known_rows)
+                        if complete else None)
+    fees = sum(_num_or_none(t.get("fee")) or 0.0 for t in trades or [])
+    diff = None
+    if ledger_sum is not None and end_equity is not None:
+        diff = round(end_equity - start_equity - ledger_sum, 6)
+    return {
+        "rows": rows,
+        "totals": {
+            "start_equity": start_equity,
+            "end_equity": end_equity,
+            "ledger_period_pnl": ledger_sum,
+            "realized_part": realized_total,
+            "unrealized_part": unrealized_total,
+            "fees": fees,
+            "equity_change": (round(end_equity - start_equity, 6)
+                              if end_equity is not None else None),
+        },
+        "reconciliation": {
+            "diff": diff,
+            "within_tolerance": (diff is not None and abs(diff) <= 0.05),
+            "tolerance": 0.05,
+        },
+        "quality": ("unknown" if (unknown or not complete)
+                    else "legacy_approximation"
+                    if (run.get("attribution_quality")
+                        or (run.get("run_meta") or {}).get(
+                            "attribution_quality")) == "legacy_approximation"
+                    else "precise"),
+        "unknown_rows": sum(1 for row in rows if row["period_pnl"] is None),
+    }
+
+
+def metrics_from_rows(run: dict, snapshots: list[dict], trades: list[dict],
+                      positions: list[dict]) -> dict:
+    """已落库行 → 账户收益/风险摘要（A8，纯函数）。
+
+    生命周期胜率与「本段贡献」分开：胜率分母是已平仓持仓，贡献分母是本段起点
+    权益。0 / 全赢 / 全亏按不可计算返回 ``None``，不除 0、不冒充无风险。
+    """
+    closed = [p for p in positions if (p.get("status") or "closed") == "closed"]
+    returns = [p.get("realized_return") for p in closed
+               if p.get("realized_return") is not None]
+    wins = [v for v in returns if v > 0]
+    losses = [v for v in returns if v < 0]
+    ledger = period_ledger(run, snapshots, trades)
+    totals = ledger["totals"]
+    equities = [s.get("total_equity") for s in snapshots
+                if s.get("total_equity") is not None]
+    start_equity = totals["start_equity"]
+    # 期末持仓数必须来自期末快照（positions 表只保存已平仓行）。
+    last_snapshot = snapshots[-1] if snapshots else {}
+    last_positions = last_snapshot.get("positions") or []
+    market_value = _num_or_none(last_snapshot.get("market_value")) or 0.0
+    open_count = (len(last_positions) if last_positions
+                  else (0 if market_value <= 0 else None))
+    # 整笔净盈亏金额（生命周期口径），用于净盈亏比；与「本段贡献」分开。
+    whole_trade = [p.get("realized_pnl") for p in closed
+                   if p.get("realized_pnl") is not None]
+    if not whole_trade:
+        whole_trade = [p.get("period_pnl") for p in closed
+                       if p.get("period_pnl") is not None]
+    whole_trade = [float(v) for v in whole_trade]
+    profit = sum(max(0.0, value) for value in whole_trade)
+    loss = -sum(min(0.0, value) for value in whole_trade)
+    period_amounts = [row["period_pnl"] for row in ledger["rows"]
+                      if row.get("period_pnl") is not None]
+    quality = ledger["quality"]
+    known = totals["ledger_period_pnl"] is not None
+    return {
+        "run_id": run.get("id"),
+        "start_equity": start_equity,
+        "final_equity": run.get("final_equity"),
+        "initial_cash": run.get("initial_cash"),
+        "total_return": run.get("total_return"),
+        "max_drawdown": run.get("max_drawdown"),
+        "sharpe": sharpe_ratio(equities),
+        "trade_count": run.get("trade_count"),
+        "closed_count": len(closed),
+        "open_count": open_count,
+        "win_rate": (len(wins) / len(returns) * 100) if returns else None,
+        "wins": len(wins),
+        "losses": len(losses),
+        "avg_win_pct": (sum(wins) / len(wins)) if wins else None,
+        "avg_loss_pct": (sum(losses) / len(losses)) if losses else None,
+        "net_profit_ratio": (profit / loss) if loss > 0 else None,
+        "net_profit_ratio_basis": "whole_trade_realized_pnl_amount",
+        "expectancy_amount": (sum(period_amounts) / len(period_amounts)
+                              if period_amounts else None),
+        "fees": totals["fees"],
+        "realized_amount": totals["realized_part"] if known else None,
+        "unrealized_amount": totals["unrealized_part"] if known else None,
+        "unrealized_basis": ("mark" if known else "unknown"),
+        "period_pnl_amount": totals["ledger_period_pnl"],
+        "equity_change": totals["equity_change"],
+        "reconciliation": ledger["reconciliation"],
+        "largest_loss_amount": min(period_amounts) if period_amounts else None,
+        "contribution_basis": ("period_pnl" if quality == "precise"
+                               else quality),
+        "ledger_rows": ledger["rows"],
+        "data_quality": (run.get("run_meta") or {}).get("data_quality"),
+        "run_meta": run.get("run_meta") or {},
+    }
 
 
 def compare_strategies(date_from: str, date_to: str, data, cfg=None, variant_grid: dict | None = None) -> dict:

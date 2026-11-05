@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from dragon_quant.infra.board_height import parse_board_height
 from dragon_quant.infra.provider.macro import (
     CALIBER_PREVIOUS, CALIBER_SAME_DAY, MACRO_INDEX_KEYS, MACRO_KEYS,
     SPEC_BY_KEY,
@@ -115,15 +116,9 @@ def _lianban_count(high_days) -> int:
 
 
 def _board_height(row: dict) -> Optional[int]:
-    """block_top 行 → 最高板高度：优先数值 high_num，缺失解析 high「N天M板」取 M。"""
-    hn = row.get("high_num")
-    try:
-        if hn is not None and int(hn) > 0:
-            return int(hn)
-    except (TypeError, ValueError):
-        pass
-    m = _LIANBAN_RE.search(str(row.get("high") or ""))
-    return int(m.group(2)) if m else None
+    """block_top 行 → 最高板高度（含 THS 打包值解码）；唯一实现见 ``infra.board_height``。"""
+
+    return parse_board_height(row)
 
 
 def _hhmmss(ts) -> Optional[str]:

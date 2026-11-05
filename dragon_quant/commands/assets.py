@@ -146,6 +146,47 @@ def _emit_purge(payload: dict, exit_code: int, as_json: bool) -> None:
     sys.exit(exit_code)
 
 
+def _backfill_stock_daily_human_summary(result: dict) -> str:
+    prefix = "体检（dry-run）" if result.get("dry_run") else "回填"
+    return (f"{prefix}：detected={len(result.get('detected') or [])} "
+            f"missing={len(result.get('missing') or [])} "
+            f"stale={len(result.get('stale') or [])} "
+            f"fetched={len(result.get('fetched') or [])} "
+            f"updated={len(result.get('updated') or [])} "
+            f"skipped={len(result.get('skipped') or [])} "
+            f"failed={len(result.get('failed') or [])}")
+
+
+def _emit_backfill_stock_daily(outcome, *, as_json: bool) -> None:
+    """``backfill-stock-daily`` 输出：JSON 到 stdout；人读摘要到 stderr。"""
+
+    payload = outcome.payload
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        if "detected" in payload:
+            print(_backfill_stock_daily_human_summary(payload), file=sys.stderr)
+            for item in payload.get("failed") or []:
+                if isinstance(item, dict):
+                    print(f"  - {item.get('code') or '(全局)'}: {item.get('reason')}",
+                          file=sys.stderr)
+            if payload.get("dry_run"):
+                print("dry-run 未写库；确认后去掉 --dry-run 执行回填",
+                      file=sys.stderr)
+            elif not payload.get("detected"):
+                print("未检测到缺口；如需强制补采请用 --codes A,B", file=sys.stderr)
+            elif payload.get("target_date"):
+                print(f"目标日 {payload['target_date']}；dashboard 刷新即可见",
+                      file=sys.stderr)
+        if not payload.get("ok"):
+            reasons = [reason for item in payload.get("failed") or []
+                       if isinstance(item, dict)
+                       and isinstance(reason := item.get("reason"), str) and reason]
+            detail = "；".join(reasons[:3]) or payload.get("error") or "未知错误"
+            print(f"❌ {outcome.command} 失败：{detail}", file=sys.stderr)
+    sys.exit(outcome.exit_code)
+
+
 def handle(args, services):
     """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。
 
@@ -172,6 +213,10 @@ def handle(args, services):
         return
     if action == "backfill-dragons":
         _emit_backfill(outcome, as_json=bool(getattr(args, "json", False)))
+        return
+    if action == "backfill-stock-daily":
+        _emit_backfill_stock_daily(
+            outcome, as_json=bool(getattr(args, "json", False)))
         return
     # doctor / 未知动作：只输出 JSON（stderr 保持为空）。
     print(json.dumps(outcome.payload, ensure_ascii=False, indent=2))

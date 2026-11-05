@@ -72,12 +72,15 @@ def scan_quality(date_from: str | None = None, date_to: str | None = None,
     if date_from > date_to:
         raise ApiError(400, "invalid_request", "date_from 不能晚于 date_to")
 
+    read_errors: list[str] = []
+    base_read_failed = False
     try:
         dates = scans.list_scan_dates(date_from, date_to)
-    except Exception:  # noqa: BLE001 - 空库按无数据返回，不 500
+    except Exception as exc:  # noqa: BLE001 - 基础读取失败 ≠ 区间内无扫描
         dates = []
+        base_read_failed = True
+        read_errors.append(f"scan_dates: {type(exc).__name__}: {exc}")
     contributions = {}
-    read_errors: list[str] = []
     for day in dates:
         try:
             contributions[day] = scans.list_scan_stock_contributions_by_date(day)
@@ -111,7 +114,9 @@ def scan_quality(date_from: str | None = None, date_to: str | None = None,
         return quality_view.build_scan_quality(
             date_from=date_from, date_to=date_to,
             contributions_by_date={}, calendar=calendar, bars={},
-            read_errors=read_errors + ["local_bars_truncated"])
+            read_errors=read_errors + ["local_bars_truncated"],
+            base_read_failed=base_read_failed,
+            empty_reason="local_bars_truncated")
     except Exception as exc:  # noqa: BLE001 - 行情缺失按证据不足返回
         read_errors.append(f"local_bars_error: {type(exc).__name__}: {exc}")
     payload = quality_view.build_scan_quality(
@@ -122,6 +127,7 @@ def scan_quality(date_from: str | None = None, date_to: str | None = None,
         bars=bars,
         read_errors=read_errors,
         prior_codes=prior_codes,
+        base_read_failed=base_read_failed,
     )
     return payload
 

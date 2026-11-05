@@ -85,6 +85,7 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
 
     app = create_app(settings)
     runner = getattr(app.state, "bs_runner", None)
+    review_runner = getattr(app.state, "review_runner", None)
     config = uvicorn.Config(
         app,
         host="127.0.0.1",
@@ -149,6 +150,11 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
             try:
                 runner.terminate()
             except Exception:  # noqa: BLE001 - 绝不让清理阻塞服务退出
+                pass
+        if review_runner is not None:
+            try:
+                review_runner.terminate()
+            except Exception:  # noqa: BLE001 - 同上
                 pass
         for signum in installed:
             try:

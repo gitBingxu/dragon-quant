@@ -4,6 +4,16 @@ import { EmptyState } from "../../components/EmptyState";
 import { Section } from "../../components/Section";
 import { fmtPct, pnlClass } from "../../lib/format";
 
+/** 期间列口径：unknown 必须明确展示（旧数据缺 mark/期初），不填 0 伪造精确。 */
+function basisText(
+  basis: AccountPositionStats["contribution_basis"] | undefined
+): string {
+  if (basis === "period_pnl") return "精确金额（期初盯市）";
+  if (basis === "legacy_approximation") return "旧数据近似";
+  if (basis === "unknown") return "未知（旧数据缺期初估值 / 盯市价）";
+  return "未提供";
+}
+
 export function EntryReasonStats({ stats }: { stats: AccountPositionStats | null }) {
   const rows = stats?.rows ?? [];
   return (
@@ -12,7 +22,7 @@ export function EntryReasonStats({ stats }: { stats: AccountPositionStats | null
       description={
         stats
           ? `生命周期列只聚合已平仓；期间列含未平仓/半卖。本段贡献分母=期初权益 ${stats.start_equity != null ? stats.start_equity.toFixed(2) : "—"}；`
-            + `口径=${stats.contribution_basis ?? "unknown"}`
+            + `口径=${basisText(stats.contribution_basis)}`
             + (stats.reconciliation?.diff != null
               ? `；权益对账差 ${stats.reconciliation.diff.toFixed(2)}`
               : "；权益对账不可用")

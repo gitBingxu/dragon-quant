@@ -43,6 +43,7 @@ export interface ScanQuality {
   spread: Record<string, unknown> | null;
   coverage_gap: string | null;
   warnings: string[];
+  read_errors?: string[];
   caveats: string[];
 }
 
@@ -52,6 +53,16 @@ export async function fetchScanQuality(
 ): Promise<ScanQuality> {
   const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
   const res = await fetch("/api/research/scan-quality?" + params.toString());
-  if (!res.ok) throw new Error(`scan quality ${res.status}`);
+  if (!res.ok) {
+    let message = `扫描研究接口返回 ${res.status}`;
+    try {
+      const body = await res.json();
+      const detail = body?.detail ?? body?.error;
+      if (detail) message = String(detail);
+    } catch {
+      // keep the status-based Chinese fallback
+    }
+    throw new Error(message);
+  }
   return res.json();
 }

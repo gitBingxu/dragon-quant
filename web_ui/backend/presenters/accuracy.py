@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from collections import Counter
 from dataclasses import dataclass
@@ -298,22 +299,39 @@ def _empty_summary() -> dict:
             "direction_denominator": "bull_or_bear_only"}
 
 
+def _finite_values(values: Sequence[Any]) -> list[float]:
+    """只保留有限数值：``None`` / 非数值 / inf / nan 不是有效收益。"""
+    result: list[float] = []
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            result.append(number)
+    return result
+
+
 def _mean(values: Sequence[float]) -> float | None:
-    return round(sum(values) / len(values), 4) if values else None
+    numbers = _finite_values(values)
+    return round(sum(numbers) / len(numbers), 4) if numbers else None
 
 
 def _date_equal_mean(records: Sequence[Mapping[str, Any]]) -> float | None:
     """按交易日等权：先算每日均值，再对日期取均值（A11）。"""
     by_day: dict[str, list[float]] = {}
     for record in records:
-        by_day.setdefault(record["snapshot_date"], []).append(record["net_return_pct"])
+        value = _finite_values([record.get("net_return_pct")])
+        if value:
+            by_day.setdefault(record["snapshot_date"], []).append(value[0])
     daily = [_mean(values) for values in by_day.values()]
     daily = [value for value in daily if value is not None]
     return _mean(daily)
 
 
 def _group_stats(records: Sequence[Mapping[str, Any]]) -> dict:
-    returns = [record["net_return_pct"] for record in records]
+    returns = _finite_values([record.get("net_return_pct")
+                              for record in records])
     wins = sum(1 for value in returns if value > 0)
     losses = sum(1 for value in returns if value < 0)
     flats = sum(1 for value in returns if value == 0)
@@ -342,7 +360,12 @@ def _bootstrap_interval(
 
     输入是 ``(日期, 数值)``：每次有放回抽取**日期**，再把该日全部样本一起纳入，
     保留同日样本相关性；不是对股票收益值做独立重抽样。样本/独立日不足不出区间。
+    ``None`` / 非有限值不是有效收益，进入重采样前剔除（不当作 0）。
     """
+    left = [(day, values[0]) for day, value in left
+            if (values := _finite_values([value]))]
+    right = [(day, values[0]) for day, value in right
+             if (values := _finite_values([value]))]
     left_days = sorted({day for day, _ in left})
     right_days = sorted({day for day, _ in right})
     if (len(left) < BOOTSTRAP_MIN_SAMPLES
@@ -478,7 +501,12 @@ def evaluate_accuracy(
                     reason = "immature"
                 reasons_by_h[horizon][reason] += 1
                 continue
-            net = float(label["value"])
+            net_values = _finite_values([label["value"]])
+            if not net_values:
+                # 该 horizon 标签存在但收益非有限：按无效样本排除，不填 0。
+                reasons_by_h[horizon]["invalid_value"] += 1
+                continue
+            net = net_values[0]
             actual = _classify_net(net)
             record = {
                 "code": sample.code,

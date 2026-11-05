@@ -108,7 +108,7 @@ class PrepCalendar(BaseModel):
     default_date: str
     default_date_source: Literal[
         "local_bar_previous", "local_bar_latest",
-        "record_date_fallback", "today_fallback"]
+        "latest_snapshot", "record_date_fallback", "today_fallback"]
     calendar_basis: Literal["local_stock_daily_bars_union", "record_dates"]
     calendar_latest_date: str | None = None
     degraded: bool = False
@@ -389,7 +389,7 @@ class AuctionCalendar(BaseModel):
     default_date: str
     default_date_source: Literal[
         "local_bar_previous", "local_bar_latest",
-        "record_date_fallback", "today_fallback"]
+        "latest_snapshot", "record_date_fallback", "today_fallback"]
     calendar_basis: Literal["local_stock_daily_bars_union", "record_dates"]
     calendar_latest_date: str | None = None
     degraded: bool = False
@@ -541,7 +541,9 @@ def prep_calendar(days: int = 365, end: str | None = None,
     defaults = resolve_default_date(
         page="prep", bar_dates=load_calendar(start_day, end_day) or [],
         reference_date=end_day,
-        latest_record_date=built.get("latest_record_date"))
+        latest_record_date=built.get("latest_record_date"),
+        latest_snapshot_date=built.get("latest_snapshot_date"),
+        latest_asset_date=built.get("latest_asset_date"))
     return PrepCalendar(available=bool(rows), **built, **defaults)
 
 

@@ -71,6 +71,10 @@
 
 ## 测试与 E2E 细则
 
+- **浏览器交互验收（2026-11-05 起）**：dashboard 的真实交互（回测入口 / popover 持久已读 /
+  单飞 / 日历折叠吸顶 / 百分点格式 / 旧账户 / 请求乱序与失败重试）用隔离 fixture server +
+  Playwright 脚本验证；fixture 使用独立 `DQ_DATA_DIR`、种子脚本与离线 provider，不打开真实
+  库、不触网。脚本与启动命令见 `docs/solutions/2026-11-05-dashboard-user-reported-fixes.md`。
 - **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
 - **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 56 个 parser 节点 / 18 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。`bs-eval` 的 BS1–BS5 映射到 `test_bs_eval.py`，只读 Web API + SPA fallback（`/bs`）映射到 `cross_cutting.bs_eval_api` 与 `web_spa_fallback`；`dashboard` 节点 flags 含 `--no-bs-autogen`，D13 映射 BS 自动生成 fail-soft。计数（56/18）不变。
 - **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
@@ -81,10 +85,18 @@
 
 ## 研究入口与 dashboard 只读启动（2026-11-05）
 
+- 次级导航入口统一叫「扫描研究」（`/research`）；导航里的「研究 / 诊断」灰字伪入口已删除。
+  研究页用中文说明通过 / 否决、评分 / rank、首次 / 重复入榜对 scan 质量的反馈。
 - Web 新增 `routers/research.py`：`GET /api/research/scan-quality`（只读原始扫描候选 +
   本地 `stock_daily`）与 `POST /api/account/experiments`（用户显式 `confirm=true` 才运行，
   冻结 run 的期间/资金/策略/上游母集，复用 `AccountSimulator`；本地行情缺失返回
   `insufficient_data`，不触网）。`GET /api/account/experiments` 只读已存报告，不重算。
+  scan-quality 的主 horizon 收益可能缺失：bootstrap 与主窗口统计只接收该窗口的有限有效
+  样本（不把 `None` 当 0），其他 horizon 的有效样本保留；基础扫描日志读取失败返回
+  `insufficient_data + reason="scan_read_error"`，不吞成「区间内无扫描」。
+- Web 新增 `routers/review.py` + `review_runner.py`：龙头总览「待回测」卡片的增量回测经
+  显式 POST 启动 `review --recompute-all` 子进程（单飞 / 403 / 中文错误 / shutdown 清理），
+  只读状态端点与页面加载绝不触发回测。契约见 [review](review.md)。
 - 实验报告落 `review_account_experiments`（幂等建表）；`review_account/experiments.py`
   不复制买卖/撮合算法，fixed 60/20/20 时间切分与双倍滑点压力，样本不足显式
   `insufficient_evidence`，不自动推广参数。

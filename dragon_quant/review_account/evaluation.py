@@ -486,7 +486,10 @@ def period_ledger(run: dict, snapshots: list[dict],
         if lot["basis"] is None:
             unrealized = None
         elif qty > 0:
-            unrealized = end_value - lot["basis"]
+            # 旧 run 的期末快照可能没有 mark（老版本 positions_json 无该字段）：
+            # 期末价值未知 → 未实现盈亏 unknown，绝不把 None 当 0 或直接相减。
+            unrealized = (None if end_value is None
+                          else end_value - lot["basis"])
         else:
             unrealized = None if lot["realized_part"] is None else 0.0
         period_pnl = None

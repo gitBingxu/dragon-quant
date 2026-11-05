@@ -12,6 +12,7 @@ import {
 } from "../../api/assets";
 import { AccuracyBoard } from "../../components/AccuracyBoard";
 import { AssetCalendar } from "../../components/AssetCalendar";
+import { CalendarPanel } from "../../components/CalendarPanel";
 import { Badge } from "../../components/Badge";
 import { type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
@@ -505,15 +506,23 @@ export function AuctionPage() {
       ) : null}
 
       <div className="grid gap-3">
-        {/* 1. 年度日历：默认永远最近确认交易日。 */}
-        <Section
+        {/* 1. 年度日历：与复盘共用可折叠面板；默认永远最近确认交易日。 */}
+        <CalendarPanel
           title="数据资产日历"
           description={
             calendar
               ? `近一年；默认日期：${defaultSource ?? "本地最近交易日"}。点任意日期切换。`
               : "近一年数据资产日历；点任意日期切换。"
           }
-          className="sticky top-14 z-20"
+          summary={
+            date ? (
+              <span>
+                选中日期 <span className="num text-ink">{date}</span>
+              </span>
+            ) : null
+          }
+          className="sticky z-20"
+          style={{ top: "var(--dq-header-h, 3.5rem)" }}
         >
           <AssetCalendar
             startDate={calendar?.start_date ?? date}
@@ -528,7 +537,7 @@ export function AuctionPage() {
               默认日期已降级：{calendar.degraded_reason ?? "本地日 K 缺失"}。
             </div>
           ) : null}
-        </Section>
+        </CalendarPanel>
 
         {/* 2. 所有候选竞价结果（含 T+1/3/5）。 */}
         <Section

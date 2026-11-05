@@ -219,11 +219,21 @@ def test_asset_calendar_is_github_style_and_shared() -> None:
         assert "AssetCalendar" in _read(page), f"{page.name} 未复用共享日历"
 
 
-def test_calendar_is_sticky_below_app_header() -> None:
+def test_calendar_is_sticky_below_real_app_header() -> None:
+    """顶栏窄屏会换行：sticky top 必须用实测高度变量，不能固定 top-14。"""
+    shell = _read(SRC / "AppShell.tsx")
+    assert "--dq-header-h" in shell
+    assert "ResizeObserver" in shell
     for page in (PREP_PAGE, AUCTION_PAGE):
         text = _read(page)
-        assert "sticky top-14 z-20" in text, (
-            f"{page.name} 日历 Section 必须 sticky 且避开 56px 顶栏")
+        assert "CalendarPanel" in text, f"{page.name} 未复用共享可折叠日历面板"
+        assert "var(--dq-header-h" in text, (
+            f"{page.name} 日历 sticky 必须停在真实顶栏下沿")
+        assert "sticky top-14" not in text, f"{page.name} 不得再固定 top-14"
+    panel = _read(SRC / "components" / "CalendarPanel.tsx")
+    for token in ("aria-expanded", "aria-controls", "收起", "展开",
+                  "defaultOpen = true"):
+        assert token in panel, f"CalendarPanel 缺少 {token!r}"
 
 
 def test_calendar_marks_missing_days_as_no_record() -> None:

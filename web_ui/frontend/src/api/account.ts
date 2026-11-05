@@ -181,7 +181,8 @@ export interface AccountSummary {
   unrealized_amount: number | null;
   unrealized_basis?: "mark" | "unknown";
   largest_loss_amount: number | null;
-  contribution_basis: "period_pnl" | "legacy_approximation";
+  /** period_pnl = 精确金额归因；legacy_approximation = 旧数据近似；unknown = 旧数据缺期初估值。 */
+  contribution_basis: "period_pnl" | "legacy_approximation" | "unknown";
   data_quality: string | null;
   run_meta: Record<string, unknown>;
 }

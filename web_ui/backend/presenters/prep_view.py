@@ -305,7 +305,8 @@ def build_calendar(
     # 保证回放可重现）；路由缺省 end 时已由时钟取今天。
     reference_date = end_date or today
     days: list[dict] = []
-    latest: str | None = None
+    latest_snapshot: str | None = None
+    latest_assets: str | None = None
 
     for trade_date in sorted(rows):
         raw = rows[trade_date] or {}
@@ -381,13 +382,23 @@ def build_calendar(
             "report_error": raw.get("report_error"),
         })
 
-        if has_snapshot or has_real_assets:
-            latest = trade_date
+        if has_snapshot:
+            latest_snapshot = trade_date
+        if has_real_assets:
+            latest_assets = trade_date
+
+    # ``latest_record_date`` 保持既有语义：最近真实资产或快照的日期（取较新者）。
+    # 「默认日优先快照」由 ``resolve_default_date`` 单独消费 latest_snapshot_date /
+    # latest_asset_date 实现，不改变这个公开键。
+    latest = max((day for day in (latest_snapshot, latest_assets) if day),
+                 default=None)
 
     return {
         "start_date": start_date,
         "end_date": end_date,
         "latest_record_date": latest,
+        "latest_snapshot_date": latest_snapshot,
+        "latest_asset_date": latest_assets,
         "days": days,
     }
 

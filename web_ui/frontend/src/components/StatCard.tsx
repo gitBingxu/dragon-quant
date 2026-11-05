@@ -31,6 +31,7 @@ export function StatCard({
   sub,
   hint,
   labelExtra,
+  footer,
   tone = "neutral",
   icon,
 }: {
@@ -39,6 +40,8 @@ export function StatCard({
   sub?: ReactNode;
   hint?: string;
   labelExtra?: ReactNode;
+  /** 卡片底部附加操作（如「待回测」卡片内的增量回测入口）。 */
+  footer?: ReactNode;
   tone?: StatTone;
   icon?: ReactNode;
 }) {
@@ -62,6 +65,7 @@ export function StatCard({
         {value}
       </div>
       {sub ? <div className="mt-1 text-caption text-ink-2">{sub}</div> : null}
+      {footer}
     </div>
   );
 }

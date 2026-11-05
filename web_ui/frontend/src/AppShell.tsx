@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Link, usePathname } from "./router";
 import { ThemeToggle } from "./components/ThemeToggle";
 import {
@@ -35,7 +35,7 @@ function BrandMark({ size = 28 }: { size?: number }) {
  * 导航按两个核心组织（D1）：
  * 1) 龙头识别：scan → review 机会质量与候选对照；
  * 2) 账户验证：prep / auction / 买卖点都服务真实账户结果；
- * 3) 研究 / 诊断：扫描日志、因子与实验入口，降为次级。
+ * 3) 次级入口：扫描研究、扫描日志、因子。全部是真实路由，不设伪入口。
  * 保留全部旧深链（/scans、/prep、/auction、/account、/bs、/factors）。
  */
 const PRIMARY_NAV = [
@@ -47,17 +47,49 @@ const SECONDARY_NAV = [
   { to: "/prep", label: "复盘", icon: IconCalendar, match: (p: string) => p === "/prep" },
   { to: "/auction", label: "竞价", icon: IconClock, match: (p: string) => p === "/auction" },
   { to: "/bs", label: "买卖点", icon: IconTrendUp, match: (p: string) => p === "/bs" },
-  { to: "/research", label: "研究", icon: IconRadar, match: (p: string) => p === "/research" },
+  { to: "/research", label: "扫描研究", icon: IconRadar, match: (p: string) => p === "/research" },
   { to: "/scans", label: "扫描日志", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
   { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
 ];
 
+/**
+ * 顶栏在窄屏会换行（高度 > 56px），把真实高度写进 ``--dq-header-h``，
+ * 供日历面板 sticky 使用，避免固定 ``top-14`` 遮挡内容。
+ */
+function useHeaderHeightVar(ref: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const apply = () => {
+      const height = Math.ceil(node.getBoundingClientRect().height);
+      document.documentElement.style.setProperty(
+        "--dq-header-h",
+        `${height > 0 ? height : 56}px`
+      );
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(apply) : null;
+    observer?.observe(node);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", apply);
+    };
+  }, [ref]);
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const headerRef = useRef<HTMLElement>(null);
+  useHeaderHeightVar(headerRef);
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-hairline bg-header backdrop-blur-xl">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-40 border-b border-hairline bg-header backdrop-blur-xl"
+      >
         <div className="mx-auto flex min-h-14 max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 sm:px-6">
           <Link to="/" className="order-1 flex shrink-0 items-center gap-2.5 no-underline">
             <BrandMark size={28} />
@@ -94,9 +126,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-hidden="true"
               className="mx-1 h-5 w-px shrink-0 bg-hairline"
             />
-            <span className="shrink-0 pr-1 text-caption uppercase tracking-[0.14em] text-ink-3">
-              研究/诊断
-            </span>
             {SECONDARY_NAV.map((item) => {
               const active = item.match(pathname);
               const Icon = item.icon;

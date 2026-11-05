@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchScanQuality,
   type ScanQuality,
@@ -74,6 +74,31 @@ function GroupTable({ title, groups }: {
   );
 }
 
+const STATUS_HINTS: Record<string, string> = {
+  no_scan_in_range: "所选区间没有扫描记录（空区间不是错误，也没有补造样本）。",
+  scan_read_error: "扫描日志读取失败，本次没有可用样本；可稍后重试。",
+  no_mature_samples: "有扫描记录，但主窗口尚无成熟收益样本；未成熟样本保留，不填 0。",
+  local_bars_truncated: "本地日 K 覆盖超出单次上限，已整体停止统计；请缩小日期区间后重试。",
+};
+
+function StatusNotice({ data }: { data: ScanQuality }) {
+  if (data.status === "ok") return null;
+  const reason = data.reason ?? "insufficient_data";
+  return (
+    <div className="rounded-lg border border-warning-line bg-warning-soft px-3.5 py-2.5 text-body text-warning">
+      <span className="font-semibold">证据不足：</span>
+      {STATUS_HINTS[reason] ?? `暂无可展示样本（${reason}）。`}
+      {data.read_errors?.length ? (
+        <ul className="mt-1 grid gap-0.5 font-mono text-caption">
+          {data.read_errors.map((item, index) => (
+            <li key={`${index}-${item}`}>· {item}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export function ResearchPage() {
   const search = useSearchParams();
   const [dateFrom, setDateFrom] = useState(
@@ -83,17 +108,23 @@ export function ResearchPage() {
   const [data, setData] = useState<ScanQuality | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 单调递增请求序号：慢的旧响应不得覆盖新查询（乱序守卫）。
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
-      setData(await fetchScanQuality(dateFrom, dateTo));
+      const payload = await fetchScanQuality(dateFrom, dateTo);
+      if (seq !== requestSeq.current) return;
+      setData(payload);
     } catch (exc) {
+      if (seq !== requestSeq.current) return;
       setData(null);
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [dateFrom, dateTo]);
 
@@ -104,9 +135,9 @@ export function ResearchPage() {
   return (
     <>
       <PageHeader
-        eyebrow="RESEARCH · 研究 / 诊断"
-        title="scan 候选质量"
-        description="只读原始扫描候选与本地行情，按通过/否决、分数、rank 与首次/重复入榜分组；不改 dragons 去重与生产候选池。"
+        eyebrow="RESEARCH · 扫描研究"
+        title="扫描研究"
+        description="只读原始扫描候选与本地行情：对比通过 / 否决、评分与 rank 区间、首次 / 重复入榜的事后净收益，用来反馈 scan 筛查质量；不改 dragons 去重与生产候选池。"
       />
 
       <div className="mb-3 flex flex-wrap items-end gap-2">
@@ -141,9 +172,11 @@ export function ResearchPage() {
 
       {data ? (
         <div className="grid gap-3">
+          <StatusNotice data={data} />
           <div className="card p-4 text-caption text-ink-2">
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               <span>状态：{data.status}</span>
+              <span>区间：{data.date_from} ~ {data.date_to}</span>
               <span>版本：{data.evaluation_version}</span>
               <span>截至：{data.as_of ?? "—"}</span>
               <span>口径：{data.window.entry_rule} / {data.window.exit_rule}</span>
@@ -160,6 +193,11 @@ export function ResearchPage() {
             ) : null}
             {data.warnings.length ? (
               <p className="mt-2 text-ink-3">提示：{data.warnings.join("；")}</p>
+            ) : null}
+            {data.status === "ok" && data.read_errors?.length ? (
+              <p className="mt-2 text-warning">
+                部分读取异常：{data.read_errors.join("；")}
+              </p>
             ) : null}
           </div>
 

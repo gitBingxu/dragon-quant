@@ -61,6 +61,7 @@ export interface PrepCalendarDay {
 export type DefaultDateSource =
   | "local_bar_previous"
   | "local_bar_latest"
+  | "latest_snapshot"
   | "record_date_fallback"
   | "today_fallback";
 

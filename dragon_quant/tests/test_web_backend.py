@@ -1713,9 +1713,10 @@ def test_prep_calendar_default_date_fields():
         bar_calendar_loader=_calendar_loader(["2026-09-10", "2026-09-11"]),
     )
     calendar = client.get("/api/prep/calendar?days=365").json()
-    assert calendar["default_date"] == "2026-09-10"
-    assert calendar["default_date_source"] == "local_bar_previous"
-    assert calendar["calendar_basis"] == "local_stock_daily_bars_union"
+    # 复盘默认选最近有复盘数据的日期（快照优先），不按本地 K 线推断。
+    assert calendar["default_date"] == "2026-09-11"
+    assert calendar["default_date_source"] == "latest_snapshot"
+    assert calendar["calendar_basis"] == "record_dates"
     assert calendar["calendar_latest_date"] == "2026-09-11"
     assert calendar["degraded"] is False
     assert calendar["degraded_reason"] is None

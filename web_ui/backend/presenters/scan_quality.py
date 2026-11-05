@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 from statistics import median
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
@@ -101,20 +102,36 @@ def _horizon_metrics(entry: float, hold_days: int,
     exit_bar = bars_by_date.get(exit_day)
     if not is_valid_bar(exit_bar):
         return {"status": "missing_exit_bar"}
-    exit_price = float(exit_bar["close"])
-    net = (exit_price / entry - 1) * 100 - cost_bps / 100
+    exit_price = _finite(exit_bar.get("close"))
+    entry_price = _finite(entry)
+    if exit_price is None or entry_price is None or entry_price == 0:
+        # 有效 bar 但价格非有限值：该窗口无有效收益，不填 0。
+        return {"status": "missing_exit_bar"}
+    net = (exit_price / entry_price - 1) * 100 - cost_bps / 100
+    if not math.isfinite(net):
+        return {"status": "missing_exit_bar"}
     return {"status": "ok", "exit_date": exit_day, "net_return_pct": net}
 
 
+def _finite(value: Any) -> float | None:
+    """只接受有限数值：``None`` / 非数值 / inf / nan 一律视为无有效样本。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _group_block(records: list[dict]) -> dict:
-    returns = [r["net_return_pct"] for r in records if r.get("net_return_pct") is not None]
-    opps = [r["max_opportunity_pct"] for r in records
-            if r.get("max_opportunity_pct") is not None]
+    returns = [value for value in (_finite(r.get("net_return_pct"))
+                                   for r in records) if value is not None]
+    opps = [value for value in (_finite(r.get("max_opportunity_pct"))
+                                for r in records) if value is not None]
     by_day: dict[str, list[float]] = {}
     for record in records:
-        if record.get("net_return_pct") is not None:
-            by_day.setdefault(record["snapshot_date"], []).append(
-                record["net_return_pct"])
+        value = _finite(record.get("net_return_pct"))
+        if value is not None:
+            by_day.setdefault(record["snapshot_date"], []).append(value)
     daily = [_mean(values) for values in by_day.values()]
     daily = [value for value in daily if value is not None]
     wins = sum(1 for value in returns if value > 0)
@@ -125,8 +142,12 @@ def _group_block(records: list[dict]) -> dict:
         if value.get("status") == "ok"
     }, key=lambda value: int(value))
     for key in horizon_keys:
-        values = [record["horizons"][key]["net_return_pct"] for record in records
-                  if (record.get("horizons") or {}).get(key, {}).get("status") == "ok"]
+        values = [value for value in (
+            _finite((record.get("horizons") or {}).get(key, {}).get(
+                "net_return_pct"))
+            for record in records
+            if (record.get("horizons") or {}).get(key, {}).get("status") == "ok"
+        ) if value is not None]
         by_horizon[key] = {
             "valid": len(values),
             "mean_net_return_pct": _mean(values),
@@ -159,7 +180,9 @@ def build_scan_quality(*,
                        hold_days: Sequence[int] = DEFAULT_HOLD_DAYS,
                        cost_bps: float = DEFAULT_COST_BPS,
                        read_errors: Optional[list[str]] = None,
-                       prior_codes: Optional[Iterable[str]] = None) -> dict:
+                       prior_codes: Optional[Iterable[str]] = None,
+                       base_read_failed: bool = False,
+                       empty_reason: Optional[str] = None) -> dict:
     days = sorted({str(day) for day in (calendar or []) if day})
     index = {day: position for position, day in enumerate(days)}
     horizons = sorted({int(value) for value in hold_days if int(value) > 0})
@@ -169,8 +192,11 @@ def build_scan_quality(*,
     dates = sorted(day for day in contributions_by_date
                    if date_from <= day <= date_to)
     if not dates:
+        # 基础读取失败（扫描日志/日期列表）不得静默呈现成「区间内没有扫描」。
+        reason = empty_reason or (
+            "scan_read_error" if base_read_failed else "no_scan_in_range")
         return _empty(date_from, date_to, horizons, cost_bps,
-                      reason="no_scan_in_range", calendar=days,
+                      reason=reason, calendar=days,
                       read_errors=read_errors or [])
 
     records: list[dict] = []
@@ -286,6 +312,13 @@ def build_scan_quality(*,
         return round(block["mean_net_return_pct"]
                      - baseline["mean_net_return_pct"], 4)
 
+    # bootstrap 只接收**主 horizon 有效且有限**的收益：主 horizon 未成熟的
+    # 记录保留在 samples/其他 horizon 统计里，但不得把 None 当 0 送进重采样。
+    def pairs(gate: str) -> list[tuple[str, float]]:
+        return [(record["snapshot_date"], value) for record in ok
+                if record.get("gate") == gate
+                and (value := _finite(record.get("net_return_pct"))) is not None]
+
     status = ("ok" if baseline["valid"] > 0
               else "insufficient_data")
     return {
@@ -331,10 +364,7 @@ def build_scan_quality(*,
                               and rejected.get("mean_net_return_pct") is not None
                               else None),
                     "bootstrap": _bootstrap_interval(
-                        [(r["snapshot_date"], r["net_return_pct"])
-                         for r in ok if r["gate"] == "passed"],
-                        [(r["snapshot_date"], r["net_return_pct"])
-                         for r in ok if r["gate"] == "rejected"],
+                        pairs("passed"), pairs("rejected"),
                         seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES)}
                    if passed and rejected else None),
         "coverage_gap": (

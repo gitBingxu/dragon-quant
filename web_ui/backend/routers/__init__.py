@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
-from . import account, accuracy, assets, bs, dragons, factors, meta, research, scans
+from . import (
+    account, accuracy, assets, bs, dragons, factors, meta, research, review, scans,
+)
 
 ROUTERS = (
     meta.router,
@@ -15,6 +17,7 @@ ROUTERS = (
     factors.router,
     accuracy.router,
     research.router,
+    review.router,
     assets.router,
     account.router,
     bs.router,

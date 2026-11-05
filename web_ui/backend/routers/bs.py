@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 from functools import wraps
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -26,12 +25,10 @@ from ..deps import (
     dashboard_settings,
 )
 from ..errors import ApiError
+from ..http_guards import origin_allowed
 from ..presenters import bs_view
 
 router = APIRouter(tags=["bs"])
-
-# 只放行本机 Origin；``Origin: null`` / 外部站点一律 403。
-_ALLOWED_ORIGIN_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def stable_errors(fn):
@@ -75,14 +72,6 @@ def _strategy_payload(doc) -> dict:
     }
 
 
-def _origin_allowed(origin: str) -> bool:
-    try:
-        host = urlsplit(origin).hostname
-    except ValueError:
-        return False
-    return bool(host) and host.lower() in _ALLOWED_ORIGIN_HOSTS
-
-
 def _job_payload(runner, settings) -> dict:
     snapshot = runner.status()
     return {
@@ -104,7 +93,7 @@ def bs_jobs_status(runner=Depends(bs_runner),
 def bs_rebuild(request: Request, runner=Depends(bs_runner),
                settings=Depends(dashboard_settings)):
     origin = request.headers.get("origin")
-    if origin is not None and not _origin_allowed(origin):
+    if origin is not None and not origin_allowed(origin):
         return JSONResponse(status_code=403, content={"error": "invalid_origin"})
     try:
         runner.start_force(trigger="manual")

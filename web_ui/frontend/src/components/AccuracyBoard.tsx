@@ -27,8 +27,15 @@ import {
   labelOf,
 } from "../lib/labels";
 
+/** 比率（0.125）→ 百分数（12.5%）：命中率 / 避损率 / 错失率等 0~1 口径。 */
 function pctRate(value: number | null): string {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+/** 已是百分点（1.25 → 1.3%）：收益 / 差值 / bootstrap 区间不得再 ×100。 */
+function pctPoints(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return `${value.toFixed(1)}%`;
 }
 
 const STOCK_COLUMNS: Column<AccuracyStock>[] = [
@@ -241,9 +248,9 @@ function Body({
                   <tr key={name} className="border-b border-hairline">
                     <td className="py-1.5 pr-3 text-ink">{name}</td>
                     <td className="py-1.5 pr-3">{group.samples}</td>
-                    <td className="py-1.5 pr-3">{pctRate(group.mean_return_pct)}</td>
-                    <td className="py-1.5 pr-3">{pctRate(group.median_return_pct)}</td>
-                    <td className="py-1.5 pr-3">{pctRate(group.date_equal_mean_return_pct)}</td>
+                    <td className="py-1.5 pr-3">{pctPoints(group.mean_return_pct)}</td>
+                    <td className="py-1.5 pr-3">{pctPoints(group.median_return_pct)}</td>
+                    <td className="py-1.5 pr-3">{pctPoints(group.date_equal_mean_return_pct)}</td>
                     <td className="py-1.5 pr-3">{group.wins}/{group.losses}/{group.flats}</td>
                     <td className="py-1.5">
                       {pctRate(group.avoided_loss_rate)} / {pctRate(group.missed_gain_rate)}
@@ -257,13 +264,13 @@ function Body({
         {data.spread ? (
           <div className="rounded-md border border-hairline px-3 py-2 text-caption text-ink-2">
             推荐−不推荐差值：
-            {pctRate((data.spread.value as number | null) ?? null)}
+            {pctPoints(data.spread.value as number | null)}
             {(() => {
               const boot = (data.spread?.bootstrap || {}) as Record<string, unknown>;
               if (boot.low == null || boot.high == null) {
                 return `（${String(boot.status ?? "无区间")}，不出虚假显著性）`;
               }
-              return `（日期级 bootstrap ${pctRate(boot.low as number)} ~ ${pctRate(boot.high as number)}，seed=${String(boot.seed ?? "—")}）`;
+              return `（日期级 bootstrap ${pctPoints(boot.low as number)} ~ ${pctPoints(boot.high as number)}，seed=${String(boot.seed ?? "—")}）`;
             })()}
           </div>
         ) : null}

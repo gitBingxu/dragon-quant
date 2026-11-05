@@ -94,3 +94,10 @@ python -m dragon_quant sell --force
   已实现/未实现、最大单笔亏损、Sharpe；0/全赢/全亏返回不可计算（None）。
 - 链式增量沿 `base_run_id` 保留追溯与期初状态；旧快照缺盯市价时
   `attribution_quality=legacy_approximation`。
+- **旧 run 缺字段（2026-11-05 修复）**：旧版本 `positions_json` 可能没有 `mark` 字段，
+  期末盯市价值未知。`period_ledger` 遇到 `end_value is None` 时把该批次 `unrealized_part /
+  period_pnl` 置 `None`、整段 `quality="unknown"`，**绝不与浮点相减、也绝不 fill 0**；
+  `/api/account/positions` 与 `/api/account/summary` 对旧 run 均返回 200，前端明确显示
+  「未知（旧数据缺期初估值 / 盯市价）」与「旧数据近似」。`AccountPage` 的四个核心请求
+  改为 `Promise.allSettled` 逐项降级：单个统计端点失败只显示「部分数据暂不可用」，
+  已加载的快照/交割单/持仓不被清空；请求序号仍防串批。

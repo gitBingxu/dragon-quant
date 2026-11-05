@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ReviewCaliber, Summary } from "../../api/dragons";
 import { HintIcon } from "../../components/HintIcon";
 import { StatCard } from "../../components/StatCard";
@@ -14,10 +15,13 @@ export function SummaryCards({
   summary,
   coverage,
   caliber,
+  pendingAction,
 }: {
   summary: Summary | null;
   coverage?: Summary | null;
   caliber: ReviewCaliber;
+  /** 「待回测」卡片内的增量回测入口；仅待回测 > 0 时由页面传入。 */
+  pendingAction?: ReactNode;
 }) {
   const s = summary;
   const isStrict = caliber === "strict";
@@ -57,6 +61,7 @@ export function SummaryCards({
         value={s?.derived_pending ?? s?.pending ?? 0}
         sub="完整收益窗口（入选后约 6 个交易日）"
         tone={(s?.derived_pending ?? s?.pending ?? 0) > 0 ? "warning" : "neutral"}
+        footer={pendingAction}
       />
       <StatCard
         label="平均最大潜在涨幅"

@@ -13,6 +13,7 @@ def create_app(settings: DashboardSettings | None = None):
 
     from .bs_runner import BsRunner
     from .errors import install_error_handlers
+    from .review_runner import ReviewJobRunner
     from .routers import ROUTERS
     from .static import CacheControlMiddleware, mount_frontend
 
@@ -20,11 +21,13 @@ def create_app(settings: DashboardSettings | None = None):
 
     app = FastAPI(
         title="dragon-quant dashboard",
-        description="本地面板（查询为主；BS 派生数据经子进程生成）",
+        description="本地面板（查询为主；BS / 回测增量经子进程生成）",
     )
     app.state.settings = settings
     # 只构造（无 I/O、不 spawn）；启动由 ``serve._serve`` 按开关触发。
     app.state.bs_runner = BsRunner()
+    # 龙头回测增量作业：只有显式 POST 才启动，查看页面绝不触发。
+    app.state.review_runner = ReviewJobRunner()
 
     # 纯 ASGI 中间件：在响应流上叠加 Cache-Control（不改路由实现）。
     app.add_middleware(CacheControlMiddleware)

@@ -161,6 +161,11 @@ def bs_runner(request: Request):
     return request.app.state.bs_runner
 
 
+def review_runner(request: Request):
+    """从 ``app.state`` 取龙头回测增量作业状态机（子进程委派，无 I/O）。"""
+    return request.app.state.review_runner
+
+
 def bs_repository():
     """``bs_runs`` / ``bs_signals`` 只读仓储。"""
     from dragon_quant.bs_eval import storage

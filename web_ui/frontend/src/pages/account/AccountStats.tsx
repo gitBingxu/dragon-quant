@@ -11,6 +11,15 @@ function metaText(run: AccountRun | null, key: string): string | null {
   return String(value);
 }
 
+/** 本段归因口径的中文说明：unknown 必须明确展示，绝不填 0 冒充精确。 */
+function contributionBasisLabel(
+  basis: "period_pnl" | "legacy_approximation" | "unknown" | undefined
+): string {
+  if (basis === "period_pnl") return "期初盯市价值（精确）";
+  if (basis === "legacy_approximation") return "旧数据近似（不可精确归因）";
+  return "未知（旧数据缺期初估值 / 盯市价）";
+}
+
 export function AccountStats({
   run,
   latest,
@@ -83,7 +92,13 @@ export function AccountStats({
         <StatCard
           label="期望整笔收益"
           value={fmtMoney(metrics?.expectancy_amount ?? null)}
-          sub={metrics?.contribution_basis === "legacy_approximation" ? "旧数据近似" : "精确金额"}
+          sub={
+            metrics?.contribution_basis === "period_pnl"
+              ? "精确金额"
+              : metrics?.contribution_basis === "unknown"
+                ? "未知（旧数据，不填 0）"
+                : "旧数据近似"
+          }
         />
         <StatCard label="费用合计" value={fmtMoney(metrics?.fees ?? null)} />
         <StatCard
@@ -107,9 +122,7 @@ export function AccountStats({
             <span>排序：{metaText(run, "ranking_mode")}</span>
           ) : null}
           <span>
-            本段贡献基准：{metrics?.contribution_basis === "legacy_approximation"
-              ? "旧数据近似（不可精确归因）"
-              : "期初盯市价值"}
+            本段贡献基准：{contributionBasisLabel(metrics?.contribution_basis)}
           </span>
         </div>
         {degraded ? (

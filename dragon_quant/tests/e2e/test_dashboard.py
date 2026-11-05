@@ -816,9 +816,11 @@ def test_d12_prep_default_date_effect_and_accuracy():
         with start_dashboard(box) as server:
             calendar = server.request(
                 "GET", "/api/prep/calendar?days=365&end=2026-09-11").json()
-            assert calendar["default_date"] == "2026-09-10"
-            assert calendar["default_date_source"] == "local_bar_previous"
-            assert calendar["calendar_basis"] == "local_stock_daily_bars_union"
+            # 复盘默认选最近有复盘数据的日期（快照 09-11 优先），不再按
+            # 「本地 K 线前一交易日」推断。
+            assert calendar["default_date"] == "2026-09-11"
+            assert calendar["default_date_source"] == "latest_snapshot"
+            assert calendar["calendar_basis"] == "record_dates"
             assert calendar["calendar_latest_date"] == "2026-09-11"
             assert calendar["degraded"] is False
 

@@ -44,6 +44,38 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 **前端行为**：FilterBar 在「体系」后新增「口径」Select（默认严格；v1 固定宽松并禁用；切体系 / 切口径导致生效口径变为宽松时，同 patch 把严格专有的 `pending_recompute` / `cannot_evaluate` 状态清空为「全部」，宽松选项列表不含这两项；「重置」保留 source，v2 回严格、v1 保持宽松）。表格、卡片与客户端排序都使用**已加载响应**的口径（`responseCaliber` 与 `data` / `summary` 在 `requestSeq` 守卫内原子写入），不使用表单待提交值。状态列展示服务端 `derived_status`，状态表头排序也按 `derived_status`（不再按可能为 `NULL` 的 `strict_review_status`）。卡片平均收益 / 最佳随口径选择键；宽松胜率与严格胜率两张卡始终同时展示；「待回测」的「待重算 / 失败」副文案来自严格侧重算进度，仅 v2 + strict 展示。
 
+## 龙头总览增量回测作业（Web，2026-11-05）
+
+只读页面不触发回测；写入只经显式 POST 的子进程作业（Ports/Adapters：HTTP 处理函数
+不建连接、不 import `dragon_quant.review`）：
+
+- `GET /api/review/jobs/status`：纯只读 `{state, last_run, summary}`，**不启动任何任务**。
+  `summary` 从既有 `--recompute-all` 输出块解析（processed / completed /
+  cannot_evaluate / failed / skipped / skipped_immature），解析不到为 `null`。
+  **作业状态 ≠ 业务结果**：CLI 对单条 error 仍 exit 0，前端不得把 succeeded 当全部成功。
+- `POST /api/review/jobs/incremental`：单飞启动
+  `python -m dragon_quant review --source v2 --recompute-all`（**固定不带 `--force`**）。
+  返回 `202` + 同一状态载荷；运行中重复触发 `409 {"error":"job_running", "detail": 中文}`；
+  跨站 `Origin` `403 {"error":"invalid_origin"}`；spawn 同步失败 `500 {"error":"spawn_failed"}`。
+  进程退出时服务 `terminate()` 清理。
+- 语义复用 CLI：成熟 `pending`、`partial` 与严格侧表缺失行补算，已有非 partial 严格结果
+  跳过，未成熟保留（约 6 个交易日后才能补算），不把全量强制重算伪装成增量。
+- 前端：`SummaryCards` 的「待回测」卡片在 `derived_pending > 0` 时渲染「回测」文本按钮；
+  计数未知（加载中/失败）不渲染。首次出现自动弹说明（只有点击「我知道了」才写版本化
+  localStorage；展示不写、storage 异常不崩溃），按钮运行期间禁用防双击。
+- **恢复与轮询**：挂载仅 GET status——运行中立即挂接现有作业、禁用按钮且不重复 POST；
+  最近 10 分钟内完成的作业恢复结果（包括待回测归零后刷新）；父级在页面加载时只读探测运行中或最近终态，保持卡片状态区
+  挂载（筛选 pending=0 也不丢状态）。轮询用串行 `setTimeout`（2s，不重叠），按
+  `started_at` 作业身份守卫，过期 running 不得覆盖终态；网络失败只提示重试并继续，
+  **不暗示后端任务被取消**。
+- **结果展示**：有 `summary` 时展示 completed/cannot_evaluate/skipped；`failed > 0`
+  显示「任务部分失败」；`processed=0` 明确「没有需要补算的成熟标的」；没有汇总时只给
+  「任务执行结束，仍有 N 条待处理，请查看状态/错误」，不推断剩余全是未成熟。成功刷新
+  按**最近一次提交的筛选**进行；刷新请求失败时显示「任务已结束，但列表刷新失败…已保留
+  上次有效数据」，绝不伪报已刷新（刷新被更新的查询接管时单独提示）。
+- 测试 owner：`test_dashboard_followup_20261105.py`、`test_web_frontend_dashboard_followup.py`；
+  浏览器交互证据脚本见 `docs/solutions/2026-11-05-dashboard-user-reported-fixes.md`。
+
 ## 入选后表现（只读端点，固定宽松口径）
 
 `GET /api/dragons/{trade_date}/{code}/performance?as_of=YYYYMMDD` 是抽屉内的局部增强，与 `/api/dragons` 冻结契约、固定 5 日回测、`dragon_review_strict` 侧表完全隔离。

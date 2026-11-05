@@ -229,6 +229,7 @@ export const CALENDAR_BASIS_LABELS: Record<string, string> = {
 export const DEFAULT_DATE_SOURCE_LABELS: Record<string, string> = {
   local_bar_previous: "本地前一交易日",
   local_bar_latest: "本地最近交易日",
+  latest_snapshot: "最近复盘快照",
   record_date_fallback: "记录日回退",
   today_fallback: "今日回退",
 };

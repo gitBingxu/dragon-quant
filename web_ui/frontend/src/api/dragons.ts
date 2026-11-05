@@ -245,6 +245,6 @@ export async function fetchDragons(
     if (v != null && String(v).trim() !== "") params.set(k, String(v).trim());
   }
   const res = await fetch("/api/dragons?" + params.toString());
-  if (!res.ok) throw new Error(`dragons ${res.status}`);
+  if (!res.ok) throw new Error(`龙头列表加载失败（${res.status}）`);
   return res.json();
 }

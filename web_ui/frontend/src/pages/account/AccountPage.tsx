@@ -65,6 +65,7 @@ export function AccountPage() {
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [auxError, setAuxError] = useState<string | null>(null);
+  const [partialError, setPartialError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -107,6 +108,7 @@ export function AccountPage() {
     setDetailRunId(null);
     setError(null);
     setAuxError(null);
+    setPartialError(null);
     // 切换 run 立即清空旧详情并进入明确加载态，绝不混用新旧批次。
     clearDetail(
       setSnapshots,
@@ -124,56 +126,76 @@ export function AccountPage() {
     setDetailLoading(true);
     const isCurrent = () =>
       requestSeq.current === requestId;
-    Promise.all([
+    // 核心数据逐项降级：单个统计端点失败（如旧 run 的 summary 500）不得
+    // 清空已加载的快照 / 交割单；只有全部失败才显示整体错误。
+    Promise.allSettled([
       fetchAccountSnapshots(runId),
       fetchAccountTrades(runId),
       fetchAccountPositions(runId),
       fetchAccountSummary(runId),
     ])
-      .then(([snapshotResp, tradeResp, positionResp, summaryResp]) => {
+      .then(([snapshotResult, tradeResult, positionResult, summaryResult]) => {
         if (!isCurrent()) return;
-        setSnapshots(snapshotResp.data || []);
-        setTrades(tradeResp.data || []);
-        setPositions(positionResp.data || []);
-        setPositionStats(positionResp.stats || null);
-        setSummary(summaryResp.data || null);
+        const failures: string[] = [];
+        if (snapshotResult.status === "fulfilled") {
+          setSnapshots(snapshotResult.value.data || []);
+        } else {
+          setSnapshots([]);
+          failures.push("权益快照");
+        }
+        if (tradeResult.status === "fulfilled") {
+          setTrades(tradeResult.value.data || []);
+        } else {
+          setTrades([]);
+          failures.push("交割单");
+        }
+        if (positionResult.status === "fulfilled") {
+          setPositions(positionResult.value.data || []);
+          setPositionStats(positionResult.value.stats || null);
+        } else {
+          setPositions([]);
+          setPositionStats(null);
+          failures.push("持仓与买点统计");
+        }
+        if (summaryResult.status === "fulfilled") {
+          setSummary(summaryResult.value.data || null);
+        } else {
+          setSummary(null);
+          failures.push("收益统计");
+        }
         setDetailRunId(runId);
+        if (failures.length === 4) {
+          setError(`批次详情读取失败：${failures.join("、")}`);
+        } else if (failures.length) {
+          setPartialError(
+            `部分数据暂不可用：${failures.join("、")}（其余结果仍可用）`
+          );
+        }
         // 辅助数据独立降级：失败不清核心详情（D3）。
         Promise.allSettled([
           fetchAccountBenchmark(runId),
           fetchAccountEvents(runId),
         ]).then(([benchmarkResult, eventResult]) => {
           if (!isCurrent()) return;
-          const failures: string[] = [];
+          const auxFailures: string[] = [];
           if (benchmarkResult.status === "fulfilled") {
             setBenchmark(benchmarkResult.value.data || []);
           } else {
             setBenchmark([]);
-            failures.push("基准对比");
+            auxFailures.push("基准对比");
           }
           if (eventResult.status === "fulfilled") {
             setEvents(eventResult.value.data || []);
           } else {
             setEvents([]);
-            failures.push("决策时间线");
+            auxFailures.push("决策时间线");
           }
           setAuxError(
-            failures.length ? `辅助数据暂不可用：${failures.join("、")}` : null
+            auxFailures.length
+              ? `辅助数据暂不可用：${auxFailures.join("、")}`
+              : null
           );
         });
-      })
-      .catch((exc) => {
-        if (!isCurrent()) return;
-        clearDetail(
-          setSnapshots,
-          setBenchmark,
-          setTrades,
-          setPositions,
-          setPositionStats,
-          setEvents,
-          setSummary
-        );
-        setError(exc instanceof Error ? exc.message : String(exc));
       })
       .finally(() => {
         if (isCurrent()) setDetailLoading(false);
@@ -276,6 +298,12 @@ export function AccountPage() {
       {detailLoading ? (
         <div className="mb-3 rounded-lg border border-hairline px-3.5 py-2.5 text-body text-ink-2">
           正在加载批次详情…
+        </div>
+      ) : null}
+
+      {partialError ? (
+        <div className="mb-3 rounded-lg border border-warning-line bg-warning-soft px-3.5 py-2.5 text-caption text-warning">
+          {partialError}
         </div>
       ) : null}
 

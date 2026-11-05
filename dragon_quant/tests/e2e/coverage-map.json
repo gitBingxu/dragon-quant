@@ -579,12 +579,13 @@
       {
         "command": "dashboard",
         "flags": [
-          "-h",
+          "--bs-autogen",
           "--help",
-          "--port",
           "--no-browser",
+          "--no-bs-autogen",
+          "--port",
           "--yes",
-          "--no-bs-autogen"
+          "-h"
         ]
       },
       {

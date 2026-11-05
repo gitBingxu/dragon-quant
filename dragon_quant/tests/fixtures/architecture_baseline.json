@@ -296,6 +296,7 @@
         "replay_days",
         "fallback_days",
         "suspended_days",
+        "fault_days",
         "buy_date",
         "buy_rule_code",
         "buy_rule_text",
@@ -318,9 +319,13 @@
         "sell_half_price",
         "sell_half_qty",
         "sell_half_rule_code",
+        "sell_half_max_return_5d",
+        "sell_half_max_drawdown_5d",
+        "sell_half_window_days",
         "sell_max_return_5d",
         "sell_max_drawdown_5d",
         "sell_max_return_hold_days",
+        "sell_post_exit_window_days",
         "sell_window_partial",
         "content_hash",
         "last_attempt_at",
@@ -388,6 +393,7 @@
         "review_status",
         "reason",
         "review_version",
+        "tradable_open_json",
         "computed_at"
       ],
       "indexes": [
@@ -491,6 +497,20 @@
         "idx_review_account_events_run"
       ]
     },
+    "review_account_experiments": {
+      "columns": [
+        "id",
+        "base_run_id",
+        "created_at",
+        "experiment_version",
+        "status",
+        "request_json",
+        "report_json"
+      ],
+      "indexes": [
+        "idx_review_account_experiments_run"
+      ]
+    },
     "review_account_positions": {
       "columns": [
         "id",
@@ -511,7 +531,12 @@
         "status",
         "post_exit_max_return",
         "post_exit_max_drawdown",
-        "post_exit_window_days"
+        "post_exit_window_days",
+        "initial_cost",
+        "realized_pnl",
+        "period_pnl",
+        "period_start_value",
+        "inherited"
       ],
       "indexes": [
         "idx_review_account_positions_run"
@@ -533,7 +558,16 @@
         "max_drawdown",
         "trade_count",
         "win_rate",
-        "created_at"
+        "created_at",
+        "base_run_id",
+        "start_equity",
+        "start_positions_json",
+        "start_realized_pnl",
+        "start_cash",
+        "start_peak_equity",
+        "start_consecutive_losses",
+        "start_marks_json",
+        "run_meta_json"
       ],
       "indexes": [
         "idx_review_account_runs_created"
@@ -1004,8 +1038,8 @@
     "auction/stdout_collect.txt": "a24e8accb674a8633d7576c7581e3fd84a0d3e5906537ea151e1120d1403d4aa",
     "auction/stdout_snapshot.txt": "e5d727004160676def2f51a03db41d587dbc32a4b9fc712ccacf860647dcc066",
     "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
-    "factor/decision_review_auction.json": "79a3846164797875375840c86dcc2ac4d9443bb0104f72fb9e35c2576f10403f",
-    "factor/decision_review_prep.json": "005aa8f35abad7c98b00c6941b9f0dac4ba72c1c1c07fa1c143c74942a76e066",
+    "factor/decision_review_auction.json": "a9da955e4a1240277d29e863cb585527032315811c7744a795c6e3148c34308e",
+    "factor/decision_review_prep.json": "fcf2e414bbcc1609b3eb63dec055d2bc56d28b09f254aee54fec77864caf28b0",
     "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",
     "factor/export_matrix.csv": "46655b3c09b4aaf6fc0c6281a74d6694dca6d302968b79eb9d2682c104682a1c",
     "factor/export_meta.json": "7e931a536c92a65d740586bbe5621420be6fa668da207ffd84b3e908a8958e40",

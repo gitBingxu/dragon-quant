@@ -11,11 +11,13 @@ from typing import Optional
 from dragon_quant.bs_eval import constants
 from dragon_quant.bs_eval.candidates import eval_candidate
 from dragon_quant.review_account.data import historical_events
+from dragon_quant.review_account.indicators import post_exit_stats
 from dragon_quant.review_account.live_trade.signal_engine import SignalEngine
 from dragon_quant.review_account.market import (
     DataCoverageError,
     daily_bar,
     event_date,
+    is_tradable_daily_bar,
 )
 from dragon_quant.review_account.models import StrategyConfig
 from dragon_quant.review.strict_metrics import window_metrics
@@ -120,6 +122,8 @@ class BsEvaluator:
         day_qualities: dict[str, str] = {}
         fallback_days = 0
         suspended_days = 0
+        # 数据故障（DataCoverageError）≠ 停牌：必须可重试，不能写成终态无信号。
+        fault_days = 0
         replay_days = 0
         last_replayed_day: Optional[str] = None
 
@@ -142,7 +146,8 @@ class BsEvaluator:
                 events = list(historical_events(
                     day, active, {code}, self.data, daily_start=trade_date))
             except DataCoverageError:
-                suspended_days += 1
+                # 数据故障：既不是停牌也不等于无信号；不冻结为终态，等待重试。
+                fault_days += 1
                 continue
 
             day_row_seen = False
@@ -172,10 +177,21 @@ class BsEvaluator:
                 suspended_days += 1
 
         if bought is None:
+            if fault_days:
+                # 买入窗口内存在数据故障：不能宣称「整个窗口无信号」，且必须可重试。
+                return self._payload(
+                    row, eval_status=constants.STATUS_CANNOT_EVALUATE,
+                    eval_note=constants.NOTE_DATA_COVERAGE_ERROR,
+                    is_terminal=0, replay_days=replay_days,
+                    fallback_days=fallback_days, suspended_days=suspended_days,
+                    fault_days=fault_days,
+                    data_quality=_aggregate_quality(day_qualities, replay_days),
+                )
             return self._payload(
                 row, eval_status=constants.STATUS_NO_SIGNAL,
                 is_terminal=1, replay_days=replay_days,
                 fallback_days=fallback_days, suspended_days=suspended_days,
+                fault_days=0,
                 data_quality=_aggregate_quality(day_qualities, replay_days),
             )
 
@@ -184,6 +200,7 @@ class BsEvaluator:
             "replay_days": replay_days,
             "fallback_days": fallback_days,
             "suspended_days": suspended_days,
+            "fault_days": fault_days,
             "data_quality": _aggregate_quality(day_qualities, replay_days),
             "buy_data_quality": day_qualities.get(bought["entry_date"]),
         })
@@ -194,18 +211,28 @@ class BsEvaluator:
                 "sell_half_qty": half_leg.get("qty"),
                 "sell_half_rule_code": half_leg.get("reason_code"),
             })
+            # 半仓腿独立样本：与全清腿分开统计，不混入整笔交易盈利分母。
+            half_metrics = self._post_exit(half_leg, history)
+            payload.update({
+                "sell_half_max_return_5d": half_metrics["return"],
+                "sell_half_max_drawdown_5d": half_metrics["drawdown"],
+                "sell_half_window_days": half_metrics["window_days"],
+            })
 
         if final_sell is None:
             days_after_buy = self._days_after(bought["entry_date"], last_replayed_day)
             capped = days_after_buy >= constants.MAX_REPLAY_TRADING_DAYS
             payload.update({
                 "eval_status": constants.STATUS_OPEN,
-                "eval_note": (constants.NOTE_HOLD_CAP_REACHED if capped else None),
-                "is_terminal": 1 if capped else 0,
+                "eval_note": (constants.NOTE_DATA_COVERAGE_ERROR if fault_days
+                              else constants.NOTE_HOLD_CAP_REACHED if capped
+                              else None),
+                # 买入后数据故障时不能冻结为成熟终态（等待重试）。
+                "is_terminal": 1 if (capped and not fault_days) else 0,
             })
             return payload
 
-        return self._closed_payload(payload, final_sell, klines, day_qualities)
+        return self._closed_payload(payload, final_sell, history, klines, day_qualities)
 
     # ─── 买入字段 ────────────────────────────────────────────────────────
 
@@ -254,28 +281,62 @@ class BsEvaluator:
 
     # ─── 卖出字段 ────────────────────────────────────────────────────────
 
-    def _closed_payload(self, payload: dict, sell: dict, klines: list[dict],
-                        day_qualities: dict[str, str]) -> dict:
+    def _post_exit(self, sell: dict, history: list) -> dict:
+        """卖出日之后 5 根有效日 K 的机会/风险（与账户 ``post_exit_stats`` 同源）。
+
+        * 窗口 **不含卖出当日**、**不跳过次日**；
+        * 最高涨幅 = (窗口最高价 − 卖价) / 卖价；
+        * 最大跌幅 = min(0, (窗口最低价 − 卖价) / 卖价)（相对卖价起算，单边）。
+        """
         sell_date = sell.get("exit_date")
         sell_price = sell.get("exit_price")
-        metrics = (
-            window_metrics(klines, self.calendar_set, sell_date, sell_price)
-            if sell_date and sell_price else None
-        )
-        value = _metrics_payload(metrics)
-        partial = metrics is None or value["partial"]
+        stats = {"post_exit_max_return": None, "post_exit_max_drawdown": None,
+                 "post_exit_window_days": 0}
+        peak_days = None
+        if sell_date and sell_price:
+            try:
+                stats = post_exit_stats(history, sell_date, sell_price,
+                                        window=constants.POST_EXIT_WINDOW_DAYS)
+            except Exception:  # 纯函数异常不污染整行；按窗口不足处理
+                stats = stats
+        # 旧字段 ``sell_max_return_hold_days`` 保持「到峰值天数」语义；
+        # 窗口有效 bar 数单独用 ``sell_post_exit_window_days``。
+        if stats["post_exit_window_days"]:
+            valid = [bar for bar in history
+                     if event_date(bar.timestamp) > sell_date
+                     and is_tradable_daily_bar(bar)]
+            valid.sort(key=lambda bar: bar.timestamp)
+            valid = valid[:constants.POST_EXIT_WINDOW_DAYS]
+            if valid:
+                peak = max(valid, key=lambda bar: bar.high)
+                peak_days = valid.index(peak) + 1
+        return {
+            "return": stats["post_exit_max_return"],
+            "drawdown": stats["post_exit_max_drawdown"],
+            "window_days": stats["post_exit_window_days"],
+            "peak_days": peak_days,
+        }
+
+    def _closed_payload(self, payload: dict, sell: dict, history: list,
+                        klines: list[dict],
+                        day_qualities: dict[str, str]) -> dict:
+        sell_date = sell.get("exit_date")
+        metrics = self._post_exit(sell, history)
+        partial = metrics["window_days"] < constants.POST_EXIT_WINDOW_DAYS
         payload.update({
             "eval_status": constants.STATUS_CLOSED,
-            "is_terminal": 0 if partial else 1,
+            # 数据故障/窗口不足都不能冻结为成熟结果（可重试）。
+            "is_terminal": 0 if (partial or int(payload.get("fault_days") or 0)) else 1,
             "sell_date": sell_date,
             "sell_rule_code": sell.get("reason_code"),
             "sell_rule_text": sell.get("reason_text"),
-            "sell_price": sell_price,
+            "sell_price": sell.get("exit_price"),
             "sell_hold_days": sell.get("hold_days"),
             "sell_data_quality": day_qualities.get(sell_date),
-            "sell_max_return_5d": value["max_return_5d"],
-            "sell_max_drawdown_5d": value["max_drawdown_5d"],
-            "sell_max_return_hold_days": value["max_return_hold_days"],
+            "sell_max_return_5d": metrics["return"],
+            "sell_max_drawdown_5d": metrics["drawdown"],
+            "sell_max_return_hold_days": metrics["peak_days"],
+            "sell_post_exit_window_days": metrics["window_days"],
             "sell_window_partial": 1 if partial else 0,
         })
         return payload
@@ -308,6 +369,7 @@ class BsEvaluator:
             "replay_days": replay_days,
             "fallback_days": fallback_days,
             "suspended_days": suspended_days,
+            "fault_days": 0,
             "buy_date": None,
             "buy_rule_code": None,
             "buy_rule_text": None,
@@ -330,9 +392,13 @@ class BsEvaluator:
             "sell_half_price": None,
             "sell_half_qty": None,
             "sell_half_rule_code": None,
+            "sell_half_max_return_5d": None,
+            "sell_half_max_drawdown_5d": None,
+            "sell_half_window_days": 0,
             "sell_max_return_5d": None,
             "sell_max_drawdown_5d": None,
             "sell_max_return_hold_days": None,
+            "sell_post_exit_window_days": 0,
             "sell_window_partial": 0,
         }
         payload.update(fields)

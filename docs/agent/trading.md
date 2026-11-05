@@ -79,3 +79,18 @@ python -m dragon_quant sell --force
 > **边界**：`bs_*`（`bs_runs` / `bs_signals`）是 BS 策略假想回放的派生表，与
 > `buy_sell_signals` 完全隔离；`bs-eval` 不改实盘/回测行为、不写本表。契约见
 > [bs_eval](bs_eval.md)。
+
+## 运行追溯与本段归因（2026-11-05，A7/A8/D2）
+
+- `review_account_runs` 幂等新增可空列：`base_run_id` / `start_equity` /
+  `start_positions_json` / `start_realized_pnl` / `run_meta_json`。旧 run 保持 NULL（unknown），
+  不推断历史业务值。
+- `review_account_positions` 新增 `initial_cost` / `realized_pnl` / `period_pnl` /
+  `period_start_value` / `inherited`。继承持仓以**期初盯市价值**为成本基准计算本段盈亏；
+  本段新仓取含费用整笔净盈亏。旧批次无金额字段时贡献显式标 `legacy_approximation`。
+- 生命周期胜率（整笔 `realized_return>0`）与「本段权益贡献」（分母 = 本段起点权益）分区；
+  `/api/account/positions` 的 `stats.start_equity/contribution_basis` 与
+  `GET /api/account/summary` 提供已平仓/未平仓、平均盈亏、净盈亏比、期望、费用、
+  已实现/未实现、最大单笔亏损、Sharpe；0/全赢/全亏返回不可计算（None）。
+- 链式增量沿 `base_run_id` 保留追溯与期初状态；旧快照缺盯市价时
+  `attribution_quality=legacy_approximation`。

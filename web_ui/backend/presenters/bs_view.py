@@ -18,6 +18,7 @@ VERDICT_LABELS = {
 _ENGINE_FIELDS = (
     "trade_date", "code", "name", "eval_status", "eval_note",
     "data_quality", "replay_days", "fallback_days", "suspended_days",
+    "fault_days",
 )
 
 
@@ -83,7 +84,12 @@ def present_sell_row(row: dict, labels: dict, verdict: str) -> dict:
         "sell_max_return_5d": row.get("sell_max_return_5d"),
         "sell_max_drawdown_5d": row.get("sell_max_drawdown_5d"),
         "sell_max_return_hold_days": row.get("sell_max_return_hold_days"),
+        "sell_post_exit_window_days": row.get("sell_post_exit_window_days"),
+        "sell_half_max_return_5d": row.get("sell_half_max_return_5d"),
+        "sell_half_max_drawdown_5d": row.get("sell_half_max_drawdown_5d"),
+        "sell_half_window_days": row.get("sell_half_window_days"),
         "sell_window_partial": _partial(row, "sell_window_partial"),
+        "fault_days": row.get("fault_days"),
         "verdict": verdict,
         "verdict_label": VERDICT_LABELS.get(verdict, verdict),
         "half_exit": half_exit,

@@ -76,11 +76,21 @@ export function DataTable<T>({
                   key={column.key}
                   className={ALIGN[column.align ?? "left"]}
                   style={column.width ? { width: column.width } : undefined}
+                  aria-sort={
+                    column.sortable
+                      ? active
+                        ? sort?.dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                      : undefined
+                  }
                 >
                   {column.sortable && onSort ? (
                     <button
                       type="button"
                       onClick={() => onSort(column.key)}
+                      aria-label={`按 ${String(column.header)} 排序`}
                       style={{ font: "inherit" }}
                       className={`cursor-pointer border-0 bg-transparent p-0 transition-colors hover:text-ink ${
                         active ? "text-brand-bright" : ""
@@ -111,7 +121,20 @@ export function DataTable<T>({
                 key={rowKey(row, index)}
                 data-clickable={onRowClick ? "true" : undefined}
                 className={rowClassName?.(row, index)}
+                tabIndex={onRowClick ? 0 : undefined}
+                role={onRowClick ? "button" : undefined}
+                aria-label={onRowClick ? "查看详情" : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onRowClick(row);
+                        }
+                      }
+                    : undefined
+                }
               >
                 {columns.map((column) => (
                   <td

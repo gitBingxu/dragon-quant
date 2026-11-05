@@ -72,8 +72,9 @@ dragon-quant assets backfill-stock-daily --dry-run
 dragon-quant assets backfill-stock-daily
 ```
 
-`dashboard` 启动后会在后台增量生成 BS 派生数据（只写 `bs_*` 派生表），页面无需先手动跑
-`bs-eval`；`--no-bs-autogen` 或 `DQ_BS_AUTOGEN=0` 可关闭，`/bs` 页面的「重置买点」等价
+`dashboard` **默认只读**：不会在启动时自动生成 BS 派生数据；需要自动生成时显式加
+`--bs-autogen`（或 `DQ_BS_AUTOGEN=1`），`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先。
+`/bs` 页面的「重新计算买卖点评估」等价
 `bs-eval --force` 全量重算。
 
 `pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
@@ -86,8 +87,8 @@ dragon-quant assets backfill-stock-daily
 资产区改为近一年日历 + 当日表格，所有日期可点击（空日期展示全部应有资产缺失）。
 扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。`/bs` 展示四类买点与
 十条卖出规则的假想回放：策略说明、汇总卡、buy/sell 列表（买后/卖后 5 日表现），
-数据由 `dragon-quant bs-eval` 离线生成；`dashboard` 启动时后台自动增量生成，
-页面「重置买点」可按需全量重算。全站字号统一 14px 基准
+数据由 `dragon-quant bs-eval` 离线生成；需自动增量时显式 `--bs-autogen`，
+页面「重新计算买卖点评估」可按需全量重算。全站字号统一 14px 基准
 （可见文字 ≥1rem），状态色收敛为 danger / warning / normal / positive。
 
 ## Agent Skill
@@ -146,7 +147,7 @@ dragon-quant scan --top 5
 
 ## 龙头回测
 
-这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计后续最多 5 个交易日的最大收益与回撤。
+这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计**买入后第 2~5 个交易日**的最大潜在涨幅与峰值前不利波动；窗口未走完标 `partial`，只展示、不进入正式分母。
 
 ```bash
 # 回测已到观察期的扫描结果

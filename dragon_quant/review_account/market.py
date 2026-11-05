@@ -200,7 +200,8 @@ def _default_auction_loader(day: str, source: str = "v2") -> list[dict]:
 
 def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
                           auction_loader=None, factor_loader=None, *,
-                          include_all_review_candidates: bool = False
+                          include_all_review_candidates: bool = False,
+                          snapshot_loader=None, factor_model=None
                           ) -> tuple[list[dict], dict]:
     """候选池 + P/A 三值注解 + 上下文（排序模式/回退原因/降级）。
 
@@ -255,7 +256,10 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
 
     snap = snapshot_date = reason = None
     if source == "v2":
-        snap, snapshot_date, reason = prep_snapshot_for(day, source, calendar)
+        # 实验编排可注入冻结快照（同内容/同版本），生产默认仍读活动仓储。
+        loader_fn = snapshot_loader or (
+            lambda target_day: prep_snapshot_for(target_day, source, calendar))
+        snap, snapshot_date, reason = loader_fn(day)
     ctx["prep_snapshot_date"] = snapshot_date
     ctx["prep_unavailable_reason"] = reason
 
@@ -277,9 +281,14 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
     if version is not None and version >= _REVIEW_SNAPSHOT_VERSION:
         # 0.8：新六维 review 是唯一权威；默认集合 = eligible ∧ position>0，
         # auction 由 include_all_review_candidates 取主集合全部。
+        # 研究消融 `prep_verdict_filter_enabled=False` 必须**实际**退回完整主集合，
+        # 否则 0.8 路径下「去掉 prep 过滤」只是空标签（main R2）。
+        include_all = (include_all_review_candidates
+                       or not bool(getattr(cfg, "prep_verdict_filter_enabled",
+                                           True)))
         pool, verdict_map, review_decision = _review_decision_branch(
             snap, day, ctx, snapshot_date,
-            include_all_review_candidates=include_all_review_candidates)
+            include_all_review_candidates=include_all)
         ctx["review_decision"] = review_decision
     elif isinstance(snap, dict) and isinstance(snap.get("candidates"), list) and snap["candidates"]:
         raw = [c for c in snap["candidates"] if isinstance(c, dict) and c.get("code")]
@@ -369,7 +378,7 @@ def collect_candidates_ex(calendar: list[str], day: str, cfg, loader,
                                    factor_decision.DEFAULT_MODEL_NAME),
                 model_version=getattr(cfg, "factor_model_version", ""),
                 min_coverage=getattr(cfg, "factor_min_coverage", 0.6),
-                factor_loader=factor_loader)
+                factor_loader=factor_loader, model=factor_model)
             ctx["factor_mode"] = result["factor_mode"]
             ctx["factor_model"] = result["factor_model"]
             ctx["factor_coverage"] = result["factor_coverage"]

@@ -87,9 +87,10 @@ class TestWindowMetrics(unittest.TestCase):
 
 class TestEvaluateStrict(unittest.TestCase):
     def test_completed_partial_window(self):
+        # A1：窗口未走完必须标 partial（可展示，但不入正式分母），不得写 completed。
         result = strict_metrics.evaluate_strict(
             _klines(), CALENDAR, "2026-09-10")
-        self.assertEqual(result["review_status"], "completed")
+        self.assertEqual(result["review_status"], "partial")
         self.assertEqual(result["reason"], strict_metrics.PARTIAL_WINDOW_REASON)
         self.assertEqual(result["buy_date"], "2026-09-11")
         self.assertEqual(result["buy_price"], 10.0)

@@ -11,7 +11,7 @@
 - **定位**：Skill 是面向「交易日助手」的窄接口，只开放九类稳定能力（个股行情 / 扫描与真龙 / 盘后复盘 / 集合竞价 / 盘前预案 / 龙头回测 / 账户回测 / 因子入库与读回 / 可视化面板）。未开放能力统一走固定话术 + issue 链接，不以命令、路由、表格或否定示例出现在 Skill 正文。
 - **布局**：`skills/dragon-quant/SKILL.md`（薄路由层）+ `references/{commands,outputs,reports,playbooks,operations,safety,premarket,evidence}.md`（按需加载）；根 `package.json`（`name=dragon-quant-skills`）+ `bin/dragon-quant-skills.mjs` + `lib/*.mjs`（安装器）；`test/*.test.mjs`（`node:test`，零依赖）；Python 侧 `dragon_quant/tests/test_skill_{package,content,routes}.py`。
 - **唯一白名单**：`references/commands.md` 的 `<!-- routes:start/end -->` 表是 Skill 侧唯一命令真源；`references/safety.md` 的 `<!-- safety:start/end -->` 只登记同一白名单的 T0/T1。每条 route 的顶层命令必须属于 `{data, scan, dragons, review, prep, auction, premarket, factor, review-account, dashboard}`；`data` 只允许 `quote/kline/minute/batch-quote`，`factor` 只允许 `build/query`。被排除的顶层命令与 `data`/`factor` 子命令由测试从 CLI `-h` 动态枚举并断言不出现；`scan_v2` 与 `--source v1` 禁止出现。
-- **路由纪律**：只对白名单叶子命令取 help（如 `data quote -h`、`factor build -h`），不要取父级 `data -h` / `factor -h`。默认安全分级只有 T0/T1；`dashboard` 是 T0 但长驻且可能初始化/校验本地 schema，启动后默认后台增量生成 BS 派生数据（`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 关闭），且禁止 `--yes` 自动安装。
+- **路由纪律**：只对白名单叶子命令取 help（如 `data quote -h`、`factor build -h`），不要取父级 `data -h` / `factor -h`。默认安全分级只有 T0/T1；`dashboard` 是 T0 但长驻且可能初始化/校验本地 schema，默认只读、不生成 BS 派生数据；显式 `--bs-autogen` / `DQ_BS_AUTOGEN=1` 才生成，`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先，且禁止 `--yes` 自动安装。
 - **因子入库**：`references/operations.md` 的 `<!-- factor-groups:start/end -->` 块固定 scan 7 / prep 23 / auction 17 三组名单，测试与 `FACTOR_SPECS.source` 逐组比较；构建必须显式 `--only`，禁止默认 build 与 `--all`，逐因子核对 `status` 并读回代表因子。
 - **报告与 workflow**：`references/reports.md` 拥有 prep 九段 / auction 七段骨架与缺失回退；`operations.md` 拥有单能力 vs 每日复合、UI 生命周期、因子入库核对；`outputs.md` 拥有字段语义与 `strategy_context` 六段（盘前字段由 `premarket.md` 拥有）。
 - **安装目标与路径**：`bin/dragon-quant-skills.mjs` 消费 `lib/paths.mjs` 的 `AGENT_TARGETS` 唯一注册表；六个 harness 为 `claude-code` / `codex` / `openclaw` / `hermes` / `deepseek` / `pi`，`agents` 仅作 `.agents/skills` 兼容别名、不进 `all`。注册表字段：`projectBase`（`projectRoot` / `cwd` / `workspace`）、`projectRel`、`global`（`homeRel` 或 `env + defaultRel + rel`）、`hints`（按 scope）、`sameName`。`resolveSkillsRoot` 接受 `cwd` / `env` 注入：`--target-dir` 始终优先；Pi 用 cwd、OpenClaw 用 workspace（默认 cwd），不套用 git root；三个官方 env（`OPENCLAW_STATE_DIR` / `DSH_HOME` / `PI_CODING_AGENT_DIR`）只覆盖 global，空串回落默认、`~/` 展开 home、相对路径按 cwd。install 主循环、跨 scope 警告与 doctor `--all-scopes` 都必须传 `cwd` / `env`。
@@ -78,3 +78,47 @@
 ## 打包边界
 
 - `docs/agent/*.md` 只服务 agent 与维护者，**不进入任何发布物**：npm 安装器白名单显式禁止 `docs/`（`test/packaging.test.mjs`），Python wheel 的 `packages.find` 只含 `dragon_quant` / `web_ui`。新增或修改本文档不会影响 `npm test` 与打包 E2E。
+
+## 研究入口与 dashboard 只读启动（2026-11-05）
+
+- Web 新增 `routers/research.py`：`GET /api/research/scan-quality`（只读原始扫描候选 +
+  本地 `stock_daily`）与 `POST /api/account/experiments`（用户显式 `confirm=true` 才运行，
+  冻结 run 的期间/资金/策略/上游母集，复用 `AccountSimulator`；本地行情缺失返回
+  `insufficient_data`，不触网）。`GET /api/account/experiments` 只读已存报告，不重算。
+- 实验报告落 `review_account_experiments`（幂等建表）；`review_account/experiments.py`
+  不复制买卖/撮合算法，fixed 60/20/20 时间切分与双倍滑点压力，样本不足显式
+  `insufficient_evidence`，不自动推广参数。
+- `dashboard` **默认只读**：BS 启动自动生成改为显式 opt-in（`--bs-autogen` 或
+  `DQ_BS_AUTOGEN=1`；`--no-bs-autogen`/`DQ_BS_AUTOGEN=0` 优先）。页面「重新计算买卖点评估」
+  仍是显式写操作，纯查看不触发。
+- `doctor` 增加实际发现路径/版本来源（manifest vs frontmatter）、同名候选路径提示
+  （不推断宿主实际加载）与 CLI 叶子能力探测。
+
+## 实验输入冻结与单飞（2026-11-05 返工，R1/R2）
+
+- `POST /api/account/experiments` 运行前先冻结：prep 快照、龙头池、竞价行、情绪、因子模型
+  版本与本地行情内容，计算 `content_sha256`；variant 只消费冻结输入，不再读活动仓储。
+- 增量 run 的实验继承期初状态/base_equity/峰值/累计已实现盈亏；缺期初状态时返回
+  `incremental_seed_missing`，不用空账户冒充续算。
+- 账户生成与实验共用 `web_ui/backend/locks.py::ACCOUNT_HEAVY_LOCK` 单飞锁；同进程不得并行。
+- 训练/验证选型后才运行 test，且 test 与双倍滑点压力只给 baseline 与选中项；
+  与 baseline 同参数的 variant 标 `no_change`，不伪造消融差异。
+- 本地行情 `LocalAccountMarket` 返回真实 `KBar`（15:00 Asia/Shanghai），缺日K 抛
+  `DataCoverageError`；无分时走日K兜底。
+
+## 实验期初状态与因子冻结（2026-11-05 D1/D3）
+
+- `seed_from_run` 只读批次自身冻结的 `start_equity/start_cash/start_positions/
+  start_peak_equity/start_consecutive_losses/start_realized_pnl`；**禁止**用
+  `run.date_to` 期末快照倒放期初。旧增量 run 缺 `start_positions_json` 记录时按
+  不可复现处理，不按空期初伪造。
+- `review_account_runs` 幂等新增 `start_cash/start_peak_equity/
+  start_consecutive_losses/start_marks_json`；新 run 完整记录期初现金、盯市、
+  峰值与连亏。
+- train/validation/test 均从本批期初状态独立重启，报告显式
+  `split_seed_policy=independent_restart_from_period_start`、
+  `split_historical_continuity=false`，不宣称跨区间连续持仓复现。
+- 因子 variant 一次性冻结模型版本与所需因子值/PIT 读取结果；所有 split/压力
+  共用同一 `factor_loader` + 模型。运行中出现 `factor_mode=degraded` 即
+  `insufficient_data`，不把降级排序当有效实验。
+- `research_prep_bypass` 仅内部实验使用；普通账户生成入口传入即 400。

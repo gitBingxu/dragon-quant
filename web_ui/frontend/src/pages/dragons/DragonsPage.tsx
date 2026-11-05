@@ -18,7 +18,7 @@ import { DragonDetailDrawer } from "./DragonDetailDrawer";
 /** 前端固定 v2；页面不再读取 ?source query（旧 v1 深链按 v2 渲染）。 */
 const DEFAULT_FILTERS: DragonFilters = {
   review_caliber: "strict",
-  status: "completed",
+  // 默认展示全部派生状态：待回测不能被默认筛选隐藏成 0（D4/R6）。
   sort_by: "composite_score",
   sort_dir: "desc",
 };
@@ -30,6 +30,7 @@ interface SortState {
 
 export function DragonsPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [coverage, setCoverage] = useState<Summary | null>(null);
   const [filters, setFilters] = useState<DragonFilters>(DEFAULT_FILTERS);
   const [rawData, setRawData] = useState<Dragon[]>([]);
   const [sort, setSort] = useState<SortState>({ by: "composite_score", dir: "desc" });
@@ -48,6 +49,7 @@ export function DragonsPage() {
       if (seq !== requestSeq.current) return;
       setRawData(resp.data || []);
       setSummary(resp.summary);
+      setCoverage(resp.coverage ?? null);
       setResponseCaliber(effectiveCaliber(next.review_caliber));
       setSort({ by: next.sort_by, dir: next.sort_dir as "asc" | "desc" });
       setError(null);
@@ -120,7 +122,7 @@ export function DragonsPage() {
       ) : null}
 
       <div className="grid gap-3">
-        <SummaryCards summary={summary} caliber={responseCaliber} />
+        <SummaryCards summary={summary} coverage={coverage} caliber={responseCaliber} />
         <RecentDragons
           onSelect={(date, code) => setSelected({ date, code })}
         />

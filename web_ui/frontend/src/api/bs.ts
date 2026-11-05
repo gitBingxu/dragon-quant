@@ -99,6 +99,23 @@ export interface BsSellSummary {
   neutral_rate: number | null;
   avg_return: number | null;
   avg_drawdown: number | null;
+  /** 两轴独立（可同时成立）：错失上涨机会 / 避开下跌。 */
+  missed_upside: number;
+  missed_upside_rate: number | null;
+  avoided_downside: number;
+  avoided_downside_rate: number | null;
+  both: number;
+  neither: number;
+  axes_denominator: number;
+  /** 半仓腿独立样本，不混入整笔交易盈利分母。 */
+  half_leg: {
+    triggered: number;
+    samples: number;
+    missed_upside: number;
+    missed_upside_rate: number | null;
+    avoided_downside: number;
+    avoided_downside_rate: number | null;
+  };
   rule_breakdown: RuleBreakdown[];
 }
 
@@ -125,6 +142,7 @@ export interface BsBuyRow {
   eval_status: string;
   eval_note: string | null;
   data_quality: string | null;
+  fault_days?: number | null;
   buy_date: string | null;
   buy_rule_code: string | null;
   buy_rule_label: string | null;
@@ -164,6 +182,11 @@ export interface BsSellRow {
   sell_max_return_5d: number | null;
   sell_max_drawdown_5d: number | null;
   sell_max_return_hold_days: number | null;
+  sell_post_exit_window_days?: number | null;
+  sell_half_max_return_5d?: number | null;
+  sell_half_max_drawdown_5d?: number | null;
+  sell_half_window_days?: number | null;
+  fault_days?: number | null;
   sell_window_partial: boolean;
   verdict: string;
   verdict_label: string;
@@ -219,8 +242,8 @@ export function fetchBsBuys(
   return getJson(`/api/bs/buys${qs(filters as Record<string, string>)}`);
 }
 
-export function fetchBsSells(filters: BsFilters) {
-  return getJson<{ data: BsSellRow[]; count: number }>(
-    `/api/bs/sells${qs(filters as Record<string, string>)}`
-  );
+export function fetchBsSells(
+  filters: BsFilters
+): Promise<{ data: BsSellRow[]; count: number; summary: BsSellSummary }> {
+  return getJson(`/api/bs/sells${qs(filters as Record<string, string>)}`);
 }

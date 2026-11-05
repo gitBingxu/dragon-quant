@@ -22,9 +22,9 @@ python -m dragon_quant review --ui-only               # 仅看结果
 **双口径**（共享收益/回撤窗口与公式；胜利条件均为 `max_return_5d > 0 且 max_drawdown_5d > -5`，0 / -5 都不算赢）：
 
 - **宽松口径**（历史行为，写 `dragons_*` 现有 review 字段）：入选后首个 `high != low` 日按**最低价**买入。
-- **严格口径**（写侧表 `dragon_review_strict`，`UNIQUE(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位 → `cannot_evaluate`（原因固定「停牌或数据缺失无法区分」）；传输失败不写/不覆盖严格结果；严格窗口为空 `cannot_evaluate`，部分窗口沿用公式并标 `partial_window`；宽松旧 0/0 契约不变。
+- **严格口径**（写侧表 `dragon_review_strict`，`UNIQUE(trade_date, code, source)`）：入选后**首个交易日**按**开盘价**买入；次日一字涨停按开盘价成交、不顺延。次日缺 bar / 无效 bar / 零成交平盘占位 → `cannot_evaluate`（原因固定「停牌或数据缺失无法区分」）；传输失败不写/不覆盖严格结果；严格窗口为空 `cannot_evaluate`；部分窗口写 `partial`（原因 `partial_window`），可展示但不进入正式分母；宽松窗口为空同样写 `partial`（不再 0/0 completed）。
 
-`review` 默认只处理 pending、取消 20 交易日上限（不足 5 交易日等待），显式 `--date` 绕过成熟度；`--force` 重算所有成熟状态并覆盖严格。按 code 聚合拉 K（每 code 一次，深度覆盖最老记录）、日历一次；拉取后校验 `min(k.date) <= trade_date`，否则报「历史数据不足」而不是拿最近窗口冒充。`--recompute-all` 仅 v2、最老优先、默认跳过已有严格行（`--force` 覆盖）、跳过 VPA；`--dry-run` / `--limit` 只能与其组合（非法组合 exit 2）；dry-run 是未过滤成熟度的上界，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。`--source v1` 保持旧 5~20 窗口与旧口径，不写严格结果。Web UI 默认严格口径，可通过 `review_caliber` 切到宽松；v1 强制旧口径并明确标注。
+`review` 默认处理 `pending + partial`、取消 20 交易日上限（完整收益窗口约需 6 个交易日，由 `maturity_cutoff()` 派生），显式 `--date` 可返回 partial；`--force` 重算所有成熟状态并覆盖严格。按 code 聚合拉 K（每 code 一次，深度覆盖最老记录）、日历一次；拉取后校验 `min(k.date) <= trade_date`，否则报「历史数据不足」而不是拿最近窗口冒充。`--recompute-all` 仅 v2、最老优先、默认跳过**非 partial** 的已有严格行（partial 必须补算，`--force` 覆盖）、跳过 VPA；`--dry-run` / `--limit` 只能与其组合（非法组合 exit 2）；dry-run 是未过滤成熟度的上界，正式运行结束输出 processed/completed/cannot_evaluate/failed/skipped 聚合汇总。`--source v1` 保持旧 5~20 窗口与旧口径，不写严格结果。Web UI 默认严格口径，可通过 `review_caliber` 切到宽松；v1 强制旧口径并明确标注。
 
 ## 严格口径侧表 `dragon_review_strict`
 
@@ -77,3 +77,17 @@ python -m dragon_quant review --ui-only               # 仅看结果
 ## 只读投影说明（2026-11-01）
 
 本次不改固定 5 日回测与 `dragon_review_strict`。dashboard 新增的扫描运行态、复盘/竞价日历与成效全部是只读投影（`web_ui/backend/presenters/`）；竞价成效复用 `infra.factor.decision_review`，行情只读本地 `prep_assets.stock_daily`，不触网。
+
+## 成熟度与 partial（2026-11-05，A1/KR1）
+
+- 收益窗口仍是「买入后第 2~5 个交易日」（`WINDOW_SKIP=1` / `WINDOW_SIZE=4`），由此派生
+  **所需交易日数 = 1 + WINDOW_SKIP + WINDOW_SIZE = 6**；成熟度上界由
+  `review.strict_metrics.maturity_cutoff()` 统一计算，不再硬编码「入选满 5 日」。
+- 窗口未走完时严格侧表与宽松 `review_status` 都写 `partial`（原因 `partial_window`）：
+  可展示，**不进入正式成效分母**；`summarize_review_rows` 的 `partial` 计数与
+  `avg_return_strict/win_rate_strict` 分母均已排除。
+- 默认 `review` 选择 `pending + partial`，partial 不是终态，下次可合法补算；
+  `--recompute-all` 只跳过非 partial 的已有严格行。
+- 新增独立研究口径 `tradable_open_v1`（`evaluate_tradable_open`）：T+1 开盘入场，
+  一字板（`high==low`）排除、不顺延；固定 1/3/5 持有期收盘净收益，扣固定成本。
+  它只作可成交估算，不替代历史严格公式，也不宣称真实成交。

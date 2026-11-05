@@ -23,6 +23,7 @@ _COLUMNS = (
     "trade_date", "code", "name", "source", "strategy_hash",
     "evaluator_version", "eval_status", "eval_note", "is_terminal",
     "data_quality", "replay_days", "fallback_days", "suspended_days",
+    "fault_days",
     "buy_date", "buy_rule_code", "buy_rule_text", "buy_loose_price",
     "buy_strict_price", "buy_data_quality", "buy_loose_max_return_5d",
     "buy_loose_max_drawdown_5d", "buy_strict_max_return_5d",
@@ -30,7 +31,10 @@ _COLUMNS = (
     "buy_window_partial", "sell_date", "sell_rule_code", "sell_rule_text",
     "sell_price", "sell_hold_days", "sell_data_quality", "sell_half_date",
     "sell_half_price", "sell_half_qty", "sell_half_rule_code",
+    "sell_half_max_return_5d", "sell_half_max_drawdown_5d",
+    "sell_half_window_days",
     "sell_max_return_5d", "sell_max_drawdown_5d", "sell_max_return_hold_days",
+    "sell_post_exit_window_days",
     "sell_window_partial",
 )
 
@@ -194,6 +198,10 @@ def upsert_signal(payload: dict, *, force: bool = False) -> bool:
     """写入一行；返回是否写入业务字段（False = 哈希相同，仅轻量写尝试时间）。"""
 
     data = dict(payload)
+    # NOT NULL 计数列的稳定默认值：缺键按 0，不写 NULL 触发约束错误。
+    for key in ("is_terminal", "replay_days", "fallback_days", "suspended_days",
+                "fault_days", "buy_window_partial", "sell_window_partial"):
+        data.setdefault(key, 0)
     data["content_hash"] = content_hash(data)
     now = _local_now()
     with _lock:

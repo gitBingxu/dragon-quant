@@ -114,6 +114,9 @@ class StrategyConfig:
     auction_ranking_enabled: bool = False     # A 维度参与排序
     auction_veto_enabled: bool = False        # D3 否决（verified ∧ is_weak）
     prep_verdict_filter_enabled: bool = True  # D4：verdict=ignore 出池（消融可关）
+    # 研究专用：仅对照实验的 prep 消融使用；移除 review_not_eligible 资格闸门，
+    # 保留其它 prep/非 prep 风控。生产默认 False，CLI/Web 默认路径不得开启。
+    research_prep_bypass: bool = False
     auction_veto_exempt_signals: list = field(default_factory=list)
     # ── 因子层决策接入（P2，默认关；关闭时零读取、排序与旧实现逐位等价）──
     factor_ranking_enabled: bool = False
@@ -256,6 +259,16 @@ class Position:
     initial_cost: float = 0.0
     realized_pnl: float = 0.0
     took_profit_half: bool = False
+    # ── 本段归因（增量续算；全量 run 保持默认值）──
+    #: 快照时的盯市价（供下一段恢复期初价值）。
+    mark: Optional[float] = None
+    #: 是否为基准 run 继承来的持仓（期初已存在）。
+    inherited: bool = False
+    #: 期初状态（继承持仓在基准结束时）：数量 / 盯市价 / 已实现盈亏 / 剩余成本。
+    period_start_qty: int = 0
+    period_start_mark: Optional[float] = None
+    period_start_realized_pnl: float = 0.0
+    period_start_cost: float = 0.0
 
     def __post_init__(self):
         if self.initial_qty <= 0:
@@ -334,6 +347,16 @@ class ClosedPosition:
     post_exit_max_return: Optional[float] = None
     post_exit_max_drawdown: Optional[float] = None
     post_exit_window_days: int = 0
+    # ── 精确金额与跨段归因（新 run 才写入；旧记录为 None）──
+    #: 整笔生命周期净盈亏金额（含费用）。
+    realized_pnl: Optional[float] = None
+    #: 原始建仓成本（含买入费用）。
+    initial_cost: Optional[float] = None
+    #: 本段贡献金额：继承持仓以期初盯市价值为成本基准；本段新仓取整笔净盈亏。
+    period_pnl: Optional[float] = None
+    #: 本段归因成本基准（继承持仓=期初盯市价值；新仓=None）。
+    period_start_value: Optional[float] = None
+    inherited: bool = False
 
 
 @dataclass

@@ -100,6 +100,20 @@ def scan_logs_repository():
     return logs
 
 
+def candidate_loader_factory():
+    """实验用龙头池 loader 工厂（source → loader）；测试可 override。"""
+    from dragon_quant.review_account.market import candidate_loader
+
+    return candidate_loader
+
+
+def prep_snapshot_reader():
+    """实验用 T-1 prep 快照读取器（默认读活动 assets 仓储）。"""
+    from dragon_quant.review_account.market import prep_snapshot_for
+
+    return prep_snapshot_for
+
+
 def decision_review_store():
     """决策回测只读快照 store（``prep_snapshots`` / ``auction_snapshots``）。"""
     from dragon_quant.infra.factor import decision_review_store

@@ -197,6 +197,14 @@ const SUMMARY_COLUMNS: Column<EffectGroupSummary>[] = [
     render: (row) => <span className="num text-body text-ink-2">{row.cannot_evaluate}</span>,
   },
   {
+    key: "partial",
+    header: "窗口未成熟",
+    align: "right",
+    render: (row) => (
+      <span className="num text-body text-ink-3">{row.partial ?? 0}</span>
+    ),
+  },
+  {
     key: "pending",
     header: "待评估",
     align: "right",

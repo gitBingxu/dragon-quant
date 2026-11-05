@@ -74,6 +74,8 @@ export function statusMeta(status: string | null | undefined): StatusMeta {
       return { label: "待重算", tone: "warning" };
     case "cannot_evaluate":
       return { label: "无法评估", tone: "neutral" };
+    case "partial":
+      return { label: "窗口未成熟", tone: "warning" };
     case "no_entry":
       return { label: "无介入", tone: "neutral" };
     case "error":

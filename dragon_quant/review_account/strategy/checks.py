@@ -321,7 +321,8 @@ def explain_buy_candidate(candidate: dict, row: Optional[dict], cfg: StrategyCon
     elif row is None:
         reason, text = "missing_kline", "缺少决策时点行情"
         checks = _static_check_dicts(cfg, BUY_CHECK_UNAVAILABLE, "缺少决策时点行情")
-    elif is_review_pool(candidate) and not is_review_eligible(candidate):
+    elif (is_review_pool(candidate) and not is_review_eligible(candidate)
+          and not getattr(cfg, "research_prep_bypass", False)):
         reason = "review_not_eligible"
         text = "复盘候选未达可买条件（eligible 且仓位>0）"
         checks = _static_check_dicts(cfg, BUY_CHECK_SKIPPED,

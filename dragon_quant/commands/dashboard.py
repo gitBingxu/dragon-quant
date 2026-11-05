@@ -50,7 +50,12 @@ def _env_auto_install() -> bool:
 
 
 def _resolve_bs_autogen(args) -> bool:
-    """BS 启动自动生成开关（高 → 低）：env 关闭 → flag 关闭 → env 开启 → 默认开启。
+    """BS 启动自动生成开关：**默认只读**，必须显式 opt-in（D7）。
+
+    优先级（高 → 低）：
+      1. ``DQ_BS_AUTOGEN=0`` / ``--no-bs-autogen`` → 关闭（兼容旧开关）；
+      2. ``DQ_BS_AUTOGEN=1`` / ``--bs-autogen`` → 开启；
+      3. 未显式启用 → 关闭，查看面板绝不隐式重算。
 
     ``args`` 用 ``getattr`` 读取，兼容既有测试的 ``SimpleNamespace``。
     """
@@ -61,7 +66,7 @@ def _resolve_bs_autogen(args) -> bool:
         return False
     if raw in _TRUE_VALUES:
         return True
-    return True
+    return bool(getattr(args, "bs_autogen", False))
 
 
 def _is_tty() -> bool:

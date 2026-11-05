@@ -214,6 +214,7 @@ class DragonDetail(BaseModel):
     dims: Dims | None = None
     dims_source: Literal["scan_stocks", "scan_stocks_missing", "scan_missing"]
     reject_reason: str | None = None
+    strict_tradable_open: dict | None = None
 
 
 def _review_fields(row: dict, prefix: str = "") -> ReviewFields:
@@ -307,6 +308,7 @@ def dragon_detail(trade_date: str, code: str, source: str = "v2",
             if row.get("strict_reviewed") else None
         ),
         derived_status=row.get("derived_status"),
+        strict_tradable_open=row.get("strict_tradable_open"),
         caliber=resolved,
         dims=dims,
         dims_source=dims_source,

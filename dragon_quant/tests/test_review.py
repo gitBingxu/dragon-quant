@@ -188,7 +188,7 @@ class TestReviewDragon(unittest.TestCase):
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "partial")
         self.assertEqual(result["buy_date"], "2026-05-22")
         self.assertEqual(result["buy_price"], 12.0)
 
@@ -253,9 +253,10 @@ class TestReviewDragon(unittest.TestCase):
                    return_value=empty_calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["max_return_5d"], 0)
-        self.assertEqual(result["max_drawdown_5d"], 0)
+        # A1：买入后 0 个交易日 = 未成熟，不得填 0/0。
+        self.assertEqual(result["status"], "partial")
+        self.assertIsNone(result["max_return_5d"])
+        self.assertIsNone(result["max_drawdown_5d"])
 
     def test_review_klines_no_future_match(self):
         """K 线数据中没有覆盖买入后的交易日 → 收益/回撤为 0"""
@@ -274,9 +275,10 @@ class TestReviewDragon(unittest.TestCase):
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["max_return_5d"], 0)
-        self.assertEqual(result["max_drawdown_5d"], 0)
+        # A1：窗口为空 = 未成熟，不再填 0/0 冒充 completed。
+        self.assertEqual(result["status"], "partial")
+        self.assertIsNone(result["max_return_5d"])
+        self.assertIsNone(result["max_drawdown_5d"])
 
     def test_review_one_word_board_skipped(self):
         """一字板（high==low）被跳过，找到下一个可介入日"""
@@ -296,7 +298,8 @@ class TestReviewDragon(unittest.TestCase):
                    return_value=self._calendar):
             result = review_dragon("000001", trade_date, provider=mock_provider)
 
-        self.assertEqual(result["status"], "completed")
+        # 04-22 买入后窗口不足 5 个交易日 → partial（可展示，不入正式分母）。
+        self.assertEqual(result["status"], "partial")
         self.assertEqual(result["buy_date"], "2026-05-22")
         self.assertEqual(result["buy_price"], 9.0)
 
@@ -431,7 +434,9 @@ class TestRunReview(unittest.TestCase):
 
             run_review(trade_date="2026-05-19", source="v2", verbose=False)
 
-        mock_pending.assert_called_once_with(trade_date="2026-05-19", top_n=None, source="v2")
+        mock_pending.assert_called_once_with(
+            trade_date="2026-05-19", top_n=None,
+            review_statuses=["pending", "partial"], source="v2")
         self.assertEqual(mock_update.call_args.kwargs["source"], "v2")
 
     def test_run_review_force_still_filters_window(self):
@@ -539,7 +544,8 @@ class TestRunReviewServicesInjection(unittest.TestCase):
         assert call.kwargs["fq_type"] == "normal"
         assert call.kwargs["days"] >= 20
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["status"], "completed")
+        # 该 fixture 日历只有 4 天，收益窗口未走完 → partial（provider 注入才是本用例断言点）。
+        self.assertEqual(results[0]["status"], "partial")
         mock_update.assert_called_once()
 
     def test_explicit_provider_wins_over_services(self):
@@ -598,11 +604,11 @@ class TestStrictReviewDragon(unittest.TestCase):
         ]
         result = self._run("2026-05-19", klines)
 
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "partial")
         self.assertEqual(result["buy_date"], "2026-05-20")
         self.assertAlmostEqual(result["buy_price"], 9.8)
         strict = result["strict"]
-        self.assertEqual(strict["review_status"], "completed")
+        self.assertEqual(strict["review_status"], "partial")
         self.assertEqual(strict["buy_date"], "2026-05-20")
         self.assertAlmostEqual(strict["buy_price"], 10.5)
         # 共享窗口：买入后第 2~5 个交易日（05-21/22/25）
@@ -623,7 +629,7 @@ class TestStrictReviewDragon(unittest.TestCase):
         result = self._run("2026-05-19", klines)
 
         strict = result["strict"]
-        self.assertEqual(strict["review_status"], "completed")
+        self.assertEqual(strict["review_status"], "partial")
         self.assertEqual(strict["buy_date"], "2026-05-20")
         self.assertAlmostEqual(strict["buy_price"], 11.0)
         # 宽松口径不受影响：仍跳过一字板，找 05-22 的最低价。
@@ -643,8 +649,8 @@ class TestStrictReviewDragon(unittest.TestCase):
         self.assertEqual(strict["review_status"], "cannot_evaluate")
         self.assertEqual(strict["reason"], "停牌或数据缺失无法区分")
         self.assertIsNone(strict["buy_date"])
-        # 宽松口径仍可找到后续可介入日。
-        self.assertEqual(result["status"], "completed")
+        # 宽松口径仍可找到后续可介入日（窗口不足 → partial）。
+        self.assertEqual(result["status"], "partial")
         self.assertEqual(result["buy_date"], "2026-05-21")
 
     def test_zero_volume_flat_placeholder_is_cannot_evaluate(self):
@@ -684,10 +690,10 @@ class TestStrictReviewDragon(unittest.TestCase):
         result = self._run("2026-05-19", klines, calendar=calendar)
         # 严格：窗口为空 → cannot_evaluate
         self.assertEqual(result["strict"]["review_status"], "cannot_evaluate")
-        # 宽松：旧 0/0 completed 契约不变
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["max_return_5d"], 0)
-        self.assertEqual(result["max_drawdown_5d"], 0)
+        # 宽松：窗口为空也是未成熟（A1 起不再填 0/0）。
+        self.assertEqual(result["status"], "partial")
+        self.assertIsNone(result["max_return_5d"])
+        self.assertIsNone(result["max_drawdown_5d"])
 
     def test_partial_window_is_reported(self):
         calendar = {"2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22"}
@@ -699,7 +705,8 @@ class TestStrictReviewDragon(unittest.TestCase):
         ]
         result = self._run("2026-05-19", klines, calendar=calendar)
         strict = result["strict"]
-        self.assertEqual(strict["review_status"], "completed")
+        # A1：partial 行必须显式标 partial，才不会被正式汇总误计。
+        self.assertEqual(strict["review_status"], "partial")
         self.assertEqual(strict["reason"], "partial_window")
 
 
@@ -787,8 +794,8 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         entries = [self._entry("600001", "2026-07-01")]
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
-                      return_value=set()), \
+                patch("dragon_quant.review.main.strict_store.list_statuses",
+                      return_value={}), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review") as save, \
                 patch("dragon_quant.review.main.XueqiuProvider") as provider_cls:
             results = run_review(recompute_all=True, dry_run=True,
@@ -805,8 +812,8 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         provider.get_kline.return_value = self._klines()
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
-                      return_value=set()), \
+                patch("dragon_quant.review.main.strict_store.list_statuses",
+                      return_value={}), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review") as save, \
                 patch("dragon_quant.review.main.build_trade_calendar",
                       return_value=self._calendar):
@@ -821,11 +828,11 @@ class TestRunReviewDualCaliber(unittest.TestCase):
                    self._entry("600002", "2026-07-10")]
         provider = MagicMock()
         provider.get_kline.return_value = self._klines()
-        existing = {("2026-07-01", "600001")}
+        existing = {("2026-07-01", "600001"): "completed"}
 
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
+                patch("dragon_quant.review.main.strict_store.list_statuses",
                       return_value=existing), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review") as save, \
                 patch("dragon_quant.review.main.build_trade_calendar",
@@ -836,7 +843,7 @@ class TestRunReviewDualCaliber(unittest.TestCase):
 
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
+                patch("dragon_quant.review.main.strict_store.list_statuses",
                       return_value=existing), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review") as save, \
                 patch("dragon_quant.review.main.build_trade_calendar",
@@ -851,8 +858,8 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         provider.get_kline.return_value = self._klines()
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
-                      return_value=set()), \
+                patch("dragon_quant.review.main.strict_store.list_statuses",
+                      return_value={}), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review"), \
                 patch("dragon_quant.review.main._run_vpa") as vpa, \
                 patch("dragon_quant.review.main.build_trade_calendar",
@@ -877,8 +884,8 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         provider.get_kline.side_effect = _kline
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
-                      return_value=set()), \
+                patch("dragon_quant.review.main.strict_store.list_statuses",
+                      return_value={}), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review"), \
                 patch("dragon_quant.review.main.build_trade_calendar",
                       return_value=self._calendar):
@@ -929,8 +936,8 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         provider.get_kline.side_effect = RuntimeError("网络超时")
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
-                      return_value=set()), \
+                patch("dragon_quant.review.main.strict_store.list_statuses",
+                      return_value={}), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review") as save, \
                 patch("dragon_quant.review.main.build_trade_calendar",
                       return_value=self._calendar):
@@ -947,8 +954,8 @@ class TestRunReviewDualCaliber(unittest.TestCase):
         provider.get_kline.return_value = self._late_klines()
         with patch("dragon_quant.review.main.dragon_store.get_pending_dragons",
                    return_value=entries), \
-                patch("dragon_quant.review.main.strict_store.list_keys",
-                      return_value=set()), \
+                patch("dragon_quant.review.main.strict_store.list_statuses",
+                      return_value={}), \
                 patch("dragon_quant.review.main.dragon_store.save_dual_review") as save, \
                 patch("dragon_quant.review.main.build_trade_calendar",
                       return_value=self._calendar):

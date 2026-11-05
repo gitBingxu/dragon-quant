@@ -327,9 +327,41 @@ export interface AccuracyWindow {
 export interface AccuracySummary {
   correct: number;
   valid: number;
+  direction_valid?: number;
+  neutral?: number;
   excluded: number;
   hit_rate: number | null;
+  direction_denominator?: string;
+  primary_horizon?: number;
   excluded_by_reason: Record<string, number>;
+}
+
+export interface AccuracyGroup {
+  samples: number;
+  stocks: number;
+  days: number;
+  mean_return_pct: number | null;
+  median_return_pct: number | null;
+  date_equal_mean_return_pct: number | null;
+  wins: number;
+  losses: number;
+  flats: number;
+  win_rate: number | null;
+  avoided_loss_rate: number | null;
+  missed_gain_rate: number | null;
+}
+
+export interface AccuracyHorizon {
+  horizon: number;
+  valid: number;
+  direction_valid: number;
+  neutral: number;
+  correct: number;
+  hit_rate: number | null;
+  excluded_by_reason: Record<string, number>;
+  groups: Record<string, AccuracyGroup>;
+  spread: Record<string, unknown> | null;
+  independent_dates: number;
 }
 
 export interface AccuracyStock {
@@ -353,6 +385,16 @@ export interface AccuracyResponse {
   sample_unit: "stock_day";
   window: AccuracyWindow;
   summary: AccuracySummary;
+  groups?: Record<string, AccuracyGroup>;
+  spread?: Record<string, unknown> | null;
+  horizons?: Record<string, AccuracyHorizon>;
+  independent_dates?: number;
+  independent_codes?: number;
+  versions_seen?: Record<string, number>;
+  axes?: Record<string, number>;
+  stratification?: Record<string, unknown>;
+  contract?: Record<string, unknown>;
+  market_day_effect?: Record<string, unknown>;
   day_kind_counts: Record<string, number>;
   stocks: AccuracyStock[];
   excluded_snapshot_dates: Record<string, number>;
@@ -417,6 +459,7 @@ export interface EffectGroupSummary {
   group: string;
   label: string;
   valid: number;
+  partial?: number;
   cannot_evaluate: number;
   pending: number;
   mean_max_return_5d: number | null;

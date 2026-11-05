@@ -140,16 +140,22 @@ def test_handle_runs_bootstrap_before_start():
     start.assert_called_once_with(args, default_page="review")
 
 
-# ─── BS 启动自动生成开关（高 → 低：env 关闭 / flag 关闭 / env 开启 / 默认开启）───
+# ─── BS 启动自动生成开关（D7：默认只读；显式 opt-in 才开启）───
 
 
 def test_resolve_bs_autogen_priority(monkeypatch):
     monkeypatch.delenv("DQ_BS_AUTOGEN", raising=False)
-    assert dashboard._resolve_bs_autogen(SimpleNamespace()) is True
+    # 默认只读：查看面板不隐式重算。
+    assert dashboard._resolve_bs_autogen(SimpleNamespace()) is False
     assert dashboard._resolve_bs_autogen(
-        SimpleNamespace(no_bs_autogen=False)) is True
+        SimpleNamespace(no_bs_autogen=False)) is False
     assert dashboard._resolve_bs_autogen(
         SimpleNamespace(no_bs_autogen=True)) is False
+    # 显式 flag 才开启。
+    assert dashboard._resolve_bs_autogen(
+        SimpleNamespace(bs_autogen=True)) is True
+    assert dashboard._resolve_bs_autogen(
+        SimpleNamespace(bs_autogen=True, no_bs_autogen=True)) is False
 
     monkeypatch.setenv("DQ_BS_AUTOGEN", "1")
     assert dashboard._resolve_bs_autogen(SimpleNamespace()) is True
@@ -172,7 +178,11 @@ def test_start_ui_forwards_bs_autogen(monkeypatch):
 
     monkeypatch.setattr(dashboard, "_start_server", fake_start)
     dashboard.start_ui(SimpleNamespace(port=0, no_browser=True))
-    assert calls == [(0, True)]
+    assert calls == [(0, False)]
+
+    dashboard.start_ui(
+        SimpleNamespace(port=0, no_browser=True, bs_autogen=True))
+    assert calls[-1] == (0, True)
 
     dashboard.start_ui(
         SimpleNamespace(port=0, no_browser=True, no_bs_autogen=True))

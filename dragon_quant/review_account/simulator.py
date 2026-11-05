@@ -48,7 +48,11 @@ def annotate_post_exit(positions: list[ClosedPosition], data: MarketData) -> Non
 
 class AccountSimulator:
     def __init__(self, cfg: StrategyConfig, provider=None, data=None, *,
-                 initial_state=None, base_equity=None, peak_equity=None):
+                 initial_state=None, base_equity=None, peak_equity=None,
+                 start_realized_pnl=0.0, candidate_source=None,
+                 auction_source=None, snapshot_loader=None,
+                 sentiment_loader=None, factor_loader=None,
+                 factor_model=None):
         """``initial_state`` / ``base_equity`` / ``peak_equity`` 是增量续算入口。
 
         三者缺省时与旧行为逐位一致：``AccountState(cfg.initial_cash)``、
@@ -63,6 +67,14 @@ class AccountSimulator:
         self._base_equity = cfg.initial_cash if base_equity is None else base_equity
         self._peak = cfg.initial_cash if peak_equity is None else peak_equity
         self._previous = self._base_equity
+        self._start_realized_pnl = float(start_realized_pnl or 0.0)
+        # 实验编排注入的冻结输入（生产默认 None → 仍读活动仓储）。
+        self._candidate_source = candidate_source
+        self._auction_source = auction_source
+        self._snapshot_loader = snapshot_loader
+        self._sentiment_loader = sentiment_loader
+        self._factor_loader = factor_loader
+        self._factor_model = factor_model
         self._calendar = []
         self._day_quality = {}
         self._ranking_modes = {}
@@ -74,6 +86,7 @@ class AccountSimulator:
         self._suspended_days = {}
         self._unavailable_days = {}
         self._data_degraded = []
+        self._factor_degraded_days = []
 
     def run(self, date_from: str, date_to: str) -> dict:
         if date_from > date_to:
@@ -85,7 +98,15 @@ class AccountSimulator:
             raise DataCoverageError("回测区间没有完整交易日")
         for day in days:
             candidates, ctx = collect_candidates_ex(
-                self._calendar, day, self.cfg, candidate_loader(self.cfg.source))
+                self._calendar, day, self.cfg,
+                self._candidate_source or candidate_loader(self.cfg.source),
+                auction_loader=self._auction_source,
+                snapshot_loader=self._snapshot_loader,
+                factor_loader=self._factor_loader,
+                factor_model=self._factor_model)
+            if (self.cfg.factor_ranking_enabled
+                    and ctx.get("factor_mode") == "degraded"):
+                self._factor_degraded_days.append(day)
             self._ranking_modes[day] = ctx["ranking_mode"]
             self._pool_sources[day] = ctx["pool_source"]
             self._fallback_reasons[day] = ctx["fallback_reason"]
@@ -94,7 +115,9 @@ class AccountSimulator:
             for note in ctx.get("degraded") or []:
                 if note not in self._priority_degraded:
                     self._priority_degraded.append(note)
-            self.state.sentiment_pct = load_market_sentiment(self._calendar, day, self.cfg)
+            self.state.sentiment_pct = (
+                self._sentiment_loader(day) if self._sentiment_loader is not None
+                else load_market_sentiment(self._calendar, day, self.cfg))
             codes = {c["code"] for c in candidates} | {p.code for p in self.state.positions}
             day_trades = []
             details = {}
@@ -178,6 +201,9 @@ class AccountSimulator:
                             state.marks.get(p.code, p.entry_price) if p else None,
                             (market_value / cost - 1) * 100 if cost else None)
         import json
+        # 快照时冻结每只持仓的盯市价，供下一段增量恢复「期初盯市价值」。
+        for held in state.positions:
+            held.mark = state.marks.get(held.code, held.entry_price)
         snapshot.positions_json = json.dumps([asdict(p) for p in state.positions], ensure_ascii=False)
         self.snapshots.append(snapshot)
         self._previous = equity
@@ -214,6 +240,12 @@ class AccountSimulator:
                 "base_equity": self._base_equity,
                 "max_drawdown": min(s.drawdown for s in self.snapshots), "trade_count": len(self.trades),
                 "win_rate": sum(p.realized_return > 0 for p in self.closed_positions) / count * 100 if count else None,
+                "realized_pnl": sum(t.realized_pnl for t in self.trades
+                                    if t.side == "SELL"),
+                "start_realized_pnl": self._start_realized_pnl,
+                "realized_pnl_total": (self._start_realized_pnl
+                                       + sum(t.realized_pnl for t in self.trades
+                                             if t.side == "SELL")),
                 "trades": self.trades, "snapshots": self.snapshots, "positions": positions, "events": self.events,
                 "account_state": self.state.to_dict(), "data_quality": quality,
                 "fallback_days": fallback_days, "total_days": len(self._day_quality),

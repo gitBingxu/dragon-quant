@@ -182,9 +182,10 @@ class TestStocks(unittest.TestCase):
         self.assertEqual(rows["600003"]["reason"], "invalid_bar")
 
         summary = {group["group"]: group for group in stocks["summary"]}
-        self.assertEqual(summary["recommended"]["valid"], 1)
-        self.assertEqual(summary["recommended"]["mean_max_return_5d"], 20.0)
-        self.assertEqual(summary["recommended"]["median_max_return_5d"], 20.0)
+        # A1：partial 可展示但不进入正式分母。
+        self.assertEqual(summary["recommended"]["valid"], 0)
+        self.assertEqual(summary["recommended"]["partial"], 1)
+        self.assertIsNone(summary["recommended"]["mean_max_return_5d"])
         self.assertEqual(summary["not_recommended"]["valid"], 0)
         self.assertEqual(summary["not_recommended"]["cannot_evaluate"], 2)
 

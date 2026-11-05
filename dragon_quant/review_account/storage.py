@@ -22,7 +22,16 @@ def create_review_account_run(source: str,
                               trade_count: int,
                               win_rate: Optional[float],
                               display_name: Optional[str] = None,
-                              base_equity: Optional[float] = None) -> int:
+                              base_equity: Optional[float] = None,
+                              base_run_id: Optional[int] = None,
+                              start_equity: Optional[float] = None,
+                              start_positions_json: Optional[str] = None,
+                              start_realized_pnl: Optional[float] = None,
+                              start_cash: Optional[float] = None,
+                              start_peak_equity: Optional[float] = None,
+                              start_consecutive_losses: Optional[int] = None,
+                              start_marks_json: Optional[str] = None,
+                              run_meta_json: Optional[str] = None) -> int:
     """创建一条账户级 review run，返回 run_id。
 
     ``base_equity`` 仅增量 run 写入（基准最后收盘权益，作为收益率与指数曲线
@@ -36,11 +45,17 @@ def create_review_account_run(source: str,
             cur = conn.execute(
                 "INSERT INTO review_account_runs("
                 "source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
-                "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
+                "base_run_id, start_equity, start_positions_json, start_realized_pnl, "
+                "start_cash, start_peak_equity, start_consecutive_losses, "
+                "start_marks_json, run_meta_json"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (source, display_name, strategy_name, strategy_params_json, date_from, date_to,
                  initial_cash, base_equity, final_equity, total_return, max_drawdown,
-                 trade_count, win_rate),
+                 trade_count, win_rate, base_run_id, start_equity,
+                 start_positions_json, start_realized_pnl, start_cash,
+                 start_peak_equity, start_consecutive_losses,
+                 start_marks_json, run_meta_json),
             )
             conn.commit()
             return int(cur.lastrowid or 0)
@@ -97,8 +112,9 @@ def save_review_account_results(run_id: int,
                 "run_id, code, name, entry_date, entry_price, qty, entry_reason_code, "
                 "entry_signal_json, exit_date, exit_price, exit_reason_code, exit_signal_json, "
                 "realized_return, hold_days, status, post_exit_max_return, "
-                "post_exit_max_drawdown, post_exit_window_days"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "post_exit_max_drawdown, post_exit_window_days, "
+                "initial_cost, realized_pnl, period_pnl, period_start_value, inherited"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         run_id, p.get("code"), p.get("name"), p.get("entry_date"),
@@ -108,6 +124,9 @@ def save_review_account_results(run_id: int,
                         p.get("realized_return"), p.get("hold_days"), p.get("status"),
                         p.get("post_exit_max_return"), p.get("post_exit_max_drawdown"),
                         p.get("post_exit_window_days"),
+                        p.get("initial_cost"), p.get("realized_pnl"),
+                        p.get("period_pnl"), p.get("period_start_value"),
+                        1 if p.get("inherited") else 0,
                     )
                     for p in positions
                 ],
@@ -168,23 +187,13 @@ def query_review_account_runs(limit: int = 20, source: str = "v2") -> list[dict]
         rows = conn.execute(
             "SELECT id, source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
             "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
-            "created_at "
+            "created_at, base_run_id, start_equity, start_positions_json, start_realized_pnl, "
+            "start_cash, start_peak_equity, start_consecutive_losses, start_marks_json, "
+            "run_meta_json "
             "FROM review_account_runs WHERE source = ? ORDER BY id DESC LIMIT ?",
             (source, limit),
         ).fetchall()
-        return [
-            {
-                "id": r[0], "source": r[1], "display_name": r[2],
-                "strategy_name": r[3],
-                "strategy_params": json.loads(r[4]) if r[4] else {},
-                "date_from": r[5], "date_to": r[6],
-                "initial_cash": r[7], "base_equity": r[8], "final_equity": r[9],
-                "total_return": r[10], "max_drawdown": r[11],
-                "trade_count": r[12], "win_rate": r[13],
-                "created_at": r[14],
-            }
-            for r in rows
-        ]
+        return [_run_row(r) for r in rows]
     finally:
         conn.close()
 
@@ -196,24 +205,40 @@ def get_review_account_run(run_id: int) -> Optional[dict]:
         row = conn.execute(
             "SELECT id, source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
             "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
-            "created_at "
+            "created_at, base_run_id, start_equity, start_positions_json, start_realized_pnl, "
+            "start_cash, start_peak_equity, start_consecutive_losses, start_marks_json, "
+            "run_meta_json "
             "FROM review_account_runs WHERE id = ?",
             (run_id,),
         ).fetchone()
         if not row:
             return None
-        return {
-            "id": row[0], "source": row[1], "display_name": row[2],
-            "strategy_name": row[3],
-            "strategy_params": json.loads(row[4]) if row[4] else {},
-            "date_from": row[5], "date_to": row[6],
-            "initial_cash": row[7], "base_equity": row[8], "final_equity": row[9],
-            "total_return": row[10], "max_drawdown": row[11],
-            "trade_count": row[12], "win_rate": row[13],
-            "created_at": row[14],
-        }
+        return _run_row(row)
     finally:
         conn.close()
+
+
+def _run_row(row) -> dict:
+    return {
+        "id": row[0], "source": row[1], "display_name": row[2],
+        "strategy_name": row[3],
+        "strategy_params": json.loads(row[4]) if row[4] else {},
+        "date_from": row[5], "date_to": row[6],
+        "initial_cash": row[7], "base_equity": row[8], "final_equity": row[9],
+        "total_return": row[10], "max_drawdown": row[11],
+        "trade_count": row[12], "win_rate": row[13],
+        "created_at": row[14],
+        "base_run_id": row[15],
+        "start_equity": row[16],
+        "start_positions": json.loads(row[17]) if row[17] else [],
+        "start_state_recorded": row[17] is not None,
+        "start_realized_pnl": row[18],
+        "start_cash": row[19],
+        "start_peak_equity": row[20],
+        "start_consecutive_losses": row[21],
+        "start_marks": json.loads(row[22]) if row[22] else {},
+        "run_meta": json.loads(row[23]) if row[23] else {},
+    }
 
 
 def query_review_account_snapshots(run_id: int) -> list[dict]:
@@ -274,7 +299,8 @@ def query_review_account_positions(run_id: int) -> list[dict]:
         rows = conn.execute(
             "SELECT code, name, entry_date, entry_price, qty, entry_reason_code, entry_signal_json, "
             "exit_date, exit_price, exit_reason_code, exit_signal_json, realized_return, hold_days, status, "
-            "post_exit_max_return, post_exit_max_drawdown, post_exit_window_days "
+            "post_exit_max_return, post_exit_max_drawdown, post_exit_window_days, "
+            "initial_cost, realized_pnl, period_pnl, period_start_value, inherited "
             "FROM review_account_positions WHERE run_id = ? ORDER BY entry_date ASC, id ASC",
             (run_id,),
         ).fetchall()
@@ -288,6 +314,9 @@ def query_review_account_positions(run_id: int) -> list[dict]:
                 "realized_return": r[11], "hold_days": r[12], "status": r[13],
                 "post_exit_max_return": r[14], "post_exit_max_drawdown": r[15],
                 "post_exit_window_days": r[16],
+                "initial_cost": r[17], "realized_pnl": r[18],
+                "period_pnl": r[19], "period_start_value": r[20],
+                "inherited": bool(r[21]) if r[21] is not None else False,
             }
             for r in rows
         ]
@@ -318,6 +347,54 @@ def query_review_account_closed_positions(run_id: int) -> list[dict]:
             }
             for r in rows
         ]
+    finally:
+        conn.close()
+
+
+def save_review_account_experiment(base_run_id: int, *,
+                                   experiment_version: str,
+                                   status: Optional[str],
+                                   request: Optional[dict],
+                                   report: dict) -> int:
+    """保存用户显式触发的对照实验报告（可审计；GET 只读不重算）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            cur = conn.execute(
+                "INSERT INTO review_account_experiments("
+                "base_run_id, experiment_version, status, request_json, report_json"
+                ") VALUES (?, ?, ?, ?, ?)",
+                (base_run_id, experiment_version, status,
+                 json.dumps(request or {}, ensure_ascii=False),
+                 json.dumps(report, ensure_ascii=False, default=str)),
+            )
+            conn.commit()
+            return int(cur.lastrowid or 0)
+        finally:
+            conn.close()
+
+
+def query_review_account_experiments(base_run_id: int,
+                                     limit: int = 5) -> list[dict]:
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT id, base_run_id, created_at, experiment_version, status, "
+            "request_json, report_json FROM review_account_experiments "
+            "WHERE base_run_id = ? ORDER BY id DESC LIMIT ?",
+            (base_run_id, limit),
+        ).fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row[0], "base_run_id": row[1], "created_at": row[2],
+                "experiment_version": row[3], "status": row[4],
+                "request": json.loads(row[5]) if row[5] else {},
+                "report": json.loads(row[6]) if row[6] else {},
+            })
+        return result
     finally:
         conn.close()
 

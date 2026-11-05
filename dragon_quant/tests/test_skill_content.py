@@ -448,7 +448,7 @@ class TestPremarketSkill(unittest.TestCase):
         text = self._premarket()
         for token in (
             "09:25 前", "09:25 后", "主动建议", "auction", "T1",
-            "assets.db", "本轮明确确认", "重跑 `premarket`",
+            "assets.db", "明确授权该动作", "重跑 `premarket`",
             "不自动加 `--force`", "不能自行等到 09:25", "竞价缺失",
         ):
             self.assertIn(token, text)
@@ -457,7 +457,7 @@ class TestPremarketSkill(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
         for token in (
             "09:25 前", "09:25 后", "主动建议", "auction", "T1",
-            "本轮明确确认", "重跑 `premarket`", "自动运行 `auction`",
+            "明确授权该动作", "重跑 `premarket`", "自动运行 `auction`",
             "`--force`",
         ):
             self.assertIn(token, text)
@@ -465,7 +465,9 @@ class TestPremarketSkill(unittest.TestCase):
     def test_safety_premarket_may_suggest_but_not_auto_run_auction(self):
         text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")
         self.assertIn("盘前预案流程可以主动建议运行 `auction`", text)
-        self.assertIn("必须等用户本轮明确确认", text)
+        # S6：授权按范围持续有效，不再要求「本轮」重复确认。
+        self.assertIn("需用户明确授权该动作", text)
+        self.assertIn("持续有效", text)
 
     def test_premarket_template_separates_fact_assumption_action(self):
         text = self._premarket()
@@ -518,3 +520,33 @@ class TestPremarketSkill(unittest.TestCase):
         reports = (ROOT / "references" / "reports.md").read_text(encoding="utf-8")
         self.assertIn("references/premarket.md", outputs)
         self.assertIn("references/premarket.md", reports)
+
+
+class TestSkillBehaviorScenarios(unittest.TestCase):
+    def test_two_goal_workflows_and_metric_contract_present(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for token in ("识别质量是否改善", "账户策略是否改善", "胜率/成效解释契约",
+                      "指标类型", "本段权益贡献", "中性不是看涨",
+                      "不推荐不是看跌", "不可比"):
+            self.assertIn(token, text, token)
+
+    def test_consumer_project_authority_and_persistent_authorization(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for token in ("消费项目", "运行时 `-h`", "不假设消费项目存在",
+                      "授权按日期/动作/参数", "持续有效"):
+            self.assertIn(token, text, token)
+
+    def test_scan_verification_uses_scan_record_not_dedup_pool(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for token in ("scan --date D --top 5", "scan_id", "新增回测池数量",
+                      "不是当次扫描的原始名单"):
+            self.assertIn(token, text, token)
+
+    def test_operations_and_commands_agree_on_dashboard_default(self):
+        commands = (ROOT / "references" / "commands.md").read_text(
+            encoding="utf-8")
+        operations = (ROOT / "references" / "operations.md").read_text(
+            encoding="utf-8")
+        for text in (commands, operations):
+            self.assertIn("--bs-autogen", text)
+            self.assertNotIn("默认后台增量生成", text)

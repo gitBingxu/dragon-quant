@@ -176,8 +176,19 @@ class TestRestoreSeed(unittest.TestCase):
         )
         self.assertEqual(seed["base_equity"], 6000.0)
         self.assertEqual(len(seed["state"].positions), 1)
-        self.assertEqual(asdict(seed["state"].positions[0]), asdict(position))
+        restored = seed["state"].positions[0]
+        # 基础字段逐位还原；期初归因字段由恢复入口冻结（M3）。
+        frozen = {"mark", "inherited", "period_start_qty", "period_start_mark",
+                  "period_start_realized_pnl", "period_start_cost"}
+        self.assertEqual(
+            {k: v for k, v in asdict(restored).items() if k not in frozen},
+            {k: v for k, v in asdict(position).items() if k not in frozen})
+        self.assertTrue(restored.inherited)
+        self.assertEqual(restored.period_start_qty, restored.qty)
+        self.assertIsNotNone(restored.period_start_mark)
         self.assertEqual(seed["state"].cash, 1000.0)
+        self.assertIn(seed["attribution_quality"],
+                      {"precise", "legacy_approximation"})
 
     def test_consecutive_losses_tail_only(self):
         def rows(*returns):

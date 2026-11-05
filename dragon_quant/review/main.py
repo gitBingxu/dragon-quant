@@ -24,7 +24,9 @@ from dragon_quant.infra.provider.xueqiu import XueqiuProvider
 from dragon_quant.infra import clock
 from dragon_quant.review.strict_metrics import (
     evaluate_strict,
+    evaluate_tradable_open,
     is_valid_bar,
+    maturity_cutoff,
     window_metrics,
 )
 from dragon_quant.scan.storage import dragons as dragon_store
@@ -120,7 +122,11 @@ def review_dragon(code: str, trade_date: str,
     klines = [k if isinstance(k, dict) else kbar_to_dict(k) for k in klines]
 
     result = _loose_review(klines, calendar, trade_date)
-    result["strict"] = evaluate_strict(klines, calendar, trade_date)
+    strict = evaluate_strict(klines, calendar, trade_date)
+    strict["tradable_open"] = evaluate_tradable_open(
+        klines, calendar, trade_date)
+    result["strict"] = strict
+    result["tradable_open"] = strict["tradable_open"]
     return result
 
 
@@ -144,13 +150,15 @@ def _loose_review(klines: list[dict], calendar: set[str],
     buy_price = entry_k["low"]
     metrics = window_metrics(klines, calendar, buy_date, buy_price)
     if metrics is None:
-        # 旧契约：窗口为空时宽松口径记 0/0 completed。
+        # 窗口为空 = 尚未成熟；不得填 0/0 冒充 completed（A1/KR1）。
         return _loose_result(
-            "completed", buy_date=buy_date, buy_price=buy_price,
-            max_return_5d=0, max_drawdown_5d=0, max_return_hold_days=0)
+            "partial", buy_date=buy_date, buy_price=buy_price,
+            max_return_5d=None, max_drawdown_5d=None,
+            max_return_hold_days=None)
 
     return _loose_result(
-        "completed", buy_date=buy_date, buy_price=buy_price,
+        "partial" if metrics["partial"] else "completed",
+        buy_date=buy_date, buy_price=buy_price,
         max_return_5d=metrics["max_return_5d"],
         max_drawdown_5d=metrics["max_drawdown_5d"],
         max_return_hold_days=metrics["max_return_hold_days"],
@@ -192,9 +200,8 @@ def _run_vpa(code: str, name: str, trade_date: str, verbose: bool = True) -> Non
 
 
 def _maturity_cutoff(calendar: set[str]) -> Optional[str]:
-    """返回「5 个交易日之前」的日期上界；日历不足 6 天时返回 None。"""
-    trading_days = sorted(calendar, reverse=True)
-    return trading_days[5] if len(trading_days) > 5 else None
+    """返回完整收益窗口可判成熟的入选日上界（与窗口公式同源；不足返回 None）。"""
+    return maturity_cutoff(calendar)
 
 
 def _calendar_span_days(calendar: set[str], start: str, end: str) -> int:
@@ -284,11 +291,13 @@ def run_review(trade_date: Optional[str] = None,
         entries = dragon_store.get_pending_dragons(
             trade_date=None, top_n=None, review_status=None, source=source)
         entries.sort(key=lambda e: (e["trade_date"], e["code"]))
-        existing = set() if force else strict_store.list_keys(source)
+        # partial 行不是终态：即使已有严格行也必须重算（A1 补算覆盖 partial）。
+        existing = {} if force else strict_store.list_statuses(source)
         selected: list[dict] = []
         for entry in entries:
             key = (entry["trade_date"], entry["code"])
-            if key in existing:
+            status = existing.get(key)
+            if status is not None and status != "partial":
                 skipped_existing += 1
                 continue
             selected.append(entry)
@@ -317,8 +326,10 @@ def run_review(trade_date: Optional[str] = None,
                 trade_date=trade_date, top_n=top_n,
                 review_status=None, source=source)
         else:
+            # pending + partial：partial 不是终态，默认命令应合法补算（A1）。
             entries = dragon_store.get_pending_dragons(
-                trade_date=trade_date, top_n=top_n, source=source)
+                trade_date=trade_date, top_n=top_n,
+                review_statuses=["pending", "partial"], source=source)
 
     if not entries:
         if verbose:
@@ -347,7 +358,7 @@ def run_review(trade_date: Optional[str] = None,
         if verbose and skipped:
             print(f"🔍 自动筛选：跳过 {skipped} 条"
                   + ("（不在 5~20 交易日窗口）" if source == "v1"
-                     else "（距当日不足 5 个交易日）"))
+                     else "（完整收益窗口尚未走完，留待下次补算）"))
         maturity_skipped = skipped
 
     if not entries:
@@ -457,11 +468,14 @@ def _filter_v1_window(entries: list[dict],
 
 
 def _print_progress(result: dict) -> None:
-    if result["status"] == "completed":
+    if result["status"] in ("completed", "partial"):
         hold = result.get("max_return_hold_days", "?")
+        ret = result.get("max_return_5d")
+        draw = result.get("max_drawdown_5d")
+        ret_text = f"{ret:+.1f}%" if ret is not None else "窗口未成熟"
+        draw_text = f"{draw:+.1f}%" if draw is not None else "—"
         print(f"买入 {result['buy_date']} @ {result['buy_price']:.2f}  "
-              f"收益 {result['max_return_5d']:+.1f}%({hold}d)  "
-              f"回撤 {result['max_drawdown_5d']:+.1f}%")
+              f"收益 {ret_text}({hold}d)  回撤 {draw_text}")
     elif result["status"] == "no_entry":
         print("无可介入日 ❌")
     else:

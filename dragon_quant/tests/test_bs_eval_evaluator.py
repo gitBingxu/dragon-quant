@@ -101,8 +101,11 @@ class FakeData:
             values = {"open_": self.price, "high": self.price + 0.2,
                       "low": self.price - 0.2, "close": self.price}
             if day > TRADE_DATE and self.buy_window_open is not None:
+                # 每个买入窗口日都相对前收跳空；收盘仍在 price，保证 gap 持续
+                # 超限（无信号），且 OHLC 合法（否则会被正确识别为数据故障）。
                 values["open_"] = self.buy_window_open
-                values["close"] = self.buy_window_open
+                values["high"] = max(self.buy_window_open, self.price) + 0.2
+                values["low"] = min(self.buy_window_open, self.price) - 0.2
             values.update(self.daily_overrides.get(day, {}))
             bars.append(_daily_bar(day, **values))
         return bars

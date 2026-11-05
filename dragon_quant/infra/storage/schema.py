@@ -53,7 +53,16 @@ CREATE TABLE IF NOT EXISTS review_account_runs (
     max_drawdown         REAL,
     trade_count          INTEGER,
     win_rate             REAL,
-    created_at           TEXT DEFAULT (datetime('now','localtime'))
+    created_at           TEXT DEFAULT (datetime('now','localtime')),
+    base_run_id          INTEGER,
+    start_equity         REAL,
+    start_positions_json TEXT,
+    start_realized_pnl   REAL,
+    start_cash           REAL,
+    start_peak_equity    REAL,
+    start_consecutive_losses INTEGER,
+    start_marks_json     TEXT,
+    run_meta_json        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_account_runs_created ON review_account_runs(created_at);
@@ -118,7 +127,12 @@ CREATE TABLE IF NOT EXISTS review_account_positions (
     status               TEXT,
     post_exit_max_return    REAL,
     post_exit_max_drawdown  REAL,
-    post_exit_window_days   INTEGER
+    post_exit_window_days   INTEGER,
+    initial_cost            REAL,
+    realized_pnl            REAL,
+    period_pnl              REAL,
+    period_start_value      REAL,
+    inherited               INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_account_positions_run ON review_account_positions(run_id, entry_date);
@@ -139,6 +153,19 @@ CREATE TABLE IF NOT EXISTS review_account_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_account_events_run ON review_account_events(run_id, event_date, id);
+
+CREATE TABLE IF NOT EXISTS review_account_experiments (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    base_run_id          INTEGER NOT NULL,
+    created_at           TEXT DEFAULT (datetime('now','localtime')),
+    experiment_version   TEXT NOT NULL,
+    status               TEXT,
+    request_json         TEXT,
+    report_json          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_account_experiments_run
+    ON review_account_experiments(base_run_id, id);
 
 CREATE TABLE IF NOT EXISTS buy_sell_signals (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,6 +214,7 @@ CREATE TABLE IF NOT EXISTS dragon_review_strict (
     review_status         TEXT NOT NULL,
     reason                TEXT,
     review_version        TEXT,
+    tradable_open_json    TEXT,
     computed_at           TEXT DEFAULT (datetime('now', 'localtime')),
     UNIQUE(trade_date, code, source)
 );
@@ -235,6 +263,7 @@ CREATE TABLE IF NOT EXISTS bs_signals (
     replay_days               INTEGER NOT NULL DEFAULT 0,
     fallback_days             INTEGER NOT NULL DEFAULT 0,
     suspended_days            INTEGER NOT NULL DEFAULT 0,
+    fault_days                INTEGER NOT NULL DEFAULT 0,
     buy_date                  TEXT,
     buy_rule_code             TEXT,
     buy_rule_text             TEXT,
@@ -257,9 +286,13 @@ CREATE TABLE IF NOT EXISTS bs_signals (
     sell_half_price           REAL,
     sell_half_qty             INTEGER,
     sell_half_rule_code       TEXT,
+    sell_half_max_return_5d   REAL,
+    sell_half_max_drawdown_5d REAL,
+    sell_half_window_days     INTEGER,
     sell_max_return_5d        REAL,
     sell_max_drawdown_5d      REAL,
     sell_max_return_hold_days INTEGER,
+    sell_post_exit_window_days INTEGER,
     sell_window_partial       INTEGER NOT NULL DEFAULT 0,
     content_hash              TEXT,
     last_attempt_at           TEXT,
@@ -287,6 +320,8 @@ def _ensure_schema(conn: sqlite3.Connection):
     conn.executescript(BASE_SCHEMA)
     _ensure_review_account_columns(conn)
     _ensure_signal_columns(conn)
+    _ensure_bs_columns(conn)
+    _ensure_strict_columns(conn)
     for source in sorted(VALID_SOURCES):
         _create_versioned_tables(conn, source)
         _ensure_dragon_columns(conn, source)
@@ -320,6 +355,34 @@ def _ensure_signal_columns(conn: sqlite3.Connection):
                 raise
 
 
+def _ensure_strict_columns(conn: sqlite3.Connection):
+    """对已存在的 ``dragon_review_strict`` 幂等补列（旧库升级保留数据）。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(dragon_review_strict)")}
+    if "tradable_open_json" not in cols:
+        conn.execute("ALTER TABLE dragon_review_strict ADD COLUMN tradable_open_json TEXT")
+
+
+def _ensure_bs_columns(conn: sqlite3.Connection):
+    """对已存在的 bs_signals 幂等补列（bs_eval/2 的故障与独立窗口字段）。"""
+    wanted = (
+        ("fault_days", "INTEGER NOT NULL DEFAULT 0"),
+        ("sell_half_max_return_5d", "REAL"),
+        ("sell_half_max_drawdown_5d", "REAL"),
+        ("sell_half_window_days", "INTEGER"),
+        ("sell_post_exit_window_days", "INTEGER"),
+    )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(bs_signals)")}
+    for name, decl in wanted:
+        if name in cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE bs_signals ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(bs_signals)")}
+            if name not in existing:
+                raise
+
+
 def _ensure_dragon_columns(conn: sqlite3.Connection, source: str):
     """对已存在的 dragons 分表幂等补列（CREATE IF NOT EXISTS 不会给旧表加列）。"""
     t = _tables(source)
@@ -336,6 +399,28 @@ def _ensure_review_account_columns(conn: sqlite3.Connection):
     # 增量回测的收益率/指数曲线起点（基准最后收盘权益）；全量 run 保持 NULL。
     if "base_equity" not in run_cols:
         conn.execute("ALTER TABLE review_account_runs ADD COLUMN base_equity REAL")
+    # 运行追溯（M3）：链式基准、期初状态/权益/已实现盈亏与运行质量元数据；
+    # 旧 run 保持 NULL（unknown），不推断历史业务值。
+    for name, decl in (
+        ("base_run_id", "INTEGER"),
+        ("start_equity", "REAL"),
+        ("start_positions_json", "TEXT"),
+        ("start_realized_pnl", "REAL"),
+        ("start_cash", "REAL"),
+        ("start_peak_equity", "REAL"),
+        ("start_consecutive_losses", "INTEGER"),
+        ("start_marks_json", "TEXT"),
+        ("run_meta_json", "TEXT"),
+    ):
+        if name in run_cols:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE review_account_runs ADD COLUMN {name} {decl}")
+        except sqlite3.OperationalError:
+            existing = {r[1] for r in conn.execute(
+                "PRAGMA table_info(review_account_runs)")}
+            if name not in existing:
+                raise
     snapshot_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_snapshots)")}
     if "positions_json" not in snapshot_cols:
         conn.execute("ALTER TABLE review_account_snapshots ADD COLUMN positions_json TEXT DEFAULT '[]'")
@@ -348,7 +433,12 @@ def _ensure_review_account_columns(conn: sqlite3.Connection):
     pos_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_positions)")}
     for name, decl in (("post_exit_max_return", "REAL"),
                        ("post_exit_max_drawdown", "REAL"),
-                       ("post_exit_window_days", "INTEGER")):
+                       ("post_exit_window_days", "INTEGER"),
+                       ("initial_cost", "REAL"),
+                       ("realized_pnl", "REAL"),
+                       ("period_pnl", "REAL"),
+                       ("period_start_value", "REAL"),
+                       ("inherited", "INTEGER DEFAULT 0")):
         if name in pos_cols:
             continue
         try:

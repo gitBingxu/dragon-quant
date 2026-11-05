@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createIncrementalAccountRun,
   deleteAccountRun,
@@ -7,12 +7,14 @@ import {
   fetchAccountPositions,
   fetchAccountRuns,
   fetchAccountSnapshots,
+  fetchAccountSummary,
   fetchAccountTrades,
   type AccountBenchmarkPoint,
   type AccountPosition,
   type AccountPositionStats,
   type AccountRun,
   type AccountSnapshot,
+  type AccountSummary,
   type AccountTimelineEvent,
   type AccountTrade,
 } from "../../api/account";
@@ -31,6 +33,7 @@ import { RunPicker } from "./RunPicker";
 import { CreateRunModal } from "./CreateRunModal";
 import { DeleteRunModal } from "./DeleteRunModal";
 import { EmptyRuns } from "./EmptyRuns";
+import { ExperimentPanel } from "./ExperimentPanel";
 
 function clearDetail(
   setSnapshots: (value: AccountSnapshot[]) => void,
@@ -38,7 +41,8 @@ function clearDetail(
   setTrades: (value: AccountTrade[]) => void,
   setPositions: (value: AccountPosition[]) => void,
   setPositionStats: (value: AccountPositionStats | null) => void,
-  setEvents: (value: AccountTimelineEvent[]) => void
+  setEvents: (value: AccountTimelineEvent[]) => void,
+  setSummary: (value: AccountSummary | null) => void
 ) {
   setSnapshots([]);
   setBenchmark([]);
@@ -46,6 +50,7 @@ function clearDetail(
   setPositions([]);
   setPositionStats(null);
   setEvents([]);
+  setSummary(null);
 }
 
 export function AccountPage() {
@@ -57,12 +62,18 @@ export function AccountPage() {
   const [positions, setPositions] = useState<AccountPosition[]>([]);
   const [positionStats, setPositionStats] = useState<AccountPositionStats | null>(null);
   const [events, setEvents] = useState<AccountTimelineEvent[]>([]);
+  const [summary, setSummary] = useState<AccountSummary | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [auxError, setAuxError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [incrementing, setIncrementing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // 响应必须绑定发起时的 runId：切换 run 后旧响应不得覆盖新数据（D3）。
+  const requestSeq = useRef(0);
+  const [detailRunId, setDetailRunId] = useState<number | null>(null);
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === runId) ?? null,
@@ -92,51 +103,84 @@ export function AccountPage() {
   }, [loadRuns]);
 
   useEffect(() => {
+    const requestId = ++requestSeq.current;
+    setDetailRunId(null);
+    setError(null);
+    setAuxError(null);
+    // 切换 run 立即清空旧详情并进入明确加载态，绝不混用新旧批次。
+    clearDetail(
+      setSnapshots,
+      setBenchmark,
+      setTrades,
+      setPositions,
+      setPositionStats,
+      setEvents,
+      setSummary
+    );
     if (!runId) {
-      clearDetail(
-        setSnapshots,
-        setBenchmark,
-        setTrades,
-        setPositions,
-        setPositionStats,
-        setEvents
-      );
+      setDetailLoading(false);
       return;
     }
-    let active = true;
-    setError(null);
+    setDetailLoading(true);
+    const isCurrent = () =>
+      requestSeq.current === requestId;
     Promise.all([
       fetchAccountSnapshots(runId),
-      fetchAccountBenchmark(runId),
       fetchAccountTrades(runId),
       fetchAccountPositions(runId),
-      fetchAccountEvents(runId),
+      fetchAccountSummary(runId),
     ])
-      .then(([snapshotResp, benchmarkResp, tradeResp, positionResp, eventResp]) => {
-        if (!active) return;
+      .then(([snapshotResp, tradeResp, positionResp, summaryResp]) => {
+        if (!isCurrent()) return;
         setSnapshots(snapshotResp.data || []);
-        setBenchmark(benchmarkResp.data || []);
         setTrades(tradeResp.data || []);
         setPositions(positionResp.data || []);
         setPositionStats(positionResp.stats || null);
-        setEvents(eventResp.data || []);
+        setSummary(summaryResp.data || null);
+        setDetailRunId(runId);
+        // 辅助数据独立降级：失败不清核心详情（D3）。
+        Promise.allSettled([
+          fetchAccountBenchmark(runId),
+          fetchAccountEvents(runId),
+        ]).then(([benchmarkResult, eventResult]) => {
+          if (!isCurrent()) return;
+          const failures: string[] = [];
+          if (benchmarkResult.status === "fulfilled") {
+            setBenchmark(benchmarkResult.value.data || []);
+          } else {
+            setBenchmark([]);
+            failures.push("基准对比");
+          }
+          if (eventResult.status === "fulfilled") {
+            setEvents(eventResult.value.data || []);
+          } else {
+            setEvents([]);
+            failures.push("决策时间线");
+          }
+          setAuxError(
+            failures.length ? `辅助数据暂不可用：${failures.join("、")}` : null
+          );
+        });
       })
       .catch((exc) => {
-        if (!active) return;
+        if (!isCurrent()) return;
         clearDetail(
           setSnapshots,
           setBenchmark,
           setTrades,
           setPositions,
           setPositionStats,
-          setEvents
+          setEvents,
+          setSummary
         );
         setError(exc instanceof Error ? exc.message : String(exc));
+      })
+      .finally(() => {
+        if (isCurrent()) setDetailLoading(false);
       });
-    return () => {
-      active = false;
-    };
   }, [runId]);
+
+  const detailMatchesRun = runId != null && detailRunId === runId;
 
   const selectRun = useCallback((id: number) => {
     setActionError(null);
@@ -229,6 +273,18 @@ export function AccountPage() {
         </div>
       ) : null}
 
+      {detailLoading ? (
+        <div className="mb-3 rounded-lg border border-hairline px-3.5 py-2.5 text-body text-ink-2">
+          正在加载批次详情…
+        </div>
+      ) : null}
+
+      {auxError ? (
+        <div className="mb-3 rounded-lg border border-hairline px-3.5 py-2.5 text-caption text-ink-2">
+          {auxError}（核心结果仍可用）
+        </div>
+      ) : null}
+
       <CreateRunModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -253,8 +309,12 @@ export function AccountPage() {
         <EmptyRuns onCreate={() => setCreateOpen(true)} />
       ) : (
         <div className="grid gap-3">
-          <AccountStats run={selectedRun} latest={latest} />
-          <EntryReasonStats stats={positionStats} />
+          <AccountStats
+            run={selectedRun}
+            latest={detailMatchesRun ? latest : null}
+            summary={detailMatchesRun ? summary : null}
+          />
+          <EntryReasonStats stats={detailMatchesRun ? positionStats : null} />
 
           <div className="grid gap-3 lg:grid-cols-12">
             <div className="lg:col-span-8">
@@ -265,9 +325,15 @@ export function AccountPage() {
             </div>
           </div>
 
-          <TradesTable trades={trades} />
-          <PositionsTable positions={positions} />
-          <AccountTimeline events={events} positions={positions} />
+          <TradesTable trades={detailMatchesRun ? trades : []} />
+          <PositionsTable positions={detailMatchesRun ? positions : []} />
+          <AccountTimeline
+            events={detailMatchesRun ? events : []}
+            positions={detailMatchesRun ? positions : []}
+          />
+          {detailMatchesRun && runId != null ? (
+            <ExperimentPanel runId={runId} />
+          ) : null}
         </div>
       )}
     </>

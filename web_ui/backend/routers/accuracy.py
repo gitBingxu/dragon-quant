@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
@@ -59,8 +59,12 @@ class AccuracyWindowModel(BaseModel):
 class AccuracySummary(BaseModel):
     correct: int
     valid: int
+    direction_valid: int = 0
+    neutral: int = 0
     excluded: int
     hit_rate: float | None = None
+    direction_denominator: str = "bull_or_bear_or_up_only"
+    primary_horizon: int | None = None
     excluded_by_reason: dict[str, int] = {}
 
 
@@ -69,6 +73,7 @@ class AccuracyStock(BaseModel):
     name: str | None = None
     correct: int = 0
     valid: int = 0
+    direction_valid: int = 0
     excluded: int = 0
     hit_rate: float | None = None
 
@@ -84,6 +89,16 @@ class AccuracyResponse(BaseModel):
     sample_unit: Literal["stock_day"] = "stock_day"
     window: AccuracyWindowModel
     summary: AccuracySummary
+    groups: dict[str, Any] = {}
+    spread: Any = None
+    independent_dates: int = 0
+    independent_codes: int = 0
+    versions_seen: dict[str, int] = {}
+    horizons: dict[str, Any] = {}
+    contract: dict[str, Any] = {}
+    stratification: dict[str, Any] = {}
+    axes: dict[str, int] = {}
+    market_day_effect: dict[str, Any] = {}
     day_kind_counts: dict[str, int] = {}
     stocks: list[AccuracyStock] = []
     excluded_snapshot_dates: dict[str, int] = {}

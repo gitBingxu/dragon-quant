@@ -122,7 +122,8 @@ test("json shape is stable", () => {
   const entry = report.installs[0];
   assert.deepEqual(
     Object.keys(entry).sort(),
-    ["agent", "packageVersion", "scope", "skillDir", "skillVersion", "state"],
+    ["agent", "packageVersion", "scope", "skillDir", "skillVersion",
+      "skillVersionSource", "state"],
   );
 });
 

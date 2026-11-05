@@ -288,7 +288,7 @@ def test_r5_auto_window_skips_recent_and_processes_stale_rows():
         seed_sandbox(box, base_seed(extra))
         result = run_review(box, ["review"])
         assert_exit(result, 0)
-        assert "🔍 自动筛选：跳过 1 条（距当日不足 5 个交易日）" in result.stdout
+        assert "🔍 自动筛选：跳过 1 条（完整收益窗口尚未走完，留待下次补算）" in result.stdout
         assert "共 4 条待处理" in result.stdout
         rows = {row["code"]: row for row in review_fields(box)}
         assert rows["600001"]["review_status"] == "completed"
@@ -412,7 +412,7 @@ def test_r12_runtime_clock_mode_drives_the_auto_window():
         assert payload["runtime_clock_type"] == "FixedClock"
         assert payload["runtime_clock_now"].startswith("2026-09-11T15:30")
 
-        assert "🔍 自动筛选：跳过 1 条（距当日不足 5 个交易日）" in result.stdout
+        assert "🔍 自动筛选：跳过 1 条（完整收益窗口尚未走完，留待下次补算）" in result.stdout
         assert "共 4 条待处理" in result.stdout
 
         rows = {row["code"]: row for row in review_fields(box)}

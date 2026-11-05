@@ -219,7 +219,7 @@ def test_dragons_frozen_contract_and_new_endpoints():
     client = make_client(dragon_repository=FakeDragons(),
                          scan_repository=FakeScans())
     payload = client.get("/api/dragons").json()
-    assert set(payload) == {"data", "count", "summary"}
+    assert set(payload) == {"data", "count", "summary", "coverage"}
     assert set(payload["data"][0]) == set(ROW) | {"source"}
     assert payload["summary"]["total"] == payload["count"] == len(payload["data"])
     legacy = client.get("/api/summary").json()
@@ -1631,7 +1631,8 @@ def test_review_context_market_verification_shape():
 # ─── 3A：默认日期字段 / prep effect / accuracy / 路由顺序 ────────────────────
 
 ACC_CALENDAR = ["2026-09-01", "2026-09-02", "2026-09-03",
-                "2026-09-04", "2026-09-05"]
+                "2026-09-04", "2026-09-05", "2026-09-08", "2026-09-09",
+                "2026-09-10", "2026-09-11", "2026-09-12"]
 
 
 def _acc_bar(day, *, open_px, close):
@@ -1646,8 +1647,13 @@ def _acc_bars() -> dict:
             _acc_bar("2026-09-01", open_px=10.0, close=10.5),
             _acc_bar("2026-09-02", open_px=10.0, close=11.0),
             _acc_bar("2026-09-03", open_px=11.0, close=9.0),
-            _acc_bar("2026-09-04", open_px=10.5, close=12.0),
+            _acc_bar("2026-09-04", open_px=9.0, close=9.2),
             _acc_bar("2026-09-05", open_px=12.0, close=12.5),
+            _acc_bar("2026-09-08", open_px=11.5, close=12.0),
+            _acc_bar("2026-09-09", open_px=12.5, close=13.0),
+            _acc_bar("2026-09-10", open_px=12.0, close=12.2),
+            _acc_bar("2026-09-11", open_px=12.2, close=12.4),
+            _acc_bar("2026-09-12", open_px=12.4, close=12.6),
         ],
     }
 
@@ -1688,6 +1694,7 @@ class FakeAccuracyAssets(FakeAssets):
             return []
         return [{"trade_date": trade_date, "code": "600001", "version": "2",
                  "level": "强", "direction": "bear", "is_weak": False,
+                 "strength": 80.0,
                  "data_quality": {"status": "ok"}, "unverified": False}]
 
     def list_auction_asset_names(self, trade_date, **kwargs):
@@ -1736,7 +1743,7 @@ def test_static_accuracy_routes_win_over_dynamic_date():
     prep = client.get("/api/prep/accuracy")
     assert prep.status_code == 200
     assert prep.json()["summary"]["correct"] == 2
-    assert prep.json()["as_of"] == "2026-09-02"
+    assert prep.json()["as_of"] == "2026-09-05"
 
     auction = client.get("/api/auction/accuracy")
     assert auction.status_code == 200
@@ -2002,9 +2009,8 @@ def test_bs_buys_shape_rule_filter_and_stable_summary_base():
     assert item["loose_win"] is True
     assert item["buy_window_partial"] is False
     assert body["summary"]["samples"] == 1
-    # data 查询带 rule，summary 基集不带 rule（切换买点时分母稳定）。
+    # D4：data 与 summary 使用同一筛选基集（含 rule），分子分母不跨作用域。
     assert repo.calls[0]["filters"]["rule_codes"] == ["buy_open_ma5_pullback"]
-    assert repo.calls[1]["filters"].get("rule_codes", []) == []
 
 
 def test_bs_sells_verdict_partial_and_half_exit():

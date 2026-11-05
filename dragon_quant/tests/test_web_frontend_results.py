@@ -36,7 +36,7 @@ def test_dragons_page_drops_header_description() -> None:
 
 def test_summary_cards_copy_and_accessible_hints() -> None:
     text = _read(SRC / "pages" / "dragons" / "SummaryCards.tsx")
-    for token in ("已回测", "入选满 5 个交易日后回测", "HintIcon", "宽松胜率", "严格胜率"):
+    for token in ("已回测", "完整收益窗口（入选后约 6 个交易日）", "HintIcon", "宽松胜率", "严格胜率"):
         assert token in text, f"SummaryCards 缺少 {token!r}"
 
     hint = _read(SRC / "components" / "HintIcon.tsx")
@@ -127,7 +127,7 @@ def test_prep_page_no_longer_hosts_auction() -> None:
 
 def test_dist_contains_new_copy_and_drops_old_review_cards() -> None:
     js = _dist_js()
-    for token in ("已回测", "入选满 5 个交易日后回测", "入选后表现",
+    for token in ("已回测", "完整收益窗口（入选后约 6 个交易日）", "入选后表现",
                   "展开全部", "数据不足", "不建议新建仓", "tooltip"):
         assert token in js, f"dist JS 缺少新文案/键: {token!r}"
     assert "严格 / 宽松口径对照" not in js

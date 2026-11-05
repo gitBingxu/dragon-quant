@@ -6,8 +6,9 @@
 ``AccountSimulator`` / ``TradingEngine`` 复用，本模块只做编排与状态恢复。
 """
 
+import copy
 import json
-from dataclasses import fields
+from dataclasses import asdict, fields
 from typing import Optional
 
 from dragon_quant.infra import clock
@@ -82,6 +83,13 @@ def run_review_account(date_from: str,
         date_from=date_from,
         date_to=date_to,
         display_name=display_name,
+        start_positions=[],
+        start_realized_pnl=0.0,
+        start_cash=initial_cash,
+        start_peak_equity=initial_cash,
+        start_consecutive_losses=0,
+        start_marks={},
+        attribution_quality="full_run",
     )
     result["run_id"] = run_id
     result["display_name"] = display_name
@@ -140,10 +148,14 @@ def run_incremental_review_account(base_run_id: int, *,
     data = MarketData(provider=_xueqiu_from_services(services))
     date_from, date_to = resolve_incremental_window(data, cfg, base["date_to"])
 
+    # 运行前深冻结期初持仓：模拟器会原地修改 Position，保存的 start_* 必须
+    # 是真正的期初状态（main R3），不能等 run 结束后再序列化同一批对象。
+    start_positions_snapshot = [asdict(p) for p in seed["state"].positions]
     sim = AccountSimulator(cfg, data=data,
-                           initial_state=seed["state"],
+                           initial_state=copy.deepcopy(seed["state"]),
                            base_equity=seed["base_equity"],
-                           peak_equity=seed["peak_equity"])
+                           peak_equity=seed["peak_equity"],
+                           start_realized_pnl=seed["start_realized_pnl"])
     result = sim.run(date_from, date_to)
     _assert_snapshot_end(result, date_to)
     annotate_post_exit(result["positions"], sim.data)
@@ -159,6 +171,15 @@ def run_incremental_review_account(base_run_id: int, *,
         date_to=date_to,
         display_name=display_name,
         base_equity=seed["base_equity"],
+        base_run_id=base_run_id,
+        start_positions=start_positions_snapshot,
+        start_realized_pnl=seed["start_realized_pnl"],
+        start_cash=seed["state"].cash,
+        start_peak_equity=seed["state"].peak_equity,
+        start_consecutive_losses=seed["state"].consecutive_losses,
+        start_marks={p.code: p.mark for p in seed["state"].positions
+                     if p.mark is not None},
+        attribution_quality=seed["attribution_quality"],
     )
     result["run_id"] = run_id
     result["display_name"] = display_name
@@ -195,13 +216,47 @@ def restore_incremental_seed(base_run: dict,
         raise ValueError(_ERR_POSITIONS_LEGACY)
 
     peak_equity = _restore_peak(snapshots, total_equity)
+    # 冻结本段期初状态：继承持仓以期初盯市价值为归因成本基准。
+    single_mark = last.get("position_market_price")
+    legacy_mark = 0
+    for p in positions:
+        p.inherited = True
+        p.period_start_qty = p.qty
+        mark = p.mark
+        if mark is None and len(positions) == 1 and single_mark is not None:
+            mark = single_mark
+        if mark is None:
+            legacy_mark += 1
+            mark = p.entry_price
+        p.period_start_mark = mark
+        p.period_start_realized_pnl = p.realized_pnl
+        p.period_start_cost = p.cost
+
     state = AccountState(
         cash=cash,
         positions=positions,
         consecutive_losses=_consecutive_losses(closed_rows),
         peak_equity=peak_equity,
     )
-    return {"state": state, "base_equity": total_equity, "peak_equity": peak_equity}
+    return {
+        "state": state,
+        "base_equity": total_equity,
+        "peak_equity": peak_equity,
+        "start_realized_pnl": _start_realized_pnl(base_run),
+        # 旧快照无盯市价 → 期初价值只能是近似（明示，不冒充精确）。
+        "attribution_quality": ("legacy_approximation"
+                                if legacy_mark else "precise"),
+    }
+
+
+def _start_realized_pnl(base_run: dict) -> float:
+    """基准 run 的累计已实现盈亏（新元数据）；旧 run 缺失按 0 起算并标记。"""
+    meta = base_run.get("run_meta")
+    if isinstance(meta, dict):
+        value = meta.get("realized_pnl_total")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return 0.0
 
 
 def resolve_incremental_window(data, cfg: StrategyConfig,
@@ -287,8 +342,33 @@ def _persist_result(result: dict, *,
                     date_from: str,
                     date_to: str,
                     display_name: Optional[str],
-                    base_equity: Optional[float] = None) -> int:
+                    base_equity: Optional[float] = None,
+                    base_run_id: Optional[int] = None,
+                    start_positions: Optional[list[dict]] = None,
+                    start_realized_pnl: float = 0.0,
+                    start_cash: Optional[float] = None,
+                    start_peak_equity: Optional[float] = None,
+                    start_consecutive_losses: Optional[int] = None,
+                    start_marks: Optional[dict] = None,
+                    attribution_quality: str = "full_run") -> int:
     """全量 / 增量共用的落库管线（Template Method，行为与原全量路径逐位一致）。"""
+    run_meta = {
+        "data_quality": result.get("data_quality"),
+        "fallback_days": result.get("fallback_days"),
+        "total_days": result.get("total_days"),
+        "ranking_mode": result.get("ranking_mode"),
+        "pool_sources": result.get("pool_sources") or {},
+        "fallback_reasons": result.get("fallback_reasons") or {},
+        "priority_degraded": result.get("priority_degraded") or [],
+        "suspended_days_count": result.get("suspended_days_count"),
+        "suspended_codes": result.get("suspended_codes") or [],
+        "data_degraded": result.get("data_degraded") or [],
+        "strategy_name": strategy_name,
+        "initial_cash": result["initial_cash"],
+        "base_equity": base_equity if base_equity is not None else result["initial_cash"],
+        "realized_pnl_total": result.get("realized_pnl_total"),
+        "attribution_quality": attribution_quality,
+    }
     run_id = account_store.create_review_account_run(
         source=source,
         strategy_name=strategy_name,
@@ -303,6 +383,16 @@ def _persist_result(result: dict, *,
         win_rate=result["win_rate"],
         display_name=display_name,
         base_equity=base_equity,
+        base_run_id=base_run_id,
+        start_equity=(base_equity if base_equity is not None
+                      else result["initial_cash"]),
+        start_positions_json=json.dumps(start_positions or [], ensure_ascii=False),
+        start_realized_pnl=start_realized_pnl,
+        start_cash=start_cash,
+        start_peak_equity=start_peak_equity,
+        start_consecutive_losses=start_consecutive_losses,
+        start_marks_json=json.dumps(start_marks or {}, ensure_ascii=False),
+        run_meta_json=json.dumps(run_meta, ensure_ascii=False),
     )
     account_store.save_review_account_results(
         run_id,

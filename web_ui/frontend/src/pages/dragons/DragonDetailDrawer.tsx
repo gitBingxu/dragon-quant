@@ -160,6 +160,37 @@ function DetailBody({
         onRetry={onRetryPerformance}
       />
 
+      {detail.strict_tradable_open ? (
+        <div className="rounded-lg border border-hairline px-3.5 py-3 text-caption text-ink-2">
+          <div className="mb-1 font-semibold text-ink">
+            可成交估算（tradable_open_v1，仅研究口径）
+          </div>
+          <div>
+            {detail.strict_tradable_open.status === "cannot_evaluate"
+              ? `不可评估：${detail.strict_tradable_open.reason ?? "未知"}`
+              : `T+1 开盘 ${detail.strict_tradable_open.entry_price ?? "—"}
+                 （${detail.strict_tradable_open.entry_date ?? "—"}）；扣 13bp 后固定持有期净收益`}
+          </div>
+          {detail.strict_tradable_open.horizons ? (
+            <div className="mt-1 flex flex-wrap gap-x-3">
+              {Object.entries(
+                detail.strict_tradable_open.horizons as Record<
+                  string,
+                  { status: string; net_return_pct?: number | null }
+                >
+              ).map(([days, item]) => (
+                <span key={days}>
+                  {days} 日：
+                  {item.status === "completed"
+                    ? `${item.net_return_pct?.toFixed(2) ?? "—"}%`
+                    : item.status}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {detail.concepts.length ? (
         <div>
           <h3 className="mb-2 text-caption font-semibold uppercase tracking-[0.09em] text-ink-2">
@@ -180,11 +211,13 @@ function DetailBody({
           <h3 className="text-caption font-semibold uppercase tracking-[0.09em] text-ink-2">
             五维评分
           </h3>
-          <span className="font-mono text-caption text-ink-3">
-            dims · {detail.dims_source}
-          </span>
+
         </div>
         <DimBars dims={detail.dims} />
+        <details className="mt-2 text-caption text-ink-3">
+          <summary className="cursor-pointer">数据来源（诊断）</summary>
+          <span className="font-mono">dims · {detail.dims_source}</span>
+        </details>
       </div>
 
       {detail.reject_reason ? (
@@ -197,7 +230,7 @@ function DetailBody({
       ) : null}
 
       {detail.report_text ? (
-        <CollapsibleSection title="扫描报告原文" defaultOpen>
+        <CollapsibleSection title="扫描报告原文（诊断）" defaultOpen={false}>
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-body leading-relaxed text-ink-2">
             {detail.report_text}
           </pre>

@@ -205,7 +205,7 @@ export function PrepPage() {
               ? `近一年；默认日期：${defaultSource ?? "本地交易日"}。${basis ?? ""}，按本地日 K 交易日并集推算，不是交易所日历。`
               : "近一年数据资产日历；点任意日期切换。"
           }
-          className="sticky top-14 z-20"
+          className="sticky top-14 z-20 order-4"
         >
           <AssetCalendar
             startDate={calendar?.start_date ?? date}
@@ -227,8 +227,9 @@ export function PrepPage() {
           ) : null}
         </Section>
 
-        {/* 2. 核心结果：市场情绪 / 主线 / 是否建仓 / 推荐标的 / 资产异常摘要。 */}
+        {/* 2. 核心结果优先展示：日历等诊断信息在视觉顺序中后置。 */}
         <Section
+          className="order-1"
           title="核心结果"
           description="市场情绪、主线、是否建仓、推荐建仓标的与资产异常摘要。"
         >
@@ -244,6 +245,7 @@ export function PrepPage() {
 
         {/* 3. 当前 T 日效果：主线次日涨跌 + 严格逐股收益/回撤。 */}
         <Section
+          className="order-2"
           title="当前 T 日效果"
           description="真主线次日涨跌；推荐 / 不推荐逐股严格最大收益与回撤。只读本地日 K。"
         >
@@ -256,6 +258,7 @@ export function PrepPage() {
 
         {/* 4. 当日资产明细与缺席/异常原因。 */}
         <Section
+          className="order-5"
           title="当日资产明细"
           description="当日应有资产、缺失与合法缺席原因；采集记录是已知最新状态，不代表本次运行成功。"
         >
@@ -270,12 +273,14 @@ export function PrepPage() {
         </Section>
 
         {/* 5. 全历史逐股判断准确率：固定截至最新可验证日。 */}
-        <AccuracyBoard
-          scope="prep"
-          data={accuracy}
-          loading={accuracyLoading}
-          error={accuracyError}
-        />
+        <div className="order-3">
+          <AccuracyBoard
+            scope="prep"
+            data={accuracy}
+            loading={accuracyLoading}
+            error={accuracyError}
+          />
+        </div>
       </div>
     </>
   );

@@ -32,7 +32,7 @@ def test_page_source_has_title_empty_state_filters_and_pagination():
     for token in ("BS策略", "假想买卖点回放", "PaginatedDataTable",
                   "python -m dragon_quant bs-eval", "窗口不足",
                   "显示窗口不足样本", "半仓腿",
-                  "重置买点", "Modal", "fetchBsJobStatus", "postBsRebuild",
+                  "重新计算买卖点评估", "Modal", "fetchBsJobStatus", "postBsRebuild",
                   "aria-live", "数据生成中"):
         assert token in page, token
     card = _read(FRONTEND / "pages" / "bs" / "StrategyCard.tsx")
@@ -48,7 +48,7 @@ def test_api_router_and_nav_are_wired():
     router = _read(FRONTEND / "router.tsx")
     assert "BsPage" in router and "/^\\/bs$/" in router
     shell = _read(FRONTEND / "AppShell.tsx")
-    assert 'to: "/bs"' in shell and 'label: "BS策略"' in shell
+    assert 'to: "/bs"' in shell and 'label: "买卖点"' in shell
 
 
 def test_new_source_uses_typography_tokens_not_tailwind_scale():
@@ -65,7 +65,7 @@ def test_dist_is_built_and_contains_static_page_contract():
     for token in ("BS策略", "假想买卖点回放", "四类买点",
                   "十条卖出规则", "评估口径", "回放上限",
                   "python -m dragon_quant bs-eval", "窗口不足",
-                  "重置买点", "/api/bs/jobs/status", "/api/bs/rebuild"):
+                  "重新计算买卖点评估", "/api/bs/jobs/status", "/api/bs/rebuild"):
         assert token in js, token
 
 

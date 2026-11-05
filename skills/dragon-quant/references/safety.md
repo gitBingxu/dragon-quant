@@ -4,8 +4,12 @@
 
 ## 分级定义
 
-- **T0 只读**：不写业务记录、不改远端业务状态，可直接执行。`dashboard` 虽为 T0，但会**长驻**会话，并可能初始化/校验本地 **schema**；启动后默认后台增量生成 **BS 派生数据**（只写 `bs_*` 派生表并读取行情，不写账户/交易业务记录）；启动前要说明。
-- **T1 写本地状态**：写 `dragon.db` / `assets.db` / 用户指定文件。执行前必须得到用户显式确认；用户本轮明确点名该操作可视为确认。
+- **T0 只读**：不写业务记录、不改远端业务状态，可直接执行。`dashboard` 虽为 T0，但会**长驻**会话，
+  并可能初始化/校验本地 **schema**；启动后**默认不**生成 BS 派生数据，只有显式 `--bs-autogen` /
+  `DQ_BS_AUTOGEN=1` 才增量生成 `bs_*` 派生表；启动前要说明。
+- **T1 写本地状态**：写 `dragon.db` / `assets.db` / 用户指定文件。执行前必须得到用户明确授权。
+  **授权按日期/动作/参数/副作用范围持续有效**：用户说「今天允许跑 prep 和因子 build」后，本会话内
+  同一范围不再反复确认；只有范围变更、用户撤销或出现新的高风险副作用才补确认。
 - 本 Skill **不开放外发、破坏性或高风险操作**；遇到时走通用未开放话术。
 
 ## 白名单矩阵
@@ -18,11 +22,11 @@
 | dragons | --date --true-only | T0 | 只读 JSON；scan 后核验真龙 |
 | data | quote/kline/minute/batch-quote | T0 | 触网只读；失败字符串不等于成功 |
 | prep | --date --recompute --force --json | T1 | 写 assets.db；当日需 16:40 后 |
-| auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后；premarket 可主动建议，但执行需本轮确认 |
+| auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后；premarket 可主动建议，执行需用户授权该动作 |
 | premarket | --date --json | T0 | 只读；不写库；缺数据降级 exit0；不触网 |
 | review | --date --top | T1 | 回写回测字段；failed>0 如实报告 |
 | review-account | --from --to --capital | T1 | 写账户回测表；默认策略与 v2 |
-| dashboard | --port --no-browser --no-bs-autogen | T0 | 长驻；启动后默认后台增量生成 BS 派生数据（只写 bs_* 派生表并读取行情；不写账户/交易业务记录）；可用 --no-bs-autogen 或 DQ_BS_AUTOGEN=0 关闭；禁止 --yes 自动安装 |
+| dashboard | --port --no-browser --bs-autogen --no-bs-autogen | T0 | 长驻；默认只读，不生成 BS 派生数据；显式 --bs-autogen / DQ_BS_AUTOGEN=1 才增量生成；--no-bs-autogen / DQ_BS_AUTOGEN=0 优先；禁止 --yes 自动安装 |
 | factor | build --date --only --json | T1 | 只写三组内置因子；禁止默认 build |
 | factor | query --date --name --json | T0 | 只读；用于入库核对与代表因子读回 |
 <!-- safety:end -->
@@ -36,10 +40,10 @@
 ## 确认话术
 
 - **T1**：`将执行 <command>，会写入本地数据库（dragon.db / assets.db），范围 <日期/代码>。是否继续？`
-- **面板**：`将启动本地 Web UI 面板 dashboard（长驻，可能需要初始化/校验本地 schema，启动后默认后台增量生成 BS 派生数据、不写账户/交易业务记录），并默认尝试打开浏览器；是否继续？`
+- **面板**：`将启动本地 Web UI 面板 dashboard（长驻，可能需要初始化/校验本地 schema；默认只读、不生成 BS 派生数据），并默认尝试打开浏览器；是否继续？`
 - **文件**：`将把报告写入 <path>（本地文件）。是否继续？`；用户指定仓库内路径时提示会影响 git 状态。
-- 用户本轮明确点名某个 T1 操作可视为确认；上一次同意不代表这一次同意。
-- 盘前预案流程可以主动建议运行 `auction`，但不得因用户要预案就默认执行；必须等用户本轮明确确认。
+- 用户按日期/动作/参数给出的明确授权持续有效；不因「上一轮不算」反复确认，越界或撤销才补确认。
+- 盘前预案流程可以主动建议运行 `auction`，但不得因用户要预案就默认执行；需用户明确授权该动作。
 - 面板：`dashboard` 若交互询问是否安装 `[web]`，回答否，只转述手动安装指令；不要用 `--yes` 代替用户决定。
 - 语义模糊（“看看今天的”“整理一下”）时先确认，不自行选择写操作。
 
@@ -50,5 +54,5 @@
 - 用 `--force` 绕过盘中/盘后/竞价时点，或把它当成日常手段。
 - 手工用 SQL 删除或修改业务表。
 - 回显 Cookie、token 或同步凭据，或把它们写入日志/仓库。
-- 把 `dashboard` 说成“会回测/会写业务记录”，或伪造已经打开浏览器；BS 派生数据自动生成不等于业务写入。
+- 把 `dashboard` 说成“会回测/会写业务记录”，或伪造已经打开浏览器；默认只读，BS 派生数据生成需显式 opt-in。
 - 自动安装/升级 Python 包（含 `dashboard --yes` 与 `DQ_WEB_AUTO_INSTALL=1`），或执行 `npm publish`、`git commit`、`git push`、PR。

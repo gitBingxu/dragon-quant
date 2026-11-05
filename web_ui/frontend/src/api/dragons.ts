@@ -56,6 +56,17 @@ export interface DragonDetail {
   dims: Dims | null;
   dims_source: "scan_stocks" | "scan_stocks_missing" | "scan_missing";
   reject_reason: string | null;
+  strict_tradable_open?: {
+    status: string;
+    reason?: string | null;
+    entry_date?: string | null;
+    entry_price?: number | null;
+    horizons?: Record<string, {
+      status: string;
+      exit_date?: string | null;
+      net_return_pct?: number | null;
+    }>;
+  } | null;
 }
 
 export function fetchDragonTradeDates(limit = 5) {
@@ -139,6 +150,18 @@ export interface Dragon {
   strict_max_return_hold_days: number | null;
   strict_review_status: string | null;
   strict_review_reason: string | null;
+  /** 可成交研究口径（tradable_open_v1）：T+1 开盘、固定 1/3/5 日、扣成本。 */
+  strict_tradable_open?: {
+    status: string;
+    reason?: string | null;
+    entry_date?: string | null;
+    entry_price?: number | null;
+    horizons?: Record<string, {
+      status: string;
+      exit_date?: string | null;
+      net_return_pct?: number | null;
+    }>;
+  } | null;
   strict_reviewed: boolean;
   // 服务端统一派生状态（completed / pending / pending_recompute /
   // cannot_evaluate / error）；v1 等于旧 review_status。
@@ -163,6 +186,8 @@ export interface Summary {
   win_rate_loose_n: number;
   win_rate_strict_n: number;
   cannot_evaluate: number;
+  /** 窗口未成熟（可展示，不入正式分母）。 */
+  partial?: number;
   pending_recompute: number;
   failed_recompute: number;
   best_stock_code_strict: string | null;
@@ -193,7 +218,8 @@ export interface DragonFilters {
 
 export async function fetchDragons(
   filters: DragonFilters
-): Promise<{ data: Dragon[]; count: number; summary: Summary }> {
+): Promise<{ data: Dragon[]; count: number; summary: Summary;
+  coverage?: Summary }> {
   const params = new URLSearchParams();
   params.set("source", DRAGON_SOURCE);
   const keys: (keyof DragonFilters)[] = [

@@ -5,7 +5,12 @@ from __future__ import annotations
 from dragon_quant.review.strict_metrics import WINDOW_SIZE, WINDOW_SKIP
 
 #: 评测器版本：任何语义变化都必须递增，触发下次运行的自动 force。
-EVALUATOR_VERSION = "bs_eval/1"
+#: ``bs_eval/2``：卖后窗口改为「卖出日之后 5 根有效日K」（不含卖出当日、
+#: 不跳过次日），数据故障改为可重试 ``cannot_evaluate``，新增两轴/半仓字段。
+EVALUATOR_VERSION = "bs_eval/2"
+
+#: 卖出后独立窗口：卖出日之后 5 根有效日 K（与账户 post_exit_stats 同源）。
+POST_EXIT_WINDOW_DAYS = 5
 
 #: 买入评估窗口：入选日之后的第 1~5 个交易日（独立于 StrategyConfig 默认值）。
 BUY_WINDOW_DAYS = 5
@@ -52,6 +57,7 @@ NOTE_BUY_WINDOW_NOT_READY = "buy_window_not_ready"
 NOTE_WARMUP_INSUFFICIENT = "warmup_insufficient"
 NOTE_DAILY_MISSING = "daily_missing"
 NOTE_HOLD_CAP_REACHED = "hold_cap_reached"
+NOTE_DATA_COVERAGE_ERROR = "data_coverage_error"
 NOTE_STRATEGY_OR_EVALUATOR_CHANGED = "strategy_or_evaluator_changed_auto_force"
 
 __all__ = [
@@ -61,7 +67,9 @@ __all__ = [
     "BUY_WIN_RETURN_GT",
     "EVALUATOR_VERSION",
     "MAX_REPLAY_TRADING_DAYS",
+    "POST_EXIT_WINDOW_DAYS",
     "NOTE_BUY_WINDOW_NOT_READY",
+    "NOTE_DATA_COVERAGE_ERROR",
     "NOTE_DAILY_MISSING",
     "NOTE_HOLD_CAP_REACHED",
     "NOTE_STRATEGY_OR_EVALUATOR_CHANGED",

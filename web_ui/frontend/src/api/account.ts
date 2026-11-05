@@ -20,6 +20,24 @@ export interface AccountRun {
   trade_count: number;
   win_rate: number | null;
   created_at: string;
+  /** 链式增量：基准 run id（全量 run 为 null）。 */
+  base_run_id?: number | null;
+  /** 本段起点权益（增量=基准最后收盘权益；全量=初始资金）。 */
+  start_equity?: number | null;
+  start_positions?: AccountPositionSeed[];
+  start_realized_pnl?: number | null;
+  /** 运行质量/候选池/降级与版本元数据；旧 run 为空对象（unknown）。 */
+  run_meta?: Record<string, unknown>;
+}
+
+export interface AccountPositionSeed {
+  code: string;
+  qty: number;
+  cost: number;
+  entry_price: number;
+  entry_date: string;
+  mark?: number | null;
+  realized_pnl?: number;
 }
 
 export interface CreateAccountRunInput {
@@ -101,6 +119,12 @@ export interface AccountPosition {
   post_exit_max_return: number | null;
   post_exit_max_drawdown: number | null;
   post_exit_window_days: number | null;
+  /** 精确金额与跨段归因（旧 run 为 null / false）。 */
+  initial_cost?: number | null;
+  realized_pnl?: number | null;
+  period_pnl?: number | null;
+  period_start_value?: number | null;
+  inherited?: boolean;
 }
 
 export interface EntryReasonStatRow {
@@ -111,12 +135,55 @@ export interface EntryReasonStatRow {
   win_rate: number | null;
   avg_return: number | null;
   contribution: number | null;
+  period_pnl?: number | null;
+  codes?: number;
+  has_open?: boolean;
 }
 
 export interface AccountPositionStats {
   initial_cash: number;
+  /** 本段贡献分母（本段起点权益）。 */
+  start_equity?: number;
   total_trades: number;
+  /** period_pnl = 精确金额归因；legacy_approximation = 旧数据近似。 */
+  contribution_basis?: "period_pnl" | "legacy_approximation" | "unknown";
+  precise_attribution_count?: number;
+  period_complete?: boolean;
+  unknown_rows?: number;
+  reconciliation?: {
+    diff: number | null;
+    within_tolerance: boolean;
+    tolerance: number;
+  } | null;
   rows: EntryReasonStatRow[];
+}
+
+export interface AccountSummary {
+  run_id: number | null;
+  start_equity: number | null;
+  final_equity: number | null;
+  initial_cash: number | null;
+  total_return: number | null;
+  max_drawdown: number | null;
+  sharpe: number | null;
+  trade_count: number | null;
+  closed_count: number;
+  open_count: number;
+  win_rate: number | null;
+  wins: number;
+  losses: number;
+  avg_win_pct: number | null;
+  avg_loss_pct: number | null;
+  net_profit_ratio: number | null;
+  expectancy_amount: number | null;
+  fees: number;
+  realized_amount: number;
+  unrealized_amount: number | null;
+  unrealized_basis?: "mark" | "unknown";
+  largest_loss_amount: number | null;
+  contribution_basis: "period_pnl" | "legacy_approximation";
+  data_quality: string | null;
+  run_meta: Record<string, unknown>;
 }
 
 export async function fetchAccountRuns(): Promise<{ data: AccountRun[]; count: number }> {
@@ -225,5 +292,55 @@ export async function fetchAccountPositions(
   const params = new URLSearchParams({ run_id: String(runId) });
   const res = await fetch("/api/account/positions?" + params.toString());
   if (!res.ok) throw new Error(`account positions ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAccountSummary(
+  runId: number
+): Promise<{ data: AccountSummary; run: AccountRun }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/summary?" + params.toString());
+  if (!res.ok) throw new Error(`account summary ${res.status}`);
+  return res.json();
+}
+
+export interface AccountExperiment {
+  id: number;
+  base_run_id: number;
+  created_at: string;
+  experiment_version: string;
+  status: string | null;
+  request: Record<string, unknown>;
+  report: Record<string, unknown>;
+}
+
+export async function fetchAccountExperiments(
+  runId: number
+): Promise<{ data: AccountExperiment[] }> {
+  const params = new URLSearchParams({ run_id: String(runId) });
+  const res = await fetch("/api/account/experiments?" + params.toString());
+  if (!res.ok) throw new Error(`account experiments ${res.status}`);
+  return res.json();
+}
+
+export async function createAccountExperiment(
+  runId: number,
+  sellRules: string[] = []
+): Promise<{ data: Record<string, unknown> }> {
+  const res = await fetch("/api/account/experiments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run_id: runId, sell_rules: sellRules, confirm: true }),
+  });
+  if (!res.ok) {
+    let message = `account experiments ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = String(body.error);
+    } catch {
+      // keep the status-based fallback
+    }
+    throw new Error(message);
+  }
   return res.json();
 }

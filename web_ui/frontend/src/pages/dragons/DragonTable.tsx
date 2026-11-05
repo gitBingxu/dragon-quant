@@ -25,8 +25,8 @@ const COLUMNS: Col[] = [
   { key: "board_count", label: "连板", sortable: true },
   { key: "concepts", label: "概念" },
   { key: "buy_price", label: "买入价", sortable: true, field: "buy_price" },
-  { key: "max_return_5d", label: "最大收益%", sortable: true, field: "max_return_5d" },
-  { key: "max_drawdown_5d", label: "最大回撤%", sortable: true, field: "max_drawdown_5d" },
+  { key: "max_return_5d", label: "最大潜在涨幅", sortable: true, field: "max_return_5d" },
+  { key: "max_drawdown_5d", label: "峰值前不利波动", sortable: true, field: "max_drawdown_5d" },
   { key: "max_return_hold_days", label: "持有天", sortable: true, field: "max_return_hold_days" },
   { key: "status", label: "状态", sortable: true, field: "status" },
 ];
@@ -106,7 +106,11 @@ function renderCell(row: Dragon, col: Col, caliber: ReviewCaliber) {
     case "trade_date":
       return <span className="num">{row.trade_date}</span>;
     case "buy_date":
-      return <span className="num text-ink-2">{(field && row[field]) || "—"}</span>;
+      return (
+        <span className="num text-ink-2">
+          {field ? String(row[field] ?? "") || "—" : "—"}
+        </span>
+      );
     case "rank":
       return <span className="num text-ink-2">{row.rank ?? "—"}</span>;
     case "composite_score":
@@ -140,7 +144,11 @@ function renderCell(row: Dragon, col: Col, caliber: ReviewCaliber) {
       return <span className={`num ${pnlClass(value)}`}>{fmtPct(value)}</span>;
     }
     case "max_return_hold_days":
-      return <span className="num text-ink-2">{field ? (row[field] ?? "—") : "—"}</span>;
+      return (
+        <span className="num text-ink-2">
+          {field ? String(row[field] ?? "—") : "—"}
+        </span>
+      );
     case "status": {
       const meta = statusMeta(displayStatus(row));
       return <Badge tone={meta.tone}>{meta.label}</Badge>;

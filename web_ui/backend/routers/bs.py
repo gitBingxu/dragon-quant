@@ -164,16 +164,12 @@ def bs_buys(date_from: str | None = None, date_to: str | None = None,
         strategy_hash=latest["strategy_hash"],
         evaluator_version=doc.EVALUATOR_VERSION,
     )
-    base_rows = repo.query_signals(
-        side="buy", filters=base, sort_by=sort_by, sort_dir=sort_dir,
-        strategy_hash=latest["strategy_hash"],
-        evaluator_version=doc.EVALUATOR_VERSION,
-    )
     labels = bs_view.labels(doc)
     return {
         "data": [bs_view.present_buy_row(row, labels) for row in rows],
         "count": len(rows),
-        "summary": aggregate.buy_summary(base_rows),
+        # 汇总与当前筛选（含 rule）同基集：分子分母不跨作用域（D4）。
+        "summary": aggregate.buy_summary(rows),
     }
 
 
@@ -210,4 +206,6 @@ def bs_sells(date_from: str | None = None, date_to: str | None = None,
             for row in rows
         ],
         "count": len(rows),
+        # 与当前筛选同基集；避免「筛选后行数 + 全局卖飞数」混用分母（D4）。
+        "summary": aggregate.summarize(rows)["sell"],
     }

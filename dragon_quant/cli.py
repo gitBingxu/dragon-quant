@@ -936,8 +936,11 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                              help="不自动打开浏览器")
     dashboard_p.add_argument("--yes", action="store_true",
                              help="[web] 未安装时直接安装，不再询问（等同 DQ_WEB_AUTO_INSTALL=1）")
+    dashboard_p.add_argument("--bs-autogen", action="store_true",
+                             help="显式启用启动时后台增量生成 BS 派生数据"
+                                  "（默认只读；也可用 DQ_BS_AUTOGEN=1）")
     dashboard_p.add_argument("--no-bs-autogen", action="store_true",
-                             help="不后台增量生成 BS 派生数据（等同 DQ_BS_AUTOGEN=0）")
+                             help="关闭后台生成（兼容旧开关；优先级高于 DQ_BS_AUTOGEN=1）")
 
     argv = sys.argv[1:]
     if argv and argv[0] == "scan_v2":

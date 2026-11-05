@@ -55,6 +55,16 @@ const STOCK_COLUMNS: Column<AccuracyStock>[] = [
     render: (row) => <span className="num text-body text-ink-2">{row.valid}</span>,
   },
   {
+    key: "direction_valid",
+    header: "方向分母",
+    align: "right",
+    render: (row) => (
+      <span className="num text-body text-ink-2">
+        {(row as AccuracyStock & { direction_valid?: number }).direction_valid ?? "—"}
+      </span>
+    ),
+  },
+  {
     key: "excluded",
     header: "排除",
     align: "right",
@@ -121,6 +131,10 @@ function Body({
   scope: "prep" | "auction";
 }) {
   const isAuction = scope === "auction";
+  const contract = (data.contract || {}) as {
+    cost_bps?: number; legacy_raw_open_to_close?: boolean;
+  };
+  const comparable = (data.stratification?.comparable as boolean | undefined) !== false;
   const sampleReasons = Object.entries(data.summary.excluded_by_reason ?? {});
   const dayReasons = Object.entries(data.excluded_snapshot_dates ?? {}).filter(
     ([, value]) => value > 0
@@ -147,9 +161,14 @@ function Body({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatCard label="正确" value={data.summary.correct} tone="positive" />
-        <StatCard label="有效" value={data.summary.valid} sub="正确 + 未命中 + 平盘" />
+        <StatCard label="有效样本" value={data.summary.valid} sub="含无方向样本" />
+        <StatCard
+          label="方向分母"
+          value={data.summary.direction_valid ?? "—"}
+          sub="仅 bull/bear/推荐"
+        />
         <StatCard
           label={isAuction ? "排除条数" : "排除"}
           value={data.summary.excluded}
@@ -159,8 +178,109 @@ function Body({
         <StatCard
           label="命中率"
           value={pctRate(data.summary.hit_rate)}
-          sub="正确 ÷ 有效（历史样本）"
+          sub="正确 ÷ 方向分母（不是 ÷ 有效）"
         />
+      </div>
+
+      <div className="grid gap-2">
+        <div className="text-caption text-ink-2">
+          主研究合同：可成交开盘 → 第 N 交易日开盘，扣
+          {contract.cost_bps ?? "—"}bp；
+          {contract.legacy_raw_open_to_close ? "legacy raw 口径" : "与 decision-review 同源"}。
+          独立日 {data.independent_dates ?? "—"} · 独立股票 {data.independent_codes ?? "—"}
+          · 主 horizon {data.summary.primary_horizon ?? "—"}
+        </div>
+        {data.horizons ? (
+          <div className="overflow-x-auto rounded-lg border border-hairline">
+            <table className="w-full min-w-[560px] border-collapse text-caption">
+              <thead>
+                <tr className="border-b border-hairline text-left text-ink-3">
+                  <th className="py-1.5 pr-3">持有期</th>
+                  <th className="py-1.5 pr-3">有效</th>
+                  <th className="py-1.5 pr-3">方向分母</th>
+                  <th className="py-1.5 pr-3">中性</th>
+                  <th className="py-1.5 pr-3">命中率</th>
+                  <th className="py-1.5">排除原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.horizons).map(([key, item]) => (
+                  <tr key={key} className="border-b border-hairline">
+                    <td className="py-1.5 pr-3 text-ink">T+{item.horizon} 开盘</td>
+                    <td className="py-1.5 pr-3">{item.valid}</td>
+                    <td className="py-1.5 pr-3">{item.direction_valid}</td>
+                    <td className="py-1.5 pr-3">{item.neutral}</td>
+                    <td className="py-1.5 pr-3">{pctRate(item.hit_rate)}</td>
+                    <td className="py-1.5 text-ink-3">
+                      {Object.entries(item.excluded_by_reason ?? {})
+                        .map(([reason, count]) => `${reason}:${count}`)
+                        .join("，") || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {data.groups && Object.keys(data.groups).length ? (
+          <div className="overflow-x-auto rounded-lg border border-hairline">
+            <table className="w-full min-w-[560px] border-collapse text-caption">
+              <thead>
+                <tr className="border-b border-hairline text-left text-ink-3">
+                  <th className="py-1.5 pr-3">分组（同窗口净收益）</th>
+                  <th className="py-1.5 pr-3">样本</th>
+                  <th className="py-1.5 pr-3">均值</th>
+                  <th className="py-1.5 pr-3">中位</th>
+                  <th className="py-1.5 pr-3">日期等权</th>
+                  <th className="py-1.5 pr-3">胜/负/平</th>
+                  <th className="py-1.5">避损 / 错失</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.groups).map(([name, group]) => (
+                  <tr key={name} className="border-b border-hairline">
+                    <td className="py-1.5 pr-3 text-ink">{name}</td>
+                    <td className="py-1.5 pr-3">{group.samples}</td>
+                    <td className="py-1.5 pr-3">{pctRate(group.mean_return_pct)}</td>
+                    <td className="py-1.5 pr-3">{pctRate(group.median_return_pct)}</td>
+                    <td className="py-1.5 pr-3">{pctRate(group.date_equal_mean_return_pct)}</td>
+                    <td className="py-1.5 pr-3">{group.wins}/{group.losses}/{group.flats}</td>
+                    <td className="py-1.5">
+                      {pctRate(group.avoided_loss_rate)} / {pctRate(group.missed_gain_rate)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {data.spread ? (
+          <div className="rounded-md border border-hairline px-3 py-2 text-caption text-ink-2">
+            推荐−不推荐差值：
+            {pctRate((data.spread.value as number | null) ?? null)}
+            {(() => {
+              const boot = (data.spread?.bootstrap || {}) as Record<string, unknown>;
+              if (boot.low == null || boot.high == null) {
+                return `（${String(boot.status ?? "无区间")}，不出虚假显著性）`;
+              }
+              return `（日期级 bootstrap ${pctRate(boot.low as number)} ~ ${pctRate(boot.high as number)}，seed=${String(boot.seed ?? "—")}）`;
+            })()}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2 text-caption text-ink-2">
+          <span>版本：</span>
+          {Object.entries(data.versions_seen ?? {}).map(([version, count]) => (
+            <Badge key={version} tone="outline">{version} × {count}</Badge>
+          ))}
+          <Badge tone={comparable ? "outline" : "warning"}>
+            {comparable ? "单一版本" : "跨版本不可比"}
+          </Badge>
+          {data.axes ? (
+            Object.entries(data.axes).map(([key, value]) => (
+              <Badge key={key} tone="muted">{key} {value}</Badge>
+            ))
+          ) : null}
+        </div>
       </div>
 
       <div className="rounded-md border border-warning-line bg-warning-soft px-3 py-2 text-body text-warning">
@@ -234,12 +354,12 @@ export function AccuracyBoard({
 }) {
   const windowText =
     scope === "auction"
-      ? "T 日开盘买入 → T+2 收盘卖出"
-      : "T+1 开盘买入 → T+3 收盘卖出";
+      ? "T 日 09:25 可得 → T 日开盘买入 → 第 N 交易日开盘卖出"
+      : "T 日 16:40 可得 → T+1 开盘买入 → 第 N 交易日开盘卖出";
   return (
     <Section
       title="全历史逐股判断准确率"
-      description={`固定截至最新可验证日，不随选中日期变化；${windowText}，原始价格、不扣费。`}
+      description={`固定截至最新可验证日；${windowText}；扣 13bp 成本，与 decision-review 同源。`}
     >
       {loading ? (
         <div className="text-body text-ink-3">正在读取历史准确率…</div>

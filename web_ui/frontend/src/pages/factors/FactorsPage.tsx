@@ -220,9 +220,15 @@ export function FactorsPage() {
         {day ? (
           <Section
             title={`当日值 · ${day.trade_date}`}
-            description={`build_id ${day.build_id ?? "—"} · coverage 来源 ${day.coverage_source}`}
+            description="先看当日因子值与覆盖；构建审计默认折叠。"
             bodyClassName="px-4 py-3.5 sm:px-[18px]"
           >
+            <details className="mb-3 text-caption text-ink-3">
+              <summary className="cursor-pointer">构建审计（诊断）</summary>
+              <span className="font-mono">
+                build_id {day.build_id ?? "—"} · coverage 来源 {day.coverage_source}
+              </span>
+            </details>
             <DayValues day={day} />
           </Section>
         ) : (

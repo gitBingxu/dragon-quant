@@ -253,6 +253,18 @@ def _stock_result(*, bars_for_code: list[dict], calendar: list[str],
         return base
 
     strict = evaluate_strict(bars_for_code, set(calendar), trade_date)
+    if strict["review_status"] == "partial":
+        # 窗口已开始但未走完：展示为 partial（可看，不入正式分母）。
+        return {
+            "status": "completed",
+            "buy_date": strict["buy_date"],
+            "buy_price": strict["buy_price"],
+            "max_return_5d": strict["max_return_5d"],
+            "max_drawdown_5d": strict["max_drawdown_5d"],
+            "max_return_hold_days": strict["max_return_hold_days"],
+            "partial_window": True,
+            "reason": PARTIAL_WINDOW_REASON,
+        }
     if strict["review_status"] != "completed":
         # 买入 bar 有效但窗口尚未开始：展示 pending，而不是失败。
         base["reason"] = "window_not_started"
@@ -337,7 +349,9 @@ def _group_summary(rows: Sequence[Mapping[str, Any]]) -> list[dict]:
     summary: list[dict] = []
     for group in GROUP_ORDER:
         members = [row for row in rows if row["group"] == group]
-        completed = [row for row in members if row["status"] == "completed"]
+        completed = [row for row in members if row["status"] == "completed"
+                     and not row.get("partial_window")]
+        partial = sum(1 for row in members if row.get("partial_window"))
         returns = [row["max_return_5d"] for row in completed
                    if row["max_return_5d"] is not None]
         drawdowns = [row["max_drawdown_5d"] for row in completed
@@ -346,6 +360,7 @@ def _group_summary(rows: Sequence[Mapping[str, Any]]) -> list[dict]:
             "group": group,
             "label": GROUP_LABELS[group],
             "valid": len(completed),
+            "partial": partial,
             "cannot_evaluate": sum(1 for row in members
                                    if row["status"] == "cannot_evaluate"),
             "pending": sum(1 for row in members

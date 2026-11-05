@@ -14,7 +14,7 @@
 
 - 数据来源：只读 `dragons_v2`（v1 已废弃，`--source` 仅接受 `v2`）。
 - 存储：`bs_runs`（批次元数据）+ `bs_signals`（一行 = 一只龙头，`UNIQUE(trade_date, code)`），与实盘 `buy_sell_signals` 完全隔离。
-- 页面：`/bs` 查询为主；`dashboard` 启动时后台自动增量生成，页面「重置买点」按钮等价 `bs-eval --force` 全量重算。生成由 Web 后端子进程委派，写入仍只发生在 `bs_eval.storage`。
+- 页面：`/bs` 查询为主，**默认只读**；`dashboard` 启动时默认不生成 BS 派生数据，需显式 `--bs-autogen` / `DQ_BS_AUTOGEN=1`。页面「重新计算买卖点评估」按钮等价 `bs-eval --force` 全量重算；生成由 Web 后端子进程委派，写入仍只发生在 `bs_eval.storage`。
 
 ## 命令契约
 
@@ -102,26 +102,25 @@ stateDiagram-v2
 | 端点 | 说明 |
 |---|---|
 | `GET /api/bs/overview` | 最近一次 run 元数据 + 当前策略全部行的汇总 + 策略说明 + `stale_rows`；无 run → `run=null`、全 0 |
-| `GET /api/bs/buys` | buy 行（`rule`/`partial`/日期/代码/排序白名单）；`summary` 基于同一基集但不含 `rule`（切换买点时分母稳定） |
-| `GET /api/bs/sells` | sell 行（`rule` 为规则名，经 `SELL_REASON_TO_RULE` 展开）；行内 `verdict` / `half_exit` |
+| `GET /api/bs/buys` | buy 行（`rule`/`partial`/日期/代码/排序白名单）；`summary` 与当前筛选（含 `rule`）同基集 |
+| `GET /api/bs/sells` | sell 行（`rule` 为规则名，经 `SELL_REASON_TO_RULE` 展开）；行内 `verdict`（兼容）/ `missed_upside` / `avoided_downside` / `half_exit` / 窗口天数；`summary` 与当前筛选同基集 |
 | `GET /api/bs/jobs/status` | `{state, autogen_enabled, last_run}`；`state ∈ {idle,running,succeeded,failed}`，`last_run` 从未运行 → `null` |
 | `POST /api/bs/rebuild` | 启动全量重算（`--force`）：202 启动 / 409 已在运行 / 500 spawn 失败 / 403 非本机 `Origin` |
 
-页面 `/bs` 固定区块：页头 → 策略说明卡（四类买点 + 十条卖出规则 + 阈值 chips）→ 汇总卡 →
-buy 列表 → sell 列表。无 run 显示空态并提示 `python -m dragon_quant bs-eval`；
-`stale_rows > 0` 显示旧策略版本提示条（可点「重置买点」或执行 `bs-eval --force`）。
+页面 `/bs` 固定区块：页头 → 汇总卡 → 筛选 → buy 列表 → sell 列表 → 策略说明（默认折叠）。无 run 显示空态并提示 `python -m dragon_quant bs-eval`；
+`stale_rows > 0` 显示旧策略版本提示条（可点「重新计算买卖点评估」或执行 `bs-eval --force`）。
 运行中显示 `role="status"` 横幅并每 ~3s 轮询 status；成功后自动重拉 overview/buys/sells；
 失败显示 `exit_code` 与折叠的 `output_tail`，按钮可重试。连续 5 次轮询失败停止轮询并提示。
 
-## 自动生成与「重置买点」（`dashboard`）
+## 自动生成与「重新计算买卖点评估」（`dashboard`，默认只读）
 
 ```mermaid
 flowchart LR
-    CLI["dashboard CLI<br/>--no-bs-autogen / DQ_BS_AUTOGEN"] --> SET["DashboardSettings.bs_autogen"]
+    CLI["dashboard CLI<br/>--bs-autogen / --no-bs-autogen / DQ_BS_AUTOGEN"] --> SET["DashboardSettings.bs_autogen（默认 False）"]
     SET --> SERVE["serve._serve<br/>create_app 后、serve 前"]
     SERVE -->|"true"| RUN["BsRunner.start_incremental('auto')"]
     SERVE -->|"false"| SKIP["跳过（按钮仍可用）"]
-    BTN["/bs 「重置买点」"] --> POST["POST /api/bs/rebuild"]
+    BTN["/bs 「重新计算买卖点评估」"] --> POST["POST /api/bs/rebuild"]
     POST --> RUNNER["BsRunner.start_force('manual')"]
     RUN --> PROC["subprocess: python -m dragon_quant bs-eval [--force]"]
     RUNNER --> PROC
@@ -164,3 +163,20 @@ web_ui.serve / routers.bs → bs_runner.BsRunner（标准库 only）
   `test_dashboard.py` D1 断言沙箱 `autogen_enabled=false`、D13 断言开关打开但 `procguard` 禁止
   子进程时 fail-soft（`failed` + `spawn_failed`，`/api/meta` 仍 200）。
 - 覆盖映射：`coverage-map.json` 56 个 parser 节点 / 18 个顶层命令（dashboard flags 含 `--no-bs-autogen`）。
+
+## 评测器 `bs_eval/2`（2026-11-05，A2/A3/A12）
+
+- **卖后窗口独立**：卖出日**之后** 5 根有效日 K（不含卖出当日、不跳过次日），直接复用
+  `review_account.indicators.post_exit_stats`；最高涨幅相对卖价，最大跌幅为
+  `min(0, 最低/卖价-1)`。旧实现误用 review 的「买入后 2~5 日」窗口并混入卖出前低点。
+- **数据故障可重试**：`historical_events` 抛 `DataCoverageError` 记 `fault_days`，
+  不是停牌；买入窗口有故障且未买入 → `cannot_evaluate` + `data_coverage_error`，
+  `is_terminal=0`，下次会重试；买入后故障也不冻结为成熟终态。
+- **两轴独立**：`missed_upside`（卖后最高涨幅 ≥ 阈值）与 `avoided_downside`
+  （卖后最低跌幅 ≤ 阈值）可同时成立；旧互斥 verdict 仅兼容。半仓腿独立样本
+  （`sell_half_*`），不混入整笔交易盈利分母。
+- 版本升到 `bs_eval/2`：旧行自动 stale，UI 用显式「重新计算买卖点评估」重算；
+  查看面板不会隐式重算。
+
+- **字段语义（2026-11-05 返工）**：`sell_max_return_hold_days` 保持「卖出日到窗口最高价的天数」，
+  不再改作窗口长度；窗口有效 bar 数单独写 `sell_post_exit_window_days`。

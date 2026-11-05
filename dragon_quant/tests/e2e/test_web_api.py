@@ -244,6 +244,7 @@ def test_w1_w3_w4_w7_review_ui_routes_and_404():
                 "win_rate_loose_n": 1,
                 "win_rate_strict_n": 1,
                 "cannot_evaluate": 0,
+                "partial": 0,
                 "pending_recompute": 0,
                 "failed_recompute": 0,
                 "best_stock_code_strict": "600001",

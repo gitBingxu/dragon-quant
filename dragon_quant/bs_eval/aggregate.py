@@ -42,7 +42,11 @@ def buy_win(row: dict, prefix: str) -> Optional[bool]:
 
 
 def sell_verdict(row: dict) -> str:
-    """卖出判定（互斥，先卖飞再卖得对；窗口不足 → partial）。"""
+    """卖出判定（互斥，先卖飞再卖得对；窗口不足 → partial）。
+
+    仅为**兼容/辅助**标签：未来涨过 5% 与跌过 3% 可同时发生，正式评价用
+    :func:`sell_axes` 的两个独立轴，避免「卖飞优先」掩盖避损价值（A12）。
+    """
 
     if _partial(row, "sell_window_partial"):
         return "partial"
@@ -55,6 +59,39 @@ def sell_verdict(row: dict) -> str:
     if drawdown <= constants.SELL_GOOD_DRAWDOWN_LE:
         return "good"
     return "neutral"
+
+
+def sell_axes(row: dict, *,
+              ret_key: str = "sell_max_return_5d",
+              drawdown_key: str = "sell_max_drawdown_5d",
+              partial_key: str = "sell_window_partial",
+              window_days: Optional[int] = None) -> dict:
+    """卖出后两轴（可同时成立）与窗口覆盖。
+
+    * ``missed_upside``：卖出后窗口最高涨幅 ≥ 5%（错失的上涨机会）；
+    * ``avoided_downside``：卖出后窗口最低跌幅 ≤ -3%（避开的下跌）；
+    * 窗口不足或指标缺失时两轴均为 ``None``（不可评价，不填 False）。
+
+    ``window_days`` 显式给出时（半仓腿）按有效 bar 数判覆盖，否则读
+    ``partial_key`` 标记。
+    """
+    if window_days is not None:
+        if window_days < constants.POST_EXIT_WINDOW_DAYS:
+            return {"missed_upside": None, "avoided_downside": None,
+                    "comparable": False}
+    elif _partial(row, partial_key):
+        return {"missed_upside": None, "avoided_downside": None,
+                "comparable": False}
+    ret = row.get(ret_key)
+    drawdown = row.get(drawdown_key)
+    if ret is None or drawdown is None:
+        return {"missed_upside": None, "avoided_downside": None,
+                "comparable": False}
+    return {
+        "missed_upside": ret >= constants.SELL_FLY_RETURN_GE,
+        "avoided_downside": drawdown <= constants.SELL_GOOD_DRAWDOWN_LE,
+        "comparable": True,
+    }
 
 
 VERDICT_LABELS = {
@@ -126,6 +163,29 @@ def _sell_side(rows: list[dict]) -> dict:
         and row.get("sell_max_drawdown_5d") is not None
     ]
     verdicts = [sell_verdict(row) for row in samples]
+    axes = [sell_axes(row) for row in samples]
+    comparable = [item for item in axes if item["comparable"]]
+    missed = sum(1 for item in comparable if item["missed_upside"])
+    avoided = sum(1 for item in comparable if item["avoided_downside"])
+    both = sum(1 for item in comparable
+               if item["missed_upside"] and item["avoided_downside"])
+    neither = len(comparable) - missed - avoided + both
+
+    # 半仓腿：独立样本，不混入整笔交易盈利分母（A12）。
+    half_samples = [
+        row for row in rows
+        if row.get("sell_half_date")
+        and int(row.get("sell_half_window_days") or 0) >= constants.POST_EXIT_WINDOW_DAYS
+    ]
+    half_axes = [
+        sell_axes(row, ret_key="sell_half_max_return_5d",
+                  drawdown_key="sell_half_max_drawdown_5d",
+                  window_days=int(row.get("sell_half_window_days") or 0))
+        for row in half_samples
+    ]
+    half_missed = sum(1 for item in half_axes if item["missed_upside"])
+    half_avoided = sum(1 for item in half_axes if item["avoided_downside"])
+
     triggered = sum(1 for row in rows if row.get("sell_date"))
     breakdown = [
         {
@@ -150,6 +210,23 @@ def _sell_side(rows: list[dict]) -> dict:
         "neutral_rate": _rate(verdicts.count("neutral"), len(samples)),
         "avg_return": _mean(row.get("sell_max_return_5d") for row in samples),
         "avg_drawdown": _mean(row.get("sell_max_drawdown_5d") for row in samples),
+        # 两轴独立（可同时成立）；分母 = 窗口成熟的卖出样本。
+        "missed_upside": missed,
+        "missed_upside_rate": _rate(missed, len(comparable)),
+        "avoided_downside": avoided,
+        "avoided_downside_rate": _rate(avoided, len(comparable)),
+        "both": both,
+        "neither": neither,
+        "axes_denominator": len(comparable),
+        # 半仓腿独立样本（不混入整笔交易盈利分母）。
+        "half_leg": {
+            "triggered": sum(1 for row in rows if row.get("sell_half_date")),
+            "samples": len(half_samples),
+            "missed_upside": half_missed,
+            "missed_upside_rate": _rate(half_missed, len(half_samples)),
+            "avoided_downside": half_avoided,
+            "avoided_downside_rate": _rate(half_avoided, len(half_samples)),
+        },
         "rule_breakdown": breakdown,
     }
 
@@ -207,6 +284,7 @@ __all__ = [
     "buy_summary",
     "buy_win",
     "empty_summary",
+    "sell_axes",
     "sell_verdict",
     "summarize",
 ]

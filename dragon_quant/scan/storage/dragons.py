@@ -20,6 +20,7 @@ from typing import Optional
 
 from dragon_quant.infra.storage import dragons_rows
 from dragon_quant.infra.storage._base import _connect, _ensure_schema, _lock, _normalize_source, _tables
+from dragon_quant.review.strict_metrics import PARTIAL_WINDOW_REASON
 from dragon_quant.scan.storage import review_strict
 
 
@@ -301,11 +302,13 @@ def get_last_entry_with_rank(code: str, source: str = "v2") -> Optional[tuple]:
 def get_pending_dragons(trade_date: Optional[str] = None,
                         top_n: Optional[int] = None,
                         review_status: Optional[str] = "pending",
-                        source: str = "v2") -> list[dict]:
+                        source: str = "v2", *,
+                        review_statuses: Optional[list[str]] = None) -> list[dict]:
     """获取待 review 的 dragons 记录。
 
-    review_status='pending' 时只取待回测记录；传入 None 则不做状态过滤。
-    可按 trade_date 和 top_n 过滤。
+    ``review_status='pending'`` 时只取待回测记录；传入 None 则不做状态过滤。
+    新调用方可用 ``review_statuses`` 传多个状态（如 ``["pending", "partial"]``；
+    partial 不是终态，需要后续补算）。可按 trade_date 和 top_n 过滤。
     """
     conn = _connect()
     try:
@@ -322,7 +325,11 @@ def get_pending_dragons(trade_date: Optional[str] = None,
         )
         params: list = []
         conditions: list[str] = []
-        if review_status is not None:
+        if review_statuses:
+            placeholders = ",".join("?" * len(review_statuses))
+            conditions.append(f"review_status IN ({placeholders})")
+            params.extend(review_statuses)
+        elif review_status is not None:
             conditions.append("review_status = ?")
             params.append(review_status)
         if trade_date:
@@ -506,6 +513,10 @@ def save_dual_review(trade_date: str, code: str, *,
                     max_return_hold_days=strict.get("max_return_hold_days"),
                     review_status=strict["review_status"],
                     reason=strict.get("reason"),
+                    tradable_open_json=(json.dumps(
+                        strict["tradable_open"], ensure_ascii=False,
+                        sort_keys=True)
+                        if strict.get("tradable_open") else None),
                 )
             conn.commit()
         except Exception:
@@ -709,6 +720,9 @@ def query_dragons(filters: Optional[dict] = None,
                 "strict_max_return_hold_days": r["strict_max_return_hold_days"],
                 "strict_review_status": r["strict_review_status"],
                 "strict_review_reason": r["strict_review_reason"],
+                "strict_tradable_open": (
+                    json.loads(r["strict_tradable_open_json"])
+                    if r["strict_tradable_open_json"] else None),
                 "strict_reviewed": r["strict_review_status"] is not None,
                 # 派生状态：completed / pending / pending_recompute /
                 # cannot_evaluate / error（v1 等于旧 review_status）。
@@ -739,7 +753,8 @@ _BASE_COLUMNS: tuple[str, ...] = (
 _STRICT_COLUMNS: tuple[str, ...] = (
     "strict_buy_date", "strict_buy_price", "strict_max_return_5d",
     "strict_max_drawdown_5d", "strict_max_return_hold_days",
-    "strict_review_status", "strict_review_reason", "derived_status",
+    "strict_review_status", "strict_review_reason",
+    "strict_tradable_open_json", "derived_status",
 )
 
 _RESULT_COLUMNS: tuple[str, ...] = _BASE_COLUMNS + _STRICT_COLUMNS
@@ -821,6 +836,7 @@ def _query_base_sql(table: str, source: str, caliber: str = "strict") -> str:
             "s.max_return_hold_days AS strict_max_return_hold_days, "
             "s.review_status AS strict_review_status, "
             "s.reason AS strict_review_reason, "
+            "s.tradable_open_json AS strict_tradable_open_json, "
             f"{derived_status} AS derived_status "
         )
         join = (
@@ -833,6 +849,7 @@ def _query_base_sql(table: str, source: str, caliber: str = "strict") -> str:
             "NULL AS strict_max_return_5d, NULL AS strict_max_drawdown_5d, "
             "NULL AS strict_max_return_hold_days, NULL AS strict_review_status, "
             "NULL AS strict_review_reason, "
+            "NULL AS strict_tradable_open_json, "
             "d.review_status AS derived_status "
         )
         join = f" FROM {table} d"
@@ -944,10 +961,13 @@ def summarize_review_rows(rows: list[dict],
     }
 
     if source == "v2":
+        # 只把「成熟且有效」的严格样本放进正式分母：partial（含旧数据
+        # ``reason=partial_window``）可展示但不入正式成效（A1/KR1）。
         strict_completed = [
             r for r in rows
             if r.get("strict_reviewed")
             and r.get("strict_review_status") == "completed"
+            and r.get("strict_review_reason") != PARTIAL_WINDOW_REASON
         ]
         strict_wins = sum(1 for r in strict_completed
                           if _win(r, "strict_max_return_5d",
@@ -955,7 +975,8 @@ def summarize_review_rows(rows: list[dict],
         loose_den = [
             r for r in loose_completed
             if r.get("strict_reviewed")
-            and r.get("strict_review_status") != "cannot_evaluate"
+            and r.get("strict_review_status") == "completed"
+            and r.get("strict_review_reason") != PARTIAL_WINDOW_REASON
         ]
         loose_den_wins = sum(1 for r in loose_den
                              if _win(r, "max_return_5d", "max_drawdown_5d"))
@@ -974,6 +995,12 @@ def summarize_review_rows(rows: list[dict],
             "cannot_evaluate": sum(
                 1 for r in rows
                 if r.get("strict_review_status") == "cannot_evaluate"),
+            # 窗口未走完（含旧数据 reason=partial_window）：仅展示，不入正式分母；
+            # 下次默认 review 会重新补算。
+            "partial": sum(
+                1 for r in rows
+                if r.get("strict_review_status") == "partial"
+                or r.get("strict_review_reason") == PARTIAL_WINDOW_REASON),
             "pending_recompute": sum(
                 1 for r in rows
                 if not r.get("strict_reviewed")
@@ -1000,6 +1027,7 @@ def summarize_review_rows(rows: list[dict],
             "win_rate_loose_n": 0,
             "win_rate_strict_n": 0,
             "cannot_evaluate": 0,
+            "partial": 0,
             "pending_recompute": 0,
             "failed_recompute": 0,
             "best_stock_code_strict": None,

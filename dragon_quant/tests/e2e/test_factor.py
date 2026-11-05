@@ -1255,7 +1255,8 @@ DECISION_UNSUPPORTED_DATE = "2026-09-10"
 DECISION_REVIEW_KEYS = [
     "schema_version", "ok", "status", "source", "date_from", "date_to",
     "universe", "coverage_basis", "config", "snapshots", "versions", "groups",
-    "spreads", "exclusions", "caveats", "warnings",
+    "groups_basis", "direction_groups", "axes", "spreads", "exclusions",
+    "caveats", "warnings",
 ]
 _ASSETS_STANDARD_TABLES = {
     "prep_assets", "auction_assets", "prep_snapshots", "auction_snapshots",
@@ -1415,7 +1416,9 @@ def test_f17_decision_review_prep_groups_coverage_and_golden():
         assert _close(recommended["mean_net_return_pct"], 0.87)
         assert recommended["quality"] == "ok"
         assert recommended["above_reference"] is True
-        assert groups["not_recommended"]["horizons"]["1"]["direction_hit_rate"] == 0.0
+        # D5：不推荐不是看跌，方向不可评价。
+        assert groups["not_recommended"]["horizons"]["1"]["direction_evaluable"] is False
+        assert groups["not_recommended"]["horizons"]["1"]["direction_hit_rate"] is None
         assert groups["data_insufficient"]["horizons"]["1"]["direction_evaluable"] is False
         assert _close(payload["spreads"]["1"]["value"], -1.0)
         assert payload["spreads"]["3"]["value"] is None

@@ -145,6 +145,45 @@ function ResultsSection({
         render: (row) => <span className="num text-body text-ink-2">{row.rank ?? "—"}</span>,
       },
       {
+        key: "participation",
+        header: "参与限制 / 风险否决",
+        render: (row) => {
+          const vetoed = row.is_weak === true;
+          const reason = row.reject_reason
+            || (Array.isArray(row.risk_events) && row.risk_events.length
+              ? String((row.risk_events[0] as Record<string, unknown>).reason ?? "盘口风险")
+              : null);
+          if (vetoed) {
+            return (
+              <Badge tone="danger">
+                风险否决{reason ? `：${reason}` : ""}
+              </Badge>
+            );
+          }
+          return (
+            <span className="text-caption text-ink-2">
+              允许评估{reason ? `（${reason}）` : ""}
+            </span>
+          );
+        },
+      },
+      {
+        key: "evaluation",
+        header: "评价完整性",
+        render: (row) => {
+          const quality = row.data_quality?.status;
+          if (row.error) return <Badge tone="danger">快照损坏</Badge>;
+          if (quality === "unavailable") return <Badge tone="outline">不可评价</Badge>;
+          if (quality === "degraded") return <Badge tone="warning">降级</Badge>;
+          const validation = row.validation_status ?? "unknown";
+          return (
+            <Badge tone={validation === "verified" ? "positive" : "outline"}>
+              {validation}
+            </Badge>
+          );
+        },
+      },
+      {
         key: "collection",
         header: "采集状态",
         render: (row) => (
@@ -183,6 +222,7 @@ function ResultsSection({
       </div>
       <div className="mt-1.5 text-caption text-ink-3">
         T+1、T+3、T+5 为本地日 K 净收益（已扣 13bp 成本）；缺数据或未来交易日未到一律「待评估」。
+        采集成功 ≠ 策略已验证，「允许评估」也不代表实际可成交；参与限制与采集质量分开呈现。
       </div>
     </div>
   );

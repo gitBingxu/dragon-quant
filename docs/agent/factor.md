@@ -82,3 +82,21 @@ python -m dragon_quant factor fin status
 ## dashboard 竞价成效复用（只读，2026-11-01）
 
 `GET /api/auction/{date}/effect` 复用 `infra.factor.decision_review` 的 Adapter + 纯核心与 1/3/5 日净收益口径，行情经 `LocalStockDailyMarket` 注入本地 `prep_assets.stock_daily`；不改 `factor` CLI、阈值（`min_days=20` / `min_group_samples=30` / `cost_bps=13`）或表结构。缺本地 bar 时按既有剔除原因计入覆盖，不写 0 收益。
+
+## 共享信号适配与准确率口径（2026-11-05，A4/A5/A11）
+
+- 新增零 I/O 叶子 `infra/factor/signal_adapter.py`：prep 固定完整 `review_candidates`
+  母集（recommended / not_recommended / data_insufficient，不随建仓日型丢弃组），
+  auction 方向拆 `bull/bear/neutral/unknown`（缺关键键 fail-closed），只有 bull/bear
+  进入方向命中分母；等级与风险否决独立成轴。Web presenter 与其它研究入口共用此适配。
+- `/api/prep/accuracy`、`/api/auction/accuracy` 增加 `groups`（同窗口净收益/中位/
+  日期等权/胜负分布）、`spread`（推荐−不推荐，固定 seed bootstrap 区间）、
+  `versions_seen`、`axes`、`market_day_effect`；不推荐不是看跌，中性不是看涨。
+- `decision_review` 的等级效果口径保持不变（独立研究问题），不强行与方向命中合并。
+
+- 2026-11-05 D5：`decision-review` 消费共享 `signal_adapter`；prep `not_recommended`
+  不再有方向预期（`expected_direction=None`），只有推荐组进入方向分母。返回新增
+  `direction_groups`（prep 推荐/不推荐/数据不足；auction bull/bear/neutral/unknown）
+  与 `axes`（多/空/中性/未知/vetoed/强中弱）；旧 `groups` 保留并显式
+  `groups_basis`（prep_recommendation / legacy_level_effect），新研究合同以
+  `direction_groups` 为准。

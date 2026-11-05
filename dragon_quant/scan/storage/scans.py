@@ -233,7 +233,8 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
             "  ss.code, ss.name, ss.rank, ss.composite_score, ss.board_count, "
             "  ss.concepts_json, ss.report_text, "
             "  ss.open_px, ss.close_px, ss.high_px, ss.low_px, ss.pct, "
-            "  ss.turnover_rate, ss.amount, ss.market_cap, ss.is_true_dragon "
+            "  ss.turnover_rate, ss.amount, ss.market_cap, ss.is_true_dragon, "
+            "  ss.reject_reason "
             f"FROM {t['scans']} s "
             f"JOIN {t['scan_stocks']} ss ON ss.scan_id = s.id "
             "WHERE s.scan_date = ?",
@@ -262,6 +263,7 @@ def list_scan_stock_contributions_by_date(scan_date: str, source: str = "v2") ->
                 "amount": r[16],
                 "market_cap": r[17],
                 "is_true_dragon": bool(r[18]) if r[18] is not None else None,
+                "reject_reason": r[19],
                 "source": source,
             })
         return result

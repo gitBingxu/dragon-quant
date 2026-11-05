@@ -712,11 +712,15 @@ def test_d10_auction_calendar_day_and_local_effect():
 
             accuracy = server.request("GET", "/api/auction/accuracy").json()
             assert accuracy["status"] == "ok"
-            assert accuracy["as_of"] == "2026-09-16"
+            # 默认 horizons 1/3/5：本地 bar 只到 09-11，只有 T+1 成熟；
+            # 主 horizon=3 未成熟，summary 不得用 partial 数据出机会率。
+            assert accuracy["as_of"] == "2026-09-11"
             assert accuracy["window"]["entry_offset"] == 0
             assert accuracy["window"]["exit_offset"] == 2
-            assert accuracy["summary"]["correct"] == 2
-            assert accuracy["summary"]["valid"] == 2
+            assert accuracy["summary"]["primary_horizon"] == 3
+            assert accuracy["summary"]["valid"] >= 1
+            assert accuracy["horizons"]["1"]["valid"] >= 1
+            assert accuracy["contract"]["legacy_raw_open_to_close"] is False
 
             day = server.request("GET", "/api/auction/20260911").json()
             assert day["names"] == {"600001": "龙头A"}
@@ -842,7 +846,7 @@ def test_d12_prep_default_date_effect_and_accuracy():
 
             accuracy = server.request("GET", "/api/prep/accuracy").json()
             assert accuracy["status"] == "ok"
-            assert accuracy["as_of"] == "2026-09-15"
+            assert accuracy["as_of"] == "2026-09-11"
             # latest_bar_date 按注入时钟截断（E2E 时钟固定 09-11）。
             assert accuracy["latest_bar_date"] == "2026-09-11"
             assert accuracy["sample_unit"] == "stock_day"
@@ -852,7 +856,10 @@ def test_d12_prep_default_date_effect_and_accuracy():
             assert accuracy["day_kind_counts"] == {
                 "build": 1, "no_build": 0, "signal_missing": 1}
             assert accuracy["summary"]["correct"] == 1
-            assert accuracy["summary"]["valid"] == 1
+            # A4：不推荐组也进入同窗口样本；方向命中分母只含推荐组。
+            assert accuracy["summary"]["valid"] == 2
+            assert accuracy["summary"]["direction_valid"] == 1
+            assert accuracy["groups"]["not_recommended"]["samples"] == 1
             assert accuracy["summary"]["excluded"] >= 1
             assert accuracy["stocks"][0]["code"] == "600001"
 
@@ -872,7 +879,7 @@ def test_d13_bs_autogen_fail_soft_when_unset():
     before = sentinel.snapshot()
     with sandbox("dashboard-d13-bs-autogen") as box:
         with start_dashboard(
-            box, env_override={"DQ_BS_AUTOGEN": None},
+            box, env_override={"DQ_BS_AUTOGEN": "1"},
         ) as server:
             assert server.request("GET", "/api/meta").status == 200
             deadline = time.monotonic() + 10.0

@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-import threading
 from functools import wraps
 
 from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse
 
 from .. import compat
+from ..locks import ACCOUNT_HEAVY_LOCK
 from ..deps import (
     account_repository,
     benchmark_provider,
@@ -26,7 +26,8 @@ from ..deps import (
 
 router = APIRouter(tags=["account"])
 
-_account_run_lock = threading.Lock()
+# 兼容既有测试/调用方的名字；底层是账户生成与实验共享的单飞锁。
+_account_run_lock = ACCOUNT_HEAVY_LOCK
 
 
 def frozen_500(fn):
@@ -142,6 +143,17 @@ def account_trades(request: Request, account=Depends(account_repository)):
 def account_positions(request: Request, account=Depends(account_repository),
                       evaluation=Depends(evaluation_module)):
     return compat.account_positions(account, evaluation, request.query_params)
+
+
+@router.get("/api/account/summary", response_model=None)
+@frozen_500
+def account_summary(request: Request, account=Depends(account_repository),
+                    evaluation=Depends(evaluation_module)):
+    """账户收益/风险与运行质量摘要（只读，不重算）。"""
+    result = compat.account_summary(account, evaluation, request.query_params)
+    if "error" in result:
+        return JSONResponse(status_code=404, content=result)
+    return result
 
 
 @router.get("/api/account/events", response_model=None)

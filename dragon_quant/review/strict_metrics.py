@@ -20,13 +20,22 @@ WINDOW_SIZE = 4
 CANNOT_EVALUATE_REASON = "停牌或数据缺失无法区分"
 PARTIAL_WINDOW_REASON = "partial_window"
 
+#: 可成交研究口径（``tradable_open_v1``）的默认成本（买卖双边，bp）。
+TRADABLE_OPEN_COST_BPS = 13.0
+TRADABLE_OPEN_HORIZONS = (1, 3, 5)
+
 __all__ = [
     "CANNOT_EVALUATE_REASON",
     "PARTIAL_WINDOW_REASON",
+    "TRADABLE_OPEN_COST_BPS",
+    "TRADABLE_OPEN_HORIZONS",
     "WINDOW_SIZE",
     "WINDOW_SKIP",
     "evaluate_strict",
+    "evaluate_tradable_open",
     "is_valid_bar",
+    "maturity_cutoff",
+    "maturity_required_trading_days",
     "window_metrics",
 ]
 
@@ -86,6 +95,29 @@ def window_metrics(klines: list[dict], calendar: set[str],
     }
 
 
+def maturity_required_trading_days() -> int:
+    """完整窗口所需的「入选后交易日数」。
+
+    入选日 T → 买入日 T+1 → 收益窗口为买入后第 ``WINDOW_SKIP+1`` ～
+    ``WINDOW_SKIP+WINDOW_SIZE`` 个交易日，因此至少需要
+    ``1 + WINDOW_SKIP + WINDOW_SIZE`` 个交易日后才可能完整。
+    """
+    return 1 + WINDOW_SKIP + WINDOW_SIZE
+
+
+def maturity_cutoff(calendar: set[str]) -> Optional[str]:
+    """最新可判成熟的入选日上界；日历不足时返回 ``None``（无成熟样本）。
+
+    与窗口公式同源，不再硬编码「入选满 5 日」——后者与实际收益窗口差一个
+    交易日，是 partial 进入正式分母的根因。
+    """
+    days = sorted(calendar, reverse=True)
+    index = maturity_required_trading_days()
+    if len(days) <= index:
+        return None
+    return days[index]
+
+
 def _strict_result(status: str, *, reason: Optional[str] = None, **fields) -> dict:
     return {
         "buy_date": fields.get("buy_date"),
@@ -119,8 +151,9 @@ def evaluate_strict(klines: list[dict], calendar: set[str],
     if metrics is None:
         return _cannot_evaluate()
 
+    # 窗口不完整 → ``partial``：可展示，但不得进入正式成效分母（A1/KR1）。
     return _strict_result(
-        "completed",
+        "partial" if metrics["partial"] else "completed",
         reason=PARTIAL_WINDOW_REASON if metrics["partial"] else None,
         buy_date=buy_date,
         buy_price=buy_price,
@@ -128,3 +161,90 @@ def evaluate_strict(klines: list[dict], calendar: set[str],
         max_drawdown_5d=metrics["max_drawdown_5d"],
         max_return_hold_days=metrics["max_return_hold_days"],
     )
+
+
+def _tradable_unavailable(reason: str, entry_date: Optional[str] = None) -> dict:
+    return {
+        "caliber": "tradable_open_v1",
+        "status": "cannot_evaluate",
+        "reason": reason,
+        "entry_date": entry_date,
+        "entry_rule": "T+1 开盘买入；一字板（high==low）无法确认成交即排除",
+        "cost_bps": TRADABLE_OPEN_COST_BPS,
+        "horizons": {},
+        "partial": False,
+    }
+
+
+def evaluate_tradable_open(klines: list[dict], calendar: set[str],
+                           trade_date: str, *,
+                           hold_days: tuple[int, ...] = TRADABLE_OPEN_HORIZONS,
+                           cost_bps: float = TRADABLE_OPEN_COST_BPS) -> dict:
+    """``tradable_open_v1``：可成交估算与固定持有期净收益（研究口径）。
+
+    与严格口径并列、不替换历史公式：
+
+    * 入选后首个交易日按**开盘价**买入（T+1），不顺延到更好价格；
+    * 该日 ``high == low``（一字板/无法确认开盘可成交）→ 整体排除并说明；
+    * 持有期 n 的退出 = 买入后第 n 个交易日**收盘**；
+    * 净收益 = 毛收益 − ``cost_bps``，仅为可成交估算，不宣称真实成交；
+    * 窗口不足的持有期单独标记 ``partial``，不填 0。
+    """
+    next_days = sorted(d for d in calendar if d > trade_date)
+    if not next_days:
+        return _tradable_unavailable("no_next_trading_day")
+    entry_date = next_days[0]
+    by_date = {k.get("date"): k for k in klines}
+    entry_bar = by_date.get(entry_date)
+    if not is_valid_bar(entry_bar):
+        return _tradable_unavailable("entry_bar_invalid", entry_date)
+    if entry_bar["high"] == entry_bar["low"]:
+        return _tradable_unavailable("one_word_board_unfillable", entry_date)
+
+    entry_price = entry_bar["open"]
+    after_entry = [d for d in sorted(calendar) if d > entry_date]
+    horizons: dict[str, dict] = {}
+    any_partial = False
+    for n in sorted({int(v) for v in hold_days if int(v) > 0}):
+        if len(after_entry) < n:
+            any_partial = True
+            horizons[str(n)] = {
+                "status": "partial",
+                "exit_date": None,
+                "exit_price": None,
+                "gross_return_pct": None,
+                "net_return_pct": None,
+            }
+            continue
+        exit_date = after_entry[n - 1]
+        exit_bar = by_date.get(exit_date)
+        if not is_valid_bar(exit_bar):
+            any_partial = True
+            horizons[str(n)] = {
+                "status": "partial",
+                "exit_date": exit_date,
+                "exit_price": None,
+                "gross_return_pct": None,
+                "net_return_pct": None,
+            }
+            continue
+        exit_price = exit_bar["close"]
+        gross = (exit_price / entry_price - 1) * 100
+        horizons[str(n)] = {
+            "status": "completed",
+            "exit_date": exit_date,
+            "exit_price": round(exit_price, 4),
+            "gross_return_pct": round(gross, 2),
+            "net_return_pct": round(gross - cost_bps / 100.0, 2),
+        }
+    return {
+        "caliber": "tradable_open_v1",
+        "status": "partial" if any_partial else "completed",
+        "reason": None,
+        "entry_date": entry_date,
+        "entry_price": round(entry_price, 4),
+        "entry_rule": "T+1 开盘买入；一字板（high==low）无法确认成交即排除",
+        "cost_bps": cost_bps,
+        "horizons": horizons,
+        "partial": any_partial,
+    }

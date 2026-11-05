@@ -120,7 +120,15 @@ def dragons_payload(dragons, params, default_source: str = "v2") -> dict:
     summary = dragons.summarize_review_rows(
         rows, source=source, include_derived_counts=True, caliber=caliber,
     )
-    return {"data": rows, "count": len(rows), "summary": summary}
+    # 全量覆盖是独立数据源，不随筛选变化（main R6）；前端必须分区展示。
+    coverage_rows = dragons.query_dragons(
+        {}, source=source, caliber=caliber)
+    coverage = dragons.summarize_review_rows(
+        coverage_rows, source=source, include_derived_counts=True,
+        caliber=caliber,
+    )
+    return {"data": rows, "count": len(rows), "summary": summary,
+            "coverage": coverage}
 
 
 def legacy_summary(dragons, params, default_source: str = "v2") -> dict:
@@ -173,6 +181,11 @@ def create_account_run(payload: dict, *, default_source: str,
     if initial_cash <= 0:
         raise ValueError("initial_cash must be greater than 0")
 
+    params = payload.get("strategy_params")
+    if isinstance(params, dict) and params.get("research_prep_bypass"):
+        # 研究消融开关不得经普通账户生成入口开启。
+        raise ValueError(
+            "research_prep_bypass 仅限内部对照实验，不能作为账户参数")
     result = run_account(
         date_from=date_from,
         date_to=date_to,
@@ -181,7 +194,7 @@ def create_account_run(payload: dict, *, default_source: str,
         strategy_name=strategy_name,
         verbose=False,
         display_name=display_name,
-        strategy_params=payload.get("strategy_params"),
+        strategy_params=params,
     )
     run = account.get_review_account_run(int(result["run_id"]))
     return {"data": run, "run_id": result["run_id"]}
@@ -234,9 +247,32 @@ def account_events(account, params) -> dict:
 def account_positions(account, evaluation, params) -> dict:
     run_id = parse_run_id(params)
     rows = account.query_review_account_positions(run_id)
-    run = account.get_review_account_run(run_id)
-    stats = evaluation.entry_reason_stats(rows, (run or {}).get("initial_cash") or 0.0)
+    run = account.get_review_account_run(run_id) or {}
+    # 本段贡献分母 = 本段起点权益（增量=base/start_equity；全量=initial_cash）。
+    start_equity = (run.get("start_equity") or run.get("base_equity")
+                    or run.get("initial_cash") or 0.0)
+    snapshots = account.query_review_account_snapshots(run_id)
+    trades = account.query_review_account_trades(run_id)
+    ledger = evaluation.period_ledger(run, snapshots, trades)
+    stats = evaluation.entry_reason_stats(
+        rows, run.get("initial_cash") or 0.0, start_equity=start_equity,
+        ledger=ledger)
     return {"data": rows, "stats": stats}
+
+
+def account_summary(account, evaluation, params) -> dict:
+    """账户收益/风险摘要（A8）：生命周期胜率 + 本段贡献 + 质量标签分区。"""
+    run_id = parse_run_id(params)
+    run = account.get_review_account_run(run_id)
+    if not run:
+        return {"error": "run not found"}
+    snapshots = account.query_review_account_snapshots(run_id)
+    trades = account.query_review_account_trades(run_id)
+    positions = account.query_review_account_positions(run_id)
+    return {
+        "data": evaluation.metrics_from_rows(run, snapshots, trades, positions),
+        "run": run,
+    }
 
 
 def account_benchmark(account, provider, params) -> dict:

@@ -31,13 +31,24 @@ function BrandMark({ size = 28 }: { size?: number }) {
   );
 }
 
-const NAV = [
-  { to: "/", label: "总览", icon: IconGrid, match: (p: string) => p === "/" },
+/**
+ * 导航按两个核心组织（D1）：
+ * 1) 龙头识别：scan → review 机会质量与候选对照；
+ * 2) 账户验证：prep / auction / 买卖点都服务真实账户结果；
+ * 3) 研究 / 诊断：扫描日志、因子与实验入口，降为次级。
+ * 保留全部旧深链（/scans、/prep、/auction、/account、/bs、/factors）。
+ */
+const PRIMARY_NAV = [
+  { to: "/", label: "龙头识别", icon: IconGrid, match: (p: string) => p === "/" },
+  { to: "/account", label: "账户验证", icon: IconWallet, match: (p: string) => p === "/account" },
+];
+
+const SECONDARY_NAV = [
   { to: "/prep", label: "复盘", icon: IconCalendar, match: (p: string) => p === "/prep" },
   { to: "/auction", label: "竞价", icon: IconClock, match: (p: string) => p === "/auction" },
-  { to: "/account", label: "账户", icon: IconWallet, match: (p: string) => p === "/account" },
-  { to: "/bs", label: "BS策略", icon: IconTrendUp, match: (p: string) => p === "/bs" },
-  { to: "/scans", label: "扫描", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
+  { to: "/bs", label: "买卖点", icon: IconTrendUp, match: (p: string) => p === "/bs" },
+  { to: "/research", label: "研究", icon: IconRadar, match: (p: string) => p === "/research" },
+  { to: "/scans", label: "扫描日志", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
   { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
 ];
 
@@ -47,8 +58,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-hairline bg-header backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4 sm:px-6">
-          <Link to="/" className="flex shrink-0 items-center gap-2.5 no-underline">
+        <div className="mx-auto flex min-h-14 max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 sm:px-6">
+          <Link to="/" className="order-1 flex shrink-0 items-center gap-2.5 no-underline">
             <BrandMark size={28} />
             <span className="hidden flex-col leading-none sm:flex">
               <span className="text-body font-semibold tracking-[0.02em] text-ink">
@@ -60,18 +71,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
 
-          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {NAV.map((item) => {
+          <nav className="order-3 flex w-full min-w-0 flex-wrap items-center gap-1 lg:order-2 lg:w-auto lg:flex-1 lg:flex-nowrap lg:overflow-x-auto">
+            {PRIMARY_NAV.map((item) => {
               const active = item.match(pathname);
               const Icon = item.icon;
               return (
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-body font-medium no-underline transition-colors ${
+                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-body font-semibold no-underline transition-colors ${
                     active
                       ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand-focus"
-                      : "text-ink-2 hover:bg-hover hover:text-ink"
+                      : "text-ink hover:bg-hover"
                   }`}
                 >
                   <Icon size={15} />
@@ -79,9 +90,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
+            <span
+              aria-hidden="true"
+              className="mx-1 h-5 w-px shrink-0 bg-hairline"
+            />
+            <span className="shrink-0 pr-1 text-caption uppercase tracking-[0.14em] text-ink-3">
+              研究/诊断
+            </span>
+            {SECONDARY_NAV.map((item) => {
+              const active = item.match(pathname);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={`flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-caption font-medium no-underline transition-colors ${
+                    active
+                      ? "bg-brand-soft text-brand-bright ring-1 ring-inset ring-brand-focus"
+                      : "text-ink-2 hover:bg-hover hover:text-ink"
+                  }`}
+                >
+                  <Icon size={14} />
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="order-2 ml-auto flex shrink-0 items-center gap-2 lg:order-3 lg:ml-0">
             <ThemeToggle />
           </div>
         </div>

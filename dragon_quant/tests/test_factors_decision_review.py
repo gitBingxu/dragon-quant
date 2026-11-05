@@ -379,7 +379,14 @@ class TestLedgerAndMetrics(unittest.TestCase):
                                (11.0 / 10.0 - 1.0) * 100 - 0.13)
         nr = groups["not_recommended"]["horizons"]["1"]
         self.assertEqual(nr["down"], 1)
-        self.assertAlmostEqual(nr["direction_hit_rate"], 1.0)
+        # D5：不推荐不是看跌，方向不可评价。
+        self.assertFalse(nr["direction_evaluable"])
+        self.assertIsNone(nr["direction_hit_rate"])
+        directions = {g["group"]: g
+                      for g in payload["direction_groups"]}
+        self.assertIsNone(
+            directions["not_recommended"]["expected_direction"])
+        self.assertEqual(payload["groups_basis"], "prep_recommendation")
         ins = groups["data_insufficient"]["horizons"]["1"]
         self.assertFalse(ins["direction_evaluable"])
         self.assertIsNone(ins["direction_hit_rate"])
@@ -625,7 +632,8 @@ class TestJsonContract(unittest.TestCase):
         self.assertEqual(list(payload), [
             "schema_version", "ok", "status", "source", "date_from", "date_to",
             "universe", "coverage_basis", "config", "snapshots", "versions",
-            "groups", "spreads", "exclusions", "caveats", "warnings"])
+            "groups", "groups_basis", "direction_groups", "axes",
+            "spreads", "exclusions", "caveats", "warnings"])
         self.assertEqual(list(payload["config"]), [
             "horizons", "cost_bps", "min_days", "min_group_samples",
             "include_samples", "outcome_basis", "net_return_basis",

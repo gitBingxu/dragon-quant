@@ -48,9 +48,9 @@ class TestEvaluateAccuracy(unittest.TestCase):
             "600001": [_bar("2026-09-02", open_px=10.0, close=11.0),
                        _bar("2026-09-04", open_px=11.0, close=12.0)],
             "600002": [_bar("2026-09-02", open_px=10.0, close=10.5),
-                       _bar("2026-09-04", open_px=10.5, close=9.0)],
+                       _bar("2026-09-04", open_px=9.0, close=9.0)],
             "600003": [_bar("2026-09-02", open_px=10.0, close=10.5),
-                       _bar("2026-09-04", open_px=10.5, close=10.0)],
+                       _bar("2026-09-04", open_px=10.0, close=10.0)],
         }
         samples = [
             _sample("600001"),
@@ -58,7 +58,8 @@ class TestEvaluateAccuracy(unittest.TestCase):
             _sample("600003", name="C"),
         ]
         result = evaluate_accuracy(samples, bars, CALENDAR, WINDOW,
-                                   cutoff="2026-09-02")
+                                   cutoff="2026-09-02",
+                                   horizons=(2,), cost_bps=0.0)
         summary = result["summary"]
         self.assertEqual(summary["correct"], 1)
         self.assertEqual(summary["valid"], 3)
@@ -79,11 +80,11 @@ class TestEvaluateAccuracy(unittest.TestCase):
             _sample("600005", reason="signal_missing"),         # 样本级优先
         ]
         result = evaluate_accuracy(samples, bars, CALENDAR, WINDOW,
-                                   cutoff="2026-09-02")
+                                   cutoff="2026-09-02",
+                                   horizons=(2,), cost_bps=0.0)
         reasons = result["summary"]["excluded_by_reason"]
         self.assertEqual(reasons.get("immature"), 1)
-        self.assertEqual(reasons.get("calendar_unavailable"), 1)
-        self.assertEqual(reasons.get("missing_bar"), 1)
+        self.assertEqual(reasons.get("missing_bar"), 2)
         self.assertEqual(reasons.get("signal_missing"), 1)
         self.assertEqual(result["summary"]["valid"], 1)
 
@@ -94,14 +95,15 @@ class TestEvaluateAccuracy(unittest.TestCase):
              "low": 10.5, "close": 10.5, "volume": 0.0},
         ]}
         result = evaluate_accuracy([_sample("600001")], bars, CALENDAR,
-                                   WINDOW, cutoff="2026-09-02")
+                                   WINDOW, cutoff="2026-09-02",
+                                   horizons=(2,), cost_bps=0.0)
         self.assertEqual(result["summary"]["valid"], 0)
         self.assertEqual(result["summary"]["excluded_by_reason"],
-                         {"invalid_bar": 1})
+                         {"suspended": 1})
 
     def test_cutoff_none_marks_all_immature(self):
         result = evaluate_accuracy([_sample()], {}, CALENDAR, WINDOW,
-                                   cutoff=None)
+                                   cutoff=None, horizons=(2,), cost_bps=0.0)
         self.assertEqual(result["summary"]["excluded_by_reason"],
                          {"immature": 1})
 
@@ -114,12 +116,13 @@ class TestEvaluateAccuracy(unittest.TestCase):
         }
         samples = [_sample("600001"), _sample("600001", day="2026-09-02")]
         result = evaluate_accuracy(samples, bars, CALENDAR, WINDOW,
-                                   cutoff="2026-09-02")
+                                   cutoff="2026-09-02",
+                                   horizons=(2,), cost_bps=0.0)
         stock = result["stocks"][0]
         self.assertEqual(stock["valid"], 2)
-        self.assertEqual(stock["correct"], 1)
+        self.assertEqual(stock["correct"], 2)
         self.assertEqual(stock["excluded"], 0)
-        self.assertEqual(stock["hit_rate"], 0.5)
+        self.assertEqual(stock["hit_rate"], 1.0)
 
 
 class TestPrepSignalStrategy(unittest.TestCase):
@@ -143,9 +146,12 @@ class TestPrepSignalStrategy(unittest.TestCase):
             ]))
         self.assertEqual(selection["day_kind"], "build")
         self.assertIsNone(selection["snapshot_exclusion"])
-        included = [s.code for s in selection["samples"]
-                    if s.exclusion_reason is None]
-        self.assertEqual(included, ["600001"])
+        # A4：完整母集固定；推荐/不推荐都进样本，只有数据不足被排除。
+        groups = {s.code: s.group for s in selection["samples"]}
+        self.assertEqual(groups, {"600001": "recommended",
+                                  "600002": "not_recommended",
+                                  "600003": "data_insufficient",
+                                  "600004": "data_insufficient"})
         excluded = {s.code: s.exclusion_reason for s in selection["samples"]
                     if s.exclusion_reason}
         self.assertEqual(excluded, {"600003": "candidate_data_insufficient",
@@ -166,12 +172,15 @@ class TestPrepSignalStrategy(unittest.TestCase):
         self.assertEqual(selection["day_kind"], "no_build")
         included = {s.code for s in selection["samples"]
                     if s.exclusion_reason is None}
-        self.assertEqual(included, {"600001", "600002"})
+        # 不建仓日也不丢弃推荐/不推荐组（A4）；分组由候选自身决定。
+        self.assertEqual(included, {"600001", "600002", "600003"})
+        groups = {s.code: s.group for s in selection["samples"]}
+        self.assertEqual(groups["600001"], "not_recommended")
+        self.assertEqual(groups["600002"], "not_recommended")
+        self.assertEqual(groups["600003"], "recommended")
         excluded = {s.code: s.exclusion_reason for s in selection["samples"]
                     if s.exclusion_reason}
         self.assertEqual(excluded, {"600004": "candidate_data_insufficient"})
-        self.assertTrue(selection["warnings"])
-        self.assertIn("inconsistent_group", selection["warnings"][0])
 
     def test_position_advice_fallback(self):
         no_build = PrepSignalStrategy().select(self._payload(
@@ -188,9 +197,12 @@ class TestPrepSignalStrategy(unittest.TestCase):
         selection = PrepSignalStrategy().select(self._payload(
             {}, [{"code": "600001"}, {"code": "600002"}]))
         self.assertEqual(selection["day_kind"], "signal_missing")
+        # 市场信号缺失不改变候选分组口径：缺字段一律 data_insufficient。
         self.assertEqual(
             {s.exclusion_reason for s in selection["samples"]},
-            {"market_signal_missing"})
+            {"candidate_data_insufficient"})
+        self.assertEqual(
+            {s.group for s in selection["samples"]}, {"data_insufficient"})
 
     def test_unsupported_version_and_missing_candidates(self):
         unsupported = PrepSignalStrategy().select(self._payload(
@@ -213,18 +225,20 @@ class TestPrepSignalStrategy(unittest.TestCase):
 class TestAuctionSignalStrategy(unittest.TestCase):
     def _rows(self, **overrides):
         row = {"code": "600001", "version": "2", "level": "强",
-               "direction": "bull", "is_weak": False,
+               "direction": "bull", "is_weak": False, "strength": 80.0,
                "data_quality": {"status": "ok"}, "unverified": False}
         row.update(overrides)
         return [row]
 
     def test_direction_rules(self):
+        # A5：方向只看 direction；等级（弱/中/强）与风险否决独立成轴，
+        # 中性不再被塞成看涨。
         cases = [
-            ({"level": "弱"}, "down"),
+            ({"level": "弱", "direction": "bull"}, "up"),
             ({"level": "强", "direction": "bear"}, "down"),
             ({"level": "中", "direction": "bear"}, "down"),
             ({"level": "强", "direction": "bull"}, "up"),
-            ({"level": "中", "direction": "neutral"}, "up"),
+            ({"level": "中", "direction": "neutral"}, None),
         ]
         for overrides, expected in cases:
             selection = AuctionSignalStrategy().select(
@@ -235,16 +249,16 @@ class TestAuctionSignalStrategy(unittest.TestCase):
 
     def test_signal_missing_and_row_exclusions(self):
         cases = [
-            {"level": None},
-            {"data_quality": {"status": "unavailable"}},
-            {"unverified": True},
-            {"level": "强", "direction": None},
+            ({"level": None}, "level_or_strength_missing"),
+            ({"data_quality": {"status": "unavailable"}}, "data_unavailable"),
+            ({"unverified": True}, "unverified"),
+            ({"level": "强", "direction": None}, "direction_missing"),
         ]
-        for overrides in cases:
+        for overrides, reason in cases:
             selection = AuctionSignalStrategy().select(
                 self._rows(**overrides), {})
             self.assertEqual(selection["samples"][0].exclusion_reason,
-                             "signal_missing", overrides)
+                             reason, overrides)
         corrupt = AuctionSignalStrategy().select(
             self._rows(error="boom"), {})
         self.assertEqual(corrupt["exclusions"]["snapshot_corrupt"], 1)
@@ -289,15 +303,15 @@ class TestBuilders(unittest.TestCase):
             load_bars=lambda codes, date_from, date_to: {
                 "rows": bars, "truncated": False,
                 "bar_dates": CALENDAR, "codes": sorted(bars)},
-            today="2026-09-05")
+            today="2026-09-05", horizons=(2,), cost_bps=0.0)
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["as_of"], "2026-09-02")
+        self.assertEqual(result["as_of"], "2026-09-03")
         self.assertEqual(result["latest_bar_date"], "2026-09-05")
         self.assertEqual(result["snapshot_count"], 4)
         self.assertEqual(result["sample_unit"], "stock_day")
         self.assertEqual(result["day_kind_counts"],
                          {"build": 4, "no_build": 0, "signal_missing": 0})
-        self.assertEqual(result["summary"]["correct"], 1)
+        self.assertEqual(result["summary"]["correct"], 2)
         self.assertEqual(result["summary"]["valid"], 2)
         self.assertEqual(result["excluded_snapshot_dates"],
                          {"snapshot_unsupported": 0, "snapshot_corrupt": 0,
@@ -330,12 +344,13 @@ class TestBuilders(unittest.TestCase):
         rows = {
             "2026-09-01": [{"code": "600001", "version": "2", "level": "强",
                             "direction": "bear", "is_weak": False,
+                            "strength": 80.0,
                             "data_quality": {"status": "ok"},
                             "unverified": False}],
         }
         bars = {"600001": [
             _bar("2026-09-01", open_px=10.0, close=10.5),
-            _bar("2026-09-03", open_px=10.5, close=9.0),
+            _bar("2026-09-03", open_px=9.0, close=9.0),
         ]}
         result = build_auction_accuracy(
             snapshot_dates=["2026-09-01"],
@@ -345,7 +360,7 @@ class TestBuilders(unittest.TestCase):
             load_bars=lambda codes, date_from, date_to: {
                 "rows": bars, "truncated": False,
                 "bar_dates": CALENDAR, "codes": sorted(bars)},
-            today="2026-09-05")
+            today="2026-09-05", horizons=(2,), cost_bps=0.0)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["as_of"], "2026-09-03")  # calendar[-3]
         self.assertEqual(result["window"]["entry_offset"], 0)
@@ -413,3 +428,65 @@ class TestStockNameAggregation(unittest.TestCase):
         result = evaluate_accuracy(samples, bars, CALENDAR, WINDOW,
                                    cutoff="2026-09-02")
         self.assertEqual(result["stocks"][0]["name"], "龙头A")
+
+
+class TestDecisionReviewParity(unittest.TestCase):
+    def test_web_contract_matches_build_tradable_labels(self):
+        from dragon_quant.infra.factor.review_shadow import (
+            build_tradable_labels,
+        )
+
+        calendar = ["2026-09-01", "2026-09-02", "2026-09-03",
+                    "2026-09-04", "2026-09-05"]
+        bars = {"600001": [
+            _bar("2026-09-02", open_px=10.0, close=10.4),
+            _bar("2026-09-03", open_px=10.5, close=10.8),
+            _bar("2026-09-05", open_px=11.0, close=11.2),
+        ]}
+        result = evaluate_accuracy(
+            [_sample("600001")], bars, calendar, WINDOW,
+            cutoff="2026-09-02", horizons=(1, 3), cost_bps=13.0)
+
+        class Market:
+            def daily(self, code, start=None):
+                return bars.get(code, [])
+
+        labels = build_tradable_labels(
+            [{"code": "600001",
+              "available_at": "2026-09-01T16:40:00+08:00"}],
+            Market(), calendar, horizons=(1, 3), cost_bps=13.0)["labels"]
+        expected = {(row["horizon"]): round(row["value"], 6) for row in labels}
+        self.assertEqual(
+            result["horizons"]["1"]["groups"]["recommended"]["samples"], 1)
+        self.assertAlmostEqual(
+            result["horizons"]["1"]["spread"], None)
+        # 单样本时 group 均值即 label 值。
+        self.assertAlmostEqual(
+            result["horizons"]["1"]["groups"]["recommended"]["mean_return_pct"],
+            expected[1], places=4)
+        self.assertAlmostEqual(
+            result["horizons"]["3"]["groups"]["recommended"]["mean_return_pct"],
+            expected[3], places=4)
+
+
+class TestDateBlockBootstrap(unittest.TestCase):
+    def test_interval_is_date_block_and_reproducible(self):
+        from web_ui.backend.presenters.accuracy import _bootstrap_interval
+
+        left = [("2026-09-01", 1.0)] * 3 + [("2026-09-02", 1.0)] * 3
+        right = [("2026-09-01", 0.0)] * 3 + [("2026-09-02", 0.0)] * 3
+        first = _bootstrap_interval(left, right)
+        second = _bootstrap_interval(left, right)
+        self.assertEqual(first, second)
+        self.assertEqual(first["method"], "date_block_bootstrap")
+        self.assertEqual(first["left_days"], 2)
+        self.assertAlmostEqual(first["low"], 1.0)
+        self.assertAlmostEqual(first["high"], 1.0)
+
+    def test_single_day_does_not_emit_interval(self):
+        from web_ui.backend.presenters.accuracy import _bootstrap_interval
+
+        result = _bootstrap_interval(
+            [("2026-09-01", 1.0)] * 5, [("2026-09-01", 0.0)] * 5)
+        self.assertEqual(result["status"], "insufficient_samples")
+        self.assertIsNone(result["low"])

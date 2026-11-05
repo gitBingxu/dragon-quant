@@ -106,3 +106,13 @@ Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
 - 三态由日志聚合推导：`log_entries == 0 → 已完成·无日志`；`error_n > 0 → 已完成·有异常`；否则 `已完成`。不新增运行历史表；未落库的崩溃没有 `scans_v2` 行，页面不展示、不推断。
 - 日志正文分页 `GET /api/scans/{id}/logs?level=&offset=&limit=`（`ORDER BY ts DESC`，默认 200、上限 500，级别白名单 info/warn/error），**不返回 `data_json`**；无日志返回 200 `available=false`，不是错误（日志可能已被 `storage clear --logs` 清理）。
 - `scan/storage/{scans,logs}.py` 只新增只读函数（`summarize_scan_stocks` / `summarize_scan_logs` / `get_scan_logs_page` / `count_scan_logs_filtered`），表结构、写入路径与既有 `log_summary` 契约不变。
+
+## review 成熟度与 scan 候选质量研究（2026-11-05）
+
+- `review` 默认成熟度按实际入场 + 完整窗口派生（需 6 个交易日），partial 不入正式分母；
+  详见 [review](review.md)。
+- 新增只读研究入口 `GET /api/research/scan-quality?date_from=&date_to=`（dashboard `/research`）：
+  以原始扫描候选为母集，按通过/否决、分数区间、rank、首次/重复入榜分组；每日同 code
+  按 `min rank → max score → latest created_at` canonical 去重并保留原始贡献数；
+  T+1 开盘入场、固定 1/3/5 持有期净收益；不改 dragons gate 与生产候选池。
+  历史未持久化否决候选时明确 `coverage_gap`，不虚造召回率。

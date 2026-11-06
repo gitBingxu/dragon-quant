@@ -489,13 +489,6 @@ export function AuctionPage() {
         eyebrow="AUCTION · 集合竞价"
         title="集合竞价"
         description="查看竞价强弱、候选结果与当日资产采集。数据只来自本地，不联网补行情；缺数据一律「待评估」。"
-        actions={
-          date ? (
-            <span className="text-caption text-ink-2">
-              当前交易日 <span className="num text-ink">{date}</span>
-            </span>
-          ) : null
-        }
       />
 
       {error ? (

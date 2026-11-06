@@ -5,7 +5,13 @@ import {
   type AccountExperiment,
 } from "../../api/account";
 import { IconAlert } from "../../components/icons-extra";
-import { fmtPct } from "../../lib/format";
+import { Badge } from "../../components/Badge";
+import { CollapsibleSection } from "../../components/CollapsibleSection";
+import { DataTable, type Column } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import { Section } from "../../components/Section";
+import { fmtPct, pnlClass } from "../../lib/format";
+import { labelOf } from "../../lib/labels";
 import { fetchBsOverview } from "../../api/bs";
 
 type VariantRow = {
@@ -18,6 +24,80 @@ type VariantRow = {
   max_drawdown?: number | null;
   diff_vs_baseline?: number | null;
 };
+
+const STATUS_LABELS: Record<string, string> = {
+  ok: "正常",
+  insufficient_data: "数据不足",
+  insufficient_evidence: "证据不足",
+};
+
+function statusTone(status?: string): "normal" | "warning" | "muted" {
+  if (status === "ok") return "normal";
+  if (status === "insufficient_data" || status === "insufficient_evidence") {
+    return "warning";
+  }
+  return "muted";
+}
+
+const VARIANT_COLUMNS: Column<VariantRow>[] = [
+  {
+    key: "variant",
+    header: "变体",
+    render: (row) => (
+      <span className="font-medium text-ink">{row.label || row.name}</span>
+    ),
+  },
+  {
+    key: "status",
+    header: "状态",
+    render: (row) => (
+      <Badge tone={statusTone(row.status)}>
+        {labelOf(STATUS_LABELS, row.status, row.status ?? "—")}
+      </Badge>
+    ),
+  },
+  {
+    key: "return",
+    header: "收益",
+    align: "right",
+    render: (row) => (
+      <span className={`num font-medium ${pnlClass(row.total_return)}`}>
+        {fmtPct(row.total_return ?? null)}
+      </span>
+    ),
+  },
+  {
+    key: "drawdown",
+    header: "回撤",
+    align: "right",
+    render: (row) => (
+      <span className={`num ${pnlClass(row.max_drawdown)}`}>
+        {fmtPct(row.max_drawdown ?? null)}
+      </span>
+    ),
+  },
+  {
+    key: "closed",
+    header: "已平仓",
+    align: "right",
+    render: (row) => <span className="num text-ink-2">{row.closed_count ?? "—"}</span>,
+  },
+  {
+    key: "diff",
+    header: "相对基线",
+    align: "right",
+    render: (row) => (
+      <span className={`num ${pnlClass(row.diff_vs_baseline)}`}>
+        {fmtPct(row.diff_vs_baseline ?? null)}
+      </span>
+    ),
+  },
+  {
+    key: "reason",
+    header: "说明",
+    render: (row) => <span className="text-ink-3">{row.reason ?? "—"}</span>,
+  },
+];
 
 function pickMetrics(entry: Record<string, unknown>): VariantRow {
   const test = (entry.test || entry.all || {}) as Record<string, unknown>;
@@ -122,16 +202,11 @@ export function ExperimentPanel({ runId }: { runId: number }) {
   const upstream = (report.upstream || {}) as Record<string, unknown>;
 
   return (
-    <section className="card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-title font-semibold text-ink">账户对照实验</h2>
-          <p className="mt-1 max-w-3xl text-caption text-ink-2">
-            基于当前批次的冻结期间/资金/策略与上游候选母集做下游消融；本地行情、
-            显式触发、只展示可比证据，不自动推广参数。
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <Section
+      title="账户对照实验"
+      description="基于当前批次的冻结期间/资金/策略与上游候选母集做下游消融；本地行情、显式触发、只展示可比证据，不自动推广参数。"
+      right={
+        <>
           <button
             type="button"
             className="btn btn-ghost"
@@ -148,8 +223,9 @@ export function ExperimentPanel({ runId }: { runId: number }) {
           >
             运行对照实验
           </button>
-        </div>
-      </div>
+        </>
+      }
+    >
 
       {confirming ? (
         <div
@@ -208,55 +284,49 @@ export function ExperimentPanel({ runId }: { runId: number }) {
       ) : null}
 
       {!active ? (
-        <p className="mt-3 text-caption text-ink-3">
-          暂无已保存的对照实验。点击「运行对照实验」显式生成；仅查看不会重算。
-        </p>
+        <EmptyState
+          title="暂无已保存的对照实验"
+          description="点击「运行对照实验」显式生成；仅查看不会重算。"
+        />
       ) : (
-        <div className="mt-3 grid gap-2">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-caption text-ink-2">
-            <span>报告 #{active.id}</span>
-            <span>版本 {active.experiment_version}</span>
-            <span>状态 {active.status ?? "—"}</span>
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-caption text-ink-2">
+            <Badge tone="outline">报告 #{active.id}</Badge>
+            <Badge tone="outline">版本 {active.experiment_version}</Badge>
+            <Badge tone={statusTone(active.status ?? undefined)}>
+              {labelOf(STATUS_LABELS, active.status, active.status ?? "—")}
+            </Badge>
             <span>
-              区间 {String(period.date_from ?? "—")} ~ {String(period.date_to ?? "—")}
+              区间{" "}
+              <span className="num text-ink">
+                {String(period.date_from ?? "—")} ~ {String(period.date_to ?? "—")}
+              </span>
             </span>
-            <span>上游母集 {String(upstream.candidate_universe_hash ?? "—")}</span>
+            <span>
+              上游母集{" "}
+              <span className="num text-ink-2">
+                {String(upstream.candidate_universe_hash ?? "—")}
+              </span>
+            </span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] border-collapse text-caption">
-              <thead>
-                <tr className="border-b border-hairline text-left text-ink-3">
-                  <th className="py-1.5 pr-3">变体</th>
-                  <th className="py-1.5 pr-3">状态</th>
-                  <th className="py-1.5 pr-3">收益</th>
-                  <th className="py-1.5 pr-3">回撤</th>
-                  <th className="py-1.5 pr-3">已平仓</th>
-                  <th className="py-1.5 pr-3">相对基线</th>
-                  <th className="py-1.5">说明</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.name} className="border-b border-hairline/60">
-                    <td className="py-1.5 pr-3 text-ink">{row.label || row.name}</td>
-                    <td className="py-1.5 pr-3">{row.status ?? "—"}</td>
-                    <td className="py-1.5 pr-3">{fmtPct(row.total_return ?? null)}</td>
-                    <td className="py-1.5 pr-3">{fmtPct(row.max_drawdown ?? null)}</td>
-                    <td className="py-1.5 pr-3">{row.closed_count ?? "—"}</td>
-                    <td className="py-1.5 pr-3">{fmtPct(row.diff_vs_baseline ?? null)}</td>
-                    <td className="py-1.5 text-ink-3">{row.reason ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          <div className="overflow-hidden rounded-lg border border-hairline">
+            <DataTable
+              columns={VARIANT_COLUMNS}
+              rows={rows}
+              rowKey={(row) => row.name}
+              minWidth={760}
+              empty="报告中暂无可比变体。"
+            />
           </div>
+
           <p className="text-caption text-ink-3">
             不可比/证据不足的变体按原状态返回；不给虚假显著性，也不自动改变默认策略。
           </p>
+
           {history.length > 1 ? (
-            <details className="text-caption text-ink-3">
-              <summary className="cursor-pointer">历史报告（{history.length}）</summary>
-              <ul className="mt-1 grid gap-1">
+            <CollapsibleSection title={`历史报告（${history.length}）`}>
+              <ul className="grid gap-1 text-caption">
                 {history.map((item) => (
                   <li key={item.id}>
                     <button
@@ -269,10 +339,10 @@ export function ExperimentPanel({ runId }: { runId: number }) {
                   </li>
                 ))}
               </ul>
-            </details>
+            </CollapsibleSection>
           ) : null}
         </div>
       )}
-    </section>
+    </Section>
   );
 }

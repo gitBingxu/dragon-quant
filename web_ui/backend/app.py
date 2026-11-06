@@ -15,7 +15,9 @@ def create_app(settings: DashboardSettings | None = None):
     from .errors import install_error_handlers
     from .review_runner import ReviewJobRunner
     from .routers import ROUTERS
+    from .run_runner import RunJobRunner
     from .static import CacheControlMiddleware, mount_frontend
+    from .trade_calendar import TradeCalendarProbe
 
     settings = settings or DashboardSettings()
 
@@ -28,6 +30,10 @@ def create_app(settings: DashboardSettings | None = None):
     app.state.bs_runner = BsRunner()
     # 龙头回测增量作业：只有显式 POST 才启动，查看页面绝不触发。
     app.state.review_runner = ReviewJobRunner()
+    # scan / prep / auction 共享单飞作业：同样只在显式 POST 时启动。
+    app.state.run_runner = RunJobRunner()
+    # 交易日历探测：构造无 I/O，首次判定才联网并按自然日缓存。
+    app.state.trade_calendar = TradeCalendarProbe()
 
     # 纯 ASGI 中间件：在响应流上叠加 Cache-Control（不改路由实现）。
     app.add_middleware(CacheControlMiddleware)

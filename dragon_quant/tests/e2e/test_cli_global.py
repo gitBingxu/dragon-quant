@@ -22,6 +22,7 @@ TOP_LEVEL_COMMANDS = (
     "blacklist",
     "review",
     "review-account",
+    "research",
     "dragons",
     "prep",
     "auction",

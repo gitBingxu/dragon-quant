@@ -16,6 +16,7 @@ import { AssetCalendar } from "../../components/AssetCalendar";
 import { CalendarPanel } from "../../components/CalendarPanel";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { RunActions } from "../../components/RunActions";
 import { Section } from "../../components/Section";
 import { IconAlert } from "../../components/icons-extra";
 import { CALENDAR_BASIS_LABELS, DEFAULT_DATE_SOURCE_LABELS, labelOf } from "../../lib/labels";
@@ -53,6 +54,7 @@ export function PrepPage() {
   const [accuracyError, setAccuracyError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
   // 日历：一次请求覆盖近一年；默认日期由后端按本地日 K 计算，URL date 优先。
   useEffect(() => {
@@ -79,7 +81,7 @@ export function PrepPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadToken]);
 
   // 全历史准确率固定请求，不随选中日变化；失败不阻塞其他区块。
   useEffect(() => {
@@ -154,7 +156,7 @@ export function PrepPage() {
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, reloadToken]);
 
   const changeDate = (next: string) => {
     setDate(next);
@@ -182,11 +184,13 @@ export function PrepPage() {
         title="盘后复盘"
         description="查看复盘核心结果、当前效果、资产明细与全历史准确率。所有日期都可点击，缺数据如实展示缺失。"
         actions={
-          date ? (
-            <span className="text-caption text-ink-2">
-              当前交易日 <span className="num text-ink">{date}</span>
-            </span>
-          ) : null
+          <RunActions
+            job="prep"
+            onCompleted={(tradeDate) => {
+              setReloadToken((token) => token + 1);
+              if (tradeDate) changeDate(tradeDate);
+            }}
+          />
         }
       />
 

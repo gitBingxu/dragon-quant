@@ -17,7 +17,7 @@ from dragon_quant.review_account.live_trade.trader import LiveTrader
 from dragon_quant.infra.models import KBar
 from dragon_quant.review_account.evaluation import TOTAL_ROW_CODE, compare_strategies, entry_reason_stats
 from dragon_quant.review_account.market import bar_times, validate_bars
-from dragon_quant.review_account.models import ClosedPosition, StrategyConfig
+from dragon_quant.review_account.models import ClosedPosition, Snapshot, StrategyConfig
 from dragon_quant.review_account.service import run_review_account
 from dragon_quant.review_account.simulator import AccountSimulator
 from dragon_quant.infra.storage.connection import init_db
@@ -73,7 +73,9 @@ class TestReviewAccountIntegration(IntegrationBase):
     def test_run_review_account_persists_run(self):
         fake = {"initial_cash": 100000.0, "final_equity": 100000.0, "total_return": 0.0,
                 "max_drawdown": 0.0, "trade_count": 0, "win_rate": None,
-                "snapshots": [], "trades": [], "positions": [], "events": []}
+                "snapshots": [Snapshot("2026-09-08", 100000.0, 0.0, 100000.0,
+                                       0.0, 0.0, 0.0)],
+                "trades": [], "positions": [], "events": []}
         with patch("dragon_quant.review_account.service.AccountSimulator") as Sim:
             Sim.return_value.run.return_value = fake
             result = run_review_account("2026-09-07", "2026-09-08", source="v2", verbose=False)
@@ -90,7 +92,9 @@ class TestReviewAccountIntegration(IntegrationBase):
         )
         fake = {"initial_cash": 100000.0, "final_equity": 101000.0, "total_return": 1.0,
                 "max_drawdown": 0.0, "trade_count": 2, "win_rate": 100.0,
-                "snapshots": [], "trades": [], "positions": [closed], "events": []}
+                "snapshots": [Snapshot("2026-09-08", 101000.0, 0.0, 101000.0,
+                                       0.0, 0.0, 0.0)],
+                "trades": [], "positions": [closed], "events": []}
         sim = MagicMock()
         sim.run.return_value = fake
         sim.data = FakeData()   # daily() 返回截至 2026-09-08 的日K

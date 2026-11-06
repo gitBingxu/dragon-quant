@@ -70,12 +70,22 @@ dragon-quant bs-eval --limit 5
 # 补齐 dashboard 复盘评估所需的本地日 K（默认只体检）
 dragon-quant assets backfill-stock-daily --dry-run
 dragon-quant assets backfill-stock-daily
+
+# 本地只读研究：数据集发现、扫描质量、账户读回（不触网、不写库）
+dragon-quant research datasets
+dragon-quant research scan-quality --from 20260501 --to 20260630 --json
+dragon-quant research account --run-id 3 --view summary
 ```
 
 `dashboard` **默认只读**：不会在启动时自动生成 BS 派生数据；需要自动生成时显式加
 `--bs-autogen`（或 `DQ_BS_AUTOGEN=1`），`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先。
-`/bs` 页面的「重新计算买卖点」等价
-`bs-eval --force` 全量重算。
+`/scans`、`/prep`、`/auction` 三页提供显式运行入口（快捷 + 自定义参数），由服务端按
+交易日 / 时间窗 / 当日是否已完成 / 是否有其他任务在跑判定可点击，禁用时 hover 给出原因：
+扫描限交易日 15:00–23:55 且当日未扫描；复盘限交易日 21:00–23:55、当日已扫描且未复盘；
+竞价限交易日 09:25–23:55 且当日未执行。三条命令共享一个作业位（同一时刻只跑一个），
+写入只发生在子进程，查看页面不会触发任何命令。
+`/bs` 页面的「全部重算」等价
+`bs-eval --force` 全量重算；「增量计算」等价不带 `--force` 的 `bs-eval`（只补算未达终态的行）。
 
 `pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
 已弃用，仍可用但会提示改用 `dashboard`。面板顶部可切换主题（跟随系统 / 浅色 / 深色），
@@ -90,10 +100,15 @@ dragon-quant assets backfill-stock-daily
 与 `/auction`（集合竞价：年度日历 → 竞价结果 → 当日资产采集 → 全历史准确率）；
 资产区为近一年日历 + 当日表格，所有日期可点击（空日期展示全部应有资产缺失）。
 次级入口「扫描研究」（`/research`）只读对比通过/否决、评分与 rank、首次/重复入榜对
-scan 质量的反馈。扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。`/bs` 展示四类买点与
+scan 质量的反馈；同一口径可在 CLI 用 `dragon-quant research scan-quality` 读回。
+`research` 固定读取本地 v2 存量：`datasets` / `schema` / `query` / `scan-quality` /
+`account` / `signals` / `snapshots` / `strategy` 与 `experiments list|show` 只读，
+`experiments run` 必须显式 `--run-id N --confirm` 且与 Web 共享进程级单飞；缺库、缺表、
+空集返回可解释的 `research_v1` envelope，不建目录、不构造 provider、不触网。
+`review-account --json` 只新增执行回执（`run_id` + 汇总），人读默认输出不变。扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。`/bs` 展示四类买点与
 十条卖出规则的假想回放：策略说明、汇总卡、buy/sell 列表（买后/卖后 5 日表现），
 数据由 `dragon-quant bs-eval` 离线生成；需自动增量时显式 `--bs-autogen`，
-页面「重新计算买卖点」可按需全量重算。全站字号统一 14px 基准
+页面「全部重算」/「增量计算」可按需显式运行。全站字号统一 14px 基准
 （可见文字 ≥1rem），状态色收敛为 danger / warning / normal / positive。
 
 ## Agent Skill
@@ -132,7 +147,7 @@ npx dragon-quant-skills doctor                     # 检查安装完整性、CLI
 - 安装成功后按目标输出提示：Hermes 项目运行 `hermes skills trust <projectRoot>`，Pi 编辑后 `/reload`，DeepSeek 自动发现 skills 根的直接子项，其余按客户端重载。安装器不自动修改任何 trust 或客户端配置，也不宣称客户端已完成真实加载验证。
 - 在 dragon-quant 仓库根使用 `--agent openclaw` 会命中包内 `skills/` 源目录，install / uninstall 会直接拒绝（`--force` 也不能绕过）；请到消费项目运行，或用 `--target-dir` 指向临时 workspace。`all` 会在项目根创建 OpenClaw 的 `skills/`，不希望时请显式列出目标。
 
-Agent 可用的能力限定为九类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回、可视化面板。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
+Agent 可用的能力限定为十类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回、可视化面板、研究读回与对照实验。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
 
 仓库内 Skill 版本可能高于 npm registry 已发布版本；安装后用 `npx dragon-quant-skills doctor` 核对实际安装的 Skill 版本、来源与最低 CLI 版本，不要假定 `npx` 拉到的就是仓库中的最新内容。
 

@@ -10,6 +10,29 @@
 - 截至主分支 `aafe8e0`，覆盖 18 次 MR 合入（编号为 1～5、8～18、20～21）。`v0.2.3` 标签不在 main 历史中，不列作主分支发布；尚未合入 main 的分支提交不计入已发布版本。
 - `0.1.0` 无对应 Git 标签，保留首版日期并按早期提交校正功能归属；后续版本均注明标签与版本提交。
 
+## [0.9.0] - 2026-11-06
+
+### Added
+- **只读研究 Facade `research`**：新增顶层命令 `dragon-quant research`（`datasets` / `schema` / `query` / `scan-quality` / `account` / `signals` / `snapshots` / `strategy` / `experiments list|show|run`）。17 个显式数据集、`research_v1` JSON envelope、注册表白名单过滤器、稳定分页 cursor 与可解释空态；全程本地、不构造 provider、不建目录/库/schema/sidecar/cache。
+- **严格只读连接**：`infra/storage/readonly.py` 统一 `mode=ro`；非空 WAL 且无安全 sidecar 时返回 `readonly_unavailable`，不回退写连接、不用 `immutable` 丢弃已提交事务。
+- **共享研究用例**：scan-quality 纯计算从 Web presenter 迁至 `research/scan_quality.py`，CLI 与 Web 复用同一实现；账户对照实验从 Web 路由提取为共享用例（冻结期初/上游、进程级单飞、异常释放）。
+- **`review-account --json` 执行回执**：只新增 JSON 输出（`run_id` + 区间/汇总），人读默认格式不变；供 Agent 取得真实 run_id 后读回。
+- **Agent Skill 研究能力**：新增 `references/research.md` / `references/datasets.md`；白名单升十类，开放 `factor list/status/query(区间+code+version)/export/eval/decision-review`；动作/环境分级、授权持续性、输出类型校验同步。
+
+### Changed
+- **发布流程加固**：`scripts/publish.sh` 改为薄壳 + 标准库编排。版本经 argv 传入（拒绝注入与旧 `--passwd`）、发布前完成隔离构建/测试/包边界校验、只在 `pyproject.toml` / `_version.py` / `web_ui/dist` 上做精确提交、`HEAD:branch + vX` 原子推送、dry-run 零凭据零远端写入、凭据不进 argv/日志、状态目录支持 `--resume` 校验工件哈希与远端事实。
+- **npm Skill 发布加固**：`scripts/publish-skill.sh` 增加版本契约（package/skill/min-cli）、Python/Node 测试、`npm pack` 白名单与本地安装冒烟；同一 tarball 用于发布；dry-run 无 token、无长期配置；临时 npmrc 0600 并在全部退出路径清理；拒绝包路径与 registry/userconfig 覆盖。
+- **版本**：Python `0.9.0`；npm / Skill `1.0.1`；`metadata.min-cli-version` `0.9.0`。coverage-map 同步为 70 个 parser 节点 / 19 个顶层命令。
+
+### Fixed
+- research 收益/回撤/胜率 9 个字段统一为百分比点（1.0=1%），与生产计算一致；prep `--code` 改为结构化股票身份匹配，未知旧结构显式 `code_filter_unsupported`，不做金额/文本/指数包含匹配。
+- 严格只读连接在非空 WAL 缺 `-shm` 时直接 fail-closed，不再由 `mode=ro` 创建 sidecar；有 `-shm` 才读 WAL，无 WAL/SHM 才用 `immutable`。
+- account/experiments/strategy 专用入口统一 `database_missing` / `table_missing` / `schema_mismatch` / `run_not_found` 与损坏 JSON 降级；实验列表有界分页且默认省略大 report，账户账本达上限标 `ledger_truncated`。
+- 发布 `--resume` 校验 repo/base/release commit/branch、upstream（固定 `origin/<branch>`）、origin push URL 指纹、本地与远端 tag（含 annotated peeled）与工件 SHA256；旧状态缺 upstream/指纹 fail-closed；push 使用记录对象；上传恢复按注册表文件名+sha256 只补缺失；gh 缺失保持 pending。staging 内先跑必要测试、构建 `--no-isolation`；npm dry-run 全链离线，tag/access 严格校验并逐项 argv 传递，OTP 仅走 `NPM_OTP` 环境变量。
+
+### Docs
+- `docs/agent/development.md` 增补 research 契约、Skill 白名单与发布流程事实；`scan` / `factor` / `trading` owner 文档同步研究读回口径。
+
 ## [Unreleased]
 
 ### Added

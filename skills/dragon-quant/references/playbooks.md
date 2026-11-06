@@ -87,3 +87,12 @@
 - 期望结果 vs 实际结果（脱敏输出片段）：
 - 时间与场景（交易日？盘中/盘后/竞价？）：
 ```
+
+## research 读回失败
+
+- `ok=false` + `error.code=invalid_request`：检查 dataset / filter / field / cursor；未知项不重试、不猜。
+- `empty_reason=database_missing|table_missing`：本地尚未产生该类数据或库被移动；不伪造空表、不建库。
+- `error.code=readonly_unavailable`：存在未 checkpoint 的 WAL 且无法安全只读；停止读取并说明，交维护者处理，不要改用写连接。
+- `invalid_cursor`：过滤器或字段变化后从第一页重来；不手工拼 cursor。
+- `experiment_busy`：另一次 Web/CLI 实验在运行；如实说明并建议稍后重试，不并发硬跑。
+- `experiments run` 缺 `--confirm` 或缺真实 `run_id`：停止并补参数；不得猜“最新批次就是本次”。

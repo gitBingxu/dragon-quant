@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   fetchScanQuality,
   type ScanQuality,
   type ScanQualityGroup,
 } from "../../api/research";
+import { Badge } from "../../components/Badge";
+import { DataTable, type Column } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { Section } from "../../components/Section";
+import { StatCard } from "../../components/StatCard";
+import { TextField } from "../../components/Select";
+import { fmtPct, pnlClass, pnlStatTone } from "../../lib/format";
+import { labelOf } from "../../lib/labels";
 import { useSearchParams } from "../../router";
-import { fmtPct } from "../../lib/format";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -18,59 +26,142 @@ function daysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function GroupTable({ title, groups }: {
+/** 比率（0.5）→ 百分数（50.0%）；null 一律「—」，不填 0。 */
+function pctRate(value: number | null): string {
+  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+function coverageCount(coverage: Record<string, unknown>, key: string): number {
+  const value = Number(coverage[key] ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/** 分组 key 是后端枚举，展示层翻成中文；未知 key 原样回落。 */
+const GATE_LABELS: Record<string, string> = {
+  passed: "通过",
+  rejected: "否决",
+};
+
+const FIRST_REPEAT_LABELS: Record<string, string> = {
+  first: "首次",
+  repeat: "重复",
+  unknown: "未知",
+};
+
+const UNKNOWN_LABELS: Record<string, string> = { unknown: "未知" };
+
+interface GroupRow {
+  name: string;
+  group: ScanQualityGroup;
+}
+
+function groupColumns(
+  labels: Record<string, string>
+): Column<GroupRow>[] {
+  return [
+    {
+      key: "name",
+      header: "分组",
+      render: (row) => (
+        <span className="font-medium text-ink">
+          {labelOf(labels, row.name, row.name)}
+        </span>
+      ),
+    },
+    {
+      key: "valid",
+      header: "有效",
+      align: "right",
+      render: (row) => <span className="num text-ink">{row.group.valid}</span>,
+    },
+    {
+      key: "stocks",
+      header: "股票",
+      align: "right",
+      render: (row) => <span className="num text-ink-2">{row.group.stocks}</span>,
+    },
+    {
+      key: "days",
+      header: "日期",
+      align: "right",
+      render: (row) => <span className="num text-ink-2">{row.group.days}</span>,
+    },
+    {
+      key: "mean",
+      header: "净收益均值",
+      align: "right",
+      render: (row) => (
+        <span className={`num font-medium ${pnlClass(row.group.mean_net_return_pct)}`}>
+          {fmtPct(row.group.mean_net_return_pct)}
+        </span>
+      ),
+    },
+    {
+      key: "date_equal",
+      header: "日期等权",
+      align: "right",
+      render: (row) => (
+        <span className={`num ${pnlClass(row.group.date_equal_mean_return_pct)}`}>
+          {fmtPct(row.group.date_equal_mean_return_pct)}
+        </span>
+      ),
+    },
+    {
+      key: "win_rate",
+      header: "胜率",
+      align: "right",
+      render: (row) => (
+        <span className="num text-ink">{pctRate(row.group.win_rate)}</span>
+      ),
+    },
+    {
+      key: "missed",
+      header: "错失机会",
+      align: "right",
+      render: (row) => (
+        <span className="num text-ink-2">
+          {pctRate(row.group.missed_opportunity_rate)}
+        </span>
+      ),
+    },
+  ];
+}
+
+function GroupTable({
+  title,
+  groups,
+  labels,
+}: {
   title: string;
   groups: Record<string, ScanQualityGroup>;
+  labels: Record<string, string>;
 }) {
-  const rows = Object.entries(groups);
+  const rows: GroupRow[] = Object.entries(groups).map(([name, group]) => ({
+    name,
+    group,
+  }));
   if (!rows.length) {
     return (
-      <div className="card p-4 text-caption text-ink-3">
-        <h3 className="text-title text-ink">{title}</h3>
-        <p className="mt-2">暂无可用分组（覆盖不足）。</p>
-      </div>
+      <Section title={title}>
+        <p className="text-body text-ink-3">
+          暂无可用分组：该维度有效样本不足，缺数据不补造。
+        </p>
+      </Section>
     );
   }
   return (
-    <div className="card p-4">
-      <h3 className="text-title text-ink">{title}</h3>
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full min-w-[520px] border-collapse text-caption">
-          <thead>
-            <tr className="border-b border-hairline text-left text-ink-3">
-              <th className="py-1.5 pr-3">分组</th>
-              <th className="py-1.5 pr-3">有效</th>
-              <th className="py-1.5 pr-3">股票</th>
-              <th className="py-1.5 pr-3">日期</th>
-              <th className="py-1.5 pr-3">净收益均值</th>
-              <th className="py-1.5 pr-3">日期等权</th>
-              <th className="py-1.5 pr-3">胜率</th>
-              <th className="py-1.5">错失机会</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(([name, group]) => (
-              <tr key={name} className="border-b border-hairline/60">
-                <td className="py-1.5 pr-3 text-ink">{name}</td>
-                <td className="py-1.5 pr-3">{group.valid}</td>
-                <td className="py-1.5 pr-3">{group.stocks}</td>
-                <td className="py-1.5 pr-3">{group.days}</td>
-                <td className="py-1.5 pr-3">{fmtPct(group.mean_net_return_pct)}</td>
-                <td className="py-1.5 pr-3">{fmtPct(group.date_equal_mean_return_pct)}</td>
-                <td className="py-1.5 pr-3">
-                  {group.win_rate != null ? `${(group.win_rate * 100).toFixed(1)}%` : "—"}
-                </td>
-                <td className="py-1.5">
-                  {group.missed_opportunity_rate != null
-                    ? `${(group.missed_opportunity_rate * 100).toFixed(1)}%`
-                    : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Section
+      title={title}
+      className="overflow-hidden"
+      bodyClassName="p-0"
+    >
+      <DataTable
+        columns={groupColumns(labels)}
+        rows={rows}
+        rowKey={(row) => row.name}
+        minWidth={620}
+      />
+    </Section>
   );
 }
 
@@ -95,6 +186,128 @@ function StatusNotice({ data }: { data: ScanQuality }) {
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+function Meta({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-caption font-semibold tracking-[0.08em] text-ink-3">
+        {label}
+      </div>
+      <div className="mt-1 text-body text-ink">{value}</div>
+    </div>
+  );
+}
+
+function MetaPanel({ data }: { data: ScanQuality }) {
+  return (
+    <div className="panel px-4 py-3.5 sm:px-[18px]">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+        <Meta
+          label="状态"
+          value={
+            <Badge tone={data.status === "ok" ? "normal" : "warning"}>
+              {data.status === "ok" ? "正常" : "证据不足"}
+            </Badge>
+          }
+        />
+        <Meta
+          label="区间"
+          value={
+            <span className="num">
+              {data.date_from} ~ {data.date_to}
+            </span>
+          }
+        />
+        <Meta
+          label="版本"
+          value={<span className="num">{data.evaluation_version}</span>}
+        />
+        <Meta label="截至" value={<span className="num">{data.as_of ?? "—"}</span>} />
+        <Meta
+          label="成本"
+          value={<span className="num">{data.window.cost_bps} bp</span>}
+        />
+      </div>
+
+      <div className="mt-3 border-t border-hairline pt-2.5 text-caption">
+        <div className="font-semibold tracking-[0.08em] text-ink-3">窗口口径</div>
+        <div className="mt-1 break-words text-body text-ink-2">
+          {data.window.entry_rule} → {data.window.exit_rule}
+        </div>
+      </div>
+
+      {data.coverage_gap ? (
+        <p className="mt-2 text-caption text-ink-3">覆盖缺口：{data.coverage_gap}</p>
+      ) : null}
+
+      {data.warnings.length ? (
+        <div className="mt-2 text-caption">
+          <div className="font-semibold tracking-[0.08em] text-ink-3">提示</div>
+          <ul className="mt-1 grid gap-0.5 text-ink-3">
+            {data.warnings.map((item, index) => (
+              <li key={`${item}-${index}`}>· {item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {data.read_errors?.length ? (
+        <div className="mt-2 text-caption">
+          <div className="font-semibold tracking-[0.08em] text-warning">
+            部分读取异常
+          </div>
+          <ul className="mt-1 grid gap-0.5 text-warning">
+            {data.read_errors.map((item, index) => (
+              <li key={`${item}-${index}`}>· {item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Overview({ data }: { data: ScanQuality }) {
+  const passedDiff = data.diffs_vs_baseline?.passed ?? null;
+  const rejectedDiff = data.diffs_vs_baseline?.rejected ?? null;
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <StatCard
+        label="原始贡献"
+        value={coverageCount(data.coverage, "raw_contributions")}
+        sub="去重前逐日贡献"
+      />
+      <StatCard
+        label="去重后候选"
+        value={coverageCount(data.coverage, "canonical_candidates")}
+        sub="按 per_day_code 去重"
+      />
+      <StatCard
+        label="成熟样本"
+        value={coverageCount(data.coverage, "mature_samples")}
+        sub="已进入收益窗口"
+      />
+      <StatCard
+        label="通过组差值"
+        value={fmtPct(passedDiff)}
+        sub="相对基线的净收益均值差"
+        tone={pnlStatTone(passedDiff)}
+      />
+      <StatCard
+        label="否决组差值"
+        value={fmtPct(rejectedDiff)}
+        sub="相对基线的净收益均值差"
+        tone={pnlStatTone(rejectedDiff)}
+      />
     </div>
   );
 }
@@ -140,28 +353,31 @@ export function ResearchPage() {
         description="只读原始扫描候选与本地行情：对比通过 / 否决、评分与 rank 区间、首次 / 重复入榜的事后净收益，用来反馈 scan 筛查质量；不改 dragons 去重与生产候选池。"
       />
 
-      <div className="mb-3 flex flex-wrap items-end gap-2">
-        <label className="text-caption text-ink-2">
-          起始日期
-          <input
+      <div className="panel mb-3 px-4 py-3.5 sm:px-[18px]">
+        <div className="flex flex-wrap items-end gap-3">
+          <TextField
+            label="起始日期"
             type="date"
-            className="input ml-2"
             value={dateFrom}
-            onChange={(event) => setDateFrom(event.target.value)}
+            onChange={setDateFrom}
+            width={168}
           />
-        </label>
-        <label className="text-caption text-ink-2">
-          结束日期
-          <input
+          <TextField
+            label="结束日期"
             type="date"
-            className="input ml-2"
             value={dateTo}
-            onChange={(event) => setDateTo(event.target.value)}
+            onChange={setDateTo}
+            width={168}
           />
-        </label>
-        <button type="button" className="btn btn-primary" onClick={load} disabled={loading}>
-          {loading ? "加载中…" : "查询"}
-        </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={load}
+            disabled={loading}
+          >
+            {loading ? "查询中…" : "查询"}
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -173,50 +389,55 @@ export function ResearchPage() {
       {data ? (
         <div className="grid gap-3">
           <StatusNotice data={data} />
-          <div className="card p-4 text-caption text-ink-2">
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              <span>状态：{data.status}</span>
-              <span>区间：{data.date_from} ~ {data.date_to}</span>
-              <span>版本：{data.evaluation_version}</span>
-              <span>截至：{data.as_of ?? "—"}</span>
-              <span>口径：{data.window.entry_rule} / {data.window.exit_rule}</span>
-              <span>成本：{data.window.cost_bps} bp</span>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-              <span>原始贡献：{String((data.coverage.raw_contributions as number) ?? 0)}</span>
-              <span>去重后：{String((data.coverage.canonical_candidates as number) ?? 0)}</span>
-              <span>成熟样本：{String((data.coverage.mature_samples as number) ?? 0)}</span>
-              <span>通过/否决差：{fmtPct(data.diffs_vs_baseline.passed ?? null)} / {fmtPct(data.diffs_vs_baseline.rejected ?? null)}</span>
-            </div>
-            {data.coverage_gap ? (
-              <p className="mt-2 text-ink-3">覆盖缺口：{data.coverage_gap}</p>
-            ) : null}
-            {data.warnings.length ? (
-              <p className="mt-2 text-ink-3">提示：{data.warnings.join("；")}</p>
-            ) : null}
-            {data.status === "ok" && data.read_errors?.length ? (
-              <p className="mt-2 text-warning">
-                部分读取异常：{data.read_errors.join("；")}
-              </p>
-            ) : null}
+          <Overview data={data} />
+          <MetaPanel data={data} />
+
+          <div className="grid items-start gap-3 2xl:grid-cols-2">
+            <GroupTable
+              title="通过 / 否决"
+              groups={data.groups.by_gate || {}}
+              labels={GATE_LABELS}
+            />
+            <GroupTable
+              title="分数区间"
+              groups={data.groups.by_score_band || {}}
+              labels={UNKNOWN_LABELS}
+            />
+            <GroupTable
+              title="rank 区间"
+              groups={data.groups.by_rank_band || {}}
+              labels={UNKNOWN_LABELS}
+            />
+            <GroupTable
+              title="首次 / 重复入榜"
+              groups={data.groups.by_first_repeat || {}}
+              labels={FIRST_REPEAT_LABELS}
+            />
           </div>
 
-          <GroupTable title="通过 / 否决" groups={data.groups.by_gate || {}} />
-          <GroupTable title="分数区间" groups={data.groups.by_score_band || {}} />
-          <GroupTable title="rank 区间" groups={data.groups.by_rank_band || {}} />
-          <GroupTable title="首次 / 重复入榜" groups={data.groups.by_first_repeat || {}} />
-
-          <div className="card p-4 text-caption text-ink-3">
-            <h3 className="text-title text-ink">口径与限制</h3>
-            <ul className="mt-2 list-disc pl-5">
-              <li>去重规则：{data.dedupe_rule}</li>
-              {data.caveats.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
+          {data.dedupe_rule || data.caveats.length ? (
+            <Section title="口径与限制">
+              <ul className="grid gap-1 text-caption text-ink-2">
+                {data.dedupe_rule ? <li>· 去重规则：{data.dedupe_rule}</li> : null}
+                {data.caveats.map((item) => (
+                  <li key={item}>· {item}</li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
         </div>
-      ) : null}
+      ) : loading ? (
+        <div className="panel px-4 py-12 text-center text-body text-ink-3">
+          正在读取扫描质量…
+        </div>
+      ) : (
+        <div className="panel">
+          <EmptyState
+            title="选择区间后查询"
+            description="默认展示近 60 天；结果只描述历史样本，不构成策略有效性结论。"
+          />
+        </div>
+      )}
     </>
   );
 }

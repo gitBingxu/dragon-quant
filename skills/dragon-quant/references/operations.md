@@ -27,7 +27,7 @@
 5. 默认一屏简报，完整报告按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
 6. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
 
-## 九类 workflow
+## 十类 workflow
 
 ### 1. 个股行情
 
@@ -46,7 +46,7 @@
    `scan --date D --top 5` 读回同一记录比对）；不把读取到的其他 `top_n` 记录当本次结果。
 5. 另报 `dragons --date D --true-only` 的**新增回测池数量**；它是 5 日去重池，不是当日原始候选，
    不得据此说“当日只有 N 只真龙”，也不用它反推权重。
-6. 研究/校准需求走 `/research` 的 scan 候选质量（原始候选、通过/否决、错失机会与基准差），
+6. 研究/校准需求走 `research scan-quality --from D1 --to D2`（原始候选、通过/否决、错失机会与基准差），
    不改 dragons 去重与生产候选池。
 
 ### 3. 龙头回测与面板
@@ -78,13 +78,12 @@
 
 1. 引导：区间 `--from`/`--to`（必填）→ 初始资金（默认 100000，确认）→ 策略（默认 `dragon_pullback_daily`，不展开参数）→ 数据体系（默认 v2）。
 2. 说明会写账户回测表，且候选池优先读 prep 快照；目标区间未跑 prep 时会走回退池，报告中需说明回退天数与原因。
-3. 执行 `review-account --from D1 --to D2 [--capital N]`；校验终端摘要、`ranking_mode`、回退天数、停牌跳过、`data_degraded`、`run_id`。
+3. 执行 `review-account --from D1 --to D2 [--capital N] --json` 取得真实 `run_id` 回执（默认人读格式不变）；再按需用 `research account --run-id N --view summary|snapshots|trades|positions|events` 读回。校验 `ranking_mode`、回退天数、停牌跳过、`data_degraded`。
 4. 阶段 2：后台 `dashboard`，账户页 URL 为 `/account`；只开已有面板时跳过回测。
 5. 答疑只解释摘要与数据质量三态、兜底成交价近似、停牌冻结、候选池回退；不复制策略参数数值，不承诺收益。
 6. 账户页分区：**持仓生命周期胜率**（整笔已平仓）与**本段权益贡献**（期初盯市基准）不可混读；
    旧批次无精确归因时明确「legacy 近似/不可判定」。
-7. 对照实验只在用户显式点击/确认后运行（本地行情、冻结上游母集）；查看已存报告不重算，
-   不自动推广参数。
+7. 对照实验只在用户显式点击或 `research experiments run --run-id N --confirm` 后运行（本地行情、冻结上游母集）；`research experiments list/show` 只读、不重算；不自动推广参数。
 
 ### 8. 盘前预案
 
@@ -98,7 +97,7 @@
 1. 用户明确要看面板（龙头 / 扫描 / 因子 / 复盘 / 竞价 / 账户）时，运行 `dashboard`（T0，长驻）。
 2. 默认打开复盘页；账户页用 URL `/account`，其他页面按启动日志中的真实地址进入。
 3. 缺 `[web]` 依赖时只转述 stderr 的手动安装指令；禁止 `--yes`、禁止自动 pip 安装。
-4. 面板只读，不回测、不写业务记录；详见“UI 生命周期”。
+4. 面板默认只读，不回测、不写业务记录；`--bs-autogen` / `DQ_BS_AUTOGEN=1` 会生成 BS 派生数据，按 T1 确认；详见“UI 生命周期”。
 
 ## UI 生命周期
 
@@ -116,7 +115,7 @@
 
 ## 因子入库（三组固定名单）
 
-只有下面三组内置因子可以构建，按名称排序，逐字使用；只做这三组的固定构建与代表因子读回，其他请求一律走通用未开放话术。
+只有下面三组内置因子可以构建，按名称排序，逐字使用；构建只做这三组，其他因子构建请求走通用未开放话术。读回/核对可额外使用白名单内的 `factor list` / `status` / `query`（含区间+code+version）/ `export` / `eval` / `decision-review`。
 
 ```text
 <!-- factor-groups:start -->

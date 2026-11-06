@@ -1,8 +1,9 @@
 # 账户页「增量回测」技术方案（2026-11-03）
 
 > 阶段：2 技术方案 · 状态：自审 APPROVE（round 1，CRITICAL 0 / MAJOR 3 / MINOR 4）· 待 main 单次验收
+> **2026-11-06 语义修订**：增量改为**原地追加到基准 run**（不新建 run），以 §5.4 / §5.6 / §6 / §9 为准。
 > 范围：`/account` 页新增「增量回测」按钮 + `POST /api/account/runs/incremental` + `review_account` 真增量续算能力。
-> 非目标：不改买卖/成交规则、不改 `review-account` CLI 命令与参数、不改表结构、不改全量回测行为、不引入前端状态库或新依赖、不做增量记录的「多次合并成一个 run」。
+> 非目标：不改买卖/成交规则、不改 `review-account` CLI 命令与参数、不改表结构、不改全量回测行为、不引入前端状态库或新依赖。
 
 ---
 
@@ -13,13 +14,13 @@
 1. `review_account_snapshots.positions_json` 已经是完整 `Position` 的序列化快照，天然可作续算起点；不再另建状态表。
 2. `AccountSimulator` 只增加 **三个可选构造参数**（`initial_state` / `base_equity` / `peak_equity`），不复制任何买卖、成交、风控规则；`TradingEngine` 原样复用。
 3. 新增 `service.run_incremental_review_account(base_run_id, ...)` 负责「读基准 → 恢复状态 → 解析增量区间 → 跑模拟 → 落库」，web 层只做参数解析与错误映射。
-4. 前端在「生成回测记录」后追加按钮，问号复用 `HintIcon`，成功自动选中新记录。
+4. 前端在「生成回测记录」后追加按钮，问号复用 `HintIcon`，成功后仍选中原记录（原地追加，不产生新记录）。
 
 设计模式与动机：
 
-- **Memento（备忘录）**：`Snapshot.positions_json` 冻结了当天收盘后的账户持仓，增量回测只读取、不修改基准记录；恢复逻辑集中在 `service` 的纯函数里，避免模拟器知道数据库。
+- **Memento（备忘录）**：`Snapshot.positions_json` 冻结了当天收盘后的账户持仓；增量先只读恢复，写入阶段在**同一基准 run** 上追加后续快照（单事务），恢复逻辑集中在 `service` 的纯函数里，避免模拟器知道数据库。
 - **Strategy（策略）**：`StrategyConfig` 全量快照冻结在 run 行，增量回测继承快照而非「当前默认配置」；买卖规则链本身不变。
-- **Template Method（模板方法，轻量）**：把「补算清仓后窗口指标 → 写 run → 写子表」抽成 `service._persist_result(...)`，全量与增量共用同一落库管线，消除重复、避免两条持久化路径漂移。
+- **Template Method（模板方法，轻量）**：全量用 `_persist_result`、增量用 `append_review_account_results`，两条薄管线共用 `_insert_children` 写子表；子表 SQL 只有一份，避免持久化路径漂移。
 - **Adapter（适配器）**：`deps.run_incremental_account_backtest()` 是既有的惰性注入 seam，测试用 `dependency_overrides` 替换，web 进程仍零 `sqlite3`、零自建连接、零写库。
 
 ---
@@ -70,10 +71,10 @@ sequenceDiagram
             else 有新增
                 S->>SIM: AccountSimulator(cfg, data, initial_state, base_equity, peak)
                 SIM->>SIM: run(date_from, date_to)（TradingEngine 原样复用）
-                S->>DB: annotate_post_exit + _persist_result
+                S->>DB: annotate_post_exit + append_review_account_results（同 run 单事务）
                 S-->>R: {run_id, date_from, date_to, ...}
-                C->>DB: get_review_account_run(新 run_id)
-                R-->>FE: 201 {"data": run, "run_id": id}
+                C->>DB: get_review_account_run(base_run_id)
+                R-->>FE: 201 {"data": run, "run_id": base_run_id}
             end
         end
         R-->>R: finally: 释放锁
@@ -159,7 +160,7 @@ peak = max(peak_from_equity, peak_from_drawdown)
 ```
 
 - 对**首代基准**（普通全量 run），`drawdown = equity / running_peak - 1`，二者逐值相同，main 口径未变。
-- 对**链式增量**（从一条增量记录再增量），基准 run 的 `peak` 已继承过更早的峰值，但 `peak` 本身没有落库列；仅取快照权益最大值会把历史峰值「洗掉」，导致回撤/`drawdown_delevel` 与一次性全量回测偏离。用 `drawdown` 反推可精确还原继承峰值，且不新增列。
+- 对**已追加过的 run 再次增量**（同一记录多段），基准 run 的 `peak` 已继承过更早的峰值，但 `peak` 本身没有落库列；仅取快照权益最大值会把历史峰值「洗掉」，导致回撤/`drawdown_delevel` 与一次性全量回测偏离。用 `drawdown` 反推可精确还原继承峰值，且不新增列。
 - 若 main 坚持只看权益最大值，删除 `peak_from_drawdown` 一行即可（行为差异只出现在链式增量）。
 
 新增 run 的 `max_drawdown = min(s.drawdown for s in 新快照)`，因此它是「相对继承峰值」的全周期回撤，首日就可能为负——这是保留风控语义的必然结果，需在文档中明示。
@@ -173,28 +174,37 @@ peak = max(peak_from_equity, peak_from_drawdown)
 
 ### 5.4 收益率与 run 行字段
 
-| 字段 | 增量 run 取值 | 说明 |
-|------|---------------|------|
-| `source` | 基准 `source` | 原样继承 |
-| `strategy_name` | 基准 `strategy_name` | 原样继承 |
-| `strategy_params_json` | 基准冻结快照重建的 `cfg.to_json_dict()` | **不使用当前默认配置**；与基准逐键一致 |
-| `initial_cash` | 基准 `initial_cash` | 仅作追溯，**不是**增量收益率分母 |
-| `date_from` / `date_to` | 增量首日 / 最近已收盘日 | UI 据此展示区间 |
-| `final_equity` | 增量最后快照权益 | 绝对值 |
-| `total_return` | `(final_equity / base_equity - 1) * 100` | **增量收益率**（分母为基准最后权益） |
-| `max_drawdown` | `min(新快照 drawdown)` | 相对继承峰值（含基准期峰值） |
-| `trade_count` / `win_rate` | 仅增量期内成交/整清仓 | 与全量 run 同口径，但只统计本次增量 |
-| `display_name` | `<基准 display_name> · 增量 <date_from>` | 缺省基准名时用 `<base.date_from> ~ <base.date_to>`；用**起始日**保证同名可复现（终点每天变化） |
+| 字段 | 追加后取值 | 说明 |
+|------|------------|------|
+| `source` | 不变 | 原样保留 |
+| `strategy_name` / `strategy_params_json` | 不变 | 仍使用基准冻结快照，**不使用当前默认配置** |
+| `initial_cash` | 不变 | 整条 run 的收益率分母 |
+| `date_from` | 不变 | 记录起点不变 |
+| `date_to` | 本次增量终点（最近已收盘日） | 追加后推进 |
+| `final_equity` | 新最后快照权益 | 绝对值 |
+| `total_return` | `(final_equity / initial_cash - 1) * 100` | **整条 run** 口径 |
+| `max_drawdown` | `min(全部快照 drawdown)` | 覆盖基准期 + 增量期 |
+| `trade_count` / `win_rate` | 基准 `trade_count` + 本段；胜率按全部已平仓行 | 整条 run 口径 |
+| `display_name` | 不变 | 不追加「增量」后缀 |
+| `run_meta` | 合并更新 | `incremental_segments` 记录每段 `{date_from, date_to}` |
 
-> 语义提示：增量 run 的 `initial_cash` 与 `total_return` 分母不同源，UI 上「初始资金 × 累计收益」不能直接相乘。`display_name` 固定带「增量」后缀，且 `date_from` 即续算起点，足以让用户识别；是否在统计卡加副标题留待后续（非目标）。
+> 语义提示：追加后 run 行仍是整条记录，`initial_cash` 与 `total_return` 同源（分母都是 `initial_cash`），UI 可直接相乘；`/api/account/benchmark` 也以 `initial_cash` 为起点，账户线与指数线天然对齐。
 >
-> **基准线错位（main 未覆盖项）**：`/api/account/benchmark` 当前用 `run.initial_cash` 作为指数等效权益曲线的起点（`compat.build_benchmark_series`），而增量 run 的首个账户快照从 `base_equity` 起算。若基准 run 已有累计盈亏，图上指数线会与账户线整体错开「基准累计收益」的幅度（例如基准 +5% 时指数线起点低 5%）。本方案默认**不改**该端点（保持 D5 零回归），把错位登记为已知限制；推荐后续用可空列 `base_equity` 解决（见 §14.5）。
+> 兼容：2026-11-06 之前由旧版增量产生的独立 run（`base_equity` 非空、`display_name` 带「· 增量」）仍可读取与删除，但新版本不再产生这种记录。
 
 ### 5.5 首个快照
 
 - `daily_return` 相对 `base_equity`（基准最后收盘权益）。
 - `cumulative_return` 相对 `base_equity`：若首日无成交且价格不变则为 0；若首日发生交易/价格变动，则为**首日真实盈亏**（分母固定为基准最后权益，不是首宗成交后的权益）。「以续算起点为 0 基线」指分母口径，不是强制值为 0。
 - 快照/权益曲线只包含增量区间日期，不回溯复制基准快照（避免同一日期出现两条记录）。
+
+### 5.6 落库一致性（2026-11-06 修复补充）
+
+- **不变量**：`review_account_runs.date_to == max(snapshot.trade_date)`。`_persist_result` 写库前二次断言，违反 → 400「回测快照终点（X）与结束日期（Y）不一致，拒绝落库」。
+- **全量回测**：请求结束日若为「当日 15:05 前 / 非交易日 / 休市日」，`MarketData.calendar` 不含该日；`resolve_persisted_date_to` 把落库终点收敛到实际最后快照日，`run_meta.requested_date_to` 保留原请求日、`run_meta.date_to_clamped=true`。历史交易日数据缺失同样收敛，由后续增量补齐该日（不静默篡改请求，靠 meta 留痕）。默认名 `起点 ~ 终点` 在钳制时同步改写为真实终点。
+- **增量**：保持 §5.1 的严格断言，不做钳制；写入阶段调用 `storage.append_review_account_results`，把新快照 / 交割单 / 持仓 / 事件追加到**基准 run** 并更新 run 汇总列（`date_to` / `final_equity` / `total_return` / `max_drawdown` / `trade_count` / `win_rate` / `run_meta_json`），**不新建 run**。首条新快照必须晚于既有最后快照，否则 400「增量快照与既有快照日期重叠，拒绝追加」。
+- **原子落库**：run 行（新建或更新）与 `snapshots` / `trades` / `positions` / `events` 在同一 SQLite 事务内提交；任一子表失败整体回滚，避免「run 行存在但快照缺失」的脏记录。
+- **存量脏记录**：2026-11-06 对历史库做一次性修正，把 `date_to` 改为该 run 最后快照日（不删除任何 run）；旧版独立增量 run（`base_equity` 非空）保留可读。
 
 ---
 
@@ -208,11 +218,11 @@ peak = max(peak_from_equity, peak_from_drawdown)
 { "run_id": 12 }
 ```
 
-成功 `201`（与既有 create 同形状）：
+成功 `201`（与既有 create 同形状，`run_id` 即基准 run id）：
 
 ```json
-{ "data": { "id": 13, "source": "v2", "display_name": "2026-09-04 ~ 2026-09-08 · 增量 2026-09-09", "...": "..." },
-  "run_id": 13 }
+{ "data": { "id": 12, "source": "v2", "display_name": "2026-09-04 ~ 2026-09-11", "date_to": "2026-09-11", "...": "..." },
+  "run_id": 12 }
 ```
 
 错误矩阵：
@@ -230,7 +240,7 @@ peak = max(peak_from_equity, peak_from_drawdown)
 实现位置：
 
 - `web_ui/backend/routers/account.py`：新路由 + 复用 `_account_run_lock` + `@mutation_errors`；compat 返回 `{"error": "run not found"}` 时转 404（与 delete 同写法）。
-- `web_ui/backend/compat.py`：`create_incremental_account_run(payload, *, account, run_incremental)` —— 只解析 `run_id`、查基准、调用注入服务、回读新 run；**不写库、不 import 仓储实现**。
+- `web_ui/backend/compat.py`：`create_incremental_account_run(payload, *, account, run_incremental)` —— 只解析 `run_id`、查基准、调用注入服务、回读被追加的 run；**不写库、不 import 仓储实现**。
 - `web_ui/backend/deps.py`：新增 `run_incremental_account_backtest()`，lazy import `dragon_quant.review_account.main.run_incremental_review_account`。
 - `review_account/main.py`：公共入口新增 `run_incremental_review_account`（`service` 实现 + `__all__`）。
 - `review_account/service.py`：编排 + 纯函数 `restore_incremental_seed` / `resolve_incremental_window` / `_persist_result`。
@@ -274,7 +284,7 @@ self._previous    = self._base_equity
   **「在当前回测记录与操盘策略的基础上对增量数据执行回测」**。
 - DOM 结构：按钮与 `HintIcon` 是**兄弟节点**（包在 `inline-flex items-center gap-1.5` 的 `span` 里），避免 `<button>` 嵌套 `<button>`（`HintIcon` 自身渲染 button）。
 - 禁用条件：`!runId || incrementing`（无记录/未选中/运行中）。
-- 点击：直接 `createIncrementalAccountRun(runId)`，无弹窗；成功 `await loadRuns(resp.data.id)` 自动选中；`loadRuns` 失败时沿用 `CreateRunModal.onCreated` 的兜底（`setRuns([run]); setRunId(run.id)`），避免新记录已生成却不可见；失败写入独立 `actionError`。
+- 点击：直接 `createIncrementalAccountRun(runId)`，无弹窗；成功后 `await loadRuns(resp.data.id)` 刷新并选中**同一条记录**；`loadRuns` 失败时沿用 `CreateRunModal.onCreated` 的兜底（`setRuns([run]); setRunId(run.id)`），避免追加成功但列表刷新失败时看不到新快照；失败写入独立 `actionError`。
 - 错误展示：复用既有 `alert-danger` 条样式，但使用**独立状态** `actionError`，文案不加「加载失败：」前缀（那是数据加载失败的语义）；切换 run 或重新发起时清空。
 - `api/account.ts`：新增 `createIncrementalAccountRun(runId)`，POST `/api/account/runs/incremental`，错误解析 `body.error`（与 `createAccountRun` 一致）。
 - 不引入新依赖、不引入状态库；文本仍用既有 `text-body` 等语义令牌（禁 `text-xs` / `text-sm`）。
@@ -294,8 +304,10 @@ self._previous    = self._base_equity
 | 权益有效性 | `cash`/`total_equity` 为 NULL 或 `<= 0` | `基准记录最终权益无效，无法增量续算` |
 | 持仓明细 | `positions_json` 解析失败 / 字段不匹配 | `基准记录持仓明细无法解析，请重新生成基准记录` |
 | 旧数据降级 | 持仓为空但 `market_value > 0` | `基准记录快照缺少持仓明细（旧数据），请重新生成基准记录` |
+| 旧版增量基准 | `base_run.base_equity` 非空 | `旧版增量记录不支持继续增量，请在对应的全量记录上操作` |
 | 无新增日 | 增量区间为空 | `基准记录已覆盖最近已收盘交易日（YYYY-MM-DD），无新增数据` |
 | 行情覆盖 | `MarketData.calendar` 抛 `DataCoverageError` | 原样消息（`DataCoverageError` 继承 `ValueError` → 400） |
+| 落库不变量 | `_persist_result` 发现末快照日 ≠ `date_to` | `回测快照终点（X）与结束日期（Y）不一致，拒绝落库` |
 
 ---
 
@@ -309,7 +321,7 @@ self._previous    = self._base_equity
 4. 模拟器注入：给定 `initial_state(cash, positions, peak)`、`base_equity`，首个快照 `daily_return`/`cumulative_return` 以 `base_equity` 为分母、`drawdown` 以 `peak` 为分母；不传新参数时与旧行为逐位一致。
 5. 基准完整性：空快照 / 日期不一致 / `market_value>0` 但持仓空 / 策略快照空 / `initial_cash` 为 NULL → 各自 400 文案（不得变成 500）。
 6. 区间解析：基准 `date_to` = 最近已收盘日 → ValueError；`FixedClock` 15:05 前不含当日。
-7. 服务落库：用 `FakeData` + patch `MarketData`，断言新 run 行继承 `source/strategy_name/strategy_params/initial_cash`、`date_from/date_to` 为增量区间、`display_name` 后缀、快照从增量首日开始。
+7. 服务落库（原地追加）：用 `FakeData` + patch `MarketData`，断言 `run_id` 不变、不新增 run 行、`date_from` 不变、`date_to` 推进到增量终点、`final_equity/total_return/max_drawdown/trade_count/win_rate` 为整条 run 口径、快照追加在既有快照之后、`run_meta.incremental_segments` 记录本段。
 8. **链式 = 全量（核心 oracle）**：同一 `FakeData` 下，`full(09-04→09-11)` 与 `full(09-04→09-08)` + `incremental(→09-11)` 在重叠日期上的 `(cash, market_value, total_equity)` 与交割单逐值一致。
 
 ### 10.2 Web 后端（`dragon_quant/tests/test_web_backend.py` 追加）
@@ -325,11 +337,11 @@ self._previous    = self._base_equity
 
 1. 创建基准 `09-04~09-08`（run A）。
 2. 创建对照全量 `09-04~09-11`（run B）。
-3. `POST /runs/incremental {run_id: A}` → run C：`date_from=09-09`、`date_to=09-11`、3 条快照、`initial_cash=100000`、`display_name` 含「增量 2026-09-09」。
-4. **C 与 B 在 09-09~09-11 的快照 `(cash, market_value, total_equity)`、交割单、已平仓记录逐值一致**（D2 的强证据）。
-5. 再次对 C 增量 → 400 且消息含「无新增数据」（D3）。
+3. `POST /runs/incremental {run_id: A}` → **A 原地追加**：`run_id` 不变、`runs.count` 不增加、`date_to=09-11`、在 09-09~09-11 追加 3 条快照、`display_name` 不变。
+4. **A 与 B 在 09-09~09-11 的快照 `(cash, market_value, total_equity)`、交割单、已平仓记录逐值一致**（D2 的强证据）。
+5. 再次对 A 增量 → 400 且消息含「无新增数据」（D3）。
 6. `run_id=999999` → 404；缺 `run_id` → 400。
-7. 清理：删除 C/B/A 后 `runs.count == 0`；真实目录哨兵比对不变化。
+7. 清理：删除 B/A 后 `runs.count == 0`；真实目录哨兵比对不变化。
 
 `coverage-map.json` 不需要改（无 CLI parser 变更）；新用例归入既有 W5 组说明即可。
 
@@ -371,8 +383,9 @@ npm --prefix web_ui/frontend test   # 如有 node 测试随构建
 | 旧 run 无 `positions_json` 却仍有持仓 | 静默丢持仓 | §4 一致性校验 `positions_empty ∧ market_value>0 → 400` |
 | 链式增量峰值被「洗掉」 | 回撤/降仓偏离全量 | §5.2 `drawdown` 反推峰值（首代逐值等价） |
 | 基准期盘中峰值未落库 | 恢复的峰值只到「每日收盘权益最大值」，全量 run 的 `state.peak_equity` 可能含盘中更高点 | 快照本就不存盘中峰值；`drawdown_delevel_pct` 默认关，影响面小；文档明示 |
-| 链式增量跨边界连亏丢失 | `streak_delevel` 偏离全量 | 文档明示；`streak_delevel_enabled` 默认关；后续可选加 `base_run_id` 列（本方案不引入） |
-| 增量 run 的 `initial_cash` 与 `total_return` 分母不同源 | 用户误读收益 | `display_name` 带「增量」+ 文档口径；UI 后续可加副标题（非目标） |
+| 链式增量跨边界连亏丢失 | — | 原地追加后同一 run 的已平仓行持续累积，`_consecutive_losses` 天然跨增量段，原限制消除 |
+| 原地追加覆盖基准 run 的历史视图（无版本副本） | 想对比追加前的结果需重新全量回测 | 追加只新增快照、不修改既有快照，且单事务提交；需要保留旧结果时用「生成回测记录」另存全量 |
+| 重复/并发点击增量把同一交易日写两次 | 快照重复 | `append_review_account_results` 在写事务内校验「首条新快照 > 既有最后快照」，冲突 400「增量快照与既有快照日期重叠，拒绝追加」 |
 | 增量期间行情缺失/停牌 | 与全量同样的数据分级，不会伪造 | 复用 `historical_events` / 数据分级，错误按既有 `DataCoverageError` 400 |
 | 长耗时请求占锁 | 阻塞并发生成 | 单飞锁是既有设计；409 明确提示，前端按钮加载态防重复点击 |
 | 旧数据 `strategy_params` 缺失 | 无法保证「冻结参数」 | 明确 400 要求重新生成基准，绝不回落到当前默认配置 |
@@ -397,5 +410,5 @@ npm --prefix web_ui/frontend test   # 如有 node 测试随构建
 1. **峰值兜底**（§5.2）：在 main 口径上叠加 `drawdown` 反推峰值。首代基准逐值等价，只修正链式增量。若 main 要求严格只取「快照权益最大值」，实现删掉一行即可。
 2. **链式连亏**（§5.3）：无 `base_run_id` 列时无法跨 run 延续；建议接受并文档化，若不可接受需新增列（超出本方案范围）。
 3. **错误文案语言**：新增域错误用中文（UI 直接展示），body/参数错误沿用既有英文（`missing run_id` 等）。如需统一，另行约定。
-4. **v1 基准**：框架要求 `source` 原样继承，因此直接 POST 一个 v1 run_id 会生成新的 v1 记录，与「v1 只读历史、不再新增写入」的项目约束存在张力。前端只暴露 v2，实际 UI 路径不受影响；建议实现时在 service 层拒绝 `source != "v2"`（400「仅支持对 v2 回测记录做增量」）。若 main 坚持严格继承，则保持现状并在文档注明。
-5. **基准线锚点**（§5.4）：增量 run 的指数曲线仍从 `initial_cash` 起算，与账户首个快照的 `base_equity` 不一致。默认按 D5 不改端点、登记为已知限制；推荐后续在 `review_account_runs` 增加可空 `base_equity REAL` 列（迁移模式同 `display_name` / `positions_json`），`account_benchmark` 改为 `base_equity or initial_cash`——旧 run 为 NULL 时逐位不变，增量 run 的曲线正确对齐。需 main 决定是否纳入本次范围。
+4. **v1 基准**：service 层已拒绝 `source != "v2"`（400「仅支持对 v2 回测记录做增量」），因此不会向 v1 追加数据；与「v1 只读历史」约束一致。
+5. **基准线锚点**（§5.4）：2026-11-06 起增量原地追加，run 仍是整条记录，指数线与账户线都以 `initial_cash` 为起点，原「基准线错位」问题不再存在；`base_equity` 列仅保留给旧版独立增量 run 读取。

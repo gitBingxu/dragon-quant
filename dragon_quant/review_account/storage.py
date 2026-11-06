@@ -31,36 +31,96 @@ def create_review_account_run(source: str,
                               start_peak_equity: Optional[float] = None,
                               start_consecutive_losses: Optional[int] = None,
                               start_marks_json: Optional[str] = None,
-                              run_meta_json: Optional[str] = None) -> int:
+                              run_meta_json: Optional[str] = None,
+                              children: Optional[dict] = None) -> int:
     """创建一条账户级 review run，返回 run_id。
 
     ``base_equity`` 仅增量 run 写入（基准最后收盘权益，作为收益率与指数曲线
     起点）；全量 run 保持 NULL，读取侧 ``base_equity or initial_cash`` 逐位不变。
+
+    ``children`` 传入时（``snapshots`` / ``trades`` / ``positions`` / ``events``），
+    run 行与全部子行在**同一事务**内提交；任何异常整体回滚，避免留下
+    「run 行存在但快照缺失」的脏记录（增量回测会因此拒绝续算）。
     """
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
-            source = _normalize_source(source)
-            cur = conn.execute(
-                "INSERT INTO review_account_runs("
-                "source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
-                "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
-                "base_run_id, start_equity, start_positions_json, start_realized_pnl, "
-                "start_cash, start_peak_equity, start_consecutive_losses, "
-                "start_marks_json, run_meta_json"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (source, display_name, strategy_name, strategy_params_json, date_from, date_to,
-                 initial_cash, base_equity, final_equity, total_return, max_drawdown,
-                 trade_count, win_rate, base_run_id, start_equity,
-                 start_positions_json, start_realized_pnl, start_cash,
-                 start_peak_equity, start_consecutive_losses,
-                 start_marks_json, run_meta_json),
+            run_id = _insert_run(
+                conn,
+                source=source,
+                strategy_name=strategy_name,
+                strategy_params_json=strategy_params_json,
+                date_from=date_from,
+                date_to=date_to,
+                initial_cash=initial_cash,
+                final_equity=final_equity,
+                total_return=total_return,
+                max_drawdown=max_drawdown,
+                trade_count=trade_count,
+                win_rate=win_rate,
+                display_name=display_name,
+                base_equity=base_equity,
+                base_run_id=base_run_id,
+                start_equity=start_equity,
+                start_positions_json=start_positions_json,
+                start_realized_pnl=start_realized_pnl,
+                start_cash=start_cash,
+                start_peak_equity=start_peak_equity,
+                start_consecutive_losses=start_consecutive_losses,
+                start_marks_json=start_marks_json,
+                run_meta_json=run_meta_json,
             )
+            if children is not None:
+                _insert_children(
+                    conn, run_id,
+                    snapshots=children.get("snapshots") or [],
+                    trades=children.get("trades") or [],
+                    positions=children.get("positions") or [],
+                    events=children.get("events"),
+                )
             conn.commit()
-            return int(cur.lastrowid or 0)
+            return run_id
+        except BaseException:
+            conn.rollback()
+            raise
         finally:
             conn.close()
+
+
+def _insert_run(conn, *, source: str, strategy_name: str,
+                strategy_params_json: str, date_from: str, date_to: str,
+                initial_cash: float, final_equity: float, total_return: float,
+                max_drawdown: float, trade_count: int,
+                win_rate: Optional[float], display_name: Optional[str] = None,
+                base_equity: Optional[float] = None,
+                base_run_id: Optional[int] = None,
+                start_equity: Optional[float] = None,
+                start_positions_json: Optional[str] = None,
+                start_realized_pnl: Optional[float] = None,
+                start_cash: Optional[float] = None,
+                start_peak_equity: Optional[float] = None,
+                start_consecutive_losses: Optional[int] = None,
+                start_marks_json: Optional[str] = None,
+                run_meta_json: Optional[str] = None) -> int:
+    """在既有连接内插入 run 行（不提交；事务由调用方管理）。"""
+    source = _normalize_source(source)
+    cur = conn.execute(
+        "INSERT INTO review_account_runs("
+        "source, display_name, strategy_name, strategy_params_json, date_from, date_to, "
+        "initial_cash, base_equity, final_equity, total_return, max_drawdown, trade_count, win_rate, "
+        "base_run_id, start_equity, start_positions_json, start_realized_pnl, "
+        "start_cash, start_peak_equity, start_consecutive_losses, "
+        "start_marks_json, run_meta_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (source, display_name, strategy_name, strategy_params_json, date_from, date_to,
+         initial_cash, base_equity, final_equity, total_return, max_drawdown,
+         trade_count, win_rate, base_run_id, start_equity,
+         start_positions_json, start_realized_pnl, start_cash,
+         start_peak_equity, start_consecutive_losses,
+         start_marks_json, run_meta_json),
+    )
+    return int(cur.lastrowid or 0)
 
 
 def save_review_account_results(run_id: int,
@@ -73,81 +133,143 @@ def save_review_account_results(run_id: int,
         conn = _connect()
         try:
             _ensure_schema(conn)
-            conn.executemany(
-                "INSERT INTO review_account_snapshots("
-                "run_id, trade_date, cash, market_value, total_equity, daily_return, "
-                "cumulative_return, drawdown, position_code, position_name, position_qty, "
-                "position_cost, position_market_price, position_unrealized_return, positions_json"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        run_id, s.get("trade_date"), s.get("cash"), s.get("market_value"),
-                        s.get("total_equity"), s.get("daily_return"), s.get("cumulative_return"),
-                        s.get("drawdown"), s.get("position_code"), s.get("position_name"),
-                        s.get("position_qty"), s.get("position_cost"),
-                        s.get("position_market_price"), s.get("position_unrealized_return"),
-                        s.get("positions_json", "[]"),
-                    )
-                    for s in snapshots
-                ],
-            )
-            conn.executemany(
-                "INSERT INTO review_account_trades("
-                "run_id, trade_date, code, name, side, price, qty, amount, fee, "
-                "realized_pnl, cash_after, position_after, reason_code, reason_text, signal_json"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        run_id, t.get("trade_date"), t.get("code"), t.get("name"),
-                        t.get("side"), t.get("price"), t.get("qty"), t.get("amount"),
-                        t.get("fee"), t.get("realized_pnl"), t.get("cash_after"),
-                        t.get("position_after"), t.get("reason_code"), t.get("reason_text"),
-                        t.get("signal_json"),
-                    )
-                    for t in trades
-                ],
-            )
-            conn.executemany(
-                "INSERT INTO review_account_positions("
-                "run_id, code, name, entry_date, entry_price, qty, entry_reason_code, "
-                "entry_signal_json, exit_date, exit_price, exit_reason_code, exit_signal_json, "
-                "realized_return, hold_days, status, post_exit_max_return, "
-                "post_exit_max_drawdown, post_exit_window_days, "
-                "initial_cost, realized_pnl, period_pnl, period_start_value, inherited"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        run_id, p.get("code"), p.get("name"), p.get("entry_date"),
-                        p.get("entry_price"), p.get("qty"), p.get("entry_reason_code"),
-                        p.get("entry_signal_json"), p.get("exit_date"), p.get("exit_price"),
-                        p.get("exit_reason_code"), p.get("exit_signal_json"),
-                        p.get("realized_return"), p.get("hold_days"), p.get("status"),
-                        p.get("post_exit_max_return"), p.get("post_exit_max_drawdown"),
-                        p.get("post_exit_window_days"),
-                        p.get("initial_cost"), p.get("realized_pnl"),
-                        p.get("period_pnl"), p.get("period_start_value"),
-                        1 if p.get("inherited") else 0,
-                    )
-                    for p in positions
-                ],
-            )
-            if events:
-                conn.executemany(
-                    "INSERT INTO review_account_events("
-                    "run_id, event_date, event_type, code, name, title, detail, "
-                    "reason_code, cash, total_equity, signal_json"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        (
-                            run_id, e.get("event_date"), e.get("event_type"),
-                            e.get("code"), e.get("name"), e.get("title"),
-                            e.get("detail"), e.get("reason_code"), e.get("cash"),
-                            e.get("total_equity"), e.get("signal_json"),
-                        )
-                        for e in events
-                    ],
-                )
+            _insert_children(conn, run_id, snapshots=snapshots, trades=trades,
+                             positions=positions, events=events)
             conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def _insert_children(conn, run_id: int, *, snapshots: list[dict],
+                     trades: list[dict], positions: list[dict],
+                     events: Optional[list[dict]] = None) -> None:
+    """在既有连接内插入 run 的全部子行（不提交；事务由调用方管理）。"""
+    conn.executemany(
+        "INSERT INTO review_account_snapshots("
+        "run_id, trade_date, cash, market_value, total_equity, daily_return, "
+        "cumulative_return, drawdown, position_code, position_name, position_qty, "
+        "position_cost, position_market_price, position_unrealized_return, positions_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                run_id, s.get("trade_date"), s.get("cash"), s.get("market_value"),
+                s.get("total_equity"), s.get("daily_return"), s.get("cumulative_return"),
+                s.get("drawdown"), s.get("position_code"), s.get("position_name"),
+                s.get("position_qty"), s.get("position_cost"),
+                s.get("position_market_price"), s.get("position_unrealized_return"),
+                s.get("positions_json", "[]"),
+            )
+            for s in snapshots
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO review_account_trades("
+        "run_id, trade_date, code, name, side, price, qty, amount, fee, "
+        "realized_pnl, cash_after, position_after, reason_code, reason_text, signal_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                run_id, t.get("trade_date"), t.get("code"), t.get("name"),
+                t.get("side"), t.get("price"), t.get("qty"), t.get("amount"),
+                t.get("fee"), t.get("realized_pnl"), t.get("cash_after"),
+                t.get("position_after"), t.get("reason_code"), t.get("reason_text"),
+                t.get("signal_json"),
+            )
+            for t in trades
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO review_account_positions("
+        "run_id, code, name, entry_date, entry_price, qty, entry_reason_code, "
+        "entry_signal_json, exit_date, exit_price, exit_reason_code, exit_signal_json, "
+        "realized_return, hold_days, status, post_exit_max_return, "
+        "post_exit_max_drawdown, post_exit_window_days, "
+        "initial_cost, realized_pnl, period_pnl, period_start_value, inherited"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                run_id, p.get("code"), p.get("name"), p.get("entry_date"),
+                p.get("entry_price"), p.get("qty"), p.get("entry_reason_code"),
+                p.get("entry_signal_json"), p.get("exit_date"), p.get("exit_price"),
+                p.get("exit_reason_code"), p.get("exit_signal_json"),
+                p.get("realized_return"), p.get("hold_days"), p.get("status"),
+                p.get("post_exit_max_return"), p.get("post_exit_max_drawdown"),
+                p.get("post_exit_window_days"),
+                p.get("initial_cost"), p.get("realized_pnl"),
+                p.get("period_pnl"), p.get("period_start_value"),
+                1 if p.get("inherited") else 0,
+            )
+            for p in positions
+        ],
+    )
+    if events:
+        conn.executemany(
+            "INSERT INTO review_account_events("
+            "run_id, event_date, event_type, code, name, title, detail, "
+            "reason_code, cash, total_equity, signal_json"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    run_id, e.get("event_date"), e.get("event_type"),
+                    e.get("code"), e.get("name"), e.get("title"),
+                    e.get("detail"), e.get("reason_code"), e.get("cash"),
+                    e.get("total_equity"), e.get("signal_json"),
+                )
+                for e in events
+            ],
+        )
+
+
+def append_review_account_results(run_id: int, *,
+                                  date_to: str,
+                                  final_equity: float,
+                                  total_return: float,
+                                  max_drawdown: float,
+                                  trade_count: int,
+                                  win_rate: Optional[float],
+                                  run_meta_json: str,
+                                  snapshots: list[dict],
+                                  trades: list[dict],
+                                  positions: list[dict],
+                                  events: Optional[list[dict]] = None) -> None:
+    """把增量段追加到既有 run，并在同一事务内更新 run 汇总列。
+
+    快照 / 交割单 / 持仓 / 事件写入同一 ``run_id``，随后更新 ``date_to`` /
+    ``final_equity`` / ``total_return`` / ``max_drawdown`` / ``trade_count`` /
+    ``win_rate`` / ``run_meta_json``；任一子表失败整体回滚，基准 run 保持原状。
+    首条新快照必须晚于既有最后快照，防止并发或重复提交把同一交易日写两次。
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            if not snapshots:
+                raise ValueError("增量没有生成任何每日快照，拒绝追加")
+            last = conn.execute(
+                "SELECT MAX(trade_date) FROM review_account_snapshots WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()[0]
+            first_new = snapshots[0].get("trade_date")
+            if last is not None and (first_new is None or first_new <= last):
+                raise ValueError("增量快照与既有快照日期重叠，拒绝追加")
+            _insert_children(conn, run_id, snapshots=snapshots, trades=trades,
+                             positions=positions, events=events)
+            cur = conn.execute(
+                "UPDATE review_account_runs SET date_to = ?, final_equity = ?, "
+                "total_return = ?, max_drawdown = ?, trade_count = ?, win_rate = ?, "
+                "run_meta_json = ? WHERE id = ?",
+                (date_to, final_equity, total_return, max_drawdown, trade_count,
+                 win_rate, run_meta_json, run_id),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("基准记录不存在，无法追加增量")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 

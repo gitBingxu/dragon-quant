@@ -41,8 +41,14 @@ def _sqlite_connect_call_sites(root: Path) -> list[str]:
     return sorted(sites)
 
 
-def test_only_two_sqlite_connection_sites():
+def test_only_three_sqlite_connection_sites():
+    """三个连接点：dragon.db 写、assets.db 写、共享严格只读（mode=ro）。
+
+    只读点单独成文件是为了让 research 永远无法通过写连接读取；三者都只在
+    ``infra`` 内，其他模块仍不得直接 ``sqlite3.connect``。
+    """
     assert _sqlite_connect_call_sites(ROOT / "dragon_quant") == [
         "dragon_quant/infra/assets/db.py",
         "dragon_quant/infra/storage/connection.py",
+        "dragon_quant/infra/storage/readonly.py",
     ]

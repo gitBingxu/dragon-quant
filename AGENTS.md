@@ -113,7 +113,7 @@ python -m dragon_quant dashboard          # 本地可视化面板（[web] 可选
 npm test
 ```
 - **E2E 安全边界**：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，每命令在独立临时根下运行并隔离网络 / Cookie / 云端；真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射与 golden**：`coverage-map.json` 固定 57 个 parser 节点 / 18 个顶层命令，新增命令必须同步；golden 只在批准的行为变更时更新，结构重构不得改 golden。
+- **覆盖映射与 golden**：`coverage-map.json` 固定 70 个 parser 节点 / 19 个顶层命令，新增命令必须同步；golden 只在批准的行为变更时更新，结构重构不得改 golden。
 - 细则（哨兵比对、fake provider 注入、打包边界）见 [development](docs/agent/development.md)。
 
 ### Git 规范

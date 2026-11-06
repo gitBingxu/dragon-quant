@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from dragon_quant.app import build_services
 from dragon_quant.infra.models import KBar
 from dragon_quant.infra.provider.bundle import ProviderBundle
+from dragon_quant.review_account.models import Snapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 PROVIDER_NAMES = ("tdx", "ths", "xueqiu", "tencent")
@@ -150,7 +151,10 @@ class TestReviewAccountInjection(unittest.TestCase):
         "date_from": "2026-09-01", "date_to": "2026-09-02",
         "initial_cash": 100_000.0, "final_equity": 100_000.0,
         "total_return": 0.0, "max_drawdown": 0.0, "trade_count": 0,
-        "win_rate": None, "snapshots": [], "trades": [], "positions": [], "events": [],
+        "win_rate": None,
+        "snapshots": [Snapshot("2026-09-02", 100_000.0, 0.0, 100_000.0,
+                               0.0, 0.0, 0.0)],
+        "trades": [], "positions": [], "events": [],
     }
 
     def _run(self, services=None):
@@ -166,8 +170,7 @@ class TestReviewAccountInjection(unittest.TestCase):
         with patch.object(AccountSimulator, "run", fake_run), \
                 patch("dragon_quant.review_account.service.annotate_post_exit"), \
                 patch("dragon_quant.review_account.service.account_store.create_review_account_run",
-                      return_value=1), \
-                patch("dragon_quant.review_account.service.account_store.save_review_account_results"):
+                      return_value=1):
             run_review_account("2026-09-01", "2026-09-02", verbose=False, services=services)
         return captured["data"]
 

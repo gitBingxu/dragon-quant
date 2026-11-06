@@ -86,6 +86,7 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
     app = create_app(settings)
     runner = getattr(app.state, "bs_runner", None)
     review_runner = getattr(app.state, "review_runner", None)
+    run_runner = getattr(app.state, "run_runner", None)
     config = uvicorn.Config(
         app,
         host="127.0.0.1",
@@ -154,6 +155,11 @@ async def _serve(handle: DashboardHandle, settings: DashboardSettings, url: str,
         if review_runner is not None:
             try:
                 review_runner.terminate()
+            except Exception:  # noqa: BLE001 - 同上
+                pass
+        if run_runner is not None:
+            try:
+                run_runner.terminate()
             except Exception:  # noqa: BLE001 - 同上
                 pass
         for signum in installed:

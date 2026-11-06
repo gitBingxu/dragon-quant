@@ -166,6 +166,42 @@ def review_runner(request: Request):
     return request.app.state.review_runner
 
 
+def run_runner(request: Request):
+    """从 ``app.state`` 取 scan / prep / auction 共享单飞作业（无 I/O）。"""
+    return request.app.state.run_runner
+
+
+def trade_calendar_probe(request: Request):
+    """从 ``app.state`` 取交易日历探测（首次 ``lookup`` 才联网 + 按日缓存）。"""
+    return request.app.state.trade_calendar
+
+
+def run_done_probe():
+    """当日是否已有扫描 / 复盘 / 竞价记录的只读探针（``create=False``）。
+
+    返回 ``probe(job, trade_date) -> bool``；三个仓储读取都是既有只读投影，
+    Web 层不新建连接、不写 SQL。
+    """
+    from dragon_quant.infra.assets import db as assets_db
+    from dragon_quant.infra.storage import paths as storage_paths
+    from dragon_quant.scan.storage import scans
+
+    def probe(job: str, trade_date: str) -> bool:
+        if job == "scan":
+            # scans.list_scan_dates 会经 _connect() 建库建表；只读判定不应在页面
+            # 轮询里顺手创建 dragon.db，因此库文件不存在时直接按「无记录」处理。
+            if not storage_paths.DB_PATH.is_file():
+                return False
+            return bool(scans.list_scan_dates(trade_date, trade_date))
+        if job == "prep":
+            return bool(assets_db.list_prep_snapshot_dates(trade_date, trade_date))
+        if job == "auction":
+            return bool(assets_db.list_auction_snapshot_dates(trade_date, trade_date))
+        raise ValueError(f"未注册的完成探针：{job}")
+
+    return probe
+
+
 def bs_repository():
     """``bs_runs`` / ``bs_signals`` 只读仓储。"""
     from dragon_quant.bs_eval import storage

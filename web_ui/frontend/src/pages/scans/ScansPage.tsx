@@ -4,6 +4,7 @@ import { Badge } from "../../components/Badge";
 import { DataTable, type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { RunActions } from "../../components/RunActions";
 import { Section } from "../../components/Section";
 import { IconRadar } from "../../components/icons";
 import { IconAlert } from "../../components/icons-extra";
@@ -95,6 +96,7 @@ export function ScansPage() {
   const [rows, setRows] = useState<ScanSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -111,7 +113,7 @@ export function ScansPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadToken]);
 
   const counts = useMemo(() => {
     const base: Record<ScanStatus, number> = {
@@ -128,12 +130,17 @@ export function ScansPage() {
       <PageHeader
         eyebrow="SCANS · 龙头扫描"
         title="扫描榜单"
-        description="只读 scans_v2 / scan_stocks_v2 / scan_logs_v2。状态由日志聚合推导：无日志不等于失败；未落库的崩溃没有记录，页面不伪造。"
         actions={
-          <span className="inline-flex items-center gap-1.5 text-caption text-ink-2">
-            <IconRadar size={14} />
-            共 <span className="num text-ink">{rows.length}</span> 次扫描
-          </span>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span className="inline-flex items-center gap-1.5 text-caption text-ink-2">
+              <IconRadar size={14} />
+              共 <span className="num text-ink">{rows.length}</span> 次扫描
+            </span>
+            <RunActions
+              job="scan"
+              onCompleted={() => setReloadToken((token) => token + 1)}
+            />
+          </div>
         }
       />
 
@@ -161,7 +168,7 @@ export function ScansPage() {
         {rows.length === 0 && !loading ? (
           <EmptyState
             title="暂无扫描记录"
-            description="先运行 dragon-quant scan --top 25 生成首份榜单。"
+            description="点击右上角「龙头扫描」或运行 dragon-quant scan --top 25 生成首份榜单。"
           />
         ) : (
           <DataTable

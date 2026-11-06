@@ -126,7 +126,7 @@ export function ScansPage() {
   return (
     <>
       <PageHeader
-        eyebrow="SCANS · 扫描榜单"
+        eyebrow="SCANS · 龙头扫描"
         title="扫描榜单"
         description="只读 scans_v2 / scan_stocks_v2 / scan_logs_v2。状态由日志聚合推导：无日志不等于失败；未落库的崩溃没有记录，页面不伪造。"
         actions={

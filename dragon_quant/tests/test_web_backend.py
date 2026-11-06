@@ -1141,7 +1141,7 @@ def _incremental_client(account, run_incremental):
                        run_incremental_account_backtest=run_incremental)
 
 
-def test_incremental_run_created_with_base_equity():
+def test_incremental_run_forwards_run_id_and_returns_run_row():
     account = FakeIncrementalAccount()
     calls = []
 

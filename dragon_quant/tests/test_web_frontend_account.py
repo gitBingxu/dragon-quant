@@ -46,7 +46,8 @@ def test_page_has_incremental_button_and_exact_tooltip():
     page = _account_page()
     for token in ("createIncrementalAccountRun", "增量回测中…", "增量回测",
                   'label="增量回测说明"', TOOLTIP, "actionError",
-                  "loadRuns(resp.data.id)", "disabled={!runId || incrementing}"):
+                  "loadRuns(resp.data.id)", "setDetailRefresh",
+                  "disabled={!runId || incrementing}"):
         assert token in page, token
     assert "HintIcon" in page
 

@@ -70,6 +70,8 @@ export function AccountPage() {
   const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [incrementing, setIncrementing] = useState(false);
+  // 增量是原地追加：runId 不变，必须显式触发详情重取（否则图表/表格保持旧数据）。
+  const [detailRefresh, setDetailRefresh] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   // 响应必须绑定发起时的 runId：切换 run 后旧响应不得覆盖新数据（D3）。
@@ -200,7 +202,7 @@ export function AccountPage() {
       .finally(() => {
         if (isCurrent()) setDetailLoading(false);
       });
-  }, [runId]);
+  }, [runId, detailRefresh]);
 
   const detailMatchesRun = runId != null && detailRunId === runId;
 
@@ -218,10 +220,12 @@ export function AccountPage() {
       try {
         await loadRuns(resp.data.id);
       } catch {
-        // 新记录已生成但列表刷新失败：至少让用户看到并选中它。
+        // 追加成功但列表刷新失败：至少让用户看到并选中原记录。
         setRuns([resp.data]);
         setRunId(resp.data.id);
       }
+      // 同一 runId 不会触发详情 effect，显式刷新快照/交割单/统计。
+      setDetailRefresh((n) => n + 1);
     } catch (exc) {
       setActionError(exc instanceof Error ? exc.message : String(exc));
     } finally {

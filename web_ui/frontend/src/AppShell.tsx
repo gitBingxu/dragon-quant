@@ -90,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ref={headerRef}
         className="sticky top-0 z-40 border-b border-hairline bg-header backdrop-blur-xl"
       >
-        <div className="mx-auto flex min-h-14 max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 sm:px-6">
+        <div className="mx-auto flex min-h-14 max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 sm:px-6 2xl:max-w-none 2xl:px-16">
           <Link to="/" className="order-1 flex shrink-0 items-center gap-2.5 no-underline">
             <BrandMark size={28} />
             <span className="hidden flex-col leading-none sm:flex">
@@ -152,9 +152,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6">{children}</main>
+      <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 sm:py-6 2xl:max-w-none 2xl:px-16">{children}</main>
 
-      <footer className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 px-4 pb-6 pt-2 text-caption text-ink-3 sm:px-6">
+      <footer className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 px-4 pb-6 pt-2 text-caption text-ink-3 sm:px-6 2xl:max-w-none 2xl:px-16">
         <span>Dragon Quant · 龙头战法量化筛选系统</span>
         <span className="font-mono">A股语义：红涨 · 绿跌</span>
       </footer>

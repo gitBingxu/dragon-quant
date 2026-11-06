@@ -116,3 +116,9 @@ Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
   按 `min rank → max score → latest created_at` canonical 去重并保留原始贡献数；
   T+1 开盘入场、固定 1/3/5 持有期净收益；不改 dragons gate 与生产候选池。
   历史未持久化否决候选时明确 `coverage_gap`，不虚造召回率。
+
+## research 读回（2026-11-06）
+
+- `scan/storage/research_reads.py` 是 owner 侧严格只读适配（`mode=ro`）：`scan_runs` / `scan_candidates` / `dragons` / `review_strict` / `scan_dates` / `contributions_by_date`。字段与既有 `scans.py` 投影一致，不建表、不写 WAL。
+- `research scan-quality` 与 Web `GET /api/research/scan-quality` 共用 `dragon_quant/research/scan_quality.py::run_scan_quality`；只替换连接适配层，不复制算法。分母、成熟度、排除原因、版本与 Web 相同 fixture 必须一致。
+- 数据源固定 v2；`scan_runs`/`scan_candidates` 的 `scan_id` 与 `scan_date` 是关联键；同日多次扫描的去重策略属于研究方，读回层不代为去重。

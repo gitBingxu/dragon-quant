@@ -136,6 +136,10 @@ COMMANDS: dict[str, LazyCommand] = {
     "sell": LazyCommand(
         "dragon_quant.commands.buy_sell", attribute="handle_sell"),
     "bs-eval": LazyCommand("dragon_quant.commands.bs_eval"),
+    # 研究 Facade：全部本地存量读取；experiments run 写实验报告但不构造 provider。
+    "research": LazyCommand(
+        "dragon_quant.commands.research",
+        needs_providers=_never_providers),
 }
 
 

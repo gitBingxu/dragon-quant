@@ -1,11 +1,11 @@
 ---
 name: dragon-quant
-description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, or 因子入库与读回 factor build/query with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
+description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, 因子入库与读回 factor build/query, 扫描诊断/识别质量归因 research scan-quality, 账户策略优化/消融实验 research experiments, or 历史证据读回 research account/signals/snapshots with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
 license: MIT
-compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
+compatibility: Requires dragon-quant CLI >=0.9.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
-  skill-version: "1.4.0"
-  min-cli-version: "0.8.0"
+  skill-version: "1.0.1"
+  min-cli-version: "0.9.0"
 ---
 
 # dragon-quant 交易日助手
@@ -35,18 +35,19 @@ metadata:
 
 1. **CLI 是否存在、版本是否够**：`dragon-quant -v`。项目内优先 `.venv/bin/python -m dragon_quant -v`。低于 `min-cli-version` 时停止，给出升级/安装指引；不要自动安装 Python 包。
 2. **叶子能力探测（最低版本之外）**：对本次要用的**叶子**命令取 help（如 `data quote -h`、`factor build -h`）；关键 flag/字段缺失时降级为只读解释，不猜测旧版行为，也不取父级 `-h` 把未开放子命令带进上下文。只使用白名单列出的参数。
-3. **能力是否在白名单**：只有 `references/commands.md` 的九类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
+3. **能力是否在白名单**：只有 `references/commands.md` 的十类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
 4. **时点门禁**：统一按 Asia/Shanghai 与交易日判断。`scan` 当日 15:00 前不执行；`prep` 当日 16:40 前不执行；`auction` 当日 09:25 前不执行。时段不满足时说明等待条件，不用 `--force` 绕过。
 5. **数据源**：个股 K 线/分时雪球链路为空或 403 时，改用 `--source tencent` 重试一次；仍失败则如实说明数据不可得。
 6. **授权范围（持续有效）**：授权按日期/动作/参数给出的明确范围（如「今天允许跑 prep 和因子 build」）
    在本会话内持续有效，不因「上一轮不算」反复确认；只有用户撤销、日期/动作/参数越界或出现新的
    高风险副作用时才补一次确认。T0 只读可直接执行；T1 写操作仍受动作上限约束。
-7. **执行后校验**：输出非空、JSON 可解析、`trade_date` 与请求日期一致、`scan_id`/`run_id` 与本次
-   记录一致；空行/失败字符串不等于成功。
+7. **执行后校验（按输出类型分流）**：`json` 才 `JSON.parse` 并检查 `schema_version` / `trade_date`
+   / `scan_id` / `run_id`；`json-lines` 逐行解析、空行只表示该行无数据；`human` 不强行 JSON 化，按
+   数值与字段核对；`url` 只核对启动日志里的真实地址与进程存活。空行/失败字符串不等于成功。
 
-## 能力白名单（九类）
+## 能力白名单（十类）
 
-只有下面九类能力可以执行，详细命令与参数见 `references/commands.md`：
+只有下面十类能力可以执行，详细命令与参数见 `references/commands.md`：
 
 1. **个股行情**：实时行情、日 K、分时、批量行情。
 2. **扫描与真龙**：当日扫描（默认 `--top 5`）→ 用**本次扫描记录**核验（`scan --date D --top 5`
@@ -58,7 +59,8 @@ metadata:
 6. **龙头回测**：先回测，再用 `dashboard` 打开面板。
 7. **账户回测**：先引导区间/资金，再回测，再用 `dashboard` 打开账户页（URL `/account`）。
 8. **因子入库**：仅三组内置因子的 `factor build --only` 与代表因子 `factor query` 读回。
-9. **可视化面板**：`dashboard`（T0 长驻，**默认只读、不生成 BS 派生数据**；显式 `--bs-autogen`/`DQ_BS_AUTOGEN=1` 才开启）；缺 `[web]` 时只给手动安装指令，禁止 `--yes` 自动安装。
+9. **可视化面板**：`dashboard`（T0 长驻，**默认只读、不生成 BS 派生数据**；显式 `--bs-autogen`/`DQ_BS_AUTOGEN=1` 才开启，此时按 T1 确认）；缺 `[web]` 时只给手动安装指令，禁止 `--yes` 自动安装。
+10. **研究读回与对照实验**：`research datasets/schema/query/scan-quality/account/signals/snapshots/strategy` 与 `research experiments list/show` 为 T0 只读；`research experiments run` 是 T1，必须 `--run-id N --confirm`。用于扫描诊断、识别质量归因、历史证据读回与策略消融；不构造 provider、不自动推广结论。详细问题→覆盖→样本→基线→实验流程见 `references/research.md`，数据集导航见 `references/datasets.md`。
 
 单能力请求只执行用户点名的那一个能力，不隐式附带其他写操作；只有用户明确说“每日全流程 / 每日量化入库 / 今天全套”时才按每日复合 workflow 执行。详见 `references/operations.md`。
 
@@ -68,11 +70,12 @@ metadata:
 拼成因果结论。
 
 - **识别质量是否改善**：需要同一期间、同一 `source`、同一评分/阈值版本的 `review` 机会样本
-  （成熟且有效的严格口径）与原始扫描候选对照（`/research` 的 scan-quality）；说明分子/分母、
+  （成熟且有效的严格口径）与原始扫描候选对照（`research scan-quality`）；说明分子/分母、
   成熟度、排除原因与基准差。事后机会只能称「机会质量/错失机会描述」。
 - **账户策略质量是否改善**：需要同一区间、资金、成本、上游候选母集与策略版本的
-  `review-account` 批次；用账户页「账户对照实验」显式生成消融结果，比较权益/回撤/交易数/
-  盈利率与基线差；样本不足或版本不一致时明确「不可比/证据不足」。
+  `review-account --json` 批次（取得真实 `run_id`）；再用 `research experiments run --run-id N --confirm`
+  显式生成消融结果，比较权益/回撤/交易数/盈利率与基线差；样本不足、版本不一致或
+  `status=insufficient_evidence` 时明确「不可比/证据不足」，`no_change` 不能当改进。
 - 两者都不能由单次结果推广默认策略；不自动改权重、阈值或参数。
 
 ## 胜率/成效解释契约（回答任何胜率前必须带）
@@ -84,7 +87,8 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 
 ## 交易日时点
 
-- `scan`：同一交易日 09:00–15:00 不执行实时扫描，说明 15:00 后更准确；不提供 `--force`。
+- `scan`：助手产品规则为**同一交易日 15:00 后**才执行实时扫描（比 CLI 的 09:00–15:00 更严格；
+  历史 `scan --date` 查询不受限）；说明 15:00 后更准确；不提供 `--force`。
 - `prep`：当日必须 ≥16:40；历史复盘用 `--date`，不受当日门禁。
 - `auction`：当日 ≥09:25 才有集合竞价终态。09:30 后仍读取/采集 09:25 终态并正常生成竞价报告，标注实际运行时点与缓存状态；只有额外行情观察才归“开盘后验证”，不得倒填为竞价事实。
 - 时点判断与 CLI 一致；CLI 报错时以报错为准，不伪造交易日。
@@ -150,6 +154,8 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 | `references/premarket.md` | 生成盘前预案（作战卡八段、一页结论、逐时点检查表）时 |
 | `references/evidence.md` | 盘前采集外部政策/公告/外围行情与信源分级时 |
 | `references/playbooks.md` | 遇到行情失败、门禁、空数据、因子缺失、UI 启动失败时 |
+| `references/research.md` | 扫描诊断、识别质量归因、账户策略消融与研究读回流程时 |
+| `references/datasets.md` | 需要选择 research 数据集、过滤器或解释 envelope 时 |
 | `references/operations.md` | 单能力/每日复合 workflow、UI 生命周期、因子三组名单时 |
 | `references/safety.md` | 执行任何 T1 命令前 |
 
@@ -164,5 +170,6 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 - 不要手工用 SQL 删改业务表。
 - 不要回显 Cookie、token 或同步凭据。
 - 不要把 `unverified`、`daily_fallback`、`degraded`、`missing_source` 的结果说成确定结论或 0。
-- 不要复制或推断评分权重、策略参数、表结构；需要时引用 `AGENTS.md`、对应 `docs/agent/*.md` 或 `STRATEGY.md`。
+- 不要复制或推断评分权重、策略参数、表结构；需要时引用 `AGENTS.md`、对应 `docs/agent/*.md` 或 `STRATEGY.md`；运行时字段以 `research schema` / JSON 输出为契约。
+- 不要把 `research experiments run` 说成只读，或在没有真实 `run_id` 时猜「最新批次就是本次」。
 - 不要自动安装/升级 Python 包，也不要执行 `npm publish`、`git commit`、`git push` 或 PR；这些由用户控制。

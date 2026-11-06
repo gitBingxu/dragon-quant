@@ -170,3 +170,17 @@
 - `query` 输出会带 `resolved_versions`；同名多版本不会混成多行；`values.rows == 0` 表示无行，不等于 0 分或中性。
 - 代表因子：`five_dim_composite`（scan）、`prep_review_score`（prep）、`auction_is_weak`（auction，数据不足时可合法无行）；`auction_strength` 仅在数据质量 `ok` 时作为二次抽查。
 - `prep_review_score` 属复盘分因子族；`prep_feedback_state` 的可用阶段是 T+1 盘后（`close`），当日无 T-1 计划时合法无行，不要当失败。
+
+## research envelope
+
+**看到什么**：`research ... --json` 的单个对象 `schema_version=research_v1`、`ok`、`command`、`request`、`data`、`meta`、`warnings`、`error`。
+
+- `meta` 固定含 `source=v2`、`data_quality`、`returned`、`truncated`、`next_cursor`、`versions_available`、`caveats`；跨库读取 `non_atomic_read=true`，不是冻结快照。
+- `empty_reason`：`database_missing` / `table_missing` / `no_rows_in_scope` / `run_not_found` / `no_experiments_for_run` 是不同结论；`ok=true` 的空集不是故障。
+- 分页：`next_cursor` 绑定 dataset/过滤器/字段；换过滤器后旧 cursor 被拒绝；`truncated=true` 不得说成全量。
+- `scan-quality` 的 `coverage` 给原始贡献 / canonical 候选 / 成熟样本 / 排除；`--include-samples` 时 `data.samples` 为样本账本页，`meta.samples_total/samples_truncated/samples_next_cursor` 说明分页；`status=insufficient_data` 时读 `reason`、`read_errors`、`coverage_gap`，不补 0。
+- `account` 的 `summary` 复用既有 evaluation：`win_rate` 分母是已平仓持仓；`contribution_basis` 区分本段权益贡献；`caliber.not_broker_statement=true`。
+- `signals` 的 `meta.signal_scope`：`not_broker_fills=true`，`diagnostics=unavailable_unless_stored`；半仓腿字段可能存在也可能为空。
+- `snapshots` 默认不返回大 payload；`research query --fields result|analysis` 才返回完整对象。
+- `strategy` 的 `basis=current_runtime` 与 `historical_run` 必须分清；historical 只用该批次冻结参数。
+- `experiments`：`list/show` 只读已存报告；`run` 返回 `experiment_id/status/variants/promoted`，`no_change` / `insufficient_evidence` 不是改进。

@@ -102,3 +102,9 @@ python -m dragon_quant sell --force
   「未知（旧数据缺期初估值 / 盯市价）」与「旧数据近似」。`AccountPage` 的四个核心请求
   改为 `Promise.allSettled` 逐项降级：单个统计端点失败只显示「部分数据暂不可用」，
   已加载的快照/交割单/持仓不被清空；请求序号仍防串批。
+
+## research 账户读回与对照实验（2026-11-06）
+
+- `review_account/research_reads.py` 提供专用只读查询（runs / snapshots / trades / positions / events / signals / experiments），`mode=ro`、不触发回测、不建 schema。研究 `account --view summary` 复用既有 `evaluation.metrics_from_rows`；胜率分母与贡献口径不变，缺 run 是空态而非 0 账户。
+- `review-account --json` 是兼容回执：只新增 JSON 输出（`run_id` + 区间/汇总），人读默认格式不变。Agent 必须先取真实 `run_id`，再用 `research account --run-id` 读回；禁止猜“最新批次就是本次”。
+- 对照实验的共享用例在 `dragon_quant/research/experiments.py`：Web 与 CLI 共用冻结期初/上游、未知 sell-rule 参数错误、进程内锁 + `locks/account_experiment.lock` 进程级互斥与异常释放；`list/show` 只读且不建锁文件。`no_change` / `insufficient_evidence` 不是改进。

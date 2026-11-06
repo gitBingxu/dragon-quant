@@ -19,13 +19,17 @@ ALLOWED_TOP = {
     "premarket",
     "factor",
     "review-account",
+    "research",
     "dashboard",
 }
 ALLOWED_DATA = {"quote", "kline", "minute", "batch-quote"}
-ALLOWED_FACTOR = {"build", "query"}
+ALLOWED_FACTOR = {"build", "list", "status", "query", "export", "eval",
+                  "decision-review"}
+ALLOWED_RESEARCH = {"datasets", "schema", "query", "scan-quality", "account",
+                    "signals", "snapshots", "strategy", "experiments"}
 
 EXCLUDED_DATA = ["sector", "components", "cookie-status", "cookie-fetch", "cookie-set"]
-EXCLUDED_FACTOR = ["list", "status", "eval", "decision-review", "export", "fin"]
+EXCLUDED_FACTOR = ["fin"]
 
 TOP_LEVEL_RE = re.compile(r"^\s{2,}([a-z][a-z0-9-]+)\s{2,}", re.MULTILINE)
 
@@ -103,6 +107,8 @@ class TestSkillRoutes(unittest.TestCase):
                 self.assertIn(sub, ALLOWED_DATA, route["command"])
             elif parent == "factor":
                 self.assertIn(sub, ALLOWED_FACTOR, route["command"])
+            elif parent == "research":
+                self.assertIn(sub, ALLOWED_RESEARCH, route["command"])
             else:
                 self.assertIsNone(sub, route["command"])
 
@@ -218,7 +224,7 @@ class TestSkillRoutes(unittest.TestCase):
     def test_excluded_capability_words_absent(self):
         """未开放能力的中文名称也不得以否定清单反向出现。"""
         blob = _skill_blob()
-        for word in ("因子注册", "因子评估", "因子导出", "财务同步"):
+        for word in ("财务同步",):
             self.assertNotIn(word, blob, word)
 
     def test_unavailable_policy_verbatim(self):

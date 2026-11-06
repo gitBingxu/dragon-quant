@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 
 
@@ -22,16 +23,35 @@ def handle(args, services):
         {"strategy_params": _shared.load_strategy_params(args.config)}
         if args.config else {}
     )
-    run_review_account(
+    want_json = bool(getattr(args, "json", False))
+    result = run_review_account(
         date_from=_normalize_cli_date(args.date_from),
         date_to=_normalize_cli_date(args.date_to),
         initial_cash=args.capital,
         source=args.source,
         strategy_name=args.strategy,
-        verbose=True,
+        verbose=not want_json,
         services=services,
         **(options or {}),
     )
+    if want_json:
+        # 兼容回执：只新增 JSON 输出，人读默认格式不变；供 Agent 取得真实 run_id
+        # 后再用 `research account --run-id` 读回。
+        print(json.dumps({
+            "ok": True,
+            "run_id": result.get("run_id"),
+            "source": result.get("source") or args.source,
+            "strategy_name": result.get("strategy_name") or args.strategy,
+            "date_from": result.get("date_from"),
+            "date_to": result.get("date_to"),
+            "date_to_clamped": bool(result.get("date_to_clamped")),
+            "initial_cash": result.get("initial_cash"),
+            "final_equity": result.get("final_equity"),
+            "total_return": result.get("total_return"),
+            "max_drawdown": result.get("max_drawdown"),
+            "trade_count": result.get("trade_count"),
+            "win_rate": result.get("win_rate"),
+        }, ensure_ascii=False, indent=2))
 
     if args.ui:
         _start_ui(args)

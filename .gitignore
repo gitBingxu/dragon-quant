@@ -44,3 +44,6 @@ node_modules/
 # superpowers plan workspace (scratch)
 .superpowers/
 .playwright-mcp/
+
+# 发布状态（不含凭据）
+.release/

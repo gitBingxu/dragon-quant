@@ -251,8 +251,8 @@ export function AccountPage() {
     <>
       <PageHeader
         eyebrow="ACCOUNT · 账户回测"
-        title="账户模拟交易"
-        description="按策略逐日撮合：权益与回撤曲线、上证同期、最新持仓、交割单、买点统计、单票汇总与决策时间线。红涨绿跌。"
+        title="模拟交易"
+
         actions={
           <>
             {runs.length > 0 ? (

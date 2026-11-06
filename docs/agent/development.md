@@ -32,6 +32,8 @@
 
 源码 `web_ui/frontend/`（Vite+React+TS+Tailwind CSS v4，构建期依赖；运行期仅 react/react-dom），产物 `web_ui/dist/`（已入库并随 wheel 分发）。运行期只需 Python，**不需要 Node**；改前端时才需 `npm run build`（`tsc --noEmit && vite build`，`base: "/"` 支持 `/scans/<id>` 深链刷新）。
 
+**本地开发（双进程，HMR）**：终端 1 跑后端 `python -m dragon_quant dashboard --no-browser`（默认 8765，需已装 `[web]`）；终端 2 跑 `npm --prefix web_ui/frontend run dev`（Vite 默认 5173），`vite.config.ts` 的 `server.proxy` 已把 `/api` 转发到 `http://127.0.0.1:8765`，因此**开发时只访问 5173**，改 `src/**` 热更新、数据仍来自真实后端。两个坑：① macOS 上访问 `http://localhost:5173`，不要用 `127.0.0.1:5173`（Vite 监听 `localhost`，在 macOS 解析到 `::1`，`127.0.0.1` 直接连接被拒）；② **8765 只托管 `web_ui/dist` 构建产物**，想在 `dragon-quant dashboard` 里看到源码改动必须 `npm run build`（产物入库，与源码同批提交），否则「改了没生效」。首次或 `node_modules` 缺失时先 `npm --prefix web_ui/frontend install`；不想碰真实库时加 `DQ_DATA_DIR=<临时目录>`。
+
 **三层结构**：`web_ui/backend/` 是 FastAPI 应用（`app.create_app` 工厂 / `serve.start_dashboard` 预绑定 socket + uvicorn / `routers/*` / `deps.py` 只读仓储适配 / `static.py` SPA + Cache-Control）；`web_ui/frontend/` 是源码；`web_ui/dist/` 是构建产物。`web_ui.start_dashboard` 是 **deprecated 薄壳**，内部委托 `start_dashboard`，保留旧签名供 `python -m web_ui.server` 与 `review --ui*` / `review-account --ui*` 过渡。
 
 **公共入口**：`web_ui.start_dashboard(port=8765, open_browser=True, default_source="v2", default_page="review", *, settings=None, block=True)`，`port=0` 由 OS 分配且 URL 取真实端口；`block=False` 返回 `DashboardHandle`（`.port` / `.stop()`），**不接管信号**。SIGTERM 由本项目安装的处理器转成 `server.should_exit`，进程以非零码退出（E2E W8 冻结）。

@@ -16,7 +16,6 @@ const PENDING_HINT =
 
 export function SummaryCards({
   summary,
-  coverage,
   caliber,
   pendingHeader,
   pendingFooter,
@@ -47,32 +46,8 @@ export function SummaryCards({
   // 三种原因都没有可用的严格结果；卡片只汇总成一个「无法评估」。
   const strictUnavailable =
     (s?.cannot_evaluate ?? 0) + partialWindow + partialMissing;
-  const covPartialWindow = coverage?.partial_window ?? coverage?.partial ?? 0;
-  const covPartialMissing = coverage?.partial_missing_bars ?? 0;
 
   return (
-    <div className="grid gap-2">
-      <div className="grid gap-1 rounded-lg border border-hairline px-3.5 py-2 text-caption text-ink-2">
-        <div>
-          <span className="font-semibold text-ink">全量覆盖</span>
-          （固定分母，不随筛选变化）：总记录 {coverage?.total ?? "—"} ·
-          已回测 {coverage?.derived_completed ?? coverage?.completed ?? "—"} ·
-          待回测 {coverage?.derived_pending ?? coverage?.pending ?? "—"}
-          {(coverage?.derived_pending_immature ?? 0) > 0
-            ? ` · 未成熟 ${coverage?.derived_pending_immature}`
-            : ""}
-          {covPartialWindow > 0 ? ` · 窗口未成熟 ${covPartialWindow}` : ""}
-          {covPartialMissing > 0 ? ` · 窗口缺K线 ${covPartialMissing}` : ""}
-        </div>
-        <div>
-          <span className="font-semibold text-ink">当前筛选</span>：
-          {s?.total ?? 0} 条 · 已回测 {s?.derived_completed ?? s?.completed ?? 0} ·
-          待回测 {s?.derived_pending ?? s?.pending ?? 0}
-          {(s?.derived_pending_immature ?? 0) > 0
-            ? ` · 未成熟 ${s?.derived_pending_immature}`
-            : ""}
-        </div>
-      </div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
       <StatCard label="总记录" value={s?.total ?? 0} />
       <StatCard label="已回测" value={s?.derived_completed ?? s?.completed ?? 0} />
@@ -123,7 +98,6 @@ export function SummaryCards({
           ) : undefined
         }
       />
-    </div>
     </div>
   );
 }

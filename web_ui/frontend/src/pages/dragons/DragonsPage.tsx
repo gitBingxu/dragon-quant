@@ -24,7 +24,8 @@ import {
 const DEFAULT_FILTERS: DragonFilters = {
   review_caliber: "strict",
   // 默认展示全部派生状态：待回测不能被默认筛选隐藏成 0（D4/R6）。
-  sort_by: "composite_score",
+  // 列表默认按入选日倒序：最新入选的龙头排在最前。
+  sort_by: "trade_date",
   sort_dir: "desc",
 };
 
@@ -45,7 +46,7 @@ export function DragonsPage() {
   const [coverage, setCoverage] = useState<Summary | null>(null);
   const [filters, setFilters] = useState<DragonFilters>(DEFAULT_FILTERS);
   const [rawData, setRawData] = useState<Dragon[]>([]);
-  const [sort, setSort] = useState<SortState>({ by: "composite_score", dir: "desc" });
+  const [sort, setSort] = useState<SortState>({ by: "trade_date", dir: "desc" });
   const [responseCaliber, setResponseCaliber] = useState<ReviewCaliber>("strict");
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ date: string; code: string } | null>(null);
@@ -146,6 +147,12 @@ export function DragonsPage() {
       if (rb != null) vb = typeof rb === "string" ? rb.toLowerCase() : (rb as number);
       if (va < vb) return dir === "asc" ? -1 : 1;
       if (va > vb) return dir === "asc" ? 1 : -1;
+      // 同日多行按综合分倒序兜底，避免翻页时行序抖动。
+      if (by === "trade_date") {
+        const sa = a.composite_score ?? -Infinity;
+        const sb = b.composite_score ?? -Infinity;
+        if (sa !== sb) return sa < sb ? 1 : -1;
+      }
       return 0;
     });
     return arr;

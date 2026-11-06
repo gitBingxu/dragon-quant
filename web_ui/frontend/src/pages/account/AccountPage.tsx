@@ -267,20 +267,18 @@ export function AccountPage() {
               <IconPlus size={15} />
               生成回测记录
             </button>
-            <span className="inline-flex items-center gap-1.5">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={runIncremental}
-                disabled={!runId || incrementing}
-              >
-                <IconRefresh size={15} />
-                {incrementing ? "增量回测中…" : "增量回测"}
-              </button>
-              <HintIcon label="增量回测说明">
+            <button
+              type="button"
+              className="btn btn-ghost group"
+              onClick={runIncremental}
+              disabled={!runId || incrementing}
+            >
+              <IconRefresh size={15} />
+              {incrementing ? "增量回测中…" : "增量回测"}
+              <HintIcon as="span" label="增量回测说明" align="end">
                 在当前回测记录与操盘策略的基础上对增量数据执行回测
               </HintIcon>
-            </span>
+            </button>
           </>
         }
       />

@@ -44,6 +44,9 @@ export function SummaryCards({
   const caliberLabel = isStrict ? "严格口径" : "宽松口径";
   const partialWindow = s?.partial_window ?? s?.partial ?? 0;
   const partialMissing = s?.partial_missing_bars ?? 0;
+  // 三种原因都没有可用的严格结果；卡片只汇总成一个「无法评估」。
+  const strictUnavailable =
+    (s?.cannot_evaluate ?? 0) + partialWindow + partialMissing;
   const covPartialWindow = coverage?.partial_window ?? coverage?.partial ?? 0;
   const covPartialMissing = coverage?.partial_missing_bars ?? 0;
 
@@ -104,9 +107,7 @@ export function SummaryCards({
         value={strictRate != null ? `${strictRate.toFixed(1)}%` : "—"}
         sub={
           `n=${strictN ?? 0}` +
-          ((s?.cannot_evaluate ?? 0) > 0 ? ` · 无法评估 ${s?.cannot_evaluate}` : "") +
-          (partialWindow > 0 ? ` · 窗口未成熟 ${partialWindow}` : "") +
-          (partialMissing > 0 ? ` · 窗口缺K线 ${partialMissing}` : "")
+          (strictUnavailable > 0 ? ` · 无法评估 ${strictUnavailable}` : "")
         }
         tone="neutral"
       />

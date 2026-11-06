@@ -232,8 +232,8 @@ export function fetchBsJobStatus() {
   return getJson<BsJobStatus>("/api/bs/jobs/status");
 }
 
-export function postBsRebuild() {
-  return postJson<BsJobStatus>("/api/bs/rebuild", {});
+export function postBsRebuild(mode: BsJobMode = "force") {
+  return postJson<BsJobStatus>(`/api/bs/rebuild?mode=${mode}`, {});
 }
 
 export function fetchBsBuys(

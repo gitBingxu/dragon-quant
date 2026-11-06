@@ -32,9 +32,11 @@ def test_page_source_has_title_empty_state_filters_and_pagination():
     for token in ("BS策略", "假想买卖点回放", "PaginatedDataTable",
                   "python -m dragon_quant bs-eval", "窗口不足",
                   "显示窗口不足样本", "半仓腿",
-                  "重新计算买卖点", "Modal", "fetchBsJobStatus", "postBsRebuild",
+                  "全部重算", "增量计算", "Modal", "fetchBsJobStatus",
+                  "postBsRebuild", "postBsRebuild(confirmMode)",
                   "aria-live", "数据生成中"):
         assert token in page, token
+    assert "重新计算买卖点" not in page
     card = _read(FRONTEND / "pages" / "bs" / "StrategyCard.tsx")
     for token in ("四类买点", "十条卖出规则", "评估口径", "回放上限"):
         assert token in card, token
@@ -43,8 +45,9 @@ def test_page_source_has_title_empty_state_filters_and_pagination():
 def test_api_router_and_nav_are_wired():
     api = _read(FRONTEND / "api" / "bs.ts")
     for path in ("/api/bs/overview", "/api/bs/buys", "/api/bs/sells",
-                 "/api/bs/jobs/status", "/api/bs/rebuild"):
+                 "/api/bs/jobs/status", "/api/bs/rebuild?mode="):
         assert path in api, path
+    assert 'mode: BsJobMode = "force"' in api
     router = _read(FRONTEND / "router.tsx")
     assert "BsPage" in router and "/^\\/bs$/" in router
     shell = _read(FRONTEND / "AppShell.tsx")
@@ -65,7 +68,8 @@ def test_dist_is_built_and_contains_static_page_contract():
     for token in ("BS策略", "假想买卖点回放", "四类买点",
                   "十条卖出规则", "评估口径", "回放上限",
                   "python -m dragon_quant bs-eval", "窗口不足",
-                  "重新计算买卖点", "/api/bs/jobs/status", "/api/bs/rebuild"):
+                  "全部重算", "增量计算", "/api/bs/jobs/status",
+                  "/api/bs/rebuild?mode="):
         assert token in js, token
 
 

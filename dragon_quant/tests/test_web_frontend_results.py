@@ -75,6 +75,30 @@ def test_prep_adapter_has_explicit_fallback_chain() -> None:
         assert token in text, f"prepModel 缺少 {token!r}"
 
 
+def test_strict_win_rate_card_merges_unavailable_reasons() -> None:
+    """严格胜率卡只显示一个「无法评估 N」，不再拆窗口未成熟/缺K线。"""
+
+    text = _read(SRC / "pages" / "dragons" / "SummaryCards.tsx")
+    assert "strictUnavailable" in text
+    assert "(s?.cannot_evaluate ?? 0) + partialWindow + partialMissing" in text
+    # 卡片 sub 只有一处「· 无法评估」；分项文案仅保留在全量覆盖行。
+    assert text.count(" · 无法评估 ") == 1
+
+
+def test_dragons_default_sort_is_trade_date_desc() -> None:
+    text = _read(SRC / "pages" / "dragons" / "DragonsPage.tsx")
+    assert 'sort_by: "trade_date"' in text
+    assert 'sort_dir: "desc"' in text
+    assert 'useState<SortState>({ by: "trade_date", dir: "desc" })' in text
+    # 同日行按综合分兜底，保证分页顺序稳定。
+    assert "composite_score" in text
+
+
+def test_prep_page_drops_current_trade_date_header_action() -> None:
+    text = _read(SRC / "pages" / "prep" / "PrepPage.tsx")
+    assert "当前交易日" not in text
+
+
 def test_prep_page_drops_raw_json_and_uses_new_sections() -> None:
     """原始 JSON 块已删除（调试走 API/CLI）；五区块顺序固定。"""
     page = _read(SRC / "pages" / "prep" / "PrepPage.tsx")

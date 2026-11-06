@@ -181,13 +181,6 @@ export function PrepPage() {
         eyebrow="PREP · 盘后复盘"
         title="盘后复盘"
         description="查看复盘核心结果、当前效果、资产明细与全历史准确率。所有日期都可点击，缺数据如实展示缺失。"
-        actions={
-          date ? (
-            <span className="text-caption text-ink-2">
-              当前交易日 <span className="num text-ink">{date}</span>
-            </span>
-          ) : null
-        }
       />
 
       {error ? (

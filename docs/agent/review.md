@@ -42,7 +42,7 @@ python -m dragon_quant review --ui-only               # 仅看结果
 
 **排序键兼容**：`sort_by` 先归一到逻辑键再按口径取物理列（`buy_date` / `buy_price` / `max_return_5d` / `max_drawdown_5d` / `max_return_hold_days` / `review_status`）；旧客户端传 `strict_*` 键在 loose 下语义降级为宽松列（v1 同类降级沿用现状），未知键回退 `composite_score`，`NULLS LAST` 两口径一致。
 
-**前端行为**：FilterBar 在「体系」后新增「口径」Select（默认严格；v1 固定宽松并禁用；切体系 / 切口径导致生效口径变为宽松时，同 patch 把严格专有的 `pending_recompute` / `cannot_evaluate` 状态清空为「全部」，宽松选项列表不含这两项；「重置」保留 source，v2 回严格、v1 保持宽松）。表格、卡片与客户端排序都使用**已加载响应**的口径（`responseCaliber` 与 `data` / `summary` 在 `requestSeq` 守卫内原子写入），不使用表单待提交值。状态列展示服务端 `derived_status`，状态表头排序也按 `derived_status`（不再按可能为 `NULL` 的 `strict_review_status`）。卡片平均收益 / 最佳随口径选择键；宽松胜率与严格胜率两张卡始终同时展示；「待回测」的「待重算 / 失败」副文案来自严格侧重算进度，仅 v2 + strict 展示。
+**前端行为**：FilterBar 在「体系」后新增「口径」Select（默认严格；v1 固定宽松并禁用；切体系 / 切口径导致生效口径变为宽松时，同 patch 把严格专有的 `pending_recompute` / `cannot_evaluate` 状态清空为「全部」，宽松选项列表不含这两项；「重置」保留 source，v2 回严格、v1 保持宽松）。**列表默认按入选日倒序**（`sort_by=trade_date` / `sort_dir=desc`，同日行按 `composite_score` 倒序兜底保证翻页稳定）。表格、卡片与客户端排序都使用**已加载响应**的口径（`responseCaliber` 与 `data` / `summary` 在 `requestSeq` 守卫内原子写入），不使用表单待提交值。状态列展示服务端 `derived_status`，状态表头排序也按 `derived_status`（不再按可能为 `NULL` 的 `strict_review_status`）。卡片平均收益 / 最佳随口径选择键；宽松胜率与严格胜率两张卡始终同时展示；「待回测」的「待重算 / 失败」副文案来自严格侧重算进度，仅 v2 + strict 展示。
 
 ## 龙头总览增量回测作业（Web，2026-11-05）
 

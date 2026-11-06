@@ -2199,6 +2199,48 @@ def test_bs_rebuild_202_then_409_and_origin_guard():
     assert client.get("/api/bs/jobs/status").json()["state"] == "succeeded"
 
 
+def test_bs_rebuild_incremental_mode_spawns_without_force():
+    from web_ui.backend.bs_runner import BsRunner
+
+    gate = threading.Event()
+    seen: list[list[str]] = []
+
+    def opener(argv, **kwargs):
+        seen.append(list(argv))
+        return _FakeProc(gate=gate)
+
+    runner = BsRunner(popener=opener)
+    client = make_client(bs_runner=runner)
+
+    response = client.post("/api/bs/rebuild?mode=incremental",
+                           headers={"Origin": "http://localhost:8765"})
+    assert response.status_code == 202
+    body = response.json()
+    assert body["state"] == "running"
+    assert body["last_run"]["mode"] == "incremental"
+    assert body["last_run"]["trigger"] == "manual"
+    assert seen and "--force" not in seen[0]
+    assert seen[0][-2:] == ["--source", "v2"]
+
+    gate.set()
+    assert _wait_job_state(runner, "succeeded")["last_run"]["exit_code"] == 0
+
+
+def test_bs_rebuild_rejects_unknown_mode_without_spawning():
+    from web_ui.backend.bs_runner import BsRunner
+
+    def opener(argv, **kwargs):  # pragma: no cover - 不应被调用
+        raise AssertionError("invalid mode must not spawn a job")
+
+    runner = BsRunner(popener=opener)
+    client = make_client(bs_runner=runner)
+
+    response = client.post("/api/bs/rebuild?mode=evil")
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_request"
+    assert runner.status() == {"state": "idle", "last_run": None}
+
+
 def test_bs_rebuild_spawn_failure_is_500_and_status_failed():
     from web_ui.backend.bs_runner import BsRunner
 

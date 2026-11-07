@@ -92,9 +92,6 @@ python -m dragon_quant dashboard          # 本地可视化面板（[web] 可选
 
 ---
 
-### Cookie 失效处理
-
-板块数据用同花顺（无需 Cookie）。个股依赖雪球 Cookie（有效期几天到数周），返回空/403 先查雪球 Cookie 状态。
 
 ### 测试与 E2E 门禁
 

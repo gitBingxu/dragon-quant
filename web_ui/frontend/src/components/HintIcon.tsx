@@ -5,17 +5,23 @@ import { IconInfo } from "./icons";
 /**
  * 可访问的小提示：hover / focus 打开，mouseleave / blur / Escape 关闭。
  * 只用现有 token，不引入 UI 库或全局状态。
+ *
+ * ``as="span"`` 供「提示图标放在按钮内部」的场景使用：不能嵌套 ``<button>``，
+ * 显隐改由外层按钮的 ``group`` hover / focus-visible 驱动（纯 CSS，无状态）。
  */
 export function HintIcon({
   label,
   children,
   side = "bottom",
   align = "center",
+  as = "button",
 }: {
   label: string;
   children: ReactNode;
   side?: "bottom" | "top";
   align?: "center" | "start" | "end";
+  /** span：非交互触发器，要求最近的祖先元素带 ``group`` 类。 */
+  as?: "button" | "span";
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -27,6 +33,28 @@ export function HintIcon({
       : align === "end"
         ? "right-0"
         : "left-1/2 -translate-x-1/2";
+  const placement = `absolute z-30 w-56 ${horizontal} rounded-md border border-hairline bg-panel-2 px-2.5 py-1.5 text-left text-caption font-normal leading-relaxed text-ink-2 ${
+    side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5"
+  }`;
+
+  if (as === "span") {
+    return (
+      <span
+        className="relative inline-flex items-center"
+        role="img"
+        aria-label={label}
+      >
+        <IconInfo size={13} className="text-ink-3" />
+        <span
+          role="tooltip"
+          className={`${placement} pointer-events-none invisible group-hover:visible group-focus-visible:visible`}
+          style={{ boxShadow: "var(--shadow-overlay)" }}
+        >
+          {children}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span className="relative inline-flex">
@@ -49,9 +77,7 @@ export function HintIcon({
         <span
           id={id}
           role="tooltip"
-          className={`absolute z-30 w-56 ${horizontal} rounded-md border border-hairline bg-panel-2 px-2.5 py-1.5 text-left text-caption font-normal leading-relaxed text-ink-2 ${
-            side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5"
-          }`}
+          className={placement}
           style={{ boxShadow: "var(--shadow-overlay)" }}
         >
           {children}

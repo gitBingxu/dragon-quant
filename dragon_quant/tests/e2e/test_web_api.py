@@ -531,8 +531,8 @@ def _assert_float_fields(actual: dict, expected: dict, keys: tuple[str, ...]) ->
             key, actual.get("trade_date"), actual[key], expected[key])
 
 
-def test_w5_incremental_run_matches_full_replay():
-    """D2 强证据：A(09-04~09-08) + 增量 → C 与 B(09-04~09-11) 重叠日期逐值一致。"""
+def test_w5_incremental_appends_to_base_and_matches_full_replay():
+    """D2 强证据：A(09-04~09-08) 原地追加 → A 与 B(09-04~09-11) 重叠日期逐值一致。"""
     with sandbox("m1f1-account-incremental") as box:
         seed_account(box)
         with web_server(box, server_command(REVIEW_UI, 0),
@@ -563,26 +563,30 @@ def test_w5_incremental_run_matches_full_replay():
                                       payload={"run_id": base_id}, timeout=60.0)
             assert inc_resp.status == 201, inc_resp.text
             inc_body = inc_resp.json()
-            inc_id = inc_body["run_id"]
+            assert inc_body["run_id"] == base_id            # 原地追加，不新建 run
             inc_run = inc_body["data"]
-            assert inc_run["date_from"] == "2026-09-09"
+            assert inc_run["date_from"] == "2026-09-04"     # 起点不变
             assert inc_run["date_to"] == "2026-09-11"
             assert inc_run["initial_cash"] == 100000
-            assert floats_close(inc_run["base_equity"], base["data"]["final_equity"],
-                                rel=0, abs_tol=1e-6)
-            assert "增量 2026-09-09" in inc_run["display_name"]
+            assert inc_run["display_name"] == "基准"         # 名称不追加后缀
+            assert inc_run["base_equity"] is None
+            assert server.request("GET", "/api/account/runs").json()["count"] == 2
 
-            inc_snapshots = _run_rows(server, "snapshots", inc_id)
+            base_snapshots = _run_rows(server, "snapshots", base_id)
+            assert [row["trade_date"] for row in base_snapshots] == [
+                "2026-09-04", "2026-09-07", "2026-09-08",
+                "2026-09-09", "2026-09-10", "2026-09-11"]
+            inc_snapshots = [row for row in base_snapshots
+                             if row["trade_date"] >= "2026-09-09"]
             full_snapshots = [row for row in _run_rows(server, "snapshots", full_id)
                               if row["trade_date"] >= "2026-09-09"]
-            assert [row["trade_date"] for row in inc_snapshots] == [
-                "2026-09-09", "2026-09-10", "2026-09-11"]
-            assert len(inc_snapshots) == len(full_snapshots)
+            assert len(inc_snapshots) == len(full_snapshots) == 3
             for actual, expected in zip(inc_snapshots, full_snapshots):
                 _assert_float_fields(actual, expected,
                                      ("cash", "market_value", "total_equity"))
 
-            inc_trades = _run_rows(server, "trades", inc_id)
+            inc_trades = [row for row in _run_rows(server, "trades", base_id)
+                          if row["trade_date"] >= "2026-09-09"]
             full_trades = [row for row in _run_rows(server, "trades", full_id)
                            if row["trade_date"] >= "2026-09-09"]
             assert inc_trades, "增量期应至少有一笔成交，否则 oracle 不成立"
@@ -597,7 +601,8 @@ def test_w5_incremental_run_matches_full_replay():
                                      ("price", "amount", "fee", "realized_pnl",
                                       "cash_after"))
 
-            inc_positions = _run_rows(server, "positions", inc_id)
+            inc_positions = [row for row in _run_rows(server, "positions", base_id)
+                             if (row["exit_date"] or "") >= "2026-09-09"]
             full_positions = [row for row in _run_rows(server, "positions", full_id)
                               if (row["exit_date"] or "") >= "2026-09-09"]
             assert len(inc_positions) == len(full_positions)
@@ -607,19 +612,16 @@ def test_w5_incremental_run_matches_full_replay():
                 _assert_float_fields(actual, expected,
                                      ("entry_price", "exit_price", "realized_return"))
 
-            # D7：指数等效权益与账户曲线从同一起点（base_equity）起算。
-            inc_bench = server.request(
-                "GET", f"/api/account/benchmark?run_id={inc_id}").json()
-            base_bench = server.request(
+            # 追加后 run 仍是整条记录：指数线与账户线同以 initial_cash 起算。
+            bench = server.request(
                 "GET", f"/api/account/benchmark?run_id={base_id}").json()
-            assert floats_close(inc_bench["data"][0]["total_equity"],
-                                base["data"]["final_equity"], rel=0, abs_tol=1e-6)
-            assert floats_close(base_bench["data"][0]["total_equity"],
+            assert floats_close(bench["data"][0]["total_equity"],
                                 100000.0, rel=0, abs_tol=1e-6)
+            assert bench["data"][-1]["trade_date"] == "2026-09-11"
 
             # D3：已经覆盖最近已收盘日 → 400 中文原因。
             again = server.request("POST", "/api/account/runs/incremental",
-                                   payload={"run_id": inc_id}, timeout=60.0)
+                                   payload={"run_id": base_id}, timeout=60.0)
             assert again.status == 400
             assert "无新增数据" in again.json()["error"]
 
@@ -633,7 +635,7 @@ def test_w5_incremental_run_matches_full_replay():
             assert missing_id.status == 400
             assert missing_id.json() == {"error": "missing run_id"}
 
-            for run_id in (inc_id, full_id, base_id):
+            for run_id in (full_id, base_id):
                 deleted = server.request(
                     "DELETE", f"/api/account/runs?run_id={run_id}")
                 assert deleted.status == 200, deleted.text

@@ -40,14 +40,20 @@ def default_command(mode: JobMode) -> list[str]:
 
 @dataclass(frozen=True)
 class JobSnapshot:
-    """最近一次任务快照；``running`` 期间结果字段为 ``None``。"""
+    """最近一次任务快照；``running`` 期间结果字段为 ``None``。
 
-    mode: JobMode
+    ``job`` / ``label`` 只有 ``start_command`` 路径会填（scan / prep / auction
+    共享单飞作业），BS / 回测作业保持 ``None``，既有响应对应键值不变。
+    """
+
+    mode: str
     trigger: JobTrigger
     started_at: str
     finished_at: str | None = None
     exit_code: int | None = None
     output_tail: str | None = None
+    job: str | None = None
+    label: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +63,8 @@ class JobSnapshot:
             "finished_at": self.finished_at,
             "exit_code": self.exit_code,
             "output_tail": self.output_tail,
+            "job": self.job,
+            "label": self.label,
         }
 
 
@@ -91,6 +99,14 @@ class BsRunner:
 
     def start_force(self, trigger: JobTrigger) -> JobSnapshot:
         return self._start("force", trigger)
+
+    def start_command(self, argv: Sequence[str], *, job: str, label: str,
+                      trigger: JobTrigger = "manual") -> JobSnapshot:
+        """以显式 argv 启动任务（scan / prep / auction 共享单飞作业）。
+
+        argv 由注册表按白名单字段组装，**以列表传给 Popen**，绝不拼 shell。
+        """
+        return self._start(job, trigger, argv=list(argv), job=job, label=label)
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -135,16 +151,20 @@ class BsRunner:
         last_lines = "\n".join(stripped.splitlines()[-self._output_lines:])
         return last_lines[-self._output_chars:]
 
-    def _start(self, mode: JobMode, trigger: JobTrigger) -> JobSnapshot:
-        argv = list(self._command_factory(mode))
+    def _start(self, mode: str, trigger: JobTrigger, *,
+               argv: Sequence[str] | None = None,
+               job: str | None = None,
+               label: str | None = None) -> JobSnapshot:
+        command = list(argv) if argv is not None else list(self._command_factory(mode))
         with self._lock:
             if self._state == "running":
                 raise BsJobBusy("BS 数据生成已在进行中")
-            snapshot = JobSnapshot(mode=mode, trigger=trigger, started_at=_now())
+            snapshot = JobSnapshot(mode=mode, trigger=trigger, started_at=_now(),
+                                   job=job, label=label)
             self._last_run = snapshot
             try:
                 proc = self._popener(
-                    argv,
+                    command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,

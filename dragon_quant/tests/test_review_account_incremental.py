@@ -329,6 +329,24 @@ class TestIncrementalService(_IncrementalBase):
             run_incremental_review_account(run_id, verbose=False)
         self.assertEqual(str(caught.exception), "仅支持对 v2 回测记录做增量")
 
+    def test_rejects_legacy_incremental_base(self):
+        # 旧版增量 run 的 initial_cash 与快照起点不同源，不能再追加。
+        cfg = StrategyConfig(initial_cash=100_000.0)
+        run_id = account_store.create_review_account_run(
+            source="v2", strategy_name="dragon_pullback_daily",
+            strategy_params_json=json.dumps(cfg.to_json_dict(), ensure_ascii=False),
+            date_from="2026-09-09", date_to=BASE_TO, initial_cash=100_000.0,
+            final_equity=101_000.0, total_return=1.0, max_drawdown=0.0,
+            trade_count=0, win_rate=None, base_equity=101_000.0,
+        )
+        account_store.save_review_account_results(
+            run_id, snapshots=[_snapshot(BASE_TO, 101_000.0, 0.0, [])],
+            trades=[], positions=[], events=[])
+        with patch("dragon_quant.review_account.service.MarketData",
+                   side_effect=AssertionError("不应构造行情")):
+            with self.assertRaisesRegex(ValueError, "旧版增量"):
+                run_incremental_review_account(run_id, verbose=False)
+
     def test_rejects_incomplete_base_rows(self):
         run_id = self._seed_run(params={})
         with self.assertRaisesRegex(ValueError, "缺少可用的策略参数快照"):
@@ -349,7 +367,7 @@ class TestIncrementalService(_IncrementalBase):
         with self.assertRaisesRegex(ValueError, "基准记录不存在"):
             run_incremental_review_account(999_999, verbose=False)
 
-    def test_persists_incremental_run_and_inherits_strategy(self):
+    def test_appends_to_base_run_and_updates_run_row(self):
         base_equity = 101_000.0
         run_id = self._seed_run(
             initial_cash=100_000.0,
@@ -363,25 +381,31 @@ class TestIncrementalService(_IncrementalBase):
                       return_value=(None, None, None)):
             result = run_incremental_review_account(run_id, verbose=False)
 
-        run = account_store.get_review_account_run(result["run_id"])
-        base = account_store.get_review_account_run(run_id)
-        self.assertIsNone(base["base_equity"])
-        self.assertEqual(run["base_equity"], base_equity)
+        # 原地续算：不新增 run，基准 run 被追加后续快照并更新汇总列。
+        self.assertEqual(result["run_id"], run_id)
+        self.assertEqual(len(account_store.query_review_account_runs()), 1)
+        run = account_store.get_review_account_run(run_id)
+        self.assertIsNone(run["base_equity"])          # 仍是全量 run
+        self.assertEqual(run["date_from"], "2026-09-04")
+        self.assertEqual(run["date_to"], "2026-09-11")
+        self.assertEqual(run["display_name"], "基准")   # 名称不追加后缀
         self.assertEqual(run["source"], "v2")
         self.assertEqual(run["strategy_name"], "dragon_pullback_daily")
-        self.assertEqual(run["strategy_params"], base["strategy_params"])
         self.assertEqual(run["initial_cash"], 100_000.0)
-        self.assertEqual((run["date_from"], run["date_to"]),
-                         ("2026-09-09", "2026-09-11"))
-        self.assertEqual(run["display_name"], "基准 · 增量 2026-09-09")
+        self.assertAlmostEqual(run["final_equity"], result["final_equity"])
+        self.assertAlmostEqual(
+            run["total_return"], (run["final_equity"] / 100_000.0 - 1) * 100)
+        self.assertAlmostEqual(run["max_drawdown"],
+                               min(s["drawdown"] for s in
+                                   account_store.query_review_account_snapshots(run_id)))
 
-        runs = account_store.query_review_account_runs()
-        self.assertEqual(runs[0]["id"], run["id"])  # additive 键：列表行也返回 base_equity
-        self.assertEqual(runs[0]["base_equity"], base_equity)
-
-        snapshots = account_store.query_review_account_snapshots(result["run_id"])
+        snapshots = account_store.query_review_account_snapshots(run_id)
         self.assertEqual([s["trade_date"] for s in snapshots],
-                         ["2026-09-09", "2026-09-10", "2026-09-11"])
+                         [BASE_TO, "2026-09-09", "2026-09-10", "2026-09-11"])
+        segments = run["run_meta"]["incremental_segments"]
+        self.assertEqual(len(segments), 1)
+        self.assertEqual((segments[0]["date_from"], segments[0]["date_to"]),
+                         ("2026-09-09", "2026-09-11"))
 
     def test_snapshot_end_mismatch_aborts_before_persist(self):
         run_id = self._seed_run()
@@ -404,8 +428,15 @@ class TestIncrementalService(_IncrementalBase):
             str(caught.exception),
             "增量日历与行情快照不一致（终点 2026-09-11，最后快照 2026-09-09），请重试",
         )
-        # 中止发生在落库前：只保留基准 run，没有半条增量记录。
+        # 中止发生在落库前：基准 run 的快照与汇总列都不变。
         self.assertEqual(len(account_store.query_review_account_runs()), 1)
+        base = account_store.get_review_account_run(run_id)
+        self.assertEqual(base["date_to"], BASE_TO)
+        self.assertEqual(
+            [s["trade_date"] for s in
+             account_store.query_review_account_snapshots(run_id)],
+            [BASE_TO],
+        )
 
     def test_second_incremental_reports_no_new_data(self):
         run_id = self._seed_run()
@@ -416,8 +447,9 @@ class TestIncrementalService(_IncrementalBase):
                 patch("dragon_quant.review_account.market.prep_snapshot_for",
                       return_value=(None, None, None)):
             result = run_incremental_review_account(run_id, verbose=False)
+            self.assertEqual(result["run_id"], run_id)
             with self.assertRaises(ValueError) as caught:
-                run_incremental_review_account(result["run_id"], verbose=False)
+                run_incremental_review_account(run_id, verbose=False)
         self.assertIn("无新增数据", str(caught.exception))
 
 
@@ -446,7 +478,8 @@ class TestChainEqualsFull(_IncrementalBase):
                                   display_name="基准")
         incremental = run_incremental_review_account(base["run_id"], verbose=False)
 
-        inc_snapshots = account_store.query_review_account_snapshots(incremental["run_id"])
+        inc_snapshots = [s for s in account_store.query_review_account_snapshots(
+            incremental["run_id"]) if s["trade_date"] >= "2026-09-09"]
         full_snapshots = [s for s in account_store.query_review_account_snapshots(full["run_id"])
                           if s["trade_date"] >= "2026-09-09"]
         self.assertEqual([s["trade_date"] for s in inc_snapshots],
@@ -456,7 +489,8 @@ class TestChainEqualsFull(_IncrementalBase):
                 self.assertAlmostEqual(inc[key], ref[key], places=6,
                                        msg=f"{inc['trade_date']} {key}")
 
-        inc_trades = account_store.query_review_account_trades(incremental["run_id"])
+        inc_trades = [t for t in account_store.query_review_account_trades(
+            incremental["run_id"]) if t["trade_date"] >= "2026-09-09"]
         full_trades = [t for t in account_store.query_review_account_trades(full["run_id"])
                        if t["trade_date"] >= "2026-09-09"]
         self.assertTrue(inc_trades, "增量期应至少有一笔成交，否则 oracle 不成立")
@@ -467,7 +501,8 @@ class TestChainEqualsFull(_IncrementalBase):
                         "reason_code"):
                 self.assertEqual(inc[key], ref[key], msg=key)
 
-        inc_positions = account_store.query_review_account_positions(incremental["run_id"])
+        inc_positions = [p for p in account_store.query_review_account_positions(
+            incremental["run_id"]) if (p["exit_date"] or "") >= "2026-09-09"]
         full_positions = [p for p in account_store.query_review_account_positions(full["run_id"])
                           if (p["exit_date"] or "") >= "2026-09-09"]
         self.assertEqual(len(inc_positions), len(full_positions))
@@ -476,11 +511,12 @@ class TestChainEqualsFull(_IncrementalBase):
                         "exit_price", "realized_return", "hold_days", "status"):
                 self.assertEqual(inc[key], ref[key], msg=key)
 
-        # 增量 run 的收益率分母是基准最后权益，不是 initial_cash。
+        # 返回值描述追加后的整条 run：收益率分母是 initial_cash。
         self.assertEqual(incremental["base_equity"], base["final_equity"])
+        self.assertEqual(incremental["date_from"], "2026-09-04")
         self.assertAlmostEqual(
             incremental["total_return"],
-            (incremental["final_equity"] / base["final_equity"] - 1) * 100,
+            (incremental["final_equity"] / 100_000.0 - 1) * 100,
         )
 
 

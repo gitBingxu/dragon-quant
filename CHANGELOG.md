@@ -10,42 +10,50 @@
 - 截至主分支 `aafe8e0`，覆盖 18 次 MR 合入（编号为 1～5、8～18、20～21）。`v0.2.3` 标签不在 main 历史中，不列作主分支发布；尚未合入 main 的分支提交不计入已发布版本。
 - `0.1.0` 无对应 Git 标签，保留首版日期并按早期提交校正功能归属；后续版本均注明标签与版本提交。
 
-## [Unreleased]
+## [0.8.0] - 2026-11-08
 
 ### Added
-- `dashboard` 命令 + P0 五页（总览 / 扫描 / 因子 / 复盘 / 账户）与只读 FastAPI 后端。
-- 新增独立 `/auction` 集合竞价页（运行概况 / 竞价结果 / 成效 / 资产日历 / 当日逐股明细）与导航。
-- 新只读端点：`GET /api/prep/calendar`、`GET /api/prep/{date}/review-context`、`GET /api/auction/calendar`、`GET /api/auction/{date}/effect`、`GET /api/scans/{id}/logs`。
-- 复盘/竞价「近一年资产日历 + 当日表格」：三态 + 合法缺席豁免，**所有日期可点击**（完全缺失日返回 200 与全部应有资产缺失，不 404）。
-- 扫描列表批量补 `真龙数 / 错误数 / 日志条数 / 状态`（`已完成 / 已完成·有异常 / 已完成·无日志`）；详情新增错误摘要与日志分页。
-- 复盘成效复用既有 `plan_review` / `feedback`：否决股后续表现、推荐对照、计划执行与「当日开→收」事实；前日市场建议与今日实际并排。
-- 竞价成效复用 `factor decision-review` 口径，行情**只读本地 `prep_assets.stock_daily`**，打开页面不触网。
-- `[web]` 可选 extra（fastapi + uvicorn）；首次调用 `dashboard` 交互式安装，非 TTY / 失败降级为手动指令。
-- `GET /api/dragons/{trade_date}/{code}/performance`：只读「入选后表现」（宽松入场、窗口至最新有效日 K），不写库、不改固定 5 日回测/CLI。
-- `GET /api/dragons/trade-dates` 响应增加 `items` 全量（`preview` 前三兼容）。
+- **只读研究 Facade `research`**：新增顶层命令 `dragon-quant research`（`datasets` / `schema` / `query` / `scan-quality` / `account` / `signals` / `snapshots` / `strategy` / `experiments list|show|run`）。17 个显式数据集、`research_v1` JSON envelope、注册表白名单过滤器、稳定分页 cursor 与可解释空态；全程本地、不构造 provider、不建目录/库/schema/sidecar/cache。
+- **严格只读连接**：`infra/storage/readonly.py` 统一 `mode=ro`；非空 WAL 且无安全 sidecar 时返回 `readonly_unavailable`，不回退写连接、不用 `immutable` 丢弃已提交事务。
+- **共享研究用例**：scan-quality 纯计算从 Web presenter 迁至 `research/scan_quality.py`，CLI 与 Web 复用同一实现；账户对照实验从 Web 路由提取为共享用例（冻结期初/上游、进程级单飞、异常释放）。
+- **`review-account --json` 执行回执**：只新增 JSON 输出（`run_id` + 区间/汇总），人读默认格式不变；供 Agent 取得真实 run_id 后读回。
 - **只读盘前预案 `premarket`**：新增 T0 顶层命令 `dragon-quant premarket [--date D] [--json]`，只读 `assets.db`（`mode=ro`、零 DDL、零 WAL/SHM sidecar、无 provider / 网络 / 重算 / 新表），完整嵌入严格早于 T 的最近 `prep_snapshots.result_json` 与 T 日 `auction_snapshots.analysis_json` + 存储 meta；输出 `premarket_sc_v1`（五个时点分离、`strictness=latest_strictly_before` + `proven_gap`、三锚投影、候选 join、行动上限、数据质量）。缺 prep / 缺竞价 / 损坏 / 未到 09:25 / 周末 / 旧 schema / 配置混合均结构化降级并 exit 0；参数错误 exit 2、运行错误 exit 1。
-- **Agent Skill 第八类「盘前预案」**：新增 `references/premarket.md`（八段固定模板、事实/工作假设/行动分栏、三锚/四态、候选条件表、行动交集）与 `references/evidence.md`（官方原文优先的信源分级、event/publish/effective/first_seen/retrieved 时点、去重/冲突/更正/降级/登录边界）；`commands.md` / `safety.md` / `operations.md` / `reports.md` / `outputs.md` 同步，白名单从七类升八类。
-- **裸 `install` 交互式 Agent 多选**：`npx dragon-quant-skills install` 在 stdin/stdout/stderr 均为终端、未显式给 `--agent`、未加 `--json` 时弹出六 harness 菜单（默认 `claude-code`，不含 `agents` 别名）；`↑`/`↓` 环绕移动、空格切换、`a` 全选/清空、Enter 确认（空选择停留提示）、`q`/`Ctrl+C` 取消 exit 0 零写入。菜单只写 stderr；`--agent` / `--json` / 任一标准流重定向、`doctor`、`uninstall` 完全跳过并沿用原默认。新增零依赖 `lib/agent-select.mjs`（readline 流适配 + 纯 reducer），`main(argv, io)` 支持注入测试流，选择结果仍走 `expandAgents`，JSON 结构与 manifest schema 不变。
+- **`bs-eval` 与 `/bs` 策略页**：对全部 `dragons_v2` 逐龙头回放四类买点与十条卖出规则，双口径入场（宽松=信号日最低价 / 严格=引擎成交价）+ 买后/卖后 5 日窗口指标，落库 `bs_runs` / `bs_signals`（幂等增量、`--force` 全量重算、策略哈希变更自动重算）；新增 `/bs` 页面（策略说明卡 + 汇总卡 + 买/卖列表），`dashboard` 启动后台自动增量生成（`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 可关），「重置买点」触发全量重算；子进程委派，Web 保持零写库。
+- **Web 面板 `dashboard`**：新增长驻命令与只读 FastAPI 后端，P0 五页（总览 / 扫描 / 因子 / 复盘 / 账户）后扩展为八页（新增 `/auction` 竞价、`/bs` BS 策略、`/research` 研究）；`[web]` 可选 extra（fastapi + uvicorn），首次调用交互式安装，非 TTY / 失败降级为手动指令。
+- **面板内运行入口**：新增 `/api/runs/{job}` 的 spec / eligibility / status / POST（参数白名单、Origin 校验、共享单飞、服务端复检），扫描 / 复盘 / 竞价三页提供快捷与自定义按钮，禁用时渲染原因；子进程执行，Web 层不写库；交易日复用 TDX 日历并按日缓存（15:05 前不采信「今日缺席」），失败降级工作日口径。
+- **账户增量回测**：`POST /api/account/runs/incremental` 以选中记录为基准续算持仓/现金/连亏/峰值，生成新记录并自动选中；`review_account_runs` 新增可空 `base_equity` 列（幂等迁移），基准线改用 `base_equity or initial_cash`，旧记录逐位不变。
+- **`stock_daily` 计划候选扩池**：`prep` 采集清单改为详细池 ∪ 近 10 个有快照交易日计划候选（池 code 存 120 根、扩池独有 code 存 20 根），修复出池后日 K 断更导致的 `missing_bar`；新增 `assets backfill-stock-daily [--dry-run] [--days N] [--codes]` 按 code 合并补采，不篡改历史行。
+- **只读查询端点**：`GET /api/prep/calendar`、`GET /api/prep/{date}/review-context`、`GET /api/auction/calendar`、`GET /api/auction/{date}/effect`、`GET /api/scans/{id}/logs`、`GET /api/dragons/{trade_date}/{code}/performance`（入选后表现，宽松入场、窗口至最新有效日 K）、`GET /api/dragons/trade-dates` 增加 `items` 全量（`preview` 前三兼容）。
+- **Agent Skill 交易日助手**：默认命令面由 15 个顶层命令收敛为七类白名单，随后逐版扩到十类（新增盘前预案 / 可视化面板 / 研究读回与对照实验）；新增 `references/reports.md`（prep 九段 / auction 七段）、`operations.md`、`safety.md`、`premarket.md`、`evidence.md`、`research.md`、`datasets.md`，未开放能力统一走固定话术 + issue 链接。
+- **多 Agent 安装与交互多选**：安装器新增 `codex` / `openclaw` / `hermes` / `deepseek` / `pi` 五个 harness（保留 `claude-code` 默认与 `agents` 别名），支持 `--agent a,b`、`all`、项目级 / 用户级路径与三个官方 env 覆盖；裸 `npx dragon-quant-skills install` 在 TTY 下弹出六 harness 多选菜单（`↑`/`↓`、空格、`a`、Enter、`q`/`Ctrl+C`，取消 exit 0 零写入），`--agent` / `--json` / 非 TTY 完全跳过。
 
 ### Changed
-- dashboard 复盘/竞价拆分：`/prep` 只保留盘后复盘（固定六段），删除原始 JSON 调试块（API/CLI 仍可查）。
-- dashboard 排版统一 `html{font-size:14px}` + 六个 `--text-*` 令牌，所有可见文字最小 1rem；语义色收敛为 `danger/warning/normal/positive`（+soft/line/text），删除 `warn/critical/info`，A 股 `up/down` 独立。
-- `web_ui` 后端由 stdlib `http.server` 重写为 FastAPI；`web_ui.start_server` 降级为 deprecated 薄壳，`review --ui` / `review-account --ui` 仅保留为弃用别名。
-- 前端新增极简 pathname 路由与 AppShell，`vite base` 改为 `/` 以支持 `/scans/<id>` 深链。
-- dashboard 总览文案/排序调整（「已回测」、胜率 tooltip、筛选右对齐、榜单本地展开）；抽屉移除双口径卡片并新增独立绩效请求；复盘页改为结果优先展示，原始 JSON / 水位 / 竞价默认收起。
-- 近几日榜单改读**原始扫描真龙榜**（`scans_v2` + `scan_stocks_v2`），展示被 `dragons_v2` 5 日去重排除的当日真龙；总览表 / `/api/summary` / 回测池仍只读 `dragons_v2`，5 日去重不变。
-- **版本**：Python `0.8.0`；npm / Skill `1.3.1`；`metadata.min-cli-version` `0.8.0`。E2E coverage-map 同步为 55 个 parser 节点 / 17 个顶层命令（含 dashboard 与 premarket），新增 `golden/premarket/context.json`，旧 golden 不变。
-- **Agent Skill 面板路由**：白名单由八类升九类，新增「可视化面板」（`dashboard`，T0 长驻）；`review --ui-only` / `review-account --ui-only` 不再作为 Skill 路由（CLI 兼容别名保留）。`dashboard --yes` 与 `DQ_WEB_AUTO_INSTALL=1` 明确禁止，缺 `[web]` 时只转述手动安装指令。
-- **盘前作战卡模板 v2**：`references/premarket.md` 从按数据域的八段审计报告改为按交易时间线的盘前作战卡（一页结论 / 市场与主线剧本 / 主线与角色地图 / 候选逐只作战卡 / 09:15–15:00 逐时点检查表 / 持仓与退出 / 不做什么与盘中更新纪律 / 盘后归因）；市场层三向剧本仅作叙述，动作仍只取个股 `allowed_actions` 与 `action_ceiling` 交集；报告正文改为全汉语用语（字段名只保留在 Agent 操作说明与「输出用语」映射表）；**09:25 编排**：09:25 前只出无竞价版并主动建议，09:25 后先检查竞价状态，缺失时主动建议运行 `auction`（T1，需本轮确认），成功后重跑 `premarket`，不自动运行、不自动 `--force`；新增调研报告与方案文档 `docs/research/2026-11-02-premarket-playbook-research.md`、`docs/solutions/2026-11-02-premarket-playbook-v2-design.md`。
+- **`web_ui` 后端重写**：由 stdlib `http.server` 改为 FastAPI；`web_ui.start_server` 降级为 deprecated 薄壳，`review --ui` / `review-account --ui` 仅保留为弃用别名。
+- **前端重做**：Kraken 暗色终端风 + system / light / dark 三态主题（首次绘制前内联设置 `data-theme`，无闪烁）；新增极简 pathname 路由与 AppShell，`vite base` 改为 `/` 以支持 `/scans/<id>` 深链；收益语义统一红涨绿跌（权益曲线分段着色），2K 以上取消 1600px 宽度上限。
+- **dashboard 排版与语义**：统一 `html{font-size:14px}` + 六个 `--text-*` 令牌，可见文字最小 1rem；语义色收敛为 `danger/warning/normal/positive`（+soft/line/text），A 股 `up/down` 独立；复盘/竞价拆分，`/prep` 只保留盘后复盘（固定六段），删除原始 JSON 调试块（API/CLI 仍可查）。
+- **近几日榜单**改读**原始扫描真龙榜**（`scans_v2` + `scan_stocks_v2`），展示被 `dragons_v2` 5 日去重排除的当日真龙；总览表 / `/api/summary` / 回测池仍只读 `dragons_v2`，5 日去重不变。
+- **账户增量语义**：全量回测落库终点收敛到实际最后快照日，原始请求日写入 `run_meta`；run 与快照/交割单/持仓/事件同一事务提交，子表失败整体回滚；增量改为在基准 run 上原地追加（推进 `date_to`、整条重算、`run_meta.incremental_segments`），不新建 run。
+- **盘前作战卡模板 v2**：`references/premarket.md` 改为按交易时间线的盘前作战卡（一页结论 / 市场与主线剧本 / 主线与角色地图 / 候选逐只作战卡 / 09:15–15:00 逐时点检查表 / 持仓与退出 / 不做什么与盘中更新纪律 / 盘后归因）；市场层三向剧本仅作叙述，动作仍只取个股 `allowed_actions` 与 `action_ceiling` 交集；09:25 前只出无竞价版并主动建议，09:25 后先检查竞价状态，缺失时建议运行 `auction`（T1，需本轮确认），不自动运行、不自动 `--force`。
 - **存储只读 API**：`get_previous_prep_snapshot` / `list_auction_snapshots` / `dragons_mirror.list_dragon_trade_dates` 增加向后兼容的 `readonly=True` 路径（`_connect_readonly`，`busy_timeout=5000`，跳过 schema 建表）；默认行为不变。
-- **Agent Skill 收敛为交易日助手**：默认命令面从 15 个顶层命令收敛为七类白名单（个股行情、扫描与真龙、盘后复盘、集合竞价、龙头回测、账户回测、因子入库与读回）；未开放能力统一走固定话术 + issue 链接，不再以命令、路由或否定示例出现。新增 `references/reports.md`（prep 九段 / auction 七段模板），`operations.md` 固定单能力/每日复合、UI 生命周期与因子三组静态名单，`safety.md` 仅保留 T0/T1。
-- **npm Skill 元数据对齐**：`package.json`、`skill-version`、`min-cli-version` 同步至 `0.7.4`（本次不发布 npm，Python 版本不变）。
-- **Agent Skill 多 Agent 安装目标**：安装器新增 `codex` / `openclaw` / `hermes` / `deepseek` / `pi` 五个 harness，保留 `claude-code`（默认）与 `agents` 兼容别名；`--agent a,b` 多选与 `all`（原位置展开六个真实 harness，不含别名）；按官方矩阵实现项目级 / 用户级路径、三个官方 env 覆盖（`OPENCLAW_STATE_DIR` / `DSH_HOME` / `PI_CODING_AGENT_DIR`，仅 global）、`--target-dir` 基准与按目标 reload / trust 提示；install / uninstall 增加包根 OpenClaw 自托管预检，`--force` 不可绕过。`package.json` 与 `skill-version` 升至 `1.1.0`，`min-cli-version` 保持 `0.7.4`；本次不发布 npm，Python 版本不变。
+- **资产日历**：按月分组（组间加大间距），图例改为「无（灰）/ 缺失（黄）/ 完整（绿）」文字化；三态 + 合法缺席豁免，所有日期可点击，完全缺失日返回 200 与全部应有资产缺失。
+- **发布流程加固**：`scripts/publish.sh` 改为薄壳 + 标准库编排（版本经 argv、隔离构建/测试/包边界校验、精确提交、`HEAD:branch + vX` 原子推送、dry-run 零凭据零远端写入、`--resume` 校验工件哈希与远端事实）；`scripts/publish-skill.sh` 增加版本契约（package/skill/min-cli）、Python/Node 测试、`npm pack` 白名单与本地安装冒烟，同一 tarball 发布，临时 npmrc 0600 并全路径清理。
+- **版本**：Python `0.8.0`；npm / Skill `1.0.1`；`metadata.min-cli-version` `0.8.0`。coverage-map 同步为 70 个 parser 节点 / 19 个顶层命令。
 
 ### Fixed
 - `high_num` THS 打包值（如 `0x50005`）导致最高板显示为 327685：新增 `dragon_quant/infra/board_height.py` 共享纯解析器（`days = v>>16`、`boards = v&0xffff`，校验 `1 <= boards <= days <= 99`），5 个调用点统一接入；旧快照在 dashboard 展示解码板数并标「需重算」，不自动重算、不写库。
-- E2E `test_g2_version_matches_package_version` 改为从 `dragon_quant._version` 读取版本，不再硬编码。
 - 龙头明细与「入选后表现」在 `dragons_v2` 缺行时回退当日原始扫描贡献（五维经 `scan_stocks_v2`，绩效仅需扫描入选记录存在），两处都无才 404。
+- `partial` 拆分 `partial_window`（窗口未走完）与 `partial_missing_bars`（停牌/缺 K 线）；CLI 汇总单列 `partial`，`failed` 只统计真错误；「待回测」只统计窗口已成熟且无严格结果的记录，未成熟进 `derived_pending_immature`。
+- 账户回测落库原子性与增量续算修正；增量成功后前端显式刷新详情（runId 不变），旧版增量记录明确拒绝。
+- research 收益/回撤/胜率 9 个字段统一为百分比点（1.0=1%）；prep `--code` 改为结构化股票身份匹配，未知旧结构显式 `code_filter_unsupported`。
+- 严格只读连接在非空 WAL 缺 `-shm` 时直接 fail-closed，不再由 `mode=ro` 创建 sidecar；有 `-shm` 才读 WAL，无 WAL/SHM 才用 `immutable`。
+- account/experiments/strategy 专用入口统一 `database_missing` / `table_missing` / `schema_mismatch` / `run_not_found` 与损坏 JSON 降级；实验列表有界分页且默认省略大 report，账户账本达上限标 `ledger_truncated`。
+- 发布 `--resume` 校验 repo/base/release commit/branch、upstream（固定 `origin/<branch>`）、origin push URL 指纹、本地与远端 tag（含 annotated peeled）与工件 SHA256；旧状态缺 upstream/指纹 fail-closed；上传恢复按注册表文件名+sha256 只补缺失。
+- E2E `test_g2_version_matches_package_version` 改为从 `dragon_quant._version` 读取版本，不再硬编码。
+
+### Docs
+- `docs/agent/development.md` 增补 research 契约、Skill 白名单、发布流程与 dashboard 双进程本地开发流程（后端 8765 + Vite 5173、`server.proxy`、macOS `localhost` 与 `dist` 两个坑）；`scan` / `factor` / `trading` / `review` / `bs_eval` / `prep-auction` / `assets` owner 文档同步。
+- 新增 `docs/agent/bs_eval.md`；归档 BS 策略页 / 自动生成 / `stock_daily` 扩池、dashboard v2 主题、web_ui 重构等方案。
+- README 重写为「交易日闭环 + 快速开始 + AI Agent + Web 面板 + 方案设计」五段式，新增 Dashboard 巡览 GIF 与扫描截图。
 
 ## [0.7.4] - 2026-10-30
 

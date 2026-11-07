@@ -10,10 +10,6 @@
 dragon_quant/
 ├── __init__.py / __main__.py / _version.py / cli.py / app.py   # 入口 + Composition Root（app 不 import cli/commands）
 ├── commands/                    # 每个顶层命令一个薄 handler（COMMANDS + dispatch）
-│   ├── __init__.py              # lazy `COMMANDS` 注册表 + `dispatch(name, args)` 唯一分发入口
-│   ├── _shared.py               # CLI 纯 helper（策略 JSON / 日期 / 序列化）单一实现
-│   ├── scan.py / logs.py / data.py / blacklist.py / review.py / review_account.py
-│   └── dragons.py / prep.py / auction.py / premarket.py / assets.py / factor.py / buy_sell.py / vpa.py / storage.py / bs_eval.py
 ├── bs_eval/                     # BS 策略假想回放（只读评测层；不改 buy/sell/review）
 │   ├── __init__.py              # 惰性门面：仅 __getattr__ 导出 run_bs_eval
 │   ├── constants.py / strategy_doc.py / candidates.py / sources.py
@@ -110,7 +106,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 > 每个顶层命令的实现在 `commands/<name>.py` 的 `handle(args, services)`（buy/sell 共用
 > `commands/buy_sell.py` 的 `handle_buy`/`handle_sell`）。测试与脚本应直接走
 > `commands.dispatch` 或命令模块的公共 helper，不存在第二个转发层。真实导航链是
-> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 18 个（含 `dashboard` 长驻面板——查询为主、BS 派生数据经子进程生成、`premarket` 只读盘前上下文与 `bs-eval` 只读回放）；`app.py`（Composition Root）只是
+> `cli → commands → feature 门面 → feature 用例 → 实现`；顶层命令共 19 个（含 `dashboard` 长驻面板——查询为主、BS 派生数据经子进程生成、`premarket` 只读盘前上下文与 `bs-eval` 只读回放）；`app.py`（Composition Root）只是
 > commands 按需调用的装配支路，不在链上多一跳。
 
 > **入口事实（实测）**：`python -m dragon_quant`（不带子命令）与 `-h` 一样**打印帮助并 exit 0**，

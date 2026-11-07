@@ -18,6 +18,7 @@ import { type Column } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { PaginatedDataTable } from "../../components/PaginatedDataTable";
+import { RunActions } from "../../components/RunActions";
 import { Section } from "../../components/Section";
 import { IconAlert } from "../../components/icons-extra";
 import { fmtNum, pnlClass } from "../../lib/format";
@@ -383,6 +384,7 @@ export function AuctionPage() {
   const [accuracyLoading, setAccuracyLoading] = useState(true);
   const [accuracyError, setAccuracyError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -408,7 +410,7 @@ export function AuctionPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadToken]);
 
   // 全历史准确率固定请求，不随选中日变化；失败不阻塞其他区块。
   useEffect(() => {
@@ -465,7 +467,7 @@ export function AuctionPage() {
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, reloadToken]);
 
   const changeDate = (next: string) => {
     setDate(next);
@@ -490,11 +492,13 @@ export function AuctionPage() {
         title="集合竞价"
         description="查看竞价强弱、候选结果与当日资产采集。数据只来自本地，不联网补行情；缺数据一律「待评估」。"
         actions={
-          date ? (
-            <span className="text-caption text-ink-2">
-              当前交易日 <span className="num text-ink">{date}</span>
-            </span>
-          ) : null
+          <RunActions
+            job="auction"
+            onCompleted={(tradeDate) => {
+              setReloadToken((token) => token + 1);
+              if (tradeDate) changeDate(tradeDate);
+            }}
+          />
         }
       />
 

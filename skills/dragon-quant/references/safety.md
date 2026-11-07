@@ -7,7 +7,7 @@
 - **T0 只读**：不写业务记录、不改远端业务状态，可直接执行。`dashboard` 虽为 T0，但会**长驻**会话，
   并可能初始化/校验本地 **schema**；启动后**默认不**生成 BS 派生数据，只有显式 `--bs-autogen` /
   `DQ_BS_AUTOGEN=1` 才增量生成 `bs_*` 派生表；启动前要说明。
-- **T1 写本地状态**：写 `dragon.db` / `assets.db` / 用户指定文件。执行前必须得到用户明确授权。
+- **T1 写本地状态**：写 `dragon.db` / `assets.db` / 用户指定文件，或可能触网并写本地数据缓存（`factor eval` / `decision-review`）。执行前必须得到用户明确授权。
   **授权按日期/动作/参数/副作用范围持续有效**：用户说「今天允许跑 prep 和因子 build」后，本会话内
   同一范围不再反复确认；只有范围变更、用户撤销或出现新的高风险副作用才补确认。
 - 本 Skill **不开放外发、破坏性或高风险操作**；遇到时走通用未开放话术。
@@ -25,10 +25,16 @@
 | auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后；premarket 可主动建议，执行需用户授权该动作 |
 | premarket | --date --json | T0 | 只读；不写库；缺数据降级 exit0；不触网 |
 | review | --date --top | T1 | 回写回测字段；failed>0 如实报告 |
-| review-account | --from --to --capital | T1 | 写账户回测表；默认策略与 v2 |
-| dashboard | --port --no-browser --bs-autogen --no-bs-autogen | T0 | 长驻；默认只读，不生成 BS 派生数据；显式 --bs-autogen / DQ_BS_AUTOGEN=1 才增量生成；--no-bs-autogen / DQ_BS_AUTOGEN=0 优先；禁止 --yes 自动安装 |
+| review-account | --from --to --capital --json | T1 | 写账户回测表；--json 仅回执；默认策略与 v2 |
+| dashboard | --port --no-browser --bs-autogen --no-bs-autogen | T0 | 长驻；默认只读；显式 --bs-autogen / DQ_BS_AUTOGEN=1 才生成 BS 派生数据，该分支按 T1 确认；--no-bs-autogen / DQ_BS_AUTOGEN=0 优先；禁止 --yes 自动安装 |
 | factor | build --date --only --json | T1 | 只写三组内置因子；禁止默认 build |
-| factor | query --date --name --json | T0 | 只读；用于入库核对与代表因子读回 |
+| factor | list --json / status --json / query --date --from --to --code --name --version --json | T0 | 本地只读；用于入库核对与研究读回 |
+| factor | export --from --to --name --out | T1 | 写用户明确 --out 路径与 sidecar meta |
+| factor | eval --from --to --name --json | T1 | 可能触网并写本地数据缓存；不宣称纯离线 |
+| factor | decision-review --source --from --to --json | T1 | 只读冻结快照但可能触网/写缓存 |
+| research | datasets/schema/query/scan-quality/account/signals/snapshots/strategy --json | T0 | 本地只读、固定 v2、不构造 provider |
+| research | experiments list/show --run-id/--experiment-id | T0 | 只读已存报告，不重算、不建锁 |
+| research | experiments run --run-id --confirm | T1 | 冻结期初与上游、本地行情、单飞；必须真实 run_id 与 --confirm |
 <!-- safety:end -->
 
 表外说明：
@@ -49,10 +55,11 @@
 
 ## 禁止操作
 
-- 未确认执行 `scan`（实时）/ `prep` / `auction` / `review` / `review-account` / `factor build`，或写用户指定文件。
+- 未确认执行 `scan`（实时）/ `prep` / `auction` / `review` / `review-account` / `factor build` / `factor export` / `factor eval` / `factor decision-review` / `research experiments run`，或写用户指定文件。
 - 在单能力请求里隐式追加写操作；默认执行每日复合 workflow。
 - 用 `--force` 绕过盘中/盘后/竞价时点，或把它当成日常手段。
 - 手工用 SQL 删除或修改业务表。
 - 回显 Cookie、token 或同步凭据，或把它们写入日志/仓库。
-- 把 `dashboard` 说成“会回测/会写业务记录”，或伪造已经打开浏览器；默认只读，BS 派生数据生成需显式 opt-in。
+- 把 `dashboard` 说成“会回测/会写业务记录”，或伪造已经打开浏览器；默认只读，BS 派生数据生成需显式 opt-in 并按 T1 确认。
+- 把 `research experiments run` 说成只读，或在没有真实 `run_id` 时猜「最新批次就是本次」。
 - 自动安装/升级 Python 包（含 `dashboard --yes` 与 `DQ_WEB_AUTO_INSTALL=1`），或执行 `npm publish`、`git commit`、`git push`、PR。

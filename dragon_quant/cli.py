@@ -282,6 +282,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     acct_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     acct_p.add_argument("--config", help="共享策略参数 JSON 文件")
+    acct_p.add_argument("--json", dest="json", action="store_true",
+                        help="只输出本次回执 JSON（run_id + 汇总），默认人读输出不变")
 
     # dragons 子命令（导出扫描物化的龙头，JSON）
     dragons_p = sub.add_parser(
@@ -941,6 +943,154 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                                   "（默认只读；也可用 DQ_BS_AUTOGEN=1）")
     dashboard_p.add_argument("--no-bs-autogen", action="store_true",
                              help="关闭后台生成（兼容旧开关；优先级高于 DQ_BS_AUTOGEN=1）")
+
+    # research 子命令（本地只读研究 Facade：数据集发现 / 查询 / 质量 / 账户 / 实验）
+    research_p = sub.add_parser(
+        "research",
+        help="本地只读研究：数据集、查询、扫描质量、账户读回与对照实验",
+        usage="dragon-quant research <action> [action-options]",
+        description="研究 facade。除 experiments run 外全部只读、离线、固定 v2；"
+                    "JSON 输出统一 research_v1 envelope，诊断走 stderr。",
+        epilog="""Examples:
+  dragon-quant research datasets
+  dragon-quant research schema --dataset scan_candidates
+  dragon-quant research query --dataset dragons --from 20260101 --to 20260131 --limit 20
+  dragon-quant research scan-quality --from 20260101 --to 20260131
+  dragon-quant research account --run-id 3 --view summary
+  dragon-quant research experiments list --run-id 3
+""",
+    )
+    research_subs = research_p.add_subparsers(dest="research_action")
+    research_subs.title = "Actions"  # type: ignore[assignment]
+    research_subs.metavar = "<action>"
+
+    research_datasets = research_subs.add_parser(
+        "datasets", help="数据集描述、字段契约版本、过滤器与可用性",
+        usage="dragon-quant research datasets [--json]")
+    research_datasets.add_argument("--json", dest="json", action="store_true",
+                                   help="输出完整 JSON")
+
+    research_schema = research_subs.add_parser(
+        "schema", help="某数据集的字段、单位、过滤/排序与来源",
+        usage="dragon-quant research schema --dataset NAME [--json]")
+    research_schema.add_argument("--dataset", required=True, help="数据集名")
+    research_schema.add_argument("--json", dest="json", action="store_true")
+
+    research_query = research_subs.add_parser(
+        "query", help="按注册表过滤器分页查询已存数据",
+        usage="dragon-quant research query --dataset NAME [filters] [--fields] "
+              "[--limit] [--cursor] [--json]")
+    research_query.add_argument("--dataset", required=True, help="数据集名")
+    research_query.add_argument("--from", dest="from_date", default=None,
+                                help="起始日期（YYYYMMDD / YYYY-MM-DD）")
+    research_query.add_argument("--to", dest="to_date", default=None,
+                                help="结束日期")
+    research_query.add_argument("--code", default=None, help="6 位股票代码")
+    research_query.add_argument("--scan-id", dest="scan_id", default=None,
+                                help="扫描 run 标识")
+    research_query.add_argument("--run-id", dest="run_id", default=None,
+                                help="账户回测批次 id")
+    research_query.add_argument("--fields", default=None,
+                                help="逗号分隔字段；大 payload 需显式选择")
+    research_query.add_argument("--limit", type=int, default=100,
+                                help="每页条数（默认100，上限1000）")
+    research_query.add_argument("--cursor", default=None, help="上一页 next_cursor")
+    research_query.add_argument("--json", dest="json", action="store_true")
+
+    research_quality = research_subs.add_parser(
+        "scan-quality", help="扫描原始候选质量（复用 Web 同一算法）",
+        usage="dragon-quant research scan-quality --from D --to D [--json]")
+    research_quality.add_argument("--from", dest="from_date", required=True)
+    research_quality.add_argument("--to", dest="to_date", required=True)
+    research_quality.add_argument("--include-samples", dest="include_samples",
+                                  action="store_true",
+                                  help="附样本账本（默认不含）；配合分页参数")
+    research_quality.add_argument("--sample-limit", dest="sample_limit",
+                                  type=int, default=100,
+                                  help="样本账本每页条数（默认100，上限1000）")
+    research_quality.add_argument("--sample-cursor", dest="sample_cursor",
+                                  default=None, help="样本账本上一页游标")
+    research_quality.add_argument("--json", dest="json", action="store_true")
+
+    research_account = research_subs.add_parser(
+        "account", help="账户结果读回（不触发回测）",
+        usage="dragon-quant research account --run-id N [--view VIEW] [--json]")
+    research_account.add_argument("--run-id", dest="run_id", type=int, required=True)
+    research_account.add_argument(
+        "--view", default="summary",
+        choices=("summary", "snapshots", "trades", "positions", "events"))
+    research_account.add_argument("--limit", type=int, default=100)
+    research_account.add_argument("--cursor", default=None)
+    research_account.add_argument("--json", dest="json", action="store_true")
+
+    research_signals = research_subs.add_parser(
+        "signals", help="买卖信号历史（不运行 buy/sell）",
+        usage="dragon-quant research signals [filters] [--json]")
+    research_signals.add_argument("--from", dest="from_date", default=None)
+    research_signals.add_argument("--to", dest="to_date", default=None)
+    research_signals.add_argument("--code", default=None)
+    research_signals.add_argument("--status", default="all",
+                                  choices=("open", "closed", "all"))
+    research_signals.add_argument("--limit", type=int, default=100)
+    research_signals.add_argument("--cursor", default=None)
+    research_signals.add_argument("--json", dest="json", action="store_true")
+
+    research_snapshots = research_subs.add_parser(
+        "snapshots", help="已存 prep / auction 快照（不采集、不重算）",
+        usage="dragon-quant research snapshots --kind {prep,auction} [filters] [--json]")
+    research_snapshots.add_argument("--kind", required=True,
+                                    choices=("prep", "auction"))
+    research_snapshots.add_argument("--date", default=None, help="单日")
+    research_snapshots.add_argument("--from", dest="from_date", default=None)
+    research_snapshots.add_argument("--to", dest="to_date", default=None)
+    research_snapshots.add_argument("--code", default=None)
+    research_snapshots.add_argument("--limit", type=int, default=100)
+    research_snapshots.add_argument("--cursor", default=None)
+    research_snapshots.add_argument("--json", dest="json", action="store_true")
+
+    research_strategy = research_subs.add_parser(
+        "strategy", help="当前运行时规则元信息或账户批次冻结参数",
+        usage="dragon-quant research strategy --kind {scan,account} [--run-id N] [--json]")
+    research_strategy.add_argument("--kind", required=True,
+                                   choices=("scan", "account"))
+    research_strategy.add_argument("--run-id", dest="run_id", default=None)
+    research_strategy.add_argument("--json", dest="json", action="store_true")
+
+    research_exp = research_subs.add_parser(
+        "experiments", help="账户对照实验：list/show 只读，run 需 --confirm",
+        usage="dragon-quant research experiments <list|show|run> [options]")
+    exp_subs = research_exp.add_subparsers(dest="experiments_action")
+    exp_subs.title = "Actions"  # type: ignore[assignment]
+    exp_subs.metavar = "<action>"
+
+    exp_list = exp_subs.add_parser(
+        "list", help="列出某 run 的已存实验报告（只读）",
+        usage="dragon-quant research experiments list --run-id N [--limit N] [--json]")
+    exp_list.add_argument("--run-id", dest="run_id", type=int, required=True)
+    exp_list.add_argument("--limit", type=int, default=100)
+    exp_list.add_argument("--cursor", default=None,
+                          help="上一页 next_cursor")
+    exp_list.add_argument("--json", dest="json", action="store_true")
+
+    exp_show = exp_subs.add_parser(
+        "show", help="读取单个实验报告（只读）",
+        usage="dragon-quant research experiments show --experiment-id N "
+              "[--run-id N] [--json]")
+    exp_show.add_argument("--experiment-id", dest="experiment_id", type=int,
+                          required=True)
+    exp_show.add_argument("--run-id", dest="run_id", type=int, default=None)
+    exp_show.add_argument("--json", dest="json", action="store_true")
+
+    exp_run = exp_subs.add_parser(
+        "run", help="运行对照实验（写动作，必须 --confirm）",
+        usage="dragon-quant research experiments run --run-id N --confirm "
+              "[--sell-rule NAME] [--json]")
+    exp_run.add_argument("--run-id", dest="run_id", type=int, required=True)
+    exp_run.add_argument("--confirm", action="store_true",
+                         help="显式确认消耗本地算力并写入实验报告")
+    exp_run.add_argument("--sell-rule", dest="sell_rule", action="append",
+                         default=None, help="消融的卖出规则名（可重复）")
+    exp_run.add_argument("--json", dest="json", action="store_true")
 
     argv = sys.argv[1:]
     if argv and argv[0] == "scan_v2":

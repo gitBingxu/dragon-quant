@@ -100,3 +100,9 @@ python -m dragon_quant factor fin status
   与 `axes`（多/空/中性/未知/vetoed/强中弱）；旧 `groups` 保留并显式
   `groups_basis`（prep_recommendation / legacy_level_effect），新研究合同以
   `direction_groups` 为准。
+
+## research 因子读回（2026-11-06）
+
+- `infra/factor/research_reads.py` 是严格只读适配（assets.db `mode=ro`）：`factor_values` / `factor_registry` / `factor_build_runs` / `factor_models`；缺失 = 无行，不补 0，版本按行返回。
+- `research query --dataset factor_*` 与 `factor list/status/query` 分工：前者用于研究层统一分页与 envelope（大字段 `report` 需显式选择），后者保留既有入库核对输出。两者都不触发构建或评估。
+- `research strategy --kind scan` 暴露当前评分器权重/门槛元信息供解释；不把当前规则回填历史扫描。

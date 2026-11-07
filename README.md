@@ -13,164 +13,140 @@
   <img src="https://img.shields.io/badge/stable-scan%20%7C%20review-brightgreen" alt="Stability: scan and review">
 </p>
 
-一款通过多维量化评分识别市场龙头的工具。基于 [TMDX](https://pypi.org/project/tmdx/) 获取股票行情，使用 SQLite 持久化数据，并具备完备的选股与选股回测能力。
+从当日涨停榜出发，用五维量化评分识别市场**真龙**，并把复盘、竞价、盘前预案、模拟交易与回测归因串成完整的交易日闭环。数据全部来自免费公开源，本地 SQLite 优先，AI Agent 就绪。
 
-## 目录
+![Dashboard 漫游](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/dashboard-tour.gif)
 
-- [稳定性说明](#稳定性说明)
-- [快速使用](#快速使用)
-- [Agent Skill](#agent-skill)
-- [龙头扫描](#龙头扫描)
-- [龙头回测](#龙头回测)
-- [设计哲学](#设计哲学)
-- [目录结构](#目录结构)
-- [免责声明](#免责声明)
-- [欢迎共建](#欢迎共建)
-- [License](#license)
+## 交易日闭环
 
-## 稳定性说明
+```mermaid
+flowchart LR
+    A[收盘后 scan<br>五维识别真龙] --> B[prep 盘后复盘<br>主线 / 情绪 / 候选池]
+    B --> C[auction 次日 09:25<br>竞价强度判断]
+    C --> D[premarket 盘前预案<br>只读上下文]
+    D --> E[buy / sell<br>盘中信号记账]
+    B --> F[review / review-account<br>龙头与账户回测]
+    E --> F
+    F --> G[bs-eval<br>买卖点假想回放]
+    G --> H[dashboard / research<br>可视化与质量归因]
+```
 
-选股与选股回测能力已经稳定，暂时不再迭代。当前重点是搭建模拟账户交易与回测系统，打通盘后复盘、集合竞价和账户交易链路。
+## 快速开始
+
+要求 **Python ≥ 3.10**，推荐 `pipx`（或 `pip install "dragon-quant[web]"` 一次装好面板依赖）：
+
+```bash
+pipx install dragon-quant
+
+dragon-quant scan --top 5     # 收盘后识别当日真龙
+dragon-quant dashboard        # 本地可视化面板 http://localhost:8765
+dragon-quant prep             # 盘后复盘：主线、情绪温度、候选池
+dragon-quant auction          # 次日 09:25 后的集合竞价强度
+```
+
+[scan 模块文档](docs/agent/scan.md)。所有命令细节以 `dragon-quant -h` 为准。
+
+## 让 AI Agent 替你使用（强烈推荐）
+
+不用记命令：装上仓库内置的「交易日助手」Agent Skill，让 Claude Code、Codex 等 Agent 直接
+替你跑全流程。安装器零运行时依赖：
+
+```bash
+npx dragon-quant-skills install                    # 交互式多选目标 harness（默认 claude-code）
+npx dragon-quant-skills install --agent all        # 六个 harness 一次装齐
+npx dragon-quant-skills doctor                     # 检查安装完整性与 CLI 版本
+```
+
+在 Agent 对话里，一句话一个场景：
+
+| 你说 | Agent 做 |
+|------|----------|
+| 「今天有什么真龙？」 | `scan` 五维扫榜 → 汇报榜单、评分与否决原因 |
+| 「帮我复盘今天」 | `prep` → 主线、情绪温度、建仓建议一屏简报 |
+| 「竞价怎么样？」 | `auction` → 近期真龙竞价强度分级与方向判断 |
+| 「给我盘前预案」 | `premarket`（只读）→ 盘前作战卡 |
+| 「回测一下这批龙头」 | `review` → 双口径回测统计，打开面板 |
+| 「跑 5 月账户回测」 | `review-account` → 权益、回撤、买点统计与逐笔交易 |
+| 「识别质量最近有改善吗？」 | `research scan-quality` + 回测证据 → 口径与归因 |
+| 「买卖点胜率如何？」 | `bs-eval` 假想回放 → `/bs` 页面数据 |
+
+安全边界：Agent 只开放**十类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
+必须先经你确认，不提供投资建议。安装矩阵与交互协议详见
+[development 模块文档](docs/agent/development.md)。
+
+## Web 面板
+
+`dragon-quant dashboard` 启动本地面板（上方 GIF 即真实运行画面）：
+
+| 页面 | 看什么 |
+|------|--------|
+| `/` 龙头识别 | 总览指标、近几日榜单、全部真龙明细 |
+| `/account` 账户验证 | 权益与回撤曲线、买点统计、当前持仓 |
+| `/prep` `/auction` | 复盘与竞价的年度日历、核心结果、判断准确率 |
+| `/bs` 买卖策略 | 四类买点 × 十条卖出规则的假想回放 |
+| `/scans` `/research` `/factors` | 扫描日志、识别质量归因、因子 |
+
+面板**默认只读**：浏览页面不会触发任何命令；扫描/复盘/竞价运行入口显式点击，并按交易日
+与时间窗判定可用性。
+
+## 方案设计
+
+### 五维「识别真龙」（scan）
+
+**龙头不是预判出来的，而是根据盘面证据识别出来的。** 收盘后扫描涨停候选股，按五个维度评分：
+
+| 维度 | 权重 | 回答的问题 |
+|------|------|-----------|
+| 带动性 | 30% | 板块上涨是否由它带动 |
+| 领涨性 | 25% | 它是不是板块内最强 |
+| 抗跌性 | 15% | 板块回调时它是否跌得少 |
+| 流动性 | 20% | 大资金能否进出 |
+| 资金承接 | 10% | 谁承接了对手盘出逃的资金 |
+
+聚合采用**门槛 + 加权两段式**：四大核心维度任一低于门槛即一票否决，资金承接不否决、仅加权
+贡献，避免单一高分掩盖明显短板。细则与数值见
+[评分器规范](archived_md/score/评分器Refactor.md)，流程见 [scan 模块文档](docs/agent/scan.md)。
+
+![scan 扫描输出示例](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/scan.png)
+
+### 盘后复盘与竞价强度（prep / auction / premarket）
+
+`prep` 收盘后复盘市场：识别主线板块、量化情绪温度、生成候选池与次日计划快照；`auction` 在
+次日 09:25 后采集近期真龙的集合竞价盘口，给出强度分级与方向判断；`premarket` 把两者拼成
+只读盘前上下文。方法论来自对公开复盘/竞价知识的调研沉淀，见
+[prep-auction](docs/agent/prep-auction.md) 与 [premarket](docs/agent/premarket.md)。
+
+### 交易策略与 BS 假想回放（buy / sell / bs-eval）
+
+策略层定义了四类买点（开盘回踩 MA5、弱转强、分歧买龙、龙回头）与十条卖出规则（移动止盈、
+硬止损、保本止盈等），`buy` / `sell` 盘中给出信号并记账；`bs-eval` 在历史真龙上离线回放
+这套规则，按宽松/严格双口径统计信号触发后 5 日表现，供 `/bs` 页消费。规则数值唯一权威是
+[STRATEGY.md](dragon_quant/review_account/strategy/STRATEGY.md)，回放口径见
+[bs_eval 模块文档](docs/agent/bs_eval.md)。
+
+### 双口径回测（review / review-account）
+
+`review` 回测入选龙头：宽松口径按入选后首个非一字板交易日最低价买入，统计第 2~5 个交易日
+最大潜在涨幅；严格口径另存侧表。`review-account` 则用统一候选池、买卖规则、费用与仓位约束
+做账户级模拟交易，输出权益曲线、回撤与买点统计——目标不是展示选股收益，而是让决策链可
+回放、可验证。见 [review](docs/agent/review.md) 与 [trading](docs/agent/trading.md)。
+
+### 数据与存储
+
+行情链路 **TDX（`tmdx`，首选）+ 同花顺（板块）+ 雪球（个股 K 线/分时）+ 腾讯（批量行情）**，
+失败自动回退；本地 SQLite 持久化（惰性初始化、WAL、线程安全），数据资产支持云端双向同步。
+架构见 [architecture](docs/agent/architecture.md)，同步见 [assets](docs/agent/assets.md)。
+
+## 稳定性状态
 
 | 功能 | 状态 | 预期稳定时间 |
 |------|------|--------------|
 | `scan` 龙头扫描 | 稳定 | — |
 | `review` 龙头回测 | 稳定 | — |
-| `prep` 盘后复盘 | 快速迭代中 | 2026 年 12 月初 |
-| `auction` 集合竞价强度判断 | 快速迭代中 | 2026 年 12 月初 |
-| `premarket` 盘前预案上下文（只读） | 快速迭代中 | 2026 年 12 月初 |
+| `prep` 盘后复盘 / `auction` 集合竞价 / `premarket` 盘前预案 | 快速迭代中 | 2026 年 12 月初 |
 | `review-account` 账户模拟交易与回测 | 快速迭代中 | 2026 年 12 月初 |
-| `bs-eval` BS 策略假想回放（只读页面消费） | 快速迭代中 | 2026 年 12 月中 |
-| `dashboard` 可视化面板（龙头/扫描/因子/复盘/竞价/账户/BS策略） | 快速迭代中 | 2026 年 12 月中 |
-| `agent-skill` Agent 交易日助手 | 快速迭代中 | 2026 年 12 月中 |
-
-## 快速使用
-
-要求 **Python ≥ 3.10**，推荐使用 `pipx` 安装：
-
-```bash
-pipx install dragon-quant
-
-# 当日收盘后扫描龙头
-dragon-quant scan --top 5
-
-# 启动本地可视化面板（龙头/扫描/因子/复盘/竞价/账户）
-dragon-quant dashboard
-
-# 不自动打开浏览器 / 首次安装 [web] 时不询问
-dragon-quant dashboard --no-browser
-dragon-quant dashboard --yes
-
-# 盘前只读上下文（T-1 复盘 + T 日竞价；缺数据结构化降级）
-dragon-quant premarket --json
-
-# BS 策略假想回放（批量回放 dragons_v2，生成 /bs 页面数据）
-dragon-quant bs-eval --limit 5
-
-# 补齐 dashboard 复盘评估所需的本地日 K（默认只体检）
-dragon-quant assets backfill-stock-daily --dry-run
-dragon-quant assets backfill-stock-daily
-```
-
-`dashboard` **默认只读**：不会在启动时自动生成 BS 派生数据；需要自动生成时显式加
-`--bs-autogen`（或 `DQ_BS_AUTOGEN=1`），`--no-bs-autogen` / `DQ_BS_AUTOGEN=0` 始终优先。
-`/bs` 页面的「重新计算买卖点」等价
-`bs-eval --force` 全量重算。
-
-`pipx install "dragon-quant[web]"` 可一次装好面板依赖；`review --ui` / `review-account --ui`
-已弃用，仍可用但会提示改用 `dashboard`。面板顶部可切换主题（跟随系统 / 浅色 / 深色），
-偏好保存在当前浏览器；界面固定 v2 五维，旧 `?source=v1` 链接按 v2 展示。总览支持
-近几日榜单内展开与「入选后表现」（至最新日 K）——榜单展示**当日原始扫描真龙**（含被
-回测池 5 日去重排除项），总览与回测统计仍只认 `dragons_v2`。待回测 > 0 时，「待回测」
-卡片内提供**增量回测**入口：显式 POST 触发 `review --recompute-all`（不覆盖已完成严格
-结果、跳过未成熟），任务针对全量待处理池；首次出现弹说明，点「我知道了」后同源浏览器
-不再自动提示，查看页面绝不自动回测。复盘与竞价拆成
-`/prep`（盘后复盘：年度日历 → 核心结果 → 当前 T 日效果 → 当日资产明细 → 全历史准确率；
-日历默认选最近有复盘快照的日期，可折叠并吸顶在真实顶栏下）
-与 `/auction`（集合竞价：年度日历 → 竞价结果 → 当日资产采集 → 全历史准确率）；
-资产区为近一年日历 + 当日表格，所有日期可点击（空日期展示全部应有资产缺失）。
-次级入口「扫描研究」（`/research`）只读对比通过/否决、评分与 rank、首次/重复入榜对
-scan 质量的反馈。扫描页展示完成态/异常/无日志、真龙数、错误数与日志分页。`/bs` 展示四类买点与
-十条卖出规则的假想回放：策略说明、汇总卡、buy/sell 列表（买后/卖后 5 日表现），
-数据由 `dragon-quant bs-eval` 离线生成；需自动增量时显式 `--bs-autogen`，
-页面「重新计算买卖点」可按需全量重算。全站字号统一 14px 基准
-（可见文字 ≥1rem），状态色收敛为 danger / warning / normal / positive。
-
-## Agent Skill
-
-仓库内置单主 Agent Skill，让 Claude Code 等 Agent 按「交易日助手」定位使用 dragon-quant。安装器支持六个真实 harness 的项目级与用户级目标，可逗号多选或用 `all`；在真正的终端里裸跑 `install` 会弹出多选菜单：
-
-```bash
-npx dragon-quant-skills install                    # 终端里多选；直接 Enter 只装 claude-code
-npx dragon-quant-skills install --agent hermes     # 单个目标，跳过菜单
-npx dragon-quant-skills install --agent claude-code,hermes   # 多选，一次写两个目录
-npx dragon-quant-skills install --agent all        # 六个 harness
-npx dragon-quant-skills install --global --agent pi            # 用户级
-npx dragon-quant-skills doctor                     # 检查安装完整性、CLI 版本与遮蔽
-```
-
-交互菜单只列出六个真实 harness（不含 `agents` 别名），默认勾选 `claude-code`：
-
-- `↑` / `↓` 移动（首尾环绕），`空格` 切换当前项，`a` 全选 / 清空，`Enter` 确认；空选择时 Enter 不离场并提示「至少选择一个 agent」。
-- `q` 或 `Ctrl+C` 取消：进程 exit 0，不写任何文件（skills 根目录也不会创建）。
-- 仅在 `install`、未显式给 `--agent`、未加 `--json`，且 `stdin` / `stdout` / `stderr` **全部是 TTY** 时弹菜单；菜单与提示只写 stderr，stdout 仍只保留安装摘要。任一标准流被重定向（CI、管道到 `jq`、`2>log`）都会跳过交互并按默认 `claude-code` 安装。
-- 由 Makefile、`npm run`、任务运行器等非人类调用但仍继承 TTY 的脚本，请显式传 `--agent` 或 `--json`，避免等待按键。`doctor` 与 `uninstall` 永不弹菜单。
-
-| agent | 项目级目录（project scope） | 用户级目录（--global） |
-|---|---|---|
-| `claude-code`（默认） | `<projectRoot>/.claude/skills` | `~/.claude/skills` |
-| `codex` | `<projectRoot>/.agents/skills` | `~/.agents/skills` |
-| `openclaw` | `<workspace>/skills` | `${OPENCLAW_STATE_DIR:-~/.openclaw}/skills` |
-| `hermes` | `<projectRoot>/.hermes/skills` | `~/.hermes/skills` |
-| `deepseek`（developer preview） | `<projectRoot>/.dsh/skills` | `${DSH_HOME:-~/.dsh}/skills` |
-| `pi` | `<cwd>/.pi/skills` | `${PI_CODING_AGENT_DIR:-~/.pi/agent}/skills` |
-| `agents`（兼容别名） | `<projectRoot>/.agents/skills` | `~/.agents/skills` |
-
-- `all` 展开为六个真实 harness（`claude-code,codex,openclaw,hermes,deepseek,pi`），不包含兼容别名 `agents`。
-- Pi 与 OpenClaw 以当前工作目录 / workspace 为基准，不向上寻找 git root；`--target-dir` 对它们始终优先，表示工作目录。
-- 三个官方环境变量只影响 `--global`：空串视为未设置，`~/` 展开为 home，相对路径按 cwd 解析。
-- 安装成功后按目标输出提示：Hermes 项目运行 `hermes skills trust <projectRoot>`，Pi 编辑后 `/reload`，DeepSeek 自动发现 skills 根的直接子项，其余按客户端重载。安装器不自动修改任何 trust 或客户端配置，也不宣称客户端已完成真实加载验证。
-- 在 dragon-quant 仓库根使用 `--agent openclaw` 会命中包内 `skills/` 源目录，install / uninstall 会直接拒绝（`--force` 也不能绕过）；请到消费项目运行，或用 `--target-dir` 指向临时 workspace。`all` 会在项目根创建 OpenClaw 的 `skills/`，不希望时请显式列出目标。
-
-Agent 可用的能力限定为九类：个股行情、扫描与真龙、盘后复盘、集合竞价、盘前预案、龙头回测、账户回测、因子入库与读回、可视化面板。Skill 只做路由、预检、报告模板与写操作门禁，不复制评分权重或策略参数；报告默认在对话中交付，写文件需确认。
-
-仓库内 Skill 版本可能高于 npm registry 已发布版本；安装后用 `npx dragon-quant-skills doctor` 核对实际安装的 Skill 版本、来源与最低 CLI 版本，不要假定 `npx` 拉到的就是仓库中的最新内容。
-
-不在白名单内的能力统一回复：
-
-> 当前功能还不稳定，暂未对 Agent 开放。你可以到 https://github.com/gitBingxu/dragon-quant/issues 反馈需求或问题。
-
-## 龙头扫描
-
-在**当日收盘后**运行，扫描涨停候选股，通过多维量化评分识别市场龙头：
-
-```bash
-dragon-quant scan --top 5
-```
-
-![龙头扫描示例](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/scan.png)
-
-## 龙头回测
-
-这里的回测结果采用**宽松口径**：入选后首个非一字板交易日按最低价买入，统计**买入后第 2~5 个交易日**的最大潜在涨幅与峰值前不利波动；窗口未走完标 `partial`，只展示、不进入正式分母。
-
-```bash
-# 回测已到观察期的扫描结果
-dragon-quant review
-
-# 打开龙头回测面板（dashboard 默认落在复盘页）
-dragon-quant dashboard
-```
-
-![龙头回测面板](https://raw.githubusercontent.com/gitBingxu/dragon-quant/main/assets/review.png)
-
-## 设计哲学
-
-**龙头不是预判出来的，而是根据盘面证据识别出来的。** 评分器从带动性、领涨性、抗跌性、流动性和资金承接五个维度评估候选股：四项核心特征设置门槛，资金承接作为补充证据，避免单一高分掩盖明显短板。
-
-模拟交易与回测的目标，是把盘后复盘、集合竞价和账户交易串成可回放、可验证的决策链，用统一的候选池、买卖规则、费用与成交假设检验策略，而不只展示选股收益。
-
-详细设计见[评分器规范](archived_md/score/评分器Refactor.md)与[模拟交易和回测方案](archived_md/review_account/2026-10-20-live-trade-alignment.md)。
+| `bs-eval` BS 假想回放 / `dashboard` 面板 / `research` 研究读回 | 快速迭代中 | 2026 年 12 月中 |
+| `agent-skill` 交易日助手 | 快速迭代中 | 2026 年 12 月中 |
 
 ## 目录结构
 
@@ -185,7 +161,7 @@ dragon_quant/
 ├── infra/           # 行情数据源、SQLite、缓存、因子与资产同步
 └── tests/           # 单元、集成与离线 E2E 测试
 web_ui/              # 可视化面板（FastAPI + React，dist 入库）
-assets/              # 图标与 README 截图
+assets/              # 图标与 README 截图 / GIF
 docs/                # 模块与开发文档
 archived_md/         # 已落地的调研与技术方案
 ```

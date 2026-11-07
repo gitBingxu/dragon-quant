@@ -1,14 +1,16 @@
 """账户级回测用例实现（公共入口见 :mod:`dragon_quant.review_account.main`）。
 
 包含两条用例：全量回测 :func:`run_review_account` 与增量续算
-:func:`run_incremental_review_account`。二者共用同一落库管线
-:func:`_persist_result`，避免两条持久化路径漂移；买卖/成交规则仍全部由
-``AccountSimulator`` / ``TradingEngine`` 复用，本模块只做编排与状态恢复。
+:func:`run_incremental_review_account`。全量走 ``_persist_result`` 新建 run；
+增量走 ``storage.append_review_account_results`` 把新快照追加到原 run 并更新
+汇总列。两条薄管线共用 ``storage._insert_children``，避免子表 SQL 漂移。
+买卖/成交规则仍全部由 ``AccountSimulator`` / ``TradingEngine`` 复用，本模块只
+做编排与状态恢复。
 """
 
 import copy
 import json
-from dataclasses import asdict, fields
+from dataclasses import fields
 from typing import Optional
 
 from dragon_quant.infra import clock
@@ -30,10 +32,15 @@ _ERR_BASE_MISSING = "基准记录不存在，无法增量续算"
 _ERR_STRATEGY_PARAMS = "基准记录缺少可用的策略参数快照，无法增量续算"
 _ERR_INITIAL_CASH = "基准记录初始资金无效，无法增量续算"
 _ERR_SNAPSHOTS_MISSING = "基准记录缺少每日快照，无法增量续算"
+_ERR_NO_SNAPSHOTS = "回测没有生成任何每日快照，拒绝落库"
 _ERR_SNAPSHOT_MISMATCH = "基准记录快照与结束日期不一致，数据不完整"
 _ERR_EQUITY_INVALID = "基准记录最终权益无效，无法增量续算"
 _ERR_SOURCE_NOT_V2 = "仅支持对 v2 回测记录做增量"
+_ERR_LEGACY_INCREMENTAL = ("旧版增量记录不支持继续增量，"
+                           "请在对应的全量记录上操作")
 _ERR_SNAPSHOT_END = "增量日历与行情快照不一致（终点 {expected}，最后快照 {actual}），请重试"
+_ERR_RESULT_END = "回测快照终点（{actual}）晚于请求结束日（{expected}），拒绝落库"
+_ERR_PERSIST_SNAPSHOT_END = "回测快照终点（{actual}）与结束日期（{expected}）不一致，拒绝落库"
 
 
 def _xueqiu_from_services(services):
@@ -72,6 +79,20 @@ def run_review_account(date_from: str,
                                     "strategy_name": strategy_name, "initial_cash": initial_cash})
     sim = AccountSimulator(cfg, provider=_xueqiu_from_services(services))
     result = sim.run(date_from, date_to)
+    # 日历在 15:05 前 / 非交易日不含当日，模拟器会少跑这些日期；落库终点
+    # 必须收敛到实际最后快照，否则增量回测会拒绝续算（见 resolve_* 注释）。
+    requested_date_to = date_to
+    effective_date_to = resolve_persisted_date_to(result, requested_date_to)
+    if effective_date_to != requested_date_to:
+        result["date_to"] = effective_date_to
+        result["date_to_clamped"] = True
+        # 前端/兼容层默认名是「起点 ~ 请求终点」；钳制后同步为真实终点，
+        # 避免列表里的名称继续宣称一个没有被回测的日期。
+        if display_name == f"{date_from} ~ {requested_date_to}":
+            display_name = f"{date_from} ~ {effective_date_to}"
+        if verbose:
+            print(f"⚠️ 结束日 {requested_date_to} 尚无已收盘数据，"
+                  f"已回测至 {effective_date_to}（原始请求日已记录在 run_meta）")
     # 事后评估：清仓后窗口指标。放在 run() 之外，回测核心保持纯 as-of；失败逐条降级。
     annotate_post_exit(result["positions"], sim.data)
 
@@ -81,7 +102,8 @@ def run_review_account(date_from: str,
         strategy_name=strategy_name,
         strategy_params_json=json.dumps(cfg.to_json_dict(), ensure_ascii=False),
         date_from=date_from,
-        date_to=date_to,
+        date_to=effective_date_to,
+        requested_date_to=requested_date_to,
         display_name=display_name,
         start_positions=[],
         start_realized_pnl=0.0,
@@ -102,12 +124,14 @@ def run_review_account(date_from: str,
 def run_incremental_review_account(base_run_id: int, *,
                                    verbose: bool = True,
                                    services=None) -> dict:
-    """在基准 run 的最后收盘状态上续算到最近已收盘交易日。
+    """在基准 run 的最后收盘状态上继续交易，并把新快照**追加到同一条 run**。
 
-    基准记录只读：恢复入口 ``restore_incremental_seed`` 是纯函数（快照/已平仓
-    行由调用方传入），模拟器只接受注入的初始状态与收益率分母。任何状态口径
-    不满足完整性校验都抛 ``ValueError``（Web 层映射 400），绝不回落到「当前
-    默认配置」或用未来数据。
+    语义：A 截止到 10-10，增量就在 A 的权益曲线上续写 10-13 起的快照，更新
+    A 的 ``date_to`` / 汇总列，而不是新建一条从 10-13 开始的记录。基准记录
+    只在「追加前」被读取（``restore_incremental_seed`` 是纯函数）；写入阶段
+    快照、交割单、持仓、事件与 run 汇总列在同一事务内完成，失败整体回滚。
+    任何状态口径不满足完整性校验都抛 ``ValueError``（Web 层映射 400），绝不
+    回落到「当前默认配置」或用未来数据。
     """
     try:
         base = account_store.get_review_account_run(base_run_id)
@@ -119,6 +143,10 @@ def run_incremental_review_account(base_run_id: int, *,
     source = base.get("source") or "v2"
     if source != "v2":
         raise ValueError(_ERR_SOURCE_NOT_V2)
+    if base.get("base_equity") is not None:
+        # 旧版增量 run 的 initial_cash 是原全量起点，快照却从续算段开始；
+        # 在它上面再追加会让整条 run 的 total_return 口径失真。
+        raise ValueError(_ERR_LEGACY_INCREMENTAL)
 
     initial_cash = base.get("initial_cash")
     if initial_cash is None or initial_cash <= 0:
@@ -148,9 +176,6 @@ def run_incremental_review_account(base_run_id: int, *,
     data = MarketData(provider=_xueqiu_from_services(services))
     date_from, date_to = resolve_incremental_window(data, cfg, base["date_to"])
 
-    # 运行前深冻结期初持仓：模拟器会原地修改 Position，保存的 start_* 必须
-    # 是真正的期初状态（main R3），不能等 run 结束后再序列化同一批对象。
-    start_positions_snapshot = [asdict(p) for p in seed["state"].positions]
     sim = AccountSimulator(cfg, data=data,
                            initial_state=copy.deepcopy(seed["state"]),
                            base_equity=seed["base_equity"],
@@ -160,32 +185,57 @@ def run_incremental_review_account(base_run_id: int, *,
     _assert_snapshot_end(result, date_to)
     annotate_post_exit(result["positions"], sim.data)
 
-    base_label = base.get("display_name") or f"{base['date_from']} ~ {base['date_to']}"
-    display_name = f"{base_label} · 增量 {date_from}"
-    run_id = _persist_result(
-        result,
-        source=source,
-        strategy_name=cfg.strategy_name,
-        strategy_params_json=json.dumps(cfg.to_json_dict(), ensure_ascii=False),
-        date_from=date_from,
+    stats = _aggregate_appended_stats(base, snapshots, closed_rows, result)
+    segment_from, segment_to = date_from, date_to
+    # 返回值描述「追加后的整条 run」：区间、收益、回撤、成交与胜率都用 run 口径，
+    # 本段区间另存 segment_*，供调用方展示本次续算了哪几天。
+    result.update(stats)
+    result["date_from"] = base["date_from"]
+    result["date_to"] = date_to
+    result["segment_date_from"] = segment_from
+    result["segment_date_to"] = segment_to
+    run_meta_json = json.dumps(
+        _merged_run_meta(
+            base, result,
+            total_days=len(snapshots) + len(result["snapshots"]),
+            date_from=date_from, date_to=date_to),
+        ensure_ascii=False)
+    account_store.append_review_account_results(
+        base_run_id,
         date_to=date_to,
-        display_name=display_name,
-        base_equity=seed["base_equity"],
-        base_run_id=base_run_id,
-        start_positions=start_positions_snapshot,
-        start_realized_pnl=seed["start_realized_pnl"],
-        start_cash=seed["state"].cash,
-        start_peak_equity=seed["state"].peak_equity,
-        start_consecutive_losses=seed["state"].consecutive_losses,
-        start_marks={p.code: p.mark for p in seed["state"].positions
-                     if p.mark is not None},
-        attribution_quality=seed["attribution_quality"],
+        final_equity=stats["final_equity"],
+        total_return=stats["total_return"],
+        max_drawdown=stats["max_drawdown"],
+        trade_count=stats["trade_count"],
+        win_rate=stats["win_rate"],
+        run_meta_json=run_meta_json,
+        snapshots=[s.__dict__ for s in result["snapshots"]],
+        trades=[
+            {**t.__dict__, "signal_json": json.dumps(t.signal, ensure_ascii=False)}
+            for t in result["trades"]
+        ],
+        positions=[
+            {
+                **p.__dict__,
+                "entry_signal_json": json.dumps(p.entry_signal, ensure_ascii=False),
+                "exit_signal_json": json.dumps(p.exit_signal, ensure_ascii=False),
+            }
+            for p in result["positions"]
+        ],
+        events=[
+            {**e.__dict__, "signal_json": json.dumps(e.signal, ensure_ascii=False)}
+            for e in result.get("events", [])
+        ],
     )
-    result["run_id"] = run_id
-    result["display_name"] = display_name
+    result["run_id"] = base_run_id
+    result["display_name"] = base.get("display_name")
     result["base_equity"] = seed["base_equity"]
+    result["appended_to_run"] = base_run_id
 
     if verbose:
+        base_label = base.get("display_name") or f"{base['date_from']} ~ {base['date_to']}"
+        print(f"增量已追加到 run #{base_run_id}（{base_label}）："
+              f"本段 {segment_from} ~ {segment_to}")
         _print_summary(result, source, cfg.strategy_name)
     return result
 
@@ -274,6 +324,104 @@ def resolve_incremental_window(data, cfg: StrategyConfig,
     return future[0], future[-1]
 
 
+def resolve_persisted_date_to(result: dict, requested_date_to: str) -> str:
+    """全量回测落库终点：收敛到实际最后快照日（策略决定，区别于落库断言）。
+
+    ``MarketData.calendar`` 在「当日 15:05 前」与「非交易日」不含当日，
+    ``sim.run`` 会静默少跑这些日期。若仍按请求日落库，增量回测就会以
+    「基准记录快照与结束日期不一致」拒绝续算。这里以实际快照为准，
+    原始请求日由 ``run_meta.requested_date_to`` 留痕，不静默丢失。
+    """
+    snapshots = result.get("snapshots") or []
+    if not snapshots:
+        raise ValueError(_ERR_NO_SNAPSHOTS)
+    actual = snapshots[-1].trade_date
+    if actual > requested_date_to:
+        raise ValueError(_ERR_RESULT_END.format(expected=requested_date_to,
+                                                actual=actual))
+    return actual
+
+
+def _aggregate_appended_stats(base_run: dict, snapshots: list[dict],
+                              closed_rows: list[dict], result: dict) -> dict:
+    """追加后的 run 级汇总：收益率回到 ``initial_cash`` 口径，回撤/胜率覆盖全周期。
+
+    增量段结果只描述本次续算；run 行必须继续表达整条记录。收益率分母用 run 的
+    ``initial_cash``（与全量一致），而不是本段的 ``base_equity``。
+    """
+    drawdowns = [s.get("drawdown") for s in snapshots
+                 if s.get("drawdown") is not None]
+    drawdowns += [s.drawdown for s in result["snapshots"]
+                  if s.drawdown is not None]
+    final_equity = result["snapshots"][-1].total_equity
+    initial_cash = base_run.get("initial_cash") or 0
+    total_closed = len(closed_rows) + len(result["positions"])
+    wins = sum(1 for row in closed_rows
+               if (row.get("realized_return") or 0) > 0)
+    wins += sum(1 for p in result["positions"] if p.realized_return > 0)
+    return {
+        "final_equity": final_equity,
+        "total_return": ((final_equity / initial_cash - 1) * 100
+                         if initial_cash else 0.0),
+        "max_drawdown": min(drawdowns) if drawdowns else 0.0,
+        "trade_count": (base_run.get("trade_count") or 0) + result["trade_count"],
+        "win_rate": (wins / total_closed * 100) if total_closed else None,
+    }
+
+
+def _merged_run_meta(base_run: dict, result: dict, *,
+                     total_days: int, date_from: str, date_to: str) -> dict:
+    """把增量段并入 run_meta：可累加字段求和，枚举冲突记 ``mixed``。
+
+    ``incremental_segments`` 记录每次续算的区间，供排障与 UI 追溯；旧 run
+    没有该键时从空列表开始。
+    """
+    meta = dict(base_run.get("run_meta") or {})
+    meta["data_quality"] = _merge_enum(meta.get("data_quality"),
+                                       result.get("data_quality"))
+    meta["ranking_mode"] = _merge_enum(meta.get("ranking_mode"),
+                                       result.get("ranking_mode"))
+    meta["fallback_days"] = ((meta.get("fallback_days") or 0)
+                             + (result.get("fallback_days") or 0))
+    meta["total_days"] = total_days
+    meta["suspended_days_count"] = ((meta.get("suspended_days_count") or 0)
+                                    + (result.get("suspended_days_count") or 0))
+    meta["suspended_codes"] = sorted(
+        set(meta.get("suspended_codes") or [])
+        | set(result.get("suspended_codes") or []))
+    meta["pool_sources"] = {**(meta.get("pool_sources") or {}),
+                            **(result.get("pool_sources") or {})}
+    meta["fallback_reasons"] = {**(meta.get("fallback_reasons") or {}),
+                                **(result.get("fallback_reasons") or {})}
+    meta["priority_degraded"] = _dedup(meta.get("priority_degraded"),
+                                       result.get("priority_degraded"))
+    meta["data_degraded"] = _dedup(meta.get("data_degraded"),
+                                   result.get("data_degraded"))
+    meta["strategy_name"] = base_run.get("strategy_name") or ""
+    meta["initial_cash"] = base_run.get("initial_cash")
+    meta.setdefault("base_equity", meta["initial_cash"])
+    meta["realized_pnl_total"] = ((meta.get("realized_pnl_total") or 0)
+                                  + (result.get("realized_pnl") or 0))
+    meta.setdefault("attribution_quality", "full_run")
+    segments = list(meta.get("incremental_segments") or [])
+    segments.append({"date_from": date_from, "date_to": date_to})
+    meta["incremental_segments"] = segments
+    return meta
+
+
+def _merge_enum(old, new):
+    """枚举型元数据合并：缺失取另一侧，冲突记 ``mixed``。"""
+    if old is None:
+        return new
+    if new is None:
+        return old
+    return old if old == new else "mixed"
+
+
+def _dedup(first, second):
+    return list(dict.fromkeys((first or []) + (second or [])))
+
+
 def _assert_snapshot_end(result: dict, expected: str) -> None:
     """落库前校验行情覆盖：最后一条快照必须落在解析出的增量终点。
 
@@ -342,6 +490,7 @@ def _persist_result(result: dict, *,
                     date_from: str,
                     date_to: str,
                     display_name: Optional[str],
+                    requested_date_to: Optional[str] = None,
                     base_equity: Optional[float] = None,
                     base_run_id: Optional[int] = None,
                     start_positions: Optional[list[dict]] = None,
@@ -351,7 +500,19 @@ def _persist_result(result: dict, *,
                     start_consecutive_losses: Optional[int] = None,
                     start_marks: Optional[dict] = None,
                     attribution_quality: str = "full_run") -> int:
-    """全量 / 增量共用的落库管线（Template Method，行为与原全量路径逐位一致）。"""
+    """全量回测落库管线：新建 run 并原子写入全部子表。
+
+    落库前校验不变量 ``date_to == 最后快照 trade_date``：调用方负责决定终点
+    （全量钳制），这里拒绝任何不一致的结果进入数据库。增量不走本函数，而是
+    ``storage.append_review_account_results`` 原地追加。
+    """
+    snapshots = result.get("snapshots") or []
+    if not snapshots:
+        raise ValueError(_ERR_NO_SNAPSHOTS)
+    actual_end = snapshots[-1].trade_date
+    if actual_end != date_to:
+        raise ValueError(_ERR_PERSIST_SNAPSHOT_END.format(expected=date_to,
+                                                          actual=actual_end))
     run_meta = {
         "data_quality": result.get("data_quality"),
         "fallback_days": result.get("fallback_days"),
@@ -368,6 +529,8 @@ def _persist_result(result: dict, *,
         "base_equity": base_equity if base_equity is not None else result["initial_cash"],
         "realized_pnl_total": result.get("realized_pnl_total"),
         "attribution_quality": attribution_quality,
+        "requested_date_to": requested_date_to or date_to,
+        "date_to_clamped": bool(requested_date_to and requested_date_to != date_to),
     }
     run_id = account_store.create_review_account_run(
         source=source,
@@ -393,29 +556,29 @@ def _persist_result(result: dict, *,
         start_consecutive_losses=start_consecutive_losses,
         start_marks_json=json.dumps(start_marks or {}, ensure_ascii=False),
         run_meta_json=json.dumps(run_meta, ensure_ascii=False),
-    )
-    account_store.save_review_account_results(
-        run_id,
-        snapshots=[s.__dict__ for s in result["snapshots"]],
-        trades=[
-            {**t.__dict__, "signal_json": json.dumps(t.signal, ensure_ascii=False)}
-            for t in result["trades"]
-        ],
-        positions=[
-            {
-                **p.__dict__,
-                "entry_signal_json": json.dumps(p.entry_signal, ensure_ascii=False),
-                "exit_signal_json": json.dumps(p.exit_signal, ensure_ascii=False),
-            }
-            for p in result["positions"]
-        ],
-        events=[
-            {
-                **e.__dict__,
-                "signal_json": json.dumps(e.signal, ensure_ascii=False),
-            }
-            for e in result.get("events", [])
-        ],
+        # run 行与全部子行同一事务提交：子表失败时不留下空 run。
+        children={
+            "snapshots": [s.__dict__ for s in result["snapshots"]],
+            "trades": [
+                {**t.__dict__, "signal_json": json.dumps(t.signal, ensure_ascii=False)}
+                for t in result["trades"]
+            ],
+            "positions": [
+                {
+                    **p.__dict__,
+                    "entry_signal_json": json.dumps(p.entry_signal, ensure_ascii=False),
+                    "exit_signal_json": json.dumps(p.exit_signal, ensure_ascii=False),
+                }
+                for p in result["positions"]
+            ],
+            "events": [
+                {
+                    **e.__dict__,
+                    "signal_json": json.dumps(e.signal, ensure_ascii=False),
+                }
+                for e in result.get("events", [])
+            ],
+        },
     )
     return run_id
 

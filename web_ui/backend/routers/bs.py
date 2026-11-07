@@ -4,8 +4,9 @@
 无行返回 200 空数据；参数非法 400；仓储异常 500 单键。
 
 ``POST /api/bs/rebuild`` 是 Web 层唯一写操作例外：HTTP 处理函数不写库，只委派
-``BsRunner`` 启动 ``python -m dragon_quant bs-eval --force`` 子进程，写入发生在
-子进程内。
+``BsRunner`` 启动 ``python -m dragon_quant bs-eval [--force]`` 子进程，写入发生
+在子进程内。``mode=incremental``（不带 ``--force``）只评估尚无终态结果的行；
+``mode=force`` 为缺省的全量重算。
 """
 
 from __future__ import annotations
@@ -90,13 +91,24 @@ def bs_jobs_status(runner=Depends(bs_runner),
 
 @router.post("/api/bs/rebuild", response_model=None)
 @stable_errors
-def bs_rebuild(request: Request, runner=Depends(bs_runner),
+def bs_rebuild(request: Request, mode: str = "force",
+               runner=Depends(bs_runner),
                settings=Depends(dashboard_settings)):
     origin = request.headers.get("origin")
     if origin is not None and not origin_allowed(origin):
         return JSONResponse(status_code=403, content={"error": "invalid_origin"})
+    starters = {
+        "force": runner.start_force,
+        "incremental": runner.start_incremental,
+    }
+    starter = starters.get(mode)
+    if starter is None:
+        raise ApiError(
+            400, "invalid_request",
+            f"mode 只能是 force 或 incremental，收到：{mode}",
+        )
     try:
-        runner.start_force(trigger="manual")
+        starter(trigger="manual")
     except BsJobBusy:
         payload = _job_payload(runner, settings)
         return JSONResponse(status_code=409, content={

@@ -9,8 +9,31 @@ from dragon_quant.review_account.models import StrategyConfig
 ROOT = Path(__file__).resolve().parents[2] / "skills" / "dragon-quant"
 SKILL = ROOT / "SKILL.md"
 REFS = ["commands.md", "outputs.md", "playbooks.md", "operations.md",
-        "reports.md", "safety.md", "premarket.md", "evidence.md"]
+        "reports.md", "safety.md", "premarket.md", "evidence.md",
+        "research.md", "datasets.md"]
 STRATEGY_FIELDS = [f.name for f in fields(StrategyConfig) if f.name != "source"]
+PARAM_FACTS = tuple(f.name for f in fields(StrategyConfig)
+                    if f.name not in ("source", "strategy_name"))
+
+
+def hardcoded_param_violations(text: str) -> list[str]:
+    """允许引用运行时字段名，禁止把未授权参数数值写成 Skill 事实。"""
+    found: list[str] = []
+    for name in PARAM_FACTS:
+        patterns = (
+            rf"\b{re.escape(name)}\b\s*[:=：]\s*-?\d",
+            rf"\b{re.escape(name)}\b[^\n]{{0,12}}?\d+(\.\d+)?\s*%",
+            rf"\b{re.escape(name)}\b\s+[-+]?\d+(\.\d+)?",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                found.append(match.group(0))
+    for pattern in (r"初始资金\s*[:=：]\s*\d", r"仓位[^\n]{0,6}\d+\s*%"):
+        match = re.search(pattern, text)
+        if match:
+            found.append(match.group(0))
+    return found
 
 
 def _frontmatter() -> str:
@@ -84,11 +107,20 @@ class TestSkillContent(unittest.TestCase):
         ]
         for pattern in forbidden:
             self.assertIsNone(re.search(pattern, blob, re.IGNORECASE), pattern)
-        for name in STRATEGY_FIELDS:
-            self.assertIsNone(
-                re.search(rf"\b{re.escape(name)}\b", blob),
-                f"strategy field copied into skill: {name}",
-            )
+        for violation in hardcoded_param_violations(blob):
+            self.fail(f"skill 手写未授权参数事实：{violation}")
+
+    def test_runtime_field_names_are_allowed_but_values_are_not(self):
+        allowed = "allowed_actions 与 stop_loss_pct 等字段以运行时 JSON 契约为准"
+        self.assertEqual(hardcoded_param_violations(allowed), [])
+        for bad in (
+            "stop_loss_pct: -5",
+            "stop_loss_pct = -5%",
+            "min_score 50",
+            "take_profit_pct 12%",
+            "初始资金：100000",
+        ):
+            self.assertTrue(hardcoded_param_violations(bad), bad)
 
     def test_outputs_cover_key_contracts(self):
         text = (ROOT / "references" / "outputs.md").read_text(encoding="utf-8")
@@ -363,7 +395,7 @@ class TestSkillTomorrowStrategy(unittest.TestCase):
 
 
 class TestPremarketSkill(unittest.TestCase):
-    """盘前预案：九类白名单、T0、八段模板、三锚/四态、外部证据与体量。"""
+    """盘前预案：十类白名单、T0、八段模板、三锚/四态、外部证据与体量。"""
 
     def _premarket(self) -> str:
         return (ROOT / "references" / "premarket.md").read_text(encoding="utf-8")
@@ -373,7 +405,7 @@ class TestPremarketSkill(unittest.TestCase):
 
     def test_skill_declares_nine_capabilities_and_premarket_route(self):
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("九类", text)
+        self.assertIn("十类", text)
         self.assertIn("盘前预案", text)
         self.assertIn("premarket", text)
         self.assertIn("T0", text)

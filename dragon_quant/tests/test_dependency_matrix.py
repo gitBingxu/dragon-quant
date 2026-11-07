@@ -286,6 +286,8 @@ _COMMAND_PUBLIC_TREES = (
     "dragon_quant.commands",
     # scan persistence package: main + documented scans/dragons/logs/blacklist/results
     "dragon_quant.scan.storage",
+    # research facade: commands only use the public catalog/query/experiments entries
+    "dragon_quant.research",
 )
 
 # Feature implementation modules a command must never reach into directly: their

@@ -1,6 +1,6 @@
 import type { AccountRun, AccountSnapshot, AccountSummary } from "../../api/account";
 import { StatCard } from "../../components/StatCard";
-import { fmtMoney, fmtPct, pnlStatTone } from "../../lib/format";
+import { fmtMoney, fmtPct, pnlClass, pnlStatTone } from "../../lib/format";
 
 function metaText(run: AccountRun | null, key: string): string | null {
   const meta = run?.run_meta || {};
@@ -79,9 +79,19 @@ export function AccountStats({
         <StatCard
           label="平均盈利 / 亏损"
           value={
-            metrics
-              ? `${metrics.avg_win_pct != null ? fmtPct(metrics.avg_win_pct) : "—"} / ${metrics.avg_loss_pct != null ? fmtPct(metrics.avg_loss_pct) : "—"}`
-              : "—"
+            metrics ? (
+              <span className="num">
+                <span className={pnlClass(metrics.avg_win_pct)}>
+                  {fmtPct(metrics.avg_win_pct)}
+                </span>
+                <span className="text-ink-3"> / </span>
+                <span className={pnlClass(metrics.avg_loss_pct)}>
+                  {fmtPct(metrics.avg_loss_pct)}
+                </span>
+              </span>
+            ) : (
+              "—"
+            )
           }
         />
         <StatCard

@@ -62,6 +62,7 @@ export function TextField({
   width,
   onEnter,
   min,
+  max,
   step,
 }: {
   label?: string;
@@ -72,6 +73,7 @@ export function TextField({
   width?: number | string;
   onEnter?: () => void;
   min?: number;
+  max?: number;
   step?: number;
 }) {
   const input = (
@@ -81,6 +83,7 @@ export function TextField({
       value={value}
       placeholder={placeholder}
       min={min}
+      max={max}
       step={step}
       onChange={(event) => onChange(event.currentTarget.value)}
       onKeyDown={(event) => {

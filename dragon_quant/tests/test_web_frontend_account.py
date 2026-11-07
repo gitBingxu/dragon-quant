@@ -46,22 +46,42 @@ def test_page_has_incremental_button_and_exact_tooltip():
     page = _account_page()
     for token in ("createIncrementalAccountRun", "增量回测中…", "增量回测",
                   'label="增量回测说明"', TOOLTIP, "actionError",
-                  "loadRuns(resp.data.id)", "disabled={!runId || incrementing}"):
+                  "loadRuns(resp.data.id)", "setDetailRefresh",
+                  "disabled={!runId || incrementing}"):
         assert token in page, token
     assert "HintIcon" in page
 
 
-def test_button_and_hint_are_siblings_not_nested_buttons():
+def test_hint_icon_lives_inside_incremental_button_as_span():
     page = _account_page()
     start = page.index("增量回测中…")
-    # 增量按钮的 <button> 标签到 </button> 之间不得出现 HintIcon（避免 button 嵌套）。
     button_open = page.rindex("<button", 0, start)
     button_close = page.index("</button>", start)
-    assert "HintIcon" not in page[button_open:button_close]
-    wrapper = page.rindex("<span", 0, button_open)
-    wrapper_close = page.index("</span>", button_close)
-    assert "HintIcon" in page[button_close:wrapper_close]
-    assert "inline-flex items-center gap-1.5" in page
+    # 提示图标在按钮内部；为避免 button 嵌套，必须用非交互的 span 变体。
+    assert "HintIcon" in page[button_open:button_close]
+    assert 'as="span"' in page[button_open:button_close]
+    # tooltip 显隐由按钮自身的 group hover/focus 驱动。
+    assert "group" in page[button_open:start]
+    # 旧的「兄弟节点 + 外层 span 包裹」结构不再保留。
+    assert "inline-flex items-center gap-1.5" not in page
+
+
+def test_hint_icon_span_variant_is_css_driven_and_not_a_button():
+    hint = _read(FRONTEND / "components" / "HintIcon.tsx")
+    assert 'as = "button"' in hint
+    assert 'as === "span"' in hint
+    assert "group-hover:visible" in hint and "group-focus-visible:visible" in hint
+    # 整份文件只允许默认变体出现一次 <button> 开标签；span 变体必须纯 span。
+    assert hint.count("<button\n") == 1
+
+
+def test_avg_win_loss_value_uses_red_profit_green_loss():
+    stats = _read(FRONTEND / "pages" / "account" / "AccountStats.tsx")
+    assert "平均盈利 / 亏损" in stats
+    assert "avg_win_pct" in stats and "avg_loss_pct" in stats
+    # 盈利/亏损各自按符号取色（红涨绿跌），空值保持中性。
+    assert "pnlClass(metrics.avg_win_pct)" in stats
+    assert "pnlClass(metrics.avg_loss_pct)" in stats
 
 
 def test_account_page_uses_typography_tokens():

@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (57), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (70), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 57,
-    "top_level_count": 18,
+    "node_count": 70,
+    "top_level_count": 19,
     "nodes": [
       {
         "command": "scan",
@@ -215,7 +215,8 @@
           "--ui-only",
           "--port",
           "--no-browser",
-          "--config"
+          "--config",
+          "--json"
         ]
       },
       {
@@ -598,6 +599,150 @@
           "--limit",
           "--force",
           "--source",
+          "--json"
+        ]
+      },
+      {
+        "command": "research",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "research datasets",
+        "flags": [
+          "-h",
+          "--help",
+          "--json"
+        ]
+      },
+      {
+        "command": "research schema",
+        "flags": [
+          "-h",
+          "--help",
+          "--dataset",
+          "--json"
+        ]
+      },
+      {
+        "command": "research query",
+        "flags": [
+          "-h",
+          "--help",
+          "--dataset",
+          "--from",
+          "--to",
+          "--code",
+          "--scan-id",
+          "--run-id",
+          "--fields",
+          "--limit",
+          "--cursor",
+          "--json"
+        ]
+      },
+      {
+        "command": "research scan-quality",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--include-samples",
+          "--sample-limit",
+          "--sample-cursor",
+          "--json"
+        ]
+      },
+      {
+        "command": "research account",
+        "flags": [
+          "-h",
+          "--help",
+          "--run-id",
+          "--view",
+          "--limit",
+          "--cursor",
+          "--json"
+        ]
+      },
+      {
+        "command": "research signals",
+        "flags": [
+          "-h",
+          "--help",
+          "--from",
+          "--to",
+          "--code",
+          "--status",
+          "--limit",
+          "--cursor",
+          "--json"
+        ]
+      },
+      {
+        "command": "research snapshots",
+        "flags": [
+          "-h",
+          "--help",
+          "--kind",
+          "--date",
+          "--from",
+          "--to",
+          "--code",
+          "--limit",
+          "--cursor",
+          "--json"
+        ]
+      },
+      {
+        "command": "research strategy",
+        "flags": [
+          "-h",
+          "--help",
+          "--kind",
+          "--run-id",
+          "--json"
+        ]
+      },
+      {
+        "command": "research experiments",
+        "flags": [
+          "-h",
+          "--help"
+        ]
+      },
+      {
+        "command": "research experiments list",
+        "flags": [
+          "-h",
+          "--help",
+          "--run-id",
+          "--limit",
+          "--cursor",
+          "--json"
+        ]
+      },
+      {
+        "command": "research experiments show",
+        "flags": [
+          "-h",
+          "--help",
+          "--experiment-id",
+          "--run-id",
+          "--json"
+        ]
+      },
+      {
+        "command": "research experiments run",
+        "flags": [
+          "-h",
+          "--help",
+          "--run-id",
+          "--confirm",
+          "--sell-rule",
           "--json"
         ]
       }
@@ -1113,6 +1258,87 @@
           "dragon_quant/tests/e2e/test_bs_eval.py::test_bs5_daily_fallback_quality_is_observable"
         ],
         "notes": "BS1-BS5 drive the real bs-eval CLI with fake providers; BS6 (dashboard API + SPA fallback) lives in cross_cutting.bs_eval_api."
+      },
+      "research": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_help_lists_every_action",
+          "dragon_quant/tests/e2e/test_research.py::test_research_datasets_and_schema_contracts_without_data"
+        ],
+        "notes": "Local read-only research facade; no provider/network."
+      },
+      "research datasets": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_datasets_and_schema_contracts_without_data"
+        ],
+        "notes": "17 datasets with availability."
+      },
+      "research schema": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_datasets_and_schema_contracts_without_data"
+        ],
+        "notes": "Field/filter contract; no DDL."
+      },
+      "research query": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_query_rejects_unknown_and_injected_arguments",
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Unknown dataset/field/filter and inline injection exit 2."
+      },
+      "research scan-quality": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_scan_quality_empty_is_explainable"
+        ],
+        "notes": "Missing DB degrades with empty_reason."
+      },
+      "research account": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Missing run/DB is explainable empty state."
+      },
+      "research signals": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Not broker fills; empty DB degrades."
+      },
+      "research snapshots": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Stored snapshots only; no collection."
+      },
+      "research strategy": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Current runtime metadata; historical run separated."
+      },
+      "research experiments": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing",
+          "dragon_quant/tests/e2e/test_research.py::test_research_experiments_run_requires_real_run_and_confirm"
+        ],
+        "notes": "list/show read-only; run requires confirm."
+      },
+      "research experiments list": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Read-only saved reports; no lock file."
+      },
+      "research experiments show": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_read_only_commands_degrade_without_writing"
+        ],
+        "notes": "Read-only saved report."
+      },
+      "research experiments run": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_research.py::test_research_experiments_run_requires_real_run_and_confirm"
+        ],
+        "notes": "Missing confirm/unknown sell-rule exit 2 before any DB write."
       }
     },
     "hidden_aliases": {
@@ -1175,7 +1401,7 @@
           "dragon_quant/tests/e2e/test_web_api.py::test_w8_sigterm_exits_and_releases_port",
           "dragon_quant/tests/e2e/test_web_api.py::test_web_runner_cleans_up_when_server_fails_to_start",
           "dragon_quant/tests/e2e/test_web_api.py::test_w5_w6_account_run_lifecycle_and_series",
-          "dragon_quant/tests/e2e/test_web_api.py::test_w5_incremental_run_matches_full_replay",
+          "dragon_quant/tests/e2e/test_web_api.py::test_w5_incremental_appends_to_base_and_matches_full_replay",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_starts_and_serves_meta",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d1_dashboard_sigterm_releases_port",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d2_missing_web_extra_non_tty_gives_manual_hint",
@@ -1190,7 +1416,7 @@
           "dragon_quant/tests/e2e/test_dashboard.py::test_d11_prep_plan_followup_local_returns",
           "dragon_quant/tests/e2e/test_dashboard.py::test_d12_prep_default_date_effect_and_accuracy"
         ],
-        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network. D11 covers prep plan-followup (plan-day samples, local daily bars, 1/3/5 net returns, invalid params) and the same-day market verification. W5 also covers incremental replay: A(09-04~09-08)+incremental(→09-11) must equal the one-shot full run on overlapping days (snapshots/trades/positions), plus 400 no-new-data, 404 missing base and base_equity-anchored benchmark."
+        "notes": "W1-W9 real HTTP server subprocess with --no-browser and OS-assigned --port 0; the real port is parsed from the child's startup URL, process-group teardown asserts that exact port is released (W8 then reuses it explicitly). W9 covers /api/dragons review_caliber=strict|loose plus the v1 forced-loose path. D7 pins the recent-cards raw-scan source (5-day-deduped rank1 still shown) while the backtest pool stays deduped. D8 covers the prep calendar/three states/cross-day review-context and clickable fully-missing day; D9 covers scan runtime states and log pagination; D10 covers auction calendar/day/local-stock-daily effect with no network. D11 covers prep plan-followup (plan-day samples, local daily bars, 1/3/5 net returns, invalid params) and the same-day market verification. W5 also covers incremental replay: A(09-04~09-08) is appended in place (no new run) and must equal the one-shot full run on overlapping days (snapshots/trades/positions), plus 400 no-new-data, 404 missing base and initial_cash-anchored benchmark."
       },
       "npm": {
         "tests": [
@@ -1387,7 +1613,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_57_nodes_and_18_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_70_nodes_and_19_top_level_commands",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",

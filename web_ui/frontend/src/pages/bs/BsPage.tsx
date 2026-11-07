@@ -7,6 +7,7 @@ import {
   postBsRebuild,
   type BsBuyRow,
   type BsBuySummary,
+  type BsJobMode,
   type BsJobStatus,
   type BsOverview,
   type BsSellRow,
@@ -233,11 +234,15 @@ const SELL_COLUMNS: Column<BsSellRow>[] = [
   },
 ];
 
-function RebuildButton({
+function JobButton({
+  label,
+  variant,
   running,
   submitting,
   onClick,
 }: {
+  label: string;
+  variant: "primary" | "ghost";
   running: boolean;
   submitting: boolean;
   onClick: () => void;
@@ -245,11 +250,11 @@ function RebuildButton({
   return (
     <button
       type="button"
-      className="btn btn-primary"
+      className={`btn btn-${variant}`}
       disabled={running || submitting}
       onClick={onClick}
     >
-      {running ? "生成中…" : "重新计算买卖点"}
+      {running ? "生成中…" : label}
     </button>
   );
 }
@@ -263,6 +268,8 @@ export function BsPage() {
   const [jobError, setJobError] = useState<string | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // force = 全部重算；incremental = 只算尚未完成评测的行。
+  const [confirmMode, setConfirmMode] = useState<BsJobMode>("force");
   const [submitting, setSubmitting] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const wasRunning = useRef(false);
@@ -378,12 +385,17 @@ export function BsPage() {
     };
   }, [running, jobState]);
 
+  const openConfirm = useCallback((mode: BsJobMode) => {
+    setConfirmMode(mode);
+    setConfirmOpen(true);
+  }, []);
+
   const handleRebuild = useCallback(async () => {
     setConfirmOpen(false);
     setSubmitting(true);
     setPostError(null);
     try {
-      const payload = await postBsRebuild();
+      const payload = await postBsRebuild(confirmMode);
       setJob(payload);
       setJobError(null);
     } catch (exc: unknown) {
@@ -401,7 +413,7 @@ export function BsPage() {
     } finally {
       setSubmitting(false);
     }
-  }, []);
+  }, [confirmMode]);
 
   const baseFilters = useMemo(
     () => ({
@@ -481,7 +493,7 @@ export function BsPage() {
       <PageHeader
         eyebrow="BS · 策略回放"
         title="BS策略"
-        description="假想买卖点回放：每只龙头入选后逐日评估四类买点与十条卖出规则，统计买后/卖后 5 日表现，为策略优化提供样本。查看面板默认只读；需要重算时点击「重新计算买卖点」显式运行。"
+        description="假想买卖点回放：每只龙头入选后逐日评估四类买点与十条卖出规则，统计买后/卖后 5 日表现，为策略优化提供样本。查看面板默认只读；需要重算时用「全部重算」或「增量计算」显式运行。"
       />
 
       {running ? (
@@ -557,14 +569,16 @@ export function BsPage() {
             description={
               loading
                 ? "读取最近一次 bs-eval 批次与全量样本。"
-                : "查看面板不会隐式生成；需要时点击「重新计算买卖点」，或在终端显式执行 python -m dragon_quant bs-eval。"
+                : "查看面板不会隐式生成；需要时点击「全部重算」，或在终端显式执行 python -m dragon_quant bs-eval。"
             }
             action={
               !loading ? (
-                <RebuildButton
+                <JobButton
+                  label="全部重算"
+                  variant="primary"
                   running={running}
                   submitting={submitting}
-                  onClick={() => setConfirmOpen(true)}
+                  onClick={() => openConfirm("force")}
                 />
               ) : null
             }
@@ -574,12 +588,14 @@ export function BsPage() {
         <Section>
           <EmptyState
             title={running ? "数据生成中…" : "暂无 BS 回放数据"}
-            description="查看面板不会隐式生成/重算；需要时点击「重新计算买卖点」，或在终端显式执行 python -m dragon_quant bs-eval。"
+            description="查看面板不会隐式生成/重算；需要时点击「全部重算」，或在终端显式执行 python -m dragon_quant bs-eval。"
             action={
-              <RebuildButton
+              <JobButton
+                label="全部重算"
+                variant="primary"
                 running={running}
                 submitting={submitting}
-                onClick={() => setConfirmOpen(true)}
+                onClick={() => openConfirm("force")}
               />
             }
           />
@@ -589,7 +605,7 @@ export function BsPage() {
           {overview.stale_rows > 0 ? (
             <div className="flex items-center gap-2 rounded-lg border border-warning-line bg-warning-soft px-3.5 py-2.5 text-body text-warning-text">
               <IconAlert size={15} />
-              有 {overview.stale_rows} 行来自旧策略版本，未计入当前统计；可点击「重新计算买卖点」
+              有 {overview.stale_rows} 行来自旧策略版本，未计入当前统计；可点击「全部重算」
               全量重算，或在终端执行 python -m dragon_quant bs-eval --force。
             </div>
           ) : null}
@@ -609,10 +625,19 @@ export function BsPage() {
                       扫描 {overview.run.counters.rows_scanned} · 评估 {overview.run.counters.rows_evaluated}
                     </Badge>
                   ) : null}
-                  <RebuildButton
+                  <JobButton
+                    label="全部重算"
+                    variant="primary"
                     running={running}
                     submitting={submitting}
-                    onClick={() => setConfirmOpen(true)}
+                    onClick={() => openConfirm("force")}
+                  />
+                  <JobButton
+                    label="增量计算"
+                    variant="ghost"
+                    running={running}
+                    submitting={submitting}
+                    onClick={() => openConfirm("incremental")}
                   />
                 </>
               }
@@ -774,8 +799,12 @@ export function BsPage() {
       <Modal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title="重新计算买卖点？"
-        description="范围：全部 dragons_v2 行；版本：新评测器（旧行将标记 stale）；副作用：写入 bs_runs / bs_signals 派生表并可能耗时数分钟。纯查看不会触发重算。"
+        title={confirmMode === "force" ? "全部重算买卖点？" : "增量计算买卖点？"}
+        description={
+          confirmMode === "force"
+            ? "范围：全部 dragons_v2 行；版本：新评测器（旧行将标记 stale）；副作用：写入 bs_runs / bs_signals 派生表并可能耗时数分钟。纯查看不会触发重算。"
+            : "范围：仅尚无终态结果的 dragons_v2 行（新入选 + 未完成评测）；沿用当前策略，已有终态结果不重算；副作用：写入 bs_runs / bs_signals 派生表。策略或评测器版本变化时会自动升级为全量。"
+        }
         footer={
           <>
             <button
@@ -792,7 +821,7 @@ export function BsPage() {
               onClick={handleRebuild}
               disabled={submitting}
             >
-              开始重新计算
+              {confirmMode === "force" ? "开始全部重算" : "开始增量计算"}
             </button>
           </>
         }

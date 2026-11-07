@@ -2,10 +2,10 @@
 name: dragon-quant
 description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, 因子入库与读回 factor build/query, 扫描诊断/识别质量归因 research scan-quality, 账户策略优化/消融实验 research experiments, or 历史证据读回 research account/signals/snapshots with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
 license: MIT
-compatibility: Requires dragon-quant CLI >=0.9.0 (Python >=3.10). Node >=22.20 is only needed for installation.
+compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
   skill-version: "1.0.1"
-  min-cli-version: "0.9.0"
+  min-cli-version: "0.8.0"
 ---
 
 # dragon-quant 交易日助手

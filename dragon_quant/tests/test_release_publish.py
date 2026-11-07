@@ -255,6 +255,30 @@ def test_success_commits_only_release_files_and_uploads_same_artifacts(tmp_path)
     assert any(name.endswith(".tar.gz") for name in artifact_names)
 
 
+def test_release_succeeds_when_version_already_prepared(tmp_path):
+    """手工准备过版本时（pyproject/_version/dist 已是目标状态）复用 HEAD，不建空提交。"""
+    fixture = ReleaseFixture(tmp_path)
+    (fixture.repo / "pyproject.toml").write_text(
+        f'[project]\nname = "dragon-quant"\nversion = "{fixture.version}"\n',
+        encoding="utf-8")
+    (fixture.repo / "dragon_quant" / "_version.py").write_text(
+        f'__version__ = "{fixture.version}"\n', encoding="utf-8")
+    (fixture.repo / "web_ui" / "dist" / "index.html").write_text(
+        "<!doctype html>\n", encoding="utf-8")
+    fixture.git("add", "-A")
+    fixture.git("commit", "-q", "-m", "prepare release version")
+    head = fixture.git("rev-parse", "HEAD").stdout.strip()
+
+    result = fixture.run("--v", fixture.version,
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 0, result.stderr
+    assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
+    assert fixture.git("tag", "--list", f"v{fixture.version}").stdout.strip() == (
+        f"v{fixture.version}")
+    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
+    assert any(call["argv"][:3] == ["-m", "twine", "upload"] for call in calls)
+
+
 def test_atomic_push_failure_does_not_fall_back(tmp_path):
     fixture = ReleaseFixture(tmp_path)
     wrapper_dir = tmp_path / "gitwrap"
@@ -338,7 +362,7 @@ def test_distribution_versions_are_consistent():
     assert package["version"] == skill_version
     assert min_cli == pyproject_version == module_version
     assert skill_version == "1.0.1"
-    assert pyproject_version == "0.9.0"
+    assert pyproject_version == "0.8.0"
 
 
 def test_resume_after_github_release_failure_does_not_reupload(tmp_path):

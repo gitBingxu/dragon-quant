@@ -9,7 +9,7 @@
 
 保留日常助手已有行为、v2 口径、缺失不填零、成熟度与版本可比性约束。不修改生产评分算法、买卖规则、默认策略参数；不自动推广实验结论。不新增 v1 能力、任意 SQL、远程数据服务、付费依赖、自动安装依赖、调度、真实发布、提交、推送或 PR。不采集用户真实数据，不读取发布凭据内容，不执行真实库迁移。
 
-版本决策：新增公共能力后 Python 目标版本 `0.9.0`；按用户指定，npm/skill 同步 `1.0.1`，skill 的 min-cli-version 为 `0.9.0`。只修改源码版本和 CHANGELOG，不创建发布物的远端版本。旧命令输出默认兼容；新命令独立采用版本化 JSON。
+版本决策：新增公共能力后 Python 目标版本 `0.8.0`；按用户指定，npm/skill 同步 `1.0.1`，skill 的 min-cli-version 为 `0.8.0`。只修改源码版本和 CHANGELOG，不创建发布物的远端版本。旧命令输出默认兼容；新命令独立采用版本化 JSON。
 
 ## 2. 已确认现状与选择
 
@@ -178,7 +178,7 @@ Claude Code按该方案实现并独立完成自测/自审；核心方向变化�
 
 ## 11. Main 单次验收（2026-11-06）与实现回写
 
-Main 对首轮实现给出 NEEDS_CHANGES（A1–A11 / S1–S2），并保留首轮实现选择：shell 薄壳 + 标准库 Python 发布 helper、research Facade、owner 窄 SQL、Web 兼容转发、独立只读连接点、coverage 70/19、版本 0.9.0 / 1.0.1。以下为本次返工后的实现事实（不把未满足项写成已满足）：
+Main 对首轮实现给出 NEEDS_CHANGES（A1–A11 / S1–S2），并保留首轮实现选择：shell 薄壳 + 标准库 Python 发布 helper、research Facade、owner 窄 SQL、Web 兼容转发、独立只读连接点、coverage 70/19、版本 0.8.0 / 1.0.1。以下为本次返工后的实现事实（不把未满足项写成已满足）：
 
 - **A1 单位**：`research/catalog.py` 的 9 个收益/回撤/胜率字段统一为「百分比点（1.0 = 1%）」，与 simulator / engine 的 `*100` 生产计算一致；新增单位集合断言与代表值 fixture，不改数据值与生产算法。
 - **A2 严格只读**：`open_readonly` 在连接前判断 sidecar：非空 WAL 且无 `-shm` 直接 `readonly_unavailable`（不创建 SHM）；有 `-shm` 才 `mode=ro`；无 WAL/SHM 才 `immutable=1`。测试覆盖零 sidecar、非空 WAL 无 SHM、现有 SHM、checkpointed、损坏/旧结构分支，断言文件集合 / db+WAL 字节不变。

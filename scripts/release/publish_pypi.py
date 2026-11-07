@@ -652,6 +652,11 @@ def commit_release(repo: Path, staging: Path, version: str,
         if extra:
             raise ReleaseError(
                 "commit", f"暂存区出现非发布文件，已中止：{extra[:5]}")
+        if not staged:
+            # 版本文件与 dist 已是目标状态（例如手工准备过版本）；复用 HEAD，
+            # 不创建空的 bump 提交。
+            return runner.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              stage="commit").stdout.strip()
         runner.run(["git", "-C", str(repo), "commit", "-m", f"🔖 bump: {version}"],
                    stage="commit")
         return runner.run(["git", "-C", str(repo), "rev-parse", "HEAD"],

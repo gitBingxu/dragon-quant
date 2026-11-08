@@ -10,6 +10,19 @@
 - 截至主分支 `aafe8e0`，覆盖 18 次 MR 合入（编号为 1～5、8～18、20～21）。`v0.2.3` 标签不在 main 历史中，不列作主分支发布；尚未合入 main 的分支提交不计入已发布版本。
 - `0.1.0` 无对应 Git 标签，保留首版日期并按早期提交校正功能归属；后续版本均注明标签与版本提交。
 
+## [0.8.1] - 未发布
+
+> 草稿：覆盖 0.8.0 合入后的发布修复与数据链路变更；完成版本提交后补记版本依据。
+
+### Fixed
+- `publish.sh` 输错发布密码时不再让原始异常冒泡：错误口令下 openssl 解出垃圾字节，`subprocess` 的严格 UTF-8 解码在 `returncode` 判断前抛 `UnicodeDecodeError` 绕过 `except ReleaseError` 裸冒 traceback。改为字节捕获 + 先判 `returncode` 再解码，解密失败统一收敛为「密码错误」干净报错（exit 1）；padding 巧合解出的垃圾按 `pypi-` 前缀拒收，不送进 twine；`main()` 顶层补兜底，未预期异常打印阶段与 `--resume` 提示。
+
+### Changed
+- `scan` 与 `data kline/minute` 个股链路去雪球，统一走 TDX（无 Cookie）：`_get_trade_date` 删雪球 600519 兜底；Phase B/C/D 个股日K与分时删雪球回退；5 日去重日历由雪球平安银行日K改为 TDX 上证指数日K（`tdx_trade_dates`），TDX 失败时 fail-open 不施加去重门；`data` 门面默认 source 改 `tdx`，未知 source 显式 `ValueError` 不再静默落雪球；CLI `quote`/`batch-quote` choices 收敛 `tencent`。雪球保留给 `review-account` / `prep` / `vpa` / Web benchmark 老链路（`fq_type` 复权口径独立）。
+
+### Added
+- Skill 新增 `references/schedule.md` 定时任务引导：scan→prep→auction→premarket 跨时点依赖链的 cron/launchd 编排模板（flock 防重入、独立日志）、时间窗表（以各命令运行时门禁为准）与 Agent 行为契约（显式触发 + 会话结尾主动建议一次；只生成配置不代写 crontab；`buy`/`sell` 资金操作红线不出无人值守模板）；README 新增「每日自动化」入口。npm / Skill 版本升至 `1.0.2`。
+
 ## [0.8.0] - 2026-11-08
 
 ### Added

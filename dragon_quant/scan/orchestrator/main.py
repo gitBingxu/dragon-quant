@@ -409,7 +409,7 @@ def _get_trade_date(providers: Optional[dict] = None) -> Optional[str]:
             return None
         return datetime.fromtimestamp(bars[-1].timestamp / 1000, tz=bj_tz).strftime("%Y-%m-%d")
 
-    # 优先 TDX 上证指数（与 prep 日期门禁同源，不依赖雪球 Cookie）。
+    # 优先 TDX 上证指数（与 prep 日期门禁同源，无 Cookie）。
     # 契约：TDX KBar 的 timestamp 是本机墙钟解释（providers/tdx.py 的 time.mktime），
     # 此处再用固定 +08 反解日期——依赖运行机器时区为 Asia/Shanghai（项目运行环境约定）。
     tdx = providers.get("tdx")
@@ -422,19 +422,7 @@ def _get_trade_date(providers: Optional[dict] = None) -> Optional[str]:
                     return d
             except Exception:
                 pass
-
-    # 回退雪球（600519 历史口径，需 Cookie）
-    xq = providers.get("xueqiu")
-    if xq:
-        for fetch in (lambda: xq.get_minute_kline("600519"),
-                      lambda: xq.get_kline("600519", days=5)):
-            try:
-                d = _last_bar_date(fetch())
-                if d:
-                    return d
-            except Exception:
-                pass
-    print("  ⚠️ 无法确定最近交易日（TDX/雪球均不可用），缓存与日期判定回退自然日",
+    print("  ⚠️ 无法确定最近交易日（TDX 不可用），缓存与日期判定回退自然日",
           file=sys.stderr)
     return None
 
@@ -540,7 +528,6 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
         providers = _attach_provider_logger(injected_providers, logger)
     tdx = providers["tdx"]
     ths = providers["ths"]
-    xq = providers["xueqiu"]
     tx = providers["tencent"]
 
     cache = create_scan_cache()
@@ -731,10 +718,8 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
     if verbose:
         print(f"   拉取 {len(unique_codes)} 只个股日K线...")
     for code in unique_codes:
-        _cf("xueqiu", f"kline:day:{code}",
-            lambda c=code: _try(lambda: tdx.get_kline(c, days=30),
-                                lambda: xq.get_kline(c, days=30),
-                                "kline", "雪球"))
+        _cf("tdx", f"kline:day:{code}",
+            lambda c=code: tdx.get_kline(c, days=30))
     limiter.wait_all()
     fail_seen = _report_api_failures(logger, fail_seen, verbose)
 
@@ -807,14 +792,10 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
 
     # T2: 全部候选股分时K线（含 drive 封板池对比所需的同板块涨停股）
     for r in candidate_pool:
-        _cf("xueqiu", cache.stock_1min_key(r.code),
-            lambda c=r.code: _try(lambda: tdx.get_minute_kline(c),
-                                  lambda: xq.get_minute_kline(c),
-                                  "minute_kline", "雪球"))
-    _cf("xueqiu", cache.stock_1min_key(R.MARKET_SYMBOL),
-        lambda: _try(lambda: tdx.get_minute_kline(R.MARKET_SYMBOL),
-                     lambda: xq.get_minute_kline(R.MARKET_SYMBOL),
-                     "minute_kline", "雪球"))
+        _cf("tdx", cache.stock_1min_key(r.code),
+            lambda c=r.code: tdx.get_minute_kline(c))
+    _cf("tdx", cache.stock_1min_key(R.MARKET_SYMBOL),
+        lambda: tdx.get_minute_kline(R.MARKET_SYMBOL))
 
     # T3: 腾讯批量行情（含收盘盘口 bid1/ask1，liquidity 封单用）
     all_codes = set()
@@ -1029,13 +1010,18 @@ def scan(top_n: int = 5, candidates_n: int = 5, workers: int = 2,
             dragon_rows.append(dragon_data)
 
         # 交易日历在 persist 的 DB 隔离块内构建（callable），保持旧 Phase F
-        # 「日历构建失败与 DB 写入同样隔离」的语义。
-        cal_start = (clock.now(bj_tz) - timedelta(days=30)).strftime("%Y-%m-%d")
-        cal_end = now.strftime("%Y-%m-%d")
-
+        # 「日历构建失败与 DB 写入同样隔离」的语义。TDX 指数日K（无 Cookie）；
+        # 沿用旧门禁「今日 15:05 收盘后才计入」。TDX 不可用时返回 None →
+        # 不施加 5 日去重门（fail-open：不为日历源失败漏真龙）。
         def _scan_trade_calendar():
-            from dragon_quant.infra.market_calendar import build_trade_calendar
-            return build_trade_calendar(cal_start, cal_end)
+            from dragon_quant.infra.market_calendar import tdx_trade_dates
+            try:
+                dates = tdx_trade_dates(tdx, days=45)
+            except ValueError:
+                return None
+            today = now.strftime("%Y-%m-%d")
+            closed = (now.hour, now.minute) >= (15, 5)
+            return {d for d in dates if d < today or (d == today and closed)}
 
         report_file_text = (
             reporter.build_summary_report(display_list)

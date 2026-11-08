@@ -4,8 +4,8 @@ description: Use when the user asks about A-share 个股行情, 真龙/龙头扫
 license: MIT
 compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
-  skill-version: "1.0.1"
-  min-cli-version: "0.8.0"
+  skill-version: "1.0.2"
+  min-cli-version: "0.8.1"
 ---
 
 # dragon-quant 交易日助手
@@ -37,7 +37,7 @@ metadata:
 2. **叶子能力探测（最低版本之外）**：对本次要用的**叶子**命令取 help（如 `data quote -h`、`factor build -h`）；关键 flag/字段缺失时降级为只读解释，不猜测旧版行为，也不取父级 `-h` 把未开放子命令带进上下文。只使用白名单列出的参数。
 3. **能力是否在白名单**：只有 `references/commands.md` 的十类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
 4. **时点门禁**：统一按 Asia/Shanghai 与交易日判断。`scan` 当日 15:00 前不执行；`prep` 当日 16:40 前不执行；`auction` 当日 09:25 前不执行。时段不满足时说明等待条件，不用 `--force` 绕过。
-5. **数据源**：个股 K 线/分时雪球链路为空或 403 时，改用 `--source tencent` 重试一次；仍失败则如实说明数据不可得。
+5. **数据源**：`data kline/minute` 默认 tdx（无 Cookie）。为空时改用 `--source tencent` 重试一次；仍失败则如实说明数据不可得。
 6. **授权范围（持续有效）**：授权按日期/动作/参数给出的明确范围（如「今天允许跑 prep 和因子 build」）
    在本会话内持续有效，不因「上一轮不算」反复确认；只有用户撤销、日期/动作/参数越界或出现新的
    高风险副作用时才补一次确认。T0 只读可直接执行；T1 写操作仍受动作上限约束。
@@ -157,6 +157,7 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 | `references/research.md` | 扫描诊断、识别质量归因、账户策略消融与研究读回流程时 |
 | `references/datasets.md` | 需要选择 research 数据集、过滤器或解释 envelope 时 |
 | `references/operations.md` | 单能力/每日复合 workflow、UI 生命周期、因子三组名单时 |
+| `references/schedule.md` | 用户表达每日自动/定时/无人值守意图，或要把跨时点链交给 cron 时 |
 | `references/safety.md` | 执行任何 T1 命令前 |
 
 只加载需要的那一份；不要一次把全部 reference 读进来。

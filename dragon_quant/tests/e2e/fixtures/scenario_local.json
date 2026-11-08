@@ -635,6 +635,81 @@
           "main_net_amount": -1200000.0
         }
       ]
+    },
+    "tdx": {
+      "get_kline": {
+        "by_code": {
+          "600010": [
+            {
+              "timestamp": 1789000000000,
+              "volume": 1234567.0,
+              "open": 10.0,
+              "high": 10.5,
+              "low": 9.9,
+              "close": 10.4,
+              "chg": 0.4,
+              "pct": 4.0,
+              "turnover": 2.0,
+              "amount": 12345678.0
+            },
+            {
+              "timestamp": 1789086400000,
+              "volume": 2234567.0,
+              "open": 10.4,
+              "high": 10.9,
+              "low": 10.3,
+              "close": 10.8,
+              "chg": 0.4,
+              "pct": 3.85,
+              "turnover": 2.5,
+              "amount": 22345678.0
+            }
+          ],
+          "600020": []
+        }
+      },
+      "get_minute_kline": {
+        "by_code": {
+          "600010": [
+            {
+              "timestamp": 1789056600000,
+              "volume": 10000.0,
+              "open": 10.4,
+              "high": 10.5,
+              "low": 10.35,
+              "close": 10.45,
+              "chg": 0.05,
+              "pct": 0.48,
+              "turnover": 0.1,
+              "amount": 104500.0
+            },
+            {
+              "timestamp": 1789056660000,
+              "volume": 12000.0,
+              "open": 10.45,
+              "high": 10.6,
+              "low": 10.44,
+              "close": 10.58,
+              "chg": 0.13,
+              "pct": 1.24,
+              "turnover": 0.12,
+              "amount": 126960.0
+            },
+            {
+              "timestamp": 1789056720000,
+              "volume": 9000.0,
+              "open": 10.58,
+              "high": 10.62,
+              "low": 10.55,
+              "close": 10.6,
+              "chg": 0.02,
+              "pct": 0.19,
+              "turnover": 0.09,
+              "amount": 95400.0
+            }
+          ]
+        }
+      }
     }
   }
 }

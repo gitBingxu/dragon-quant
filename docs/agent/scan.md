@@ -6,13 +6,13 @@
 
 ## 执行流程（Phase A–F）
 
-编排器 `scan.orchestrator.main.scan()` 分 6 个阶段（最近交易日判定 `_get_trade_date` 为 TDX 指数K线优先、雪球兜底，不依赖雪球 Cookie）：
+编排器 `scan.orchestrator.main.scan()` 分 6 个阶段（最近交易日判定 `_get_trade_date` 为 TDX 指数K线（1 分 K 优先、日 K 兜底），失败回退自然日；scan 全链路无 Cookie、不依赖雪球）：
 
 | Phase | 做什么 |
 |-------|--------|
 | **A** 板块排行 | TDX/THS 三维板块榜（行业/概念/地区）融合取 Top8 + **行业**领跌 Top20，过滤 DB 黑名单；逐维度 TDX→THS 回退，单维度失败标 `degraded`、不中断扫描 |
 | **B** 候选筛选 | 每个入选板块取当日所有涨停股(pct≥9.9)，过滤 ST+双创+北交所；跨板块同 code 去重，`primary_sector` = 总榜排名最高板块 |
-| **C** 连板+排序 | TDX 日K 算连板天数（雪球回退），写 `Candidate.fived_pct`，按(连板,概念数)降序，候选池全部评分 |
+| **C** 连板+排序 | TDX 日K 算连板天数（无雪球回退），写 `Candidate.fived_pct`，按(连板,概念数)降序，候选池全部评分 |
 | **D** 并发加载 | 板块历史10日5分K + 板块当日1分K + 大盘1分K + 全候选1分K + 腾讯批量行情 |
 | **E** 打分 | `_score_one` 调 `scan.scores.main.evaluate()`，五维门槛+加权 → DragonVerdict |
 | **F** 输出+持久化 | 所有候选保留诊断分与明细，仅通过者排名；Top N 真龙报告/入库 + 5日去重，保留原始排名 |
@@ -76,13 +76,13 @@ def score(code: str, cache: DataCache, **kwargs) -> ScoreResult
 
 ## 前置条件与 Cookie
 
-板块数据用**同花顺**，**无需 Cookie**（HTTP GET + GBK 直取，无 Playwright/反爬）。个股数据依赖雪球，需配雪球 Cookie：
+板块数据用**同花顺**，**无需 Cookie**（HTTP GET + GBK 直取，无 Playwright/反爬）。个股 K 线/分时与 5 日去重日历全部走 **TDX**，`scan` 与 `data kline/minute` **不再依赖雪球 Cookie**。雪球 Cookie 仅 `review-account` / `prep` / `vpa` / Web benchmark 等老链路命令需要，`data cookie-*` 子命令为它们服务：
 
 ```bash
 # 查看状态
 python -c "from dragon_quant.infra.provider.cookie import get_xq; print(f'雪球: {bool(get_xq())}')"
 
-# 手动设置雪球 Cookie（推荐）
+# 手动设置雪球 Cookie（推荐，仅老链路命令需要）
 python -m dragon_quant data cookie-set --cookie "xq_a_token=...; xq_is_login=1; u=..."
 
 # 自动获取（需要 playwright；首次运行自动下载 chromium 内核约 150MB，走国内镜像）
@@ -95,9 +95,9 @@ Cookie 文件位置（随平台而定，可用 `DQ_DATA_DIR` 覆盖）：
 
 ## 数据源与反爬最小提示
 
-- **回退链**：TDX（`tmdx`，无 Cookie）优先 → 同花顺（板块）→ 雪球（个股 K 线/分时）→ 腾讯（批量行情/收盘盘口）；tdx 链路失败自动回退老链路，单维度失败只标 `degraded`、不中断扫描。
+- **回退链**：TDX（`tmdx`，无 Cookie）承载个股 K 线/分时与交易日历 → 同花顺（板块）→ 腾讯（批量行情/收盘盘口）。个股链路已无雪球回退；TDX 个股数据失败只降级评分，单维度失败标 `degraded`、不中断扫描。
 - **同花顺排行字段必须用 `zdf`（涨跌幅）**：旧 `tradezdf` 是资金流字段，会无视 order/page 返回固定 50 行资金流入板块（曾导致领跌榜全为正值的 bug）；网关有 403 频控，需退避重试 + 页间延迟，单页 DOM 非严格有序，须抓多页后本地按 pct 排序。
-- **雪球需 Cookie**：失效表现为空体 / 403；`pankou.json` 盘后返回空体，已弃用，封单改用腾讯收盘盘口（`Quote.bid1_volume`，买一量，单位手）。
+- **雪球仅老链路**（`review-account`/`prep`/`vpa`/Web benchmark，非 scan）：需 Cookie，失效表现为空体 / 403；`pankou.json` 盘后返回空体，已弃用，封单改用腾讯收盘盘口（`Quote.bid1_volume`，买一量，单位手）。
 - **不要在文档重建实现细节**：反爬 URL、DOM 选择器、字段下标、Chrome UA 只留在 provider 实现与 Git 历史；大面积失效时更新 UA 版本号即可。
 
 ## 扫描运行态与日志（dashboard 只读投影，2026-11-01）

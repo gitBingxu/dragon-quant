@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2] / "skills" / "dragon-quant"
 SKILL = ROOT / "SKILL.md"
 REFS = ["commands.md", "outputs.md", "playbooks.md", "operations.md",
         "reports.md", "safety.md", "premarket.md", "evidence.md",
-        "research.md", "datasets.md"]
+        "research.md", "datasets.md", "schedule.md"]
 STRATEGY_FIELDS = [f.name for f in fields(StrategyConfig) if f.name != "source"]
 PARAM_FACTS = tuple(f.name for f in fields(StrategyConfig)
                     if f.name not in ("source", "strategy_name"))

@@ -213,14 +213,14 @@ class TestScanScoringIntegration(unittest.TestCase):
             patch.object(orch, "create_scan_cache", return_value=self.cache))
         self.stack.enter_context(patch.object(orch, "_get_trade_date", return_value="2026-09-11"))
         self.stack.enter_context(
-            patch("dragon_quant.infra.market_calendar.build_trade_calendar",
-                  return_value={"2026-09-11"}))
+            patch("dragon_quant.infra.market_calendar.tdx_trade_dates",
+                  return_value=["2026-09-11"]))
         self.ths, self.xq, self.tx = Mock(), Mock(), Mock()
-        # tdx 主链路：mock 返回空，让板块链锚点/个股链全部回退到老链路
+        # tdx 主链路：个股日K/分时/行情全部由 TDX 承载（雪球不参与 scan）
         self.tdx = Mock()
         self.tdx.get_sector_ranking.side_effect = lambda asc=False, category="hy", **kw: []
-        self.tdx.get_kline.return_value = []
-        self.tdx.get_minute_kline.return_value = []
+        self.tdx.get_kline.return_value = _min_bars(10, [0, 1, 2, 3, 4, 10])
+        self.tdx.get_minute_kline.return_value = _min_bars(10, [0, 10])
         self.tdx.batch_get_quotes.return_value = []
         # 默认仅行业维度可用（gn/dq 为空 → degraded），保持既有测试语义
         self.ths.get_sector_ranking.side_effect = (
@@ -233,8 +233,6 @@ class TestScanScoringIntegration(unittest.TestCase):
         ]
         self.ths.get_sector_5min_kline_history.return_value = []
         self.ths.get_sector_1min_kline.return_value = _min_bars(100, [0, 1])
-        self.xq.get_kline.return_value = _min_bars(10, [0, 1, 2, 3, 4, 10])
-        self.xq.get_minute_kline.return_value = _min_bars(10, [0, 10])
         self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11) for c in codes]
         self.stack.enter_context(patch.object(
             orch, "create_providers",
@@ -261,7 +259,7 @@ class TestScanScoringIntegration(unittest.TestCase):
     def test_real_scorers_run_through_full_scan(self):
         self.ths.get_sector_components.return_value = [StockInfo("600001", "Dragon", pct=10)]
         self.ths.get_sector_1min_kline.return_value = _min_bars(100, [0, 0, 0, 0, .1, .5, .6, .6, .6, .6])
-        self.xq.get_minute_kline.side_effect = lambda code: (
+        self.tdx.get_minute_kline.side_effect = lambda code: (
             _min_bars(3000, [0] * 10) if code == "SH000001"
             else _min_bars(10, [0, 0, 0, 1, 4, 7, 10, 10, 10, 10]))
         self.tx.batch_get_quotes.side_effect = lambda codes: [_quote(c, 10, 11, bid1=50000, tr=15) for c in codes]
@@ -280,7 +278,8 @@ class TestScanScoringIntegration(unittest.TestCase):
         self.assertEqual(len(output["ranking"]), 2)
         self.assertNotIn("Rejected", output["report_text"])
         self.assertIn("Passed", output["report_text"])
-        self.xq.get_minute_kline.assert_any_call("SH000001")
+        self.tdx.get_minute_kline.assert_any_call("SH000001")
+        self.xq.get_minute_kline.assert_not_called()
         self.assertIsNotNone(self.cache.get("kline:1min:SH000001"))
         with redirect_stdout(io.StringIO()) as stream:
             orch._print_cached_output(output, 1)
@@ -369,6 +368,28 @@ class TestScanScoringIntegration(unittest.TestCase):
         db.rebuild_dragons_for_date(date, version="test", calendar={date}, apply_5day_gate=False)
         self.assertEqual(self.rows("dragons_v2"), [("600002", 1, 1)])
 
+    def test_stock_klines_come_from_tdx_without_xueqiu(self):
+        """TDX 个股K线为空时不再回退雪球：照常完成扫描，xq 零调用。"""
+        # setUp：tdx 日K/分时为空、xq 数据齐全 —— 旧实现会回退雪球。
+        orch.scan(top_n=1, verbose=False, force=True)
+        self.xq.get_kline.assert_not_called()
+        self.xq.get_minute_kline.assert_not_called()
+
+    def test_phase_f_trade_calendar_uses_tdx_index_klines(self):
+        """Phase F 交易日历走 TDX 指数日K（tdx_trade_dates），不再用雪球日历。"""
+        with patch("dragon_quant.infra.market_calendar.tdx_trade_dates",
+                   return_value=["2026-09-10", "2026-09-11"]) as tdx_cal, \
+             patch("dragon_quant.infra.market_calendar.build_trade_calendar",
+                   return_value={"2026-09-11"}) as old_cal, \
+             patch.object(orch, "persist_scan_result") as persist:
+            orch.scan(top_n=1, verbose=False, force=True)
+            # 日历是惰性 callable：在 patch 生效期内调用（persist 已被 mock）
+            calendar = persist.call_args.kwargs["trade_calendar"]
+            result = calendar()
+        old_cal.assert_not_called()
+        self.assertEqual(result, {"2026-09-10", "2026-09-11"})
+        tdx_cal.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -397,12 +418,15 @@ class TestScanServicesInjection(TestScanScoringIntegration):
         self.ths.get_sector_ranking.assert_called()
         # Phase B: sector components + daily klines
         self.ths.get_sector_components.assert_called()
-        self.xq.get_kline.assert_called()
+        self.tdx.get_kline.assert_called()
         # Phase D: sector history/1min + minute klines + batch quotes
         self.ths.get_sector_5min_kline_history.assert_called()
         self.ths.get_sector_1min_kline.assert_called()
-        self.xq.get_minute_kline.assert_called()
+        self.tdx.get_minute_kline.assert_called()
         self.tx.batch_get_quotes.assert_called()
+        # 雪球全程零调用：scan 数据链路只走 TDX/THS/腾讯
+        self.xq.get_kline.assert_not_called()
+        self.xq.get_minute_kline.assert_not_called()
         # Phase F: persistence unchanged (diagnostic ranking keeps both codes)
         self.assertEqual(self.rows("dragons_v2"), [("600002", 1, 1)])
         self.assertEqual({r["code"] for r in output["ranking"]},
@@ -481,7 +505,7 @@ class TestApiFailureAttribution(unittest.TestCase):
 
 
 class TestGetTradeDate(unittest.TestCase):
-    """_get_trade_date：TDX 优先（无 Cookie），雪球兜底，全失败返回 None。"""
+    """_get_trade_date：仅 TDX（无 Cookie）；失败/为空返回 None（回退自然日）。"""
 
     @staticmethod
     def _bar(date_str):
@@ -510,20 +534,6 @@ class TestGetTradeDate(unittest.TestCase):
         self.assertEqual(self._run(tdx, Mock()), "2026-10-22")
         tdx.get_kline.assert_called_once_with(orch.R.MARKET_SYMBOL, days=5)
 
-    def test_tdx_empty_lists_fall_through_to_xueqiu(self):
-        """TDX 两层都返回空列表（生产主路径：tdx 内部吞异常返回 []）→ 雪球兜底。"""
-        tdx = Mock()
-        tdx.get_minute_kline.return_value = []
-        tdx.get_kline.return_value = []
-        xq = Mock()
-        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
-        self.assertEqual(self._run(tdx, xq), "2026-10-21")
-
-    def test_tdx_provider_missing_uses_xueqiu(self):
-        xq = Mock()
-        xq.get_minute_kline.return_value = [self._bar("2026-10-20")]
-        self.assertEqual(self._run(None, xq), "2026-10-20")
-
     def test_supplied_providers_bypass_create_providers(self):
         tdx = Mock()
         tdx.get_minute_kline.return_value = [self._bar("2026-10-24")]
@@ -533,21 +543,33 @@ class TestGetTradeDate(unittest.TestCase):
         self.assertEqual(result, "2026-10-24")
         factory.assert_not_called()
 
-    def test_xueqiu_fallback_when_tdx_fails(self):
+    def test_tdx_empty_returns_none_without_xueqiu_fallback(self):
+        """TDX 两层空结果不再回退雪球：直接 None（缓存与日期判定回退自然日）。"""
+        tdx = Mock()
+        tdx.get_minute_kline.return_value = []
+        tdx.get_kline.return_value = []
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
+        self.assertIsNone(self._run(tdx, xq))
+        xq.get_minute_kline.assert_not_called()
+        xq.get_kline.assert_not_called()
+
+    def test_tdx_provider_missing_returns_none_without_xueqiu(self):
+        """TDX provider 缺失时不再借雪球兜底。"""
+        xq = Mock()
+        xq.get_minute_kline.return_value = [self._bar("2026-10-20")]
+        self.assertIsNone(self._run(None, xq))
+        xq.get_minute_kline.assert_not_called()
+        xq.get_kline.assert_not_called()
+
+    def test_tdx_failure_returns_none_without_xueqiu(self):
+        """TDX 抛异常不再借雪球兜底：None + stderr 警告。"""
         tdx = Mock()
         tdx.get_minute_kline.side_effect = RuntimeError("tdx down")
         tdx.get_kline.side_effect = RuntimeError("tdx down")
         xq = Mock()
-        xq.get_minute_kline.return_value = [self._bar("2026-10-21")]
-        self.assertEqual(self._run(tdx, xq), "2026-10-21")
-
-    def test_all_sources_fail_returns_none(self):
-        tdx = Mock()
-        tdx.get_minute_kline.side_effect = RuntimeError("boom")
-        tdx.get_kline.side_effect = RuntimeError("boom")
-        xq = Mock()
-        xq.get_minute_kline.side_effect = RuntimeError("boom")
-        xq.get_kline.side_effect = RuntimeError("boom")
         with patch("sys.stderr", new_callable=io.StringIO) as err:
             self.assertIsNone(self._run(tdx, xq))
         self.assertIn("无法确定最近交易日", err.getvalue())
+        xq.get_minute_kline.assert_not_called()
+        xq.get_kline.assert_not_called()

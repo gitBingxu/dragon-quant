@@ -133,9 +133,17 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 
 ### 数据与存储
 
-行情链路 **TDX（`tmdx`，首选）+ 同花顺（板块）+ 雪球（个股 K 线/分时）+ 腾讯（批量行情）**，
-失败自动回退；本地 SQLite 持久化（惰性初始化、WAL、线程安全），数据资产支持云端双向同步。
+行情链路 **TDX（`tmdx`，首选，个股 K 线/分时）+ 同花顺（板块）+ 腾讯（批量行情）**，`scan`
+与 `data` 命令无需 Cookie；雪球仅老链路（账户/复盘）使用。本地 SQLite 持久化
+（惰性初始化、WAL、线程安全），数据资产支持云端双向同步。
 架构见 [architecture](docs/agent/architecture.md)，同步见 [assets](docs/agent/assets.md)。
+
+## 每日自动化
+
+盘后 `scan` → `prep`，次日盘前 `auction` → `premarket` 是跨时点的依赖链，适合用
+cron/launchd 定时运行（时间窗与模板见 [schedule.md](skills/dragon-quant/references/schedule.md)）。
+用 Claude Code / Codex 的用户在会话里说「每天自动跑」，agent 会按 skill 生成配置；
+资金操作（`buy`/`sell`）不做无人值守。
 
 ## 稳定性状态
 

@@ -94,7 +94,7 @@ class TestCliHelp(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         self.assertIn("Usage: dragon-quant data kline --code CODE [options]", output)
         self.assertIn("--code CODE", output)
-        self.assertIn("--source {xueqiu,tencent}", output)
+        self.assertIn("--source {tdx,tencent}", output)
         self.assertIn("--days DAYS", output)
 
 

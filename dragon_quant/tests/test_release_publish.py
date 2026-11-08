@@ -657,3 +657,73 @@ def test_fresh_release_refuses_non_origin_tracking_branch(tmp_path):
     assert result.returncode == 1
     assert "固定发布目标" in result.stderr
     assert not (fixture.repo / ".release" / "publish" / "state.json").exists()
+
+
+def _load_release_module():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("release_publish_pypi", HELPER)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["release_publish_pypi"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_wrong_publish_password_reports_password_error_not_traceback(tmp_path):
+    """输错发布密码：控制台打印「密码错误」并 exit 1，不得让异常裸 traceback 冒泡。
+
+    真实 .enc + 错误密码：openssl 解出垃圾字节，subprocess 的严格 UTF-8 解码
+    会抛 UnicodeDecodeError（ValueError 子类），旧实现直接冒泡成 traceback。
+    """
+    fixture = ReleaseFixture(tmp_path)
+    enc = fixture.repo / "scripts" / "publish_token.enc"
+    enc.parent.mkdir()
+    enc.write_bytes((REPO / "scripts" / "publish_token.enc").read_bytes())
+    fixture.git("add", "scripts/publish_token.enc")
+    fixture.git("commit", "-q", "-m", "add encrypted token")
+    result = fixture.run("--v", fixture.version, env=fixture.env(
+        extra={"DQ_PUBLISH_PASSWORD": "definitely-not-the-passphrase"}))
+    assert result.returncode == 1
+    assert "密码错误" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_obtain_token_wrong_password_raises_clean_release_error(tmp_path, monkeypatch):
+    """解密失败必须转成含「密码错误」的 ReleaseError，不得让 UnicodeDecodeError 冒泡。
+
+    用已知口令加密垃圾明文：错误口令解密时 openssl 无论报错还是碰巧解出
+    垃圾（1/256 padding 巧合），都必须收敛为 ReleaseError（密码错误）。
+    """
+    mod = _load_release_module()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    subprocess.run(
+        ["openssl", "enc", "-aes-256-cbc", "-pbkdf2",
+         "-pass", "pass:correct-horse",
+         "-out", str(scripts / "publish_token.enc")],
+        input=b"garbage-not-a-token\n", check=True, capture_output=True)
+    runner = mod.Runner(cwd=tmp_path)
+    monkeypatch.setenv("DQ_PUBLISH_PASSWORD", "wrong-battery")
+    with pytest.raises(mod.ReleaseError) as exc_info:
+        mod.obtain_token(tmp_path, runner)
+    assert exc_info.value.stage == "upload"
+    assert "密码错误" in str(exc_info.value)
+
+
+def test_unexpected_internal_error_is_reported_not_bubbled(tmp_path, monkeypatch, capsys):
+    """main 顶层兜底：未预期异常打印阶段与错误信息 + resume 提示，不裸 traceback。"""
+    mod = _load_release_module()
+    monkeypatch.setenv("DQ_RELEASE_STATUS_DIR", str(tmp_path / "state"))
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(mod, "resolve_identity", _boom)
+    rc = mod.main(["--v", "1.2.3", "--repo-root", str(tmp_path)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "未预期异常" in err
+    assert "RuntimeError" in err
+    assert "boom" in err
+    assert "--resume" in err

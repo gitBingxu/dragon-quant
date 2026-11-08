@@ -579,15 +579,25 @@ def obtain_token(repo: Path, runner: Runner) -> str:
     enc = repo / "scripts" / "publish_token.enc"
     if not enc.is_file():
         raise ReleaseError("upload", f"缺少 {enc}")
+    # 字节捕获 + 先判 returncode 再解码：错误密码会解出垃圾字节，text=True
+    # 的严格 UTF-8 解码在 returncode 判断前抛 UnicodeDecodeError（ValueError
+    # 子类），绕过 except ReleaseError 裸冒泡成 traceback。
     result = subprocess.run(
         ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d", "-in", str(enc),
          "-pass", "env:DQ_PUBLISH_PASSWORD"],
-        text=True, capture_output=True, check=False,
+        capture_output=True, check=False,
         env={**runner.env, "DQ_PUBLISH_PASSWORD": password},
     )
-    if result.returncode != 0 or not result.stdout.strip():
-        raise ReleaseError("upload", "解密失败（密码错误或加密文件损坏）")
-    token = result.stdout.strip()
+    stdout = result.stdout.decode("utf-8", errors="replace").strip()
+    if result.returncode != 0 or not stdout:
+        raise ReleaseError(
+            "upload", "密码错误：openssl 解密失败（口令不匹配或加密文件损坏）")
+    if not stdout.startswith("pypi-"):
+        # 错误口令有小概率通过 padding 校验解出垃圾：按无效 token 拒绝，
+        # 不把垃圾明文当凭据送进 twine。
+        raise ReleaseError(
+            "upload", "密码错误：解密结果不是有效 PyPI token（应为 pypi- 前缀）")
+    token = stdout
     runner.secrets.append(token)
     return token
 
@@ -1020,6 +1030,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"状态目录：{status_dir}（可用 --resume 继续，不会重打标签）",
               file=sys.stderr)
         return 2 if exc.stage == "arguments" else 1
+    except Exception as exc:  # noqa: BLE001 — 顶层兜底：发布器不允许裸 traceback 冒泡
+        try:
+            if 'state' in locals():
+                state.fail(current, f"{type(exc).__name__}: {exc}")
+        except OSError:
+            pass
+        print(f"错误（{current}）：未预期异常 {type(exc).__name__}: "
+              f"{_redact(str(exc), runner.secrets)}", file=sys.stderr)
+        print(f"状态目录：{status_dir}（可用 --resume 继续，不会重打标签）",
+              file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -69,13 +69,13 @@ class TestDataFacadeInjection(unittest.TestCase):
         import dragon_quant.infra.provider.data as data
 
         self._call_without_default_factory(data.get_kline, "600001", days=30)
-        self.bundle.xueqiu.get_kline.assert_called_once_with("600001", days=30)
+        self.bundle.tdx.get_kline.assert_called_once_with("600001", days=30)
 
         self._call_without_default_factory(data.get_kline, "600001", source="tencent", days=5)
         self.bundle.tencent.get_kline.assert_called_once_with("600001", days=5)
 
         self._call_without_default_factory(data.get_minute_kline, "600001")
-        self.bundle.xueqiu.get_minute_kline.assert_called_once_with("600001")
+        self.bundle.tdx.get_minute_kline.assert_called_once_with("600001")
 
         self._call_without_default_factory(data.get_quote, "600001")
         self.bundle.tencent.get_quote.assert_called_once_with("600001")
@@ -98,7 +98,7 @@ class TestDataFacadeInjection(unittest.TestCase):
             data.get_kline("600001")
 
         factory.assert_called_once_with()
-        mapping["xueqiu"].get_kline.assert_called_once_with("600001", days=20)
+        mapping["tdx"].get_kline.assert_called_once_with("600001", days=20)
 
     def test_services_without_providers_falls_back_to_default_factory(self):
         import dragon_quant.infra.provider.data as data

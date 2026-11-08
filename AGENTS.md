@@ -11,7 +11,7 @@
 
 系统当前使用**五维「识别真龙」评分体系**（由 `scan` 触发）：带动性 30% / 领涨性 25% / 抗跌性 15% / 流动性 20% / 资金承接 10%，**门槛+加权两段式聚合**（四大特征任一低于门槛即一票否决，资金承接不否决仅加权贡献）。数值细则以 [评分规范](archived_md/score/评分器Refactor.md) 为准，流程见 [scan](docs/agent/scan.md)。
 
-数据源：**TDX（首选，`tmdx`）+ 同花顺（板块）+ 雪球（个股 K 线/分时）+ 腾讯（批量行情/收盘盘口）**，均不依赖付费接口，tdx 失败自动回退老链路。**板块口径为「行业 + 概念 + 地区」三维融合总榜**（取涨幅前 8），**领跌 Top20 仍按行业**（资金承接「对手盘」语义不变）。
+数据源：**TDX（首选，`tmdx`）+ 同花顺（板块）+ 腾讯（批量行情/收盘盘口）**，均不依赖付费接口。**scan 与 `data kline/minute` 的个股 K 线/分时只走 TDX（无雪球回退）**；雪球（需 Cookie）仅 `review-account`/`prep`/`vpa`/Web benchmark 等老链路使用。**板块口径为「行业 + 概念 + 地区」三维融合总榜**（取涨幅前 8），**领跌 Top20 仍按行业**（资金承接「对手盘」语义不变）。
 
 > **v1 已废弃**：所有龙头/扫描/候选池逻辑只读 `dragons_v2`（物理表沿用 `*_v2`，`scan_id` 为 `v2_YYYYMMDD_topN`）。`--source v1` 仅用于查询历史数据，**不再新增任何 v1 写入、分支或功能**；新命令一律固定 `source="v2"`。
 
@@ -30,7 +30,7 @@ python -m dragon_quant dashboard          # 本地可视化面板（[web] 可选
 
 [README](README.md) 只保留项目定位、核心链路与 `scan` / `review` 快速使用；完整命令与参数以各命令 `-h` 为准，本文不重复第二份。
 
-**前置条件（一句版）**：板块数据走同花顺**无需 Cookie**；个股依赖雪球 Cookie；数据目录可用 `DQ_DATA_DIR` 覆盖。Cookie 路径与设置方式、数据源与反爬最小提示见 [scan](docs/agent/scan.md)。
+**前置条件（一句版）**：板块数据走同花顺**无需 Cookie**；个股 K 线/分时走 TDX **无需 Cookie**（`data kline/minute` 默认 tdx，可选 tencent）；仅 `review-account`/`prep` 等老链路依赖雪球 Cookie；数据目录可用 `DQ_DATA_DIR` 覆盖。Cookie 路径与设置方式、数据源与反爬最小提示见 [scan](docs/agent/scan.md)。
 
 ---
 

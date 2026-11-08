@@ -8,8 +8,8 @@
 | intent | command | key_flags | write_class | output | notes |
 |---|---|---|---|---|---|
 | 个股实时行情 | dragon-quant data quote | --code --source | T0 | human/json | 默认腾讯；失败字符串不等于成功 |
-| 个股日K | dragon-quant data kline | --code --days --source | T0 | json-lines | 默认雪球；失败可改 --source tencent |
-| 个股分时 | dragon-quant data minute | --code --source | T0 | json-lines | 默认雪球；空行表示无数据 |
+| 个股日K | dragon-quant data kline | --code --days --source | T0 | json-lines | 默认 tdx；空输出可改 --source tencent |
+| 个股分时 | dragon-quant data minute | --code --source | T0 | json-lines | 默认 tdx；空行表示无数据 |
 | 批量行情 | dragon-quant data batch-quote | --codes --source | T0 | json-lines | 多只票优先批量；逐只核对缺失 |
 | 当日扫描 | dragon-quant scan | --top | T1 | human | 日常默认 --top 5；15:00 前禁止；不加 --force |
 | 历史扫描/本次核验 | dragon-quant scan --date | --date --top | T0 | json | 读回同一 scan_id 与原始候选；不是去重回测池 |

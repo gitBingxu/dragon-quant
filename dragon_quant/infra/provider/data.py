@@ -19,7 +19,7 @@ Agent 可以直接调用获取个股K线、实时行情、板块数据等。
   stocks = get_sector_components("881167")
 
   # 个股日K线
-  kline = get_kline("600172", source="xueqiu", days=20)
+  kline = get_kline("600172", source="tdx", days=20)
 
   # 个股1分钟K线（分时）
   mline = get_minute_kline("600172")
@@ -28,7 +28,7 @@ Agent 可以直接调用获取个股K线、实时行情、板块数据等。
   quote = get_quote("600172")
   quotes = batch_get_quotes(["600172", "000001", "002409"])
 
-  # Cookie 管理
+  # Cookie 管理（雪球 Cookie 仅 review-account/prep 等老链路需要；scan 不依赖）
   cookie_status()     # 查看 Cookie 状态
   fetch_cookies()     # 自动刷新所有 Cookie
   fetch_cookies(source="xueqiu")  # 只刷新雪球
@@ -37,7 +37,7 @@ CLI 用法:
   python -m dragon_quant data sector
   python -m dragon_quant data sector --asc
   python -m dragon_quant data components --sector 881167
-  python -m dragon_quant data kline --code 600172 [--source xueqiu] [--days 20]
+  python -m dragon_quant data kline --code 600172 [--source tdx] [--days 20]
   python -m dragon_quant data minute --code 600172
   python -m dragon_quant data quote --code 600172
   python -m dragon_quant data batch-quote --codes 600172,000001,002409
@@ -142,36 +142,44 @@ def get_sector_5min_kline(sector_code: str, bars: int = 100, services=None) -> l
 
 # ═══ 个股相关 ═══
 
-def get_kline(code: str, source: str = "xueqiu", days: int = 20,
+def _provider_for(providers: dict, source: str):
+    """按 source 取 provider；未知 source 显式报错，不静默落雪球。"""
+    p = providers.get(source)
+    if p is None:
+        raise ValueError(f"未知数据源: {source!r}（可选: {sorted(providers)}）")
+    return p
+
+
+def get_kline(code: str, source: str = "tdx", days: int = 20,
               services=None) -> list[KBar]:
     """获取个股日 K 线
 
     Args:
         code: 股票代码，如 "600172"
-        source: 数据源，xueqiu=雪球, tencent=腾讯
+        source: 数据源，tdx=通达信（默认，无 Cookie），tencent=腾讯，xueqiu=雪球
         days: 天数
         services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     Returns:
         list[KBar] 日K线数据
     """
     providers = _resolve_providers(services)
-    p = providers.get(source, providers["xueqiu"])
+    p = _provider_for(providers, source)
     return p.get_kline(code, days=days)
 
 
-def get_minute_kline(code: str, source: str = "xueqiu", services=None) -> list[KBar]:
+def get_minute_kline(code: str, source: str = "tdx", services=None) -> list[KBar]:
     """获取个股 1分钟K线（分时数据）
 
     Args:
         code: 股票代码
-        source: 数据源，xueqiu 或 tencent
+        source: 数据源，tdx=通达信（默认，无 Cookie）或 tencent
         services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     """
     providers = _resolve_providers(services)
-    p = providers.get(source, providers["xueqiu"])
+    p = _provider_for(providers, source)
     if source == "tencent":
         return p.get_5min_kline(code)
-    # 雪球直接用 get_minute_kline
+    # tdx/xueqiu 直接用 get_minute_kline
     return p.get_minute_kline(code) if hasattr(p, 'get_minute_kline') else p.get_5min_kline(code)
 
 
@@ -180,13 +188,13 @@ def get_quote(code: str, source: str = "tencent", services=None) -> Optional[Quo
 
     Args:
         code: 股票代码
-        source: 数据源，tencent=腾讯（推荐）, xueqiu=雪球
+        source: 数据源，tencent=腾讯（默认）, xueqiu=雪球
         services: 可选 M2 装配注入；有 providers 时按 ``source`` 取对应 provider。
     Returns:
         Quote 或 None（获取失败时）
     """
     providers = _resolve_providers(services)
-    p = providers.get(source, providers["tencent"])
+    p = _provider_for(providers, source)
     return p.get_quote(code)
 
 
@@ -202,7 +210,7 @@ def batch_get_quotes(codes: list[str], source: str = "tencent",
         list[Quote]
     """
     providers = _resolve_providers(services)
-    p = providers.get(source, providers["tencent"])
+    p = _provider_for(providers, source)
     if hasattr(p, 'batch_get_quotes'):
         return p.batch_get_quotes(codes)
     # fallback: 逐个请求

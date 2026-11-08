@@ -74,3 +74,34 @@ def test_data_and_rate_limit_are_moved():
     assert callable(get_kline)
     assert callable(batch_get_quotes)
     assert RateLimiter.__module__ == "dragon_quant.infra.provider.rate_limit"
+
+
+def test_data_facade_defaults_to_tdx_and_rejects_unknown_source():
+    """data 门面：个股 K 线默认走 TDX（无 Cookie），未知 source 显式报错不静默落雪球。"""
+    from unittest.mock import Mock, patch
+
+    import pytest
+
+    import dragon_quant.infra.provider.data as data_mod
+
+    tdx, ths, xq, tx = Mock(), Mock(), Mock(), Mock()
+    providers = {"tdx": tdx, "ths": ths, "xueqiu": xq, "tencent": tx}
+    with patch.object(data_mod, "create_providers", return_value=providers), \
+         patch.object(data_mod, "_providers", None):
+        data_mod.get_kline("600172", days=5)
+        data_mod.get_minute_kline("600172")
+    tdx.get_kline.assert_called_once_with("600172", days=5)
+    tdx.get_minute_kline.assert_called_once_with("600172")
+    xq.get_kline.assert_not_called()
+    xq.get_minute_kline.assert_not_called()
+
+    with patch.object(data_mod, "create_providers", return_value=providers), \
+         patch.object(data_mod, "_providers", None):
+        with pytest.raises(ValueError, match="未知数据源"):
+            data_mod.get_kline("600172", source="nope")
+        with pytest.raises(ValueError, match="未知数据源"):
+            data_mod.get_minute_kline("600172", source="nope")
+        with pytest.raises(ValueError, match="未知数据源"):
+            data_mod.get_quote("600172", source="nope")
+        with pytest.raises(ValueError, match="未知数据源"):
+            data_mod.batch_get_quotes(["600172"], source="nope")

@@ -171,26 +171,26 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 
     kline_p = data_subs.add_parser("kline", help="个股日K线", usage="dragon-quant data kline --code CODE [options]")
     kline_p.add_argument("--code", required=True, help="股票代码")
-    kline_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"],
-                         help="数据源 (默认 xueqiu)")
+    kline_p.add_argument("--source", default="tdx", choices=["tdx", "tencent"],
+                         help="数据源 (默认 tdx)")
     kline_p.add_argument("--days", type=int, default=20, help="拉取日K线根数 (默认20)")
 
     min_p = data_subs.add_parser("minute", help="个股1分钟K线（分时）",
                                  usage="dragon-quant data minute --code CODE [options]")
     min_p.add_argument("--code", required=True, help="股票代码")
-    min_p.add_argument("--source", default="xueqiu", choices=["xueqiu", "tencent"],
-                       help="数据源 (默认 xueqiu)")
+    min_p.add_argument("--source", default="tdx", choices=["tdx", "tencent"],
+                       help="数据源 (默认 tdx)")
 
     quote_p = data_subs.add_parser("quote", help="个股实时行情",
                                    usage="dragon-quant data quote --code CODE [options]")
     quote_p.add_argument("--code", required=True, help="股票代码")
-    quote_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"],
+    quote_p.add_argument("--source", default="tencent", choices=["tencent"],
                          help="数据源 (默认 tencent)")
 
     bq_p = data_subs.add_parser("batch-quote", help="批量实时行情",
                                 usage="dragon-quant data batch-quote --codes CODES [options]")
     bq_p.add_argument("--codes", required=True, help="股票代码，逗号分隔")
-    bq_p.add_argument("--source", default="tencent", choices=["tencent", "xueqiu"],
+    bq_p.add_argument("--source", default="tencent", choices=["tencent"],
                       help="数据源 (默认 tencent)")
 
     data_subs.add_parser("cookie-status", help="查看 Cookie 状态",

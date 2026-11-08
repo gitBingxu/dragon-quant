@@ -1,6 +1,6 @@
 {
   "name": "dragon-quant-skills",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Agent Skills for the dragon-quant A-share dragon scanner CLI",
   "type": "module",
   "license": "MIT",

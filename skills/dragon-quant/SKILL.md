@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
   skill-version: "1.0.2"
-  min-cli-version: "0.8.0"
+  min-cli-version: "0.8.1"
 ---
 
 # dragon-quant 交易日助手

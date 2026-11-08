@@ -157,6 +157,7 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 | `references/research.md` | 扫描诊断、识别质量归因、账户策略消融与研究读回流程时 |
 | `references/datasets.md` | 需要选择 research 数据集、过滤器或解释 envelope 时 |
 | `references/operations.md` | 单能力/每日复合 workflow、UI 生命周期、因子三组名单时 |
+| `references/schedule.md` | 用户表达每日自动/定时/无人值守意图，或要把跨时点链交给 cron 时 |
 | `references/safety.md` | 执行任何 T1 命令前 |
 
 只加载需要的那一份；不要一次把全部 reference 读进来。

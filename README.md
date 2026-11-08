@@ -138,6 +138,13 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 （惰性初始化、WAL、线程安全），数据资产支持云端双向同步。
 架构见 [architecture](docs/agent/architecture.md)，同步见 [assets](docs/agent/assets.md)。
 
+## 每日自动化
+
+盘后 `scan` → `prep`，次日盘前 `auction` → `premarket` 是跨时点的依赖链，适合用
+cron/launchd 定时运行（时间窗与模板见 [schedule.md](skills/dragon-quant/references/schedule.md)）。
+用 Claude Code / Codex 的用户在会话里说「每天自动跑」，agent 会按 skill 生成配置；
+资金操作（`buy`/`sell`）不做无人值守。
+
 ## 稳定性状态
 
 | 功能 | 状态 | 预期稳定时间 |

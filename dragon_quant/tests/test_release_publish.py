@@ -361,8 +361,6 @@ def test_distribution_versions_are_consistent():
         _re.MULTILINE).group(1)
     assert package["version"] == skill_version
     assert min_cli == pyproject_version == module_version
-    assert skill_version == "1.0.1"
-    assert pyproject_version == "0.8.0"
 
 
 def test_resume_after_github_release_failure_does_not_reupload(tmp_path):

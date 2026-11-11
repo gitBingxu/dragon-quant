@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2] / "skills" / "dragon-quant"
 SKILL = ROOT / "SKILL.md"
 REFS = ["commands.md", "outputs.md", "playbooks.md", "operations.md",
         "reports.md", "safety.md", "premarket.md", "evidence.md",
-        "research.md", "datasets.md", "schedule.md"]
+        "research.md", "workspace.md", "datasets.md", "schedule.md"]
 STRATEGY_FIELDS = [f.name for f in fields(StrategyConfig) if f.name != "source"]
 PARAM_FACTS = tuple(f.name for f in fields(StrategyConfig)
                     if f.name not in ("source", "strategy_name"))
@@ -206,7 +206,8 @@ class TestSkillContent(unittest.TestCase):
             lines = (ROOT / "references" / name).read_text(encoding="utf-8").splitlines()
             self.assertLessEqual(len(lines), 300, name)
             total += len(lines)
-        self.assertLessEqual(total, 1200)
+        # 新增 workspace 渐进指南后总上限同步上调；仍保持单文件 300 行与总量约束。
+        self.assertLessEqual(total, 1500)
 
 
 class TestReports(unittest.TestCase):
@@ -405,7 +406,7 @@ class TestPremarketSkill(unittest.TestCase):
 
     def test_skill_declares_nine_capabilities_and_premarket_route(self):
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("十类", text)
+        self.assertIn("十一类", text)
         self.assertIn("盘前预案", text)
         self.assertIn("premarket", text)
         self.assertIn("T0", text)
@@ -552,6 +553,72 @@ class TestPremarketSkill(unittest.TestCase):
         reports = (ROOT / "references" / "reports.md").read_text(encoding="utf-8")
         self.assertIn("references/premarket.md", outputs)
         self.assertIn("references/premarket.md", reports)
+
+
+class TestSkillWorkspaceGuide(unittest.TestCase):
+    """workspace 渐进指南：消费项目可执行流程、示例契约与链接完整性。"""
+
+    def _guide(self) -> str:
+        return (ROOT / "references" / "workspace.md").read_text(encoding="utf-8")
+
+    def test_guide_is_linked_and_routed(self):
+        guide = self._guide()
+        skill = SKILL.read_text(encoding="utf-8")
+        self.assertIn("references/workspace.md", skill)
+        self.assertIn("workspace", guide)
+        self.assertIn("strategy", guide)
+        self.assertIn("何时读我", guide)
+
+    def test_guide_covers_executable_workspace_flow(self):
+        guide = self._guide()
+        for token in (
+            "dragon-quant workspace init", "workspace check",
+            "strategy list", "strategy current", "strategy use",
+            "strategy validate", "factor list --workspace",
+            "factor build", "--only", "factor query",
+            "review-account", "--strategy", "--workspace",
+        ):
+            self.assertIn(token, guide)
+
+    def test_guide_reads_bundled_sdk_resources(self):
+        guide = self._guide()
+        for token in (
+            "dragon_quant.strategy_sdk", "read_resource", "README.md",
+            "importlib.resources", "resources_dir", "templates/",
+        ):
+            self.assertIn(token, guide)
+
+    def test_guide_factor_and_strategy_contract(self):
+        guide = self._guide()
+        for token in (
+            "SPECS = [", "FactorSpec", "FactorFrame", "compute",
+            "字面量", "ws_<", "required_factors", "create_strategy",
+            "evaluate_entry", "evaluate_exit", "StrategyIntent",
+            "position_pct", "exit_fraction", "missing_source",
+            "available_at", "不补 0", "prev_row",
+        ):
+            self.assertIn(token, guide, token)
+
+    def test_guide_freeze_and_permission_boundaries(self):
+        guide = self._guide()
+        for token in (
+            "冻结", "snapshot", "旧持仓", "只覆盖本次",
+            "workspace-writes", "/strategies", "不得自动切换", "实盘",
+            "revision", "409",
+        ):
+            self.assertIn(token, guide, token)
+
+    def test_guide_local_links_resolve(self):
+        guide_path = ROOT / "references" / "workspace.md"
+        for target in re.findall(r"\]\(([^)]+\.md)\)", guide_path.read_text(
+                encoding="utf-8")):
+            self.assertTrue((guide_path.parent / target).is_file(), target)
+
+    def test_guide_does_not_expand_live_trading_whitelist(self):
+        guide = self._guide()
+        for pattern in (r"dragon-quant\s+buy\b", r"dragon-quant\s+sell\b",
+                        r"dragon-quant\s+assets\b", r"dragon-quant\s+storage\b"):
+            self.assertIsNone(re.search(pattern, guide), pattern)
 
 
 class TestSkillBehaviorScenarios(unittest.TestCase):

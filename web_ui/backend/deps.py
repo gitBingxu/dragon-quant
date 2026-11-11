@@ -36,16 +36,23 @@ def evaluation_module():
 
 
 def run_account_backtest():
+    """账户回测入口：Web 一律通过独立 worker 执行用户策略（HTTP 进程不导入用户代码）。"""
     from dragon_quant.review_account.main import run_review_account
 
-    return run_review_account
+    def run(**kwargs):
+        return run_review_account(**kwargs, use_worker=True)
+
+    return run
 
 
 def run_incremental_account_backtest():
     """增量续算的惰性注入 seam（测试用 ``dependency_overrides`` 替换）。"""
     from dragon_quant.review_account.main import run_incremental_review_account
 
-    return run_incremental_review_account
+    def run(run_id, **kwargs):
+        return run_incremental_review_account(run_id, use_worker=True, **kwargs)
+
+    return run
 
 
 def assets_repository():
@@ -221,3 +228,15 @@ def bs_aggregate():
     from dragon_quant.bs_eval import aggregate
 
     return aggregate
+
+
+def workspace_module():
+    """workspace 公共门面（策略清单/当前选择/持久切换）。"""
+    from dragon_quant import workspace
+
+    return workspace
+
+
+def workspace_writes_enabled(settings) -> bool:
+    """Web 是否允许变更策略选择（远程/反代部署应显式关闭）。"""
+    return bool(getattr(settings, "workspace_writes_enabled", True))

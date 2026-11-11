@@ -1,0 +1,13 @@
+{
+  "id": "user:example_meanrev",
+  "label": "示例·回踩均线（均值回归）",
+  "description": "仅演示 SDK API 的示例策略，无有效性宣称。",
+  "sdk_version": 1,
+  "entrypoint": "create_strategy",
+  "parameters": {
+    "pullback_pct": {"type": "number", "default": 3.0},
+    "trail_giveback_pct": {"type": "number", "default": 4.0}
+  },
+  "required_factors": [],
+  "data_requirements": ["1d", "5m"]
+}

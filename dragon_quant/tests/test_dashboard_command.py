@@ -173,7 +173,8 @@ def test_start_ui_forwards_bs_autogen(monkeypatch):
     monkeypatch.delenv("DQ_BS_AUTOGEN", raising=False)
     calls = []
 
-    def fake_start(port, *, open_browser, default_page, bs_autogen):
+    def fake_start(port, *, open_browser, default_page, bs_autogen,
+                   workspace_writes):
         calls.append((port, bs_autogen))
 
     monkeypatch.setattr(dashboard, "_start_server", fake_start)
@@ -202,3 +203,20 @@ def test_start_server_accepts_bs_autogen_keyword_only():
     parameter = signature.parameters["bs_autogen"]
     assert parameter.default is False
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_resolve_workspace_writes_default_read_only_and_explicit_enable(monkeypatch):
+    from types import SimpleNamespace
+    from dragon_quant.commands import dashboard
+
+    monkeypatch.delenv("DQ_DASHBOARD_WORKSPACE_WRITES", raising=False)
+    assert dashboard._resolve_workspace_writes(SimpleNamespace()) is False
+    assert dashboard._resolve_workspace_writes(
+        SimpleNamespace(workspace_writes=True)) is True
+    assert dashboard._resolve_workspace_writes(
+        SimpleNamespace(no_workspace_writes=True, workspace_writes=True)) is False
+    monkeypatch.setenv("DQ_DASHBOARD_WORKSPACE_WRITES", "1")
+    assert dashboard._resolve_workspace_writes(SimpleNamespace()) is True
+    monkeypatch.setenv("DQ_DASHBOARD_WORKSPACE_WRITES", "0")
+    assert dashboard._resolve_workspace_writes(
+        SimpleNamespace(workspace_writes=True)) is False

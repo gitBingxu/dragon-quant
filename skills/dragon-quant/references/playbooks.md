@@ -54,7 +54,7 @@
 ## 8. 因子缺失或默认关闭
 
 - **症状**：`factor query` 无行；`factor build` 报告 `missing_source`；代表因子读回 `rows=0`。
-- **诊断**：看 `reports[0].factors[].status` 与 `warnings`；确认源（scan/prep/auction）是否已生成、日期是否一致；确认用的是三组固定 `--only` 名单。
+- **诊断**：看 `reports[0].factors[].status` 与 `warnings`；确认源（scan/prep/auction）是否已生成、日期是否一致；确认 `--only` 名单与目标一致（内建三组或 workspace 用户因子的精确注册名 `ws_<id>.<local>`）。
 - **处理**：显式 `--only` 构建对应组；`missing_source` 说明源不可用或配置 fail-closed，**不等于 0**；`empty` 说明源可用但当日无值；`no_scan_for_date` 对 prep/auction-only 组是预期。
 - **停止条件**：源整体不可用且没有历史行时停止，不要用 0 或中性分填充。
 

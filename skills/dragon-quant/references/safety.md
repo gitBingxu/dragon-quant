@@ -25,16 +25,21 @@
 | auction | --force --recompute --json | T1 | 写 assets.db；命中当日快照时本次只读；当日需 09:25 后；premarket 可主动建议，执行需用户授权该动作 |
 | premarket | --date --json | T0 | 只读；不写库；缺数据降级 exit0；不触网 |
 | review | --date --top | T1 | 回写回测字段；failed>0 如实报告 |
-| review-account | --from --to --capital --json | T1 | 写账户回测表；--json 仅回执；默认策略与 v2 |
-| dashboard | --port --no-browser --bs-autogen --no-bs-autogen | T0 | 长驻；默认只读；显式 --bs-autogen / DQ_BS_AUTOGEN=1 才生成 BS 派生数据，该分支按 T1 确认；--no-bs-autogen / DQ_BS_AUTOGEN=0 优先；禁止 --yes 自动安装 |
-| factor | build --date --only --json | T1 | 只写三组内置因子；禁止默认 build |
-| factor | list --json / status --json / query --date --from --to --code --name --version --json | T0 | 本地只读；用于入库核对与研究读回 |
-| factor | export --from --to --name --out | T1 | 写用户明确 --out 路径与 sidecar meta |
-| factor | eval --from --to --name --json | T1 | 可能触网并写本地数据缓存；不宣称纯离线 |
+| review-account | --from --to --capital --strategy --workspace --json | T1 | 写账户回测表；--json 回执含 run_id/汇总/strategy_ref；省略 --strategy 沿用保存选择 |
+| workspace | init --json | T1 | 显式创建 workspace 文件并登记活动选择；不覆盖已有文件；源码编辑属开发任务 |
+| workspace | check --workspace --json | T0 | 显式验证；导入用户策略；因子仅检查文件与语法 |
+| strategy | list/current --workspace --json | T0 | 只读 descriptor；不导入用户代码 |
+| strategy | validate --workspace --json | T0 | 显式导入并调用 create_strategy；只读 |
+| strategy | use --workspace --json | T1 | 持久切换保存选择（revision CAS）；只在用户明确要求时执行 |
+| dashboard | --port --no-browser --bs-autogen --no-bs-autogen --workspace-writes --no-workspace-writes | T0 | 长驻；默认只读；显式 --bs-autogen / DQ_BS_AUTOGEN=1 才生成 BS 派生数据，该分支按 T1 确认；--no-bs-autogen / DQ_BS_AUTOGEN=0 优先；禁止 --yes 自动安装 |
+| factor | build --date --only --json --workspace | T1 | 内建三组或显式用户因子精确名单；禁止默认 build 与 --all |
+| factor | list --json --workspace / status --json / query --date --from --to --code --name --version --json --workspace | T0 | 本地只读；list 用 AST 元数据不导入用户因子；status 不支持 --workspace |
+| factor | export --from --to --name --out --workspace | T1 | 写用户明确 --out 路径与 sidecar meta |
+| factor | eval --from --to --name --json --workspace | T1 | 可能触网并写本地数据缓存；不宣称纯离线 |
 | factor | decision-review --source --from --to --json | T1 | 只读冻结快照但可能触网/写缓存 |
 | research | datasets/schema/query/scan-quality/account/signals/snapshots/strategy --json | T0 | 本地只读、固定 v2、不构造 provider |
 | research | experiments list/show --run-id/--experiment-id | T0 | 只读已存报告，不重算、不建锁 |
-| research | experiments run --run-id --confirm | T1 | 冻结期初与上游、本地行情、单飞；必须真实 run_id 与 --confirm |
+| research | experiments run --run-id --confirm --strategy-param | T1 | 冻结期初与上游、本地行情、单飞；必须真实 run_id 与 --confirm |
 <!-- safety:end -->
 
 表外说明：
@@ -45,7 +50,9 @@
 
 ## 确认话术
 
-- **T1**：`将执行 <command>，会写入本地数据库（dragon.db / assets.db），范围 <日期/代码>。是否继续？`
+- **T1**：`将执行 <command>，会写入本地数据库（dragon.db / assets.db）或 workspace 文件，范围 <日期/代码/workspace>。是否继续？`
+- **workspace 开发任务**：用户明确要求写/改 workspace 策略或用户因子时，源码与 `workspace.json` 编辑、用户因子 build、回测与（明确要求的）持久切换属于同一任务范围，连续完成，不逐文件、逐步重复确认；越界或用户撤回才补确认。
+- **持久切换**：`strategy use` 会改写保存选择（revision CAS）；只在用户明确要求切换活动策略时执行，研究/实验成功不自动切换。
 - **面板**：`将启动本地 Web UI 面板 dashboard（长驻，可能需要初始化/校验本地 schema；默认只读、不生成 BS 派生数据），并默认尝试打开浏览器；是否继续？`
 - **文件**：`将把报告写入 <path>（本地文件）。是否继续？`；用户指定仓库内路径时提示会影响 git 状态。
 - 用户按日期/动作/参数给出的明确授权持续有效；不因「上一轮不算」反复确认，越界或撤销才补确认。
@@ -55,11 +62,13 @@
 
 ## 禁止操作
 
-- 未确认执行 `scan`（实时）/ `prep` / `auction` / `review` / `review-account` / `factor build` / `factor export` / `factor eval` / `factor decision-review` / `research experiments run`，或写用户指定文件。
+- 未确认执行 `scan`（实时）/ `prep` / `auction` / `review` / `review-account` / `factor build` / `factor export` / `factor eval` / `factor decision-review` / `research experiments run` / `workspace init` / `strategy use`，或写用户指定文件。
 - 在单能力请求里隐式追加写操作；默认执行每日复合 workflow。
+- 把实验/回测成功当作用户授权，自动执行 `strategy use` 或推广参数。
 - 用 `--force` 绕过盘中/盘后/竞价时点，或把它当成日常手段。
 - 手工用 SQL 删除或修改业务表。
 - 回显 Cookie、token 或同步凭据，或把它们写入日志/仓库。
 - 把 `dashboard` 说成“会回测/会写业务记录”，或伪造已经打开浏览器；默认只读，BS 派生数据生成需显式 opt-in 并按 T1 确认。
+- 在未启用 `--workspace-writes`（或环境变量）时声称 Web 可变更/执行用户策略；Web 默认只读。
 - 把 `research experiments run` 说成只读，或在没有真实 `run_id` 时猜「最新批次就是本次」。
 - 自动安装/升级 Python 包（含 `dashboard --yes` 与 `DQ_WEB_AUTO_INSTALL=1`），或执行 `npm publish`、`git commit`、`git push`、PR。

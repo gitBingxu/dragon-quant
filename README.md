@@ -68,10 +68,12 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 | 「回测一下这批龙头」 | `review` → 双口径回测统计，打开面板 |
 | 「跑 5 月账户回测」 | `review-account` → 权益、回撤、买点统计与逐笔交易 |
 | 「识别质量最近有改善吗？」 | `research scan-quality` + 回测证据 → 口径与归因 |
+| 「写个自己的因子/策略」 | `workspace init` → 用户因子 build/query → `strategy validate` → 账户回测 |
 | 「买卖点胜率如何？」 | `bs-eval` 假想回放 → `/bs` 页面数据 |
 
-安全边界：Agent 只开放**十类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
-必须先经你确认，不提供投资建议。安装矩阵与交互协议详见
+安全边界：Agent 只开放**十一类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
+必须先经你确认，不提供投资建议。自定义策略/用户因子的完整流程见
+[workspace 指南](skills/dragon-quant/references/workspace.md)。安装矩阵与交互协议详见
 [development 模块文档](docs/agent/development.md)。
 
 ## Web 面板
@@ -123,6 +125,24 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 这套规则，按宽松/严格双口径统计信号触发后 5 日表现，供 `/bs` 页消费。规则数值唯一权威是
 [STRATEGY.md](dragon_quant/review_account/strategy/STRATEGY.md)，回放口径见
 [bs_eval 模块文档](docs/agent/bs_eval.md)。
+
+### 自定义策略与 Workspace
+
+只装 PyPI 包也能在独立 workspace 里写 Python 策略，复用内建或自定义因子：
+
+```bash
+dragon-quant workspace init ~/my-workspace          # 生成模板 + agent 说明
+dragon-quant strategy list --workspace ~/my-workspace
+dragon-quant strategy use user:example_momentum --workspace ~/my-workspace
+dragon-quant review-account --from 20260101 --to 20260201 --strategy user:example_momentum
+```
+
+用户策略放在 `strategies/<slug>/`，通过 `dragon_quant.strategy_sdk` 的只读
+`StrategyContext` / `StrategyIntent` 决策；成交、费用、T+1、手数与风控仍由系统处理。
+切换只影响新开仓，旧持仓按开仓时冻结的版本退出。CLI 与 Web `/strategies` 页共读同一保存
+选择，`--strategy` 只覆盖单次命令。Web 默认只读；需要在本机面板选择/执行用户策略时用
+`dragon-quant dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用，
+用户代码在独立本地 worker 进程执行。安全边界与冻结语义见 [workspace](docs/agent/workspace.md)。
 
 ### 双口径回测（review / review-account）
 

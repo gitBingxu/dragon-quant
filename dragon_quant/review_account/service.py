@@ -57,6 +57,76 @@ def _xueqiu_from_services(services):
     return bundle.xueqiu
 
 
+def _factor_reader_factory(required_names, versions):
+    if not required_names:
+        return None
+    from dragon_quant.workspace.factors import FactorReader
+
+    return FactorReader(required_names, versions=versions)
+
+
+def _build_strategy_runtime(selection, cfg, *, use_worker=None):
+    """按选择冻结并构造运行时；无选择也冻结内建身份与有效参数（M5/M6）。
+
+    首次运行同样从已发布快照执行（用户策略），消除「冻结后又读当前源码」竞态。
+    ``use_worker=True`` 时用户策略在独立本地子进程执行（Web 必须如此）。
+    """
+    from dragon_quant.review_account.strategy.runtime import make_provider, make_worker_factory
+    from dragon_quant.workspace import snapshots
+    from dragon_quant.workspace.config import BUILTIN_STRATEGY_ID
+    from dragon_quant.workspace.main import freeze_strategy
+
+    if selection is None:
+        ref = snapshots.builtin_ref(strategy_id=BUILTIN_STRATEGY_ID,
+                                    params=cfg.to_json_dict())
+    else:
+        ref = freeze_strategy(selection)
+    # CLI 用户策略与 Web 一样走独立 worker；内建无需 worker。
+    if use_worker is None:
+        use_worker = (selection is not None
+                      and selection.descriptor.source == "user")
+    worker_factory = make_worker_factory() if use_worker else None
+    provider = make_provider(cfg, factor_reader_factory=_factor_reader_factory,
+                             worker_factory=worker_factory)
+    try:
+        runtime = provider.build(ref)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+    def resolver(strategy_id, frozen_ref):
+        return provider.resolve(strategy_id, frozen_ref)
+
+    resolver.close = provider.close  # type: ignore[attr-defined]
+    return runtime, resolver, ref
+
+
+def _runtime_from_frozen_ref(base_run: dict, cfg, *, use_worker=None):
+    """增量续算：严格按基准 run 的冻结身份重建；版本证据不足明确拒绝。"""
+    from dragon_quant.review_account.strategy.runtime import make_provider, make_worker_factory
+
+    meta = base_run.get("run_meta") or {}
+    ref = meta.get("strategy_ref") if isinstance(meta, dict) else None
+    if not isinstance(ref, dict) or not ref.get("strategy_id"):
+        raise ValueError(
+            "基准记录缺少可证明的策略版本（无 strategy_ref），拒绝用当前规则增量续算；"
+            "请新建回测，或用匹配版本环境重跑")
+    if use_worker is None:
+        use_worker = str(ref.get("strategy_id", "")).startswith("user:")
+    worker_factory = make_worker_factory() if use_worker else None
+    provider = make_provider(cfg, factor_reader_factory=_factor_reader_factory,
+                             worker_factory=worker_factory)
+    try:
+        runtime = provider.build(ref)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+    def resolver(strategy_id, frozen_ref):
+        return provider.resolve(strategy_id, frozen_ref)
+
+    resolver.close = provider.close  # type: ignore[attr-defined]
+    return runtime, resolver, dict(ref)
+
+
 def run_review_account(date_from: str,
                        date_to: str,
                        *,
@@ -66,19 +136,38 @@ def run_review_account(date_from: str,
                        verbose: bool = True,
                        display_name: Optional[str] = None,
                        strategy_params: Optional[dict] = None,
-                       services=None) -> dict:
+                       services=None,
+                       selection=None,
+                       use_worker=None) -> dict:
     """运行账户级交易模拟并持久化结果。
 
     ``services`` 为可选 M2 装配注入口：传入且其 ``providers`` 非空时，K 线
     加载使用 ``services.providers.xueqiu``；不传时保持原有 ``XueqiuProvider()``
     构造路径。策略、成交、候选池、信号与输出不变。
+
+    ``selection`` 为 workspace 策略选择（:class:`dragon_quant.workspace.StrategySelection`）；
+    省略时逐位复用内建规则（旧行为不变）。
     """
     if strategy_params is not None and not isinstance(strategy_params, dict):
         raise ValueError("strategy_params 必须是 JSON 对象")
+    if selection is not None:
+        if selection.descriptor.source == "user":
+            strategy_name = selection.strategy_id
+        else:
+            # 内建策略保持既有列名，workspace 保存参数作为 StrategyConfig 覆盖。
+            strategy_params = {**selection.parameters, **(strategy_params or {})}
     cfg = StrategyConfig.from_dict({**(strategy_params or {}), "source": source,
                                     "strategy_name": strategy_name, "initial_cash": initial_cash})
-    sim = AccountSimulator(cfg, provider=_xueqiu_from_services(services))
-    result = sim.run(date_from, date_to)
+    runtime, resolver, strategy_ref = _build_strategy_runtime(
+        selection, cfg, use_worker=use_worker)
+    sim = AccountSimulator(cfg, provider=_xueqiu_from_services(services),
+                           runtime=runtime, runtime_resolver=resolver)
+    try:
+        result = sim.run(date_from, date_to)
+    finally:
+        closer = getattr(resolver, "close", None)
+        if callable(closer):
+            closer()
     # 日历在 15:05 前 / 非交易日不含当日，模拟器会少跑这些日期；落库终点
     # 必须收敛到实际最后快照，否则增量回测会拒绝续算（见 resolve_* 注释）。
     requested_date_to = date_to
@@ -112,9 +201,12 @@ def run_review_account(date_from: str,
         start_consecutive_losses=0,
         start_marks={},
         attribution_quality="full_run",
+        strategy_ref=strategy_ref,
     )
     result["run_id"] = run_id
     result["display_name"] = display_name
+    result["strategy_ref"] = strategy_ref
+    result["strategy_id"] = selection.strategy_id if selection is not None else None
 
     if verbose:
         _print_summary(result, source, strategy_name)
@@ -123,7 +215,8 @@ def run_review_account(date_from: str,
 
 def run_incremental_review_account(base_run_id: int, *,
                                    verbose: bool = True,
-                                   services=None) -> dict:
+                                   services=None,
+                                   use_worker=None) -> dict:
     """在基准 run 的最后收盘状态上继续交易，并把新快照**追加到同一条 run**。
 
     语义：A 截止到 10-10，增量就在 A 的权益曲线上续写 10-13 起的快照，更新
@@ -175,13 +268,20 @@ def run_incremental_review_account(base_run_id: int, *,
 
     data = MarketData(provider=_xueqiu_from_services(services))
     date_from, date_to = resolve_incremental_window(data, cfg, base["date_to"])
+    runtime, resolver, strategy_ref = _runtime_from_frozen_ref(base, cfg, use_worker=use_worker)
 
     sim = AccountSimulator(cfg, data=data,
                            initial_state=copy.deepcopy(seed["state"]),
                            base_equity=seed["base_equity"],
                            peak_equity=seed["peak_equity"],
-                           start_realized_pnl=seed["start_realized_pnl"])
-    result = sim.run(date_from, date_to)
+                           start_realized_pnl=seed["start_realized_pnl"],
+                           runtime=runtime, runtime_resolver=resolver)
+    try:
+        result = sim.run(date_from, date_to)
+    finally:
+        closer = getattr(resolver, "close", None)
+        if callable(closer):
+            closer()
     _assert_snapshot_end(result, date_to)
     annotate_post_exit(result["positions"], sim.data)
 
@@ -198,7 +298,8 @@ def run_incremental_review_account(base_run_id: int, *,
         _merged_run_meta(
             base, result,
             total_days=len(snapshots) + len(result["snapshots"]),
-            date_from=date_from, date_to=date_to),
+            date_from=date_from, date_to=date_to,
+            strategy_ref=strategy_ref),
         ensure_ascii=False)
     account_store.append_review_account_results(
         base_run_id,
@@ -370,7 +471,8 @@ def _aggregate_appended_stats(base_run: dict, snapshots: list[dict],
 
 
 def _merged_run_meta(base_run: dict, result: dict, *,
-                     total_days: int, date_from: str, date_to: str) -> dict:
+                     total_days: int, date_from: str, date_to: str,
+                     strategy_ref: Optional[dict] = None) -> dict:
     """把增量段并入 run_meta：可累加字段求和，枚举冲突记 ``mixed``。
 
     ``incremental_segments`` 记录每次续算的区间，供排障与 UI 追溯；旧 run
@@ -403,6 +505,10 @@ def _merged_run_meta(base_run: dict, result: dict, *,
     meta["realized_pnl_total"] = ((meta.get("realized_pnl_total") or 0)
                                   + (result.get("realized_pnl") or 0))
     meta.setdefault("attribution_quality", "full_run")
+    if strategy_ref is not None:
+        meta["strategy_ref"] = strategy_ref
+    else:
+        meta.setdefault("strategy_ref", None)
     segments = list(meta.get("incremental_segments") or [])
     segments.append({"date_from": date_from, "date_to": date_to})
     meta["incremental_segments"] = segments
@@ -499,7 +605,8 @@ def _persist_result(result: dict, *,
                     start_peak_equity: Optional[float] = None,
                     start_consecutive_losses: Optional[int] = None,
                     start_marks: Optional[dict] = None,
-                    attribution_quality: str = "full_run") -> int:
+                    attribution_quality: str = "full_run",
+                    strategy_ref: Optional[dict] = None) -> int:
     """全量回测落库管线：新建 run 并原子写入全部子表。
 
     落库前校验不变量 ``date_to == 最后快照 trade_date``：调用方负责决定终点
@@ -531,6 +638,7 @@ def _persist_result(result: dict, *,
         "attribution_quality": attribution_quality,
         "requested_date_to": requested_date_to or date_to,
         "date_to_clamped": bool(requested_date_to and requested_date_to != date_to),
+        "strategy_ref": strategy_ref,
     }
     run_id = account_store.create_review_account_run(
         source=source,

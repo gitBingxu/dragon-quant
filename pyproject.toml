@@ -8,6 +8,8 @@ exclude = ["dragon_quant.tests", "dragon_quant.tests.*"]
 
 [tool.setuptools.package-data]
 web_ui = ["dist/**/*"]
+# Strategy SDK 打包资源：agent 指南 + 策略模板，随 wheel 分发（importlib.resources 读取）。
+"dragon_quant.strategy_sdk.resources" = ["README.md", "templates/*"]
 
 [project]
 name = "dragon-quant"

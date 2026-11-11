@@ -94,7 +94,8 @@ def position_as_of(signal: dict, cfg: StrategyConfig, day: str,
                     signal.get("entry_reason_text", ""), signal.get("entry_signal") or {},
                     highest_return=signal.get("highest_return") or 0.0,
                     highest_price=max(signal.get("highest_price") or 0.0, signal["entry_price"]),
-                    took_profit_half=half)
+                    took_profit_half=half,
+                    strategy_ref=(signal.get("entry_signal") or {}).get("strategy_ref") or {})
 
 
 def _signal_total_pnl(signal: dict, cfg: StrategyConfig, day: str,

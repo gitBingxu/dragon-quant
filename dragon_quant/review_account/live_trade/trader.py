@@ -36,19 +36,24 @@ def _current_moment(tz=None):
 class LiveTrader:
     """buy/sell 命令的信号执行器：回放当日事件流，复用 SignalEngine，纯信号记账。"""
 
-    def __init__(self, cfg, source: str = "v2", data=None):
+    def __init__(self, cfg, source: str = "v2", data=None, *,
+                 runtime=None, runtime_resolver=None):
         from dragon_quant.review_account.models import StrategyConfig
         self.cfg = StrategyConfig.from_dict(cfg.to_json_dict())
         self.source = source
         self.data = data or MarketData()
+        self.runtime = runtime
+        self.runtime_resolver = runtime_resolver
 
     def buy(self, trade_date: str, as_of: str | None = None, force: bool = False) -> dict:
         return self._run(trade_date, as_of, "buy", force=force)
 
-    def sell(self, trade_date: str, as_of: str | None = None, force: bool = False) -> dict:
-        return self._run(trade_date, as_of, "sell", force=force)
+    def sell(self, trade_date: str, as_of: str | None = None, force: bool = False,
+             only_strategy_id: str | None = None) -> dict:
+        return self._run(trade_date, as_of, "sell", force=force,
+                         only_strategy_id=only_strategy_id)
 
-    def _run(self, day, clock, command, force=False):
+    def _run(self, day, clock, command, force=False, only_strategy_id=None):
         forced = False
         datetime.strptime(day, "%Y-%m-%d")
         if clock:
@@ -94,7 +99,8 @@ class LiveTrader:
         if command == "buy":
             result = self._run_buy(day, target, until, calendar, cutoff, forced)
         else:
-            result = self._run_sell(day, target, until, calendar, cutoff, forced)
+            result = self._run_sell(day, target, until, calendar, cutoff, forced,
+                                    only_strategy_id=only_strategy_id)
         result["forced"] = forced
         return result
 
@@ -142,7 +148,8 @@ class LiveTrader:
         usable_positions = self._usable(day, held_codes - candidate_codes, degraded, "持仓")
         codes = candidate_codes | usable_positions
         engine = SignalEngine(self.cfg, positions=positions, held_codes=held_codes,
-                              sentiment_pct=sentiment, account=shadow, evaluate_sells=False)
+                              sentiment_pct=sentiment, account=shadow, evaluate_sells=False,
+                              runtime=self.runtime, runtime_resolver=self.runtime_resolver)
         buys, details = [], []
         quality = "strict_5min"
         last_rows = {}
@@ -200,7 +207,8 @@ class LiveTrader:
                 "priority_degraded": list(ctx.get("degraded") or []),
                 "reason_text": f"买入 {len(buys)} 只" if buys else "候选池暂无触发买点的标的"}
 
-    def _run_sell(self, day, target, until, calendar, cutoff, forced):
+    def _run_sell(self, day, target, until, calendar, cutoff, forced,
+                  only_strategy_id=None):
         signals = signal_store.list_all_signals(source=self.source)
         shadow = build_shadow_state(signals, self.cfg, day, as_of=target)
         positions = shadow.positions
@@ -215,7 +223,13 @@ class LiveTrader:
         candidate_codes = self._usable(day, {c["code"] for c in candidates} - position_codes,
                                        degraded, "候选")
         codes = position_codes | candidate_codes
-        engine = SignalEngine(self.cfg, positions=positions)
+        # --strategy 只筛选该归属持仓，不替换退出规则、不改动账户其他归属。
+        eval_positions = [p for p in positions
+                          if not only_strategy_id
+                          or ((getattr(p, "strategy_ref", None) or {}).get("strategy_id")
+                              == only_strategy_id)]
+        engine = SignalEngine(self.cfg, positions=eval_positions,
+                              runtime=self.runtime, runtime_resolver=self.runtime_resolver)
         sells = []
         quality = "strict_5min"
         suspended, unavailable = set(), {}
@@ -234,6 +248,7 @@ class LiveTrader:
             for s in sells:
                 if isinstance(s.get("signal"), dict):
                     s["signal"]["forced"] = True
+        owner_map = {p.code: (getattr(p, "strategy_ref", None) or {}) for p in positions}
         for s in sells:
             if s["partial"]:
                 s["persisted"] = signal_store.half_close_signal(
@@ -243,14 +258,22 @@ class LiveTrader:
                 s["persisted"] = signal_store.close_signal(
                     s["code"], s["exit_date"], s["exit_price"],
                     s["reason_code"], s["reason_text"], s["signal"], s["hold_days"])
+            s["strategy_id"] = ((s.get("signal") or {}).get("strategy_id")
+                                or (owner_map.get(s["code"]) or {}).get("strategy_id"))
         for p in engine.positions:
             signal_store.update_signal_peaks(p.code, p.highest_return, p.highest_price)
         held = [{"code": p.code, "name": p.name, "highest_return": p.highest_return,
                  "highest_price": p.highest_price, "qty": p.qty,
-                 "took_profit_half": p.took_profit_half} for p in engine.positions]
+                 "took_profit_half": p.took_profit_half,
+                 "strategy_id": (getattr(p, "strategy_ref", None) or {}).get("strategy_id")}
+                for p in engine.positions]
         return {"action": "sell" if sells else "idle", "sells": sells, "held": held,
                 "data_quality": quality, "degraded": degraded,
+                "strategy_filter": only_strategy_id,
+                "skipped_by_filter": len(positions) - len(eval_positions),
                 "suspended_codes": sorted(suspended),
                 "unavailable_codes": {c: r for c, r in sorted(unavailable.items())
                                       if r != UNAVAILABLE_SUSPENDED},
-                "reason_text": f"卖出 {len(sells)} 只" if sells else "持仓暂无卖出信号"}
+                "reason_text": (f"卖出 {len(sells)} 只" if sells else
+                                "持仓暂无卖出信号" if not only_strategy_id
+                                else f"策略 {only_strategy_id} 持仓暂无卖出信号")}

@@ -216,7 +216,9 @@ def _dispatch(args) -> dict:
             try:
                 return research.experiments.run(
                     args.run_id, confirm=args.confirm,
-                    sell_rules=args.sell_rule or None)
+                    sell_rules=args.sell_rule or None,
+                    strategy_params=_parse_strategy_params(
+                        getattr(args, "strategy_param", None)))
             except ExperimentBusy as exc:
                 busy = ResearchError(str(exc))
                 busy.code = "experiment_busy"
@@ -267,3 +269,23 @@ def handle(args, services) -> None:
     else:
         _print_human(payload)
     raise SystemExit(0)
+
+
+def _parse_strategy_params(items):
+    """``--strategy-param k=v`` → 单个参数变体 dict（值尝试 JSON，失败按字符串）。"""
+    if not items:
+        return None
+    import json as _json
+    params = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"--strategy-param 需要 k=v 形式，得到 {item!r}")
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("--strategy-param 参数名不能为空")
+        try:
+            params[key] = _json.loads(raw)
+        except _json.JSONDecodeError:
+            params[key] = raw
+    return [params]

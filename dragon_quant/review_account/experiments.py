@@ -358,8 +358,14 @@ def _split(days: list[str]) -> dict[str, tuple[str, str]]:
 
 def _run_variant(cfg: StrategyConfig, data, date_from: str, date_to: str,
                  frozen: Mapping[str, Any], seed: Optional[Mapping],
-                 factor_model=None) -> tuple[Optional[dict], Optional[str]]:
+                 factor_model=None, runtime=None, runtime_resolver=None,
+                 runtime_factory=None) -> tuple[Optional[dict], Optional[str]]:
+    created = None
     try:
+        # 独立模拟必须使用独立策略实例：worker/有状态策略不能跨 split 复用。
+        if runtime_factory is not None:
+            created = runtime_factory()
+            runtime = created
         # 每个 variant 必须从同一冻结期初状态独立起跑：深拷贝，绝不共享可变对象。
         initial_state = copy.deepcopy(seed.get("state")) if seed else None
         simulator = AccountSimulator(
@@ -374,12 +380,19 @@ def _run_variant(cfg: StrategyConfig, data, date_from: str, date_to: str,
             sentiment_loader=_frozen_sentiment_loader(frozen),
             factor_loader=_frozen_factor_loader(frozen),
             factor_model=factor_model,
+            runtime=runtime,
+            runtime_resolver=runtime_resolver,
         )
         result = simulator.run(date_from, date_to)
     except DataCoverageError as exc:
         return None, f"data_coverage: {exc}"
     except ValueError as exc:
         return None, f"invalid_variant: {exc}"
+    finally:
+        if created is not None:
+            closer = getattr(created, "close", None)
+            if callable(closer):
+                closer()
     if (cfg.factor_ranking_enabled
             and result.get("factor_degraded_days")):
         return None, ("factor_degraded_in_run: "
@@ -424,7 +437,11 @@ def _holds(metric: Optional[Mapping], key: str = "total_return") -> Optional[flo
 def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
                     frozen: Mapping[str, Any],
                     seed: Optional[Mapping] = None,
-                    sell_rules: Optional[list[str]] = None) -> dict:
+                    sell_rules: Optional[list[str]] = None,
+                    runtime=None, runtime_resolver=None,
+                    strategy_ref: Optional[Mapping] = None,
+                    parameter_variants: Optional[list[Mapping]] = None,
+                    runtime_factory=None, variant_runtime_factory=None) -> dict:
     """对一条冻结 run 运行 variants，返回可审计报告（无 I/O 写）。"""
     if not run:
         raise ValueError("基准 run 不存在")
@@ -457,6 +474,7 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
             "factor_completion": frozen.get("factor_completion"),
             "factor_names": list(frozen.get("factor_names") or []),
             "market_basis": "local_daily_bars_no_intraday",
+            "strategy_ref": dict(strategy_ref or {}),
         },
         "upstream": {
             "candidate_universe_sha256": frozen.get("content_sha256"),
@@ -472,6 +490,10 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
         "comparability": "same_frozen_upstream_universe",
         "variants": {},
     }
+    if strategy_ref and str(strategy_ref.get("strategy_id", "")).startswith("user:"):
+        report["user_strategy_note"] = (
+            "该基准 run 使用用户 workspace 策略；variants 的 sell-rule/cfg 消融不改变用户策略"
+            "决策逻辑，报告主要用于时间切分与成本压力评估；用户策略版本/参数见 frozen.strategy_ref。")
     if not seed and run.get("base_run_id"):
         # 增量基准但缺期初状态：不得用空账户 initial_cash 冒充续算。
         return {
@@ -499,7 +521,10 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
                 continue
             start, end = splits[split_name]
             result, error = _run_variant(gated, data, start, end, frozen, seed,
-                                         factor_model=factor_model)
+                                         factor_model=factor_model,
+                                         runtime=runtime if runtime_factory is None else None,
+                                         runtime_resolver=runtime_resolver,
+                                         runtime_factory=runtime_factory)
             if error:
                 block = {"status": "insufficient_data", "reason": error}
                 break
@@ -541,7 +566,10 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
             continue
         _, _, factor_model = _factor_gate(variant, days, frozen)
         result, error = _run_variant(variant, data, *test_split, frozen, seed,
-                                     factor_model=factor_model)
+                                     factor_model=factor_model,
+                                     runtime=runtime if runtime_factory is None else None,
+                                     runtime_resolver=runtime_resolver,
+                                     runtime_factory=runtime_factory)
         report["variants"][name]["test"] = (
             result if not error
             else {"status": "insufficient_data", "reason": error})
@@ -549,7 +577,10 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
                          sell_slippage=variant.sell_slippage * 2)
         stress_result, stress_error = _run_variant(
             stress, data, *test_split, frozen, seed,
-            factor_model=factor_model)
+            factor_model=factor_model,
+            runtime=runtime if runtime_factory is None else None,
+            runtime_resolver=runtime_resolver,
+            runtime_factory=runtime_factory)
         report["variants"][name]["stress_test"] = (
             stress_result if not stress_error
             else {"status": "insufficient_data", "reason": stress_error})
@@ -569,6 +600,38 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
             round(test_value - base_ret, 4)
             if test_value is not None and base_ret is not None else None)
 
+    # 用户策略声明参数变体：真正以不同参数构造运行时并跑 validation/test。
+    if parameter_variants and variant_runtime_factory is not None:
+        for index, params in enumerate(parameter_variants):
+            name = f"param_variant_{index}"
+            entry: dict = {"label": f"参数变体 {index + 1}", "parameters": dict(params)}
+            try:
+                probe = variant_runtime_factory(dict(params))
+            except ValueError as exc:
+                entry.update({"status": "insufficient_data", "reason": str(exc)})
+                report["variants"][name] = entry
+                report["trial_count"] += 1
+                continue
+            closer = getattr(probe, "close", None)
+            if callable(closer):
+                closer()  # 只用于校验参数可构造；实际模拟每次新建实例
+            for split_name in ("validation", "test"):
+                if split_name not in splits:
+                    continue
+                start, end = splits[split_name]
+                result, error = _run_variant(
+                    cfg, data, start, end, frozen, seed,
+                    runtime_resolver=runtime_resolver,
+                    runtime_factory=lambda p=dict(params): variant_runtime_factory(p))
+                entry[split_name] = (result if not error
+                                     else {"status": "insufficient_data", "reason": error})
+            entry["status"] = ("evaluated"
+                               if isinstance(entry.get("validation"), dict)
+                               and "status" not in entry["validation"]
+                               else "insufficient_data")
+            report["variants"][name] = entry
+            report["trial_count"] += 1
+
     evaluated = [name for name, entry in report["variants"].items()
                  if entry.get("status") in ("evaluated", "no_change")]
     report["status"] = "evaluated" if eligible or selected else (
@@ -581,6 +644,7 @@ def run_experiments(*, run: Mapping[str, Any], cfg: StrategyConfig, data,
         "行情的本地快照为日 K 兜底（无分时），与实时盘中撮合口径不同",
         "test 区间不参与选型；仅 baseline 与选中项运行 holdout 与双倍滑点压力",
         "旧 run 若缺少期初状态/冻结输入，不作为历史复现，而是基于当前冻结数据的实验基线",
-        "train/validation/test 均从本批次期初状态独立重启（非跨区间连续持仓），因此是各 sub-period 的对照，不宣称历史连续复现",
+        "train/validation/test 均从本批次期初状态独立重启（非跨区间连续持仓）；"
+        "因此是各 sub-period 的对照，不宣称历史连续复现",
     ]
     return report

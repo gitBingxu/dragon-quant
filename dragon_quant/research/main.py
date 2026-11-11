@@ -208,11 +208,11 @@ class experiments:
 
     @staticmethod
     def run(run_id: int, *, confirm: bool, sell_rules: Optional[list[str]] = None,
-            lock_path=None) -> dict:
+            lock_path=None, strategy_params: Optional[list] = None) -> dict:
         from .experiments import experiment_run
 
         return experiment_run(run_id, confirm=confirm, sell_rules=sell_rules,
-                              lock_path=lock_path)
+                              lock_path=lock_path, strategy_params=strategy_params)
 
 
 def handle_error(*, command: str, request: dict, exc: Exception) -> tuple[dict, int]:

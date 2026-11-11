@@ -4,8 +4,8 @@
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 70,
-    "top_level_count": 19,
+    "node_count": 78,
+    "top_level_count": 21,
     "nodes": [
       {
         "command": "scan",
@@ -204,19 +204,20 @@
       {
         "command": "review-account",
         "flags": [
-          "-h",
-          "--help",
-          "--from",
-          "--to",
           "--capital",
-          "--strategy",
+          "--config",
+          "--from",
+          "--help",
+          "--json",
+          "--no-browser",
+          "--port",
           "--source",
+          "--strategy",
+          "--to",
           "--ui",
           "--ui-only",
-          "--port",
-          "--no-browser",
-          "--config",
-          "--json"
+          "--workspace",
+          "-h"
         ]
       },
       {
@@ -364,36 +365,39 @@
       {
         "command": "factor build",
         "flags": [
-          "-h",
-          "--help",
+          "--all",
           "--date",
           "--from",
-          "--to",
+          "--help",
+          "--json",
           "--only",
-          "--all",
-          "--json"
+          "--to",
+          "--workspace",
+          "-h"
         ]
       },
       {
         "command": "factor list",
         "flags": [
-          "-h",
           "--help",
-          "--json"
+          "--json",
+          "--workspace",
+          "-h"
         ]
       },
       {
         "command": "factor query",
         "flags": [
-          "-h",
-          "--help",
+          "--code",
           "--date",
           "--from",
-          "--to",
+          "--help",
+          "--json",
           "--name",
-          "--code",
+          "--to",
           "--version",
-          "--json"
+          "--workspace",
+          "-h"
         ]
       },
       {
@@ -407,38 +411,40 @@
       {
         "command": "factor export",
         "flags": [
-          "-h",
-          "--help",
-          "--from",
-          "--to",
-          "--name",
-          "--code",
-          "--version",
-          "--format",
-          "--out",
           "--clean",
-          "--missing",
-          "--winsorize",
-          "--normalize",
+          "--code",
+          "--format",
+          "--from",
+          "--help",
+          "--json",
           "--limits",
-          "--json"
+          "--missing",
+          "--name",
+          "--normalize",
+          "--out",
+          "--to",
+          "--version",
+          "--winsorize",
+          "--workspace",
+          "-h"
         ]
       },
       {
         "command": "factor eval",
         "flags": [
-          "-h",
-          "--help",
-          "--name",
           "--from",
-          "--to",
-          "--horizon",
           "--groups",
-          "--version",
-          "--min-days",
+          "--help",
+          "--horizon",
+          "--json",
           "--min-cross-section",
+          "--min-days",
+          "--name",
           "--pit-policy",
-          "--json"
+          "--to",
+          "--version",
+          "--workspace",
+          "-h"
         ]
       },
       {
@@ -501,26 +507,31 @@
       {
         "command": "buy",
         "flags": [
-          "-h",
-          "--help",
-          "--date",
-          "--source",
-          "--json",
           "--at",
           "--config",
-          "--force"
+          "--date",
+          "--force",
+          "--help",
+          "--json",
+          "--source",
+          "--strategy",
+          "--workspace",
+          "-h"
         ]
       },
       {
         "command": "sell",
         "flags": [
-          "-h",
-          "--help",
-          "--date",
-          "--source",
           "--at",
           "--config",
-          "--force"
+          "--date",
+          "--force",
+          "--help",
+          "--json",
+          "--source",
+          "--strategy",
+          "--workspace",
+          "-h"
         ]
       },
       {
@@ -584,7 +595,9 @@
           "--help",
           "--no-browser",
           "--no-bs-autogen",
+          "--no-workspace-writes",
           "--port",
+          "--workspace-writes",
           "--yes",
           "-h"
         ]
@@ -738,12 +751,80 @@
       {
         "command": "research experiments run",
         "flags": [
-          "-h",
-          "--help",
-          "--run-id",
           "--confirm",
+          "--help",
+          "--json",
+          "--run-id",
           "--sell-rule",
-          "--json"
+          "--strategy-param",
+          "-h"
+        ]
+      },
+      {
+        "command": "workspace",
+        "flags": [
+          "--help",
+          "-h"
+        ]
+      },
+      {
+        "command": "workspace init",
+        "flags": [
+          "--help",
+          "--json",
+          "-h"
+        ]
+      },
+      {
+        "command": "workspace check",
+        "flags": [
+          "--help",
+          "--json",
+          "--workspace",
+          "-h"
+        ]
+      },
+      {
+        "command": "strategy",
+        "flags": [
+          "--help",
+          "-h"
+        ]
+      },
+      {
+        "command": "strategy list",
+        "flags": [
+          "--help",
+          "--json",
+          "--workspace",
+          "-h"
+        ]
+      },
+      {
+        "command": "strategy current",
+        "flags": [
+          "--help",
+          "--json",
+          "--workspace",
+          "-h"
+        ]
+      },
+      {
+        "command": "strategy use",
+        "flags": [
+          "--help",
+          "--json",
+          "--workspace",
+          "-h"
+        ]
+      },
+      {
+        "command": "strategy validate",
+        "flags": [
+          "--help",
+          "--json",
+          "--workspace",
+          "-h"
         ]
       }
     ]
@@ -927,9 +1008,10 @@
           "dragon_quant/tests/e2e/test_review_account.py::test_ra8_prep_snapshot_pool_uses_prep_only_then_mixed",
           "dragon_quant/tests/e2e/test_review_account.py::test_ra9_runtime_clock_mode_excludes_intraday_today",
           "dragon_quant/tests/e2e/test_web_api.py::test_ra7_review_account_ui_runs_backtest_then_serves_account",
-          "dragon_quant/tests/e2e/test_web_api.py::test_ra7_review_account_ui_only_needs_no_backtest"
+          "dragon_quant/tests/e2e/test_web_api.py::test_ra7_review_account_ui_only_needs_no_backtest",
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws6_cli_review_account_runs_user_strategy_in_worker"
         ],
-        "notes": "RA1-RA9; RA9 pins the runtime-clock include_today boundary; RA7 UI lifecycle is shared with the Web entry."
+        "notes": "RA1-RA9; RA9 pins the runtime-clock include_today boundary; RA7 UI lifecycle is shared with the Web entry; WS6 pins user strategies to a worker child process."
       },
       "dragons": {
         "tests": [
@@ -1176,7 +1258,7 @@
           "dragon_quant/tests/e2e/test_buy_sell.py::test_se3_no_position_exit_0",
           "dragon_quant/tests/e2e/test_buy_sell.py::test_se4_time_gates_match_buy",
           "dragon_quant/tests/e2e/test_buy_sell.py::test_se5_suspended_position_is_frozen",
-          "dragon_quant/tests/e2e/test_buy_sell.py::test_se6_sell_has_no_json_option",
+          "dragon_quant/tests/e2e/test_buy_sell.py::test_se6_sell_accepts_json_option",
           "dragon_quant/tests/e2e/test_buy_sell.py::test_se7_runtime_clock_mode_midday_gate_matches_buy"
         ],
         "notes": ""
@@ -1339,6 +1421,57 @@
           "dragon_quant/tests/e2e/test_research.py::test_research_experiments_run_requires_real_run_and_confirm"
         ],
         "notes": "Missing confirm/unknown sell-rule exit 2 before any DB write."
+      },
+      "workspace": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws2_list_never_imports_user_code"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "workspace init": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws1_init_list_validate_and_use"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "workspace check": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws3_check_reports_invalid_descriptor"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "strategy": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws2_list_never_imports_user_code"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "strategy list": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws1_init_list_validate_and_use",
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws4_list_without_workspace_shows_builtin_only"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "strategy current": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws1_init_list_validate_and_use"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "strategy use": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws1_init_list_validate_and_use",
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws5_unknown_strategy_use_fails_without_partial_write"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "strategy validate": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws1_init_list_validate_and_use",
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws2_list_never_imports_user_code"
+        ],
+        "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
       }
     },
     "hidden_aliases": {
@@ -1613,7 +1746,7 @@
       },
       "coverage_audit": {
         "tests": [
-          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_has_70_nodes_and_19_top_level_commands",
+          "dragon_quant/tests/e2e/test_coverage_map.py::test_parser_snapshot_counts_are_consistent",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_parser_node_maps_to_existing_real_tests",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_every_e2e_test_function_is_mapped",
           "dragon_quant/tests/e2e/test_coverage_map.py::test_hidden_alias_invocation_facts_and_independent_entries_are_present",

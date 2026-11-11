@@ -6,6 +6,7 @@
 
 - **单能力**：用户点名一个能力（例如“扫一下今天真龙”），只执行该能力并在报告后结束。**不隐式**追加 `prep`、`factor build` 或其他写操作，也不自动执行“下一步建议”。
 - **每日复合**：**只有用户明确**说“每日全流程 / 每日量化入库 / 今天全套”时才启用；否则一律按单能力处理。
+- **开发任务**：用户明确要求写/改 workspace 策略或用户因子时，源码编辑、`workspace.json` 登记、因子 build、回测与（明确要求的）策略切换属于同一任务范围，连续完成，不逐文件、逐步确认；越界或用户撤回才补确认。
 - 跨时点无法在同一 session 完成的部分，只输出“下一阶段待执行”，**不自动执行**，不做后台调度；需要无人值守时按 `references/schedule.md` 生成定时配置交用户安装。
 
 ## 盘后 session（交易日 ≥15:00）
@@ -27,7 +28,7 @@
 5. 默认一屏简报，完整报告按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
 6. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
 
-## 十类 workflow
+## 十一类 workflow
 
 ### 1. 个股行情
 
@@ -72,13 +73,13 @@
 
 ### 6. 因子入库
 
-见下方“因子入库（三组固定名单）”。
+见下方“因子入库（内建三组 + 用户因子）”。
 
 ### 7. 账户回测与面板
 
-1. 引导：区间 `--from`/`--to`（必填）→ 初始资金（默认 100000，确认）→ 策略（默认 `dragon_pullback_daily`，不展开参数）→ 数据体系（默认 v2）。
+1. 引导：区间 `--from`/`--to`（必填）→ 初始资金（确认）→ 策略（默认沿用保存选择；无保存选择时用内建，不展开参数）→ 数据体系（默认 v2）。
 2. 说明会写账户回测表，且候选池优先读 prep 快照；目标区间未跑 prep 时会走回退池，报告中需说明回退天数与原因。
-3. 执行 `review-account --from D1 --to D2 [--capital N] --json` 取得真实 `run_id` 回执（默认人读格式不变）；再按需用 `research account --run-id N --view summary|snapshots|trades|positions|events` 读回。校验 `ranking_mode`、回退天数、停牌跳过、`data_degraded`。
+3. 执行 `review-account --from D1 --to D2 [--capital N] [--strategy user:<slug>] [--workspace PATH] --json` 取得真实 `run_id` 回执（默认人读格式不变）；再按需用 `research account --run-id N --view summary|snapshots|trades|positions|events` 读回。校验 `ranking_mode`、回退天数、停牌跳过、`data_degraded` 与回执中的 `strategy_ref`。
 4. 阶段 2：后台 `dashboard`，账户页 URL 为 `/account`；只开已有面板时跳过回测。
 5. 答疑只解释摘要与数据质量三态、兜底成交价近似、停牌冻结、候选池回退；不复制策略参数数值，不承诺收益。
 6. 账户页分区：**持仓生命周期胜率**（整笔已平仓）与**本段权益贡献**（期初盯市基准）不可混读；
@@ -99,6 +100,13 @@
 3. 缺 `[web]` 依赖时只转述 stderr 的手动安装指令；禁止 `--yes`、禁止自动 pip 安装。
 4. 面板默认只读，不回测、不写业务记录；`--bs-autogen` / `DQ_BS_AUTOGEN=1` 会生成 BS 派生数据，按 T1 确认；详见“UI 生命周期”。
 
+### 10. 自定义策略与用户因子
+
+1. 先读 `references/workspace.md`，按渐进流程执行：`workspace init` → 读 wheel 内 SDK 指南 → 写 `factors/*.py` → 登记 `workspace.json` → `factor list --workspace` 取真实注册名 → `factor build --only <ws_…> --workspace …` → `factor query` 核对 → 写 `strategies/<slug>/` 并登记 → `strategy validate` → `review-account --strategy … --workspace …` → `research` 读回/实验。
+2. 用户因子构建需要该日本地源数据（scan/prep/auction/vpa/fin）；`missing_source` 不是 0。策略回测需要本地行情/缓存与候选池。
+3. 只在用户明确要求时 `strategy use` 持久切换，并用 `strategy current` 核对；研究/实验成功不自动推广。
+4. Web 策略页需 `dashboard --workspace-writes`（或环境变量）显式启用；默认只读。
+
 ## UI 生命周期
 
 - **后台启动**：`dashboard` 是**长驻**进程，不阻塞的判断以实际后台能力为准；宿主没有后台执行机制时，明确告知“面板会阻塞当前会话”，并给出用户自行在终端运行的命令，不假装已启动。
@@ -113,9 +121,9 @@
   `--no-bs-autogen`/`DQ_BS_AUTOGEN=0` 始终优先。面板已打开时不要重复跑回测。
 - **BS 重算**：页面「重新计算买卖点」是显式写操作，会改变 `bs_*` 派生数据；纯查看不触发。
 
-## 因子入库（三组固定名单）
+## 因子入库（内建三组 + 用户因子）
 
-只有下面三组内置因子可以构建，按名称排序，逐字使用；构建只做这三组，其他因子构建请求走通用未开放话术。读回/核对可额外使用白名单内的 `factor list` / `status` / `query`（含区间+code+version）/ `export` / `eval` / `decision-review`。
+日常入库只构建下面三组内建因子，按名称排序，逐字使用。用户因子只在用户明确要求、且 workspace 已登记时，用 `factor list --workspace` 给出的**精确注册名** `ws_<id>.<local>` 配 `--only` 显式构建；不做隐式混入。读回/核对可额外使用白名单内的 `factor list` / `status` / `query`（含区间+code+version）/ `export` / `eval` / `decision-review`。完整用户因子流程见 `references/workspace.md`。
 
 ```text
 <!-- factor-groups:start -->
@@ -127,13 +135,13 @@ auction: auction_dim_direction,auction_dim_liquidity,auction_dim_supply,auction_
 
 **构建与核对**：
 
-1. 确认日期 D 与要入库的组；T1 确认后每组单独执行 `factor build --date D --only <组名单> --json`。
-2. **不能只看退出码**：exit 0 不等于全部成功。逐条检查 `reports[0].factors[<name>].status`：`ok` 有行；`empty` 源可用但当日无值；`missing_source` 源不可用或配置 fail-closed，**不等于 0**；`error` 必须报告。
+1. 确认日期 D 与要入库的组；T1 确认后每组单独执行 `factor build --date D --only <组名单> --json`。用户因子加 `--workspace <PATH>` 并把 `--only` 换成精确注册名。
+2. **不能只看退出码**：exit 0 不等于全部成功。逐条检查 `reports[0].factors[<name>].status`：`ok` 有行；`empty` 源可用但当日无值；`missing_source` 源不可用或配置 fail-closed，**不等于 0**；`error` 必须报告。用户因子还要核对 `version` 与 `factor list --workspace` 一致、`available_at` 符合源时点。
 3. 区分 `warnings`：`no_scan_for_date` 对 prep/auction-only 组是预期，对 scan 组是失败信号。
-4. 代表因子读回：`factor query --date D --name five_dim_composite --json`、`prep_review_score`、`auction_is_weak`（二次抽查可加 `auction_strength`）；检查 `values.rows > 0` 且 `resolved_versions` 含该因子。auction 数据不足时可合法无行，需说明原因。
+4. 代表因子读回：`factor query --date D --name five_dim_composite --json`、`prep_review_score`、`auction_is_weak`（二次抽查可加 `auction_strength`）；用户因子用 `factor query --workspace <PATH> --date D --name ws_<id>.<local> --json`。检查 `rows`/`values` 有行且 `resolved_versions` 含该因子。auction 数据不足时可合法无行，需说明原因。
 5. 输出入库核对表：组 / 预期数 / `ok` 数 / `empty` 数 / `missing_source` 数 / 读回行数 / 缺失原因。
 
-**禁止**：默认 build（会漏 prep/auction）；`--all`（会混入无关因子族）；把缺失当 0。
+**禁止**：默认 build（会漏 prep/auction 与用户因子）；`--all`（会混入无关因子族与用户因子）；把缺失当 0。
 
 ## 报告保存
 

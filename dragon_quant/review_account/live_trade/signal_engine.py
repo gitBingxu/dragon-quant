@@ -25,8 +25,11 @@ from dragon_quant.review_account.models import (
 )
 from dragon_quant.review_account.strategy.priority import rank_key
 from dragon_quant.review_account.strategy.risk import risk_governor
+from dragon_quant.review_account.strategy.runtime import (
+    StrategyRuntimeError, build_builtin_runtime,
+)
 from dragon_quant.review_account.strategy.main import (
-    BUY_CHECK_SKIPPED, buy_check_placeholders, evaluate_sell, explain_buy_candidate,
+    BUY_CHECK_SKIPPED, buy_check_placeholders, explain_buy_candidate,
     explain_buy_checks,
 )
 
@@ -37,8 +40,11 @@ PENDING_BUY_TTL_MS = 300_000
 class SignalEngine:
     def __init__(self, cfg: StrategyConfig, positions: list[Position] | None = None,
                  held_codes: set[str] | None = None, sentiment_pct: Optional[float] = None,
-                 account: Optional[AccountState] = None, evaluate_sells: bool = True):
+                 account: Optional[AccountState] = None, evaluate_sells: bool = True,
+                 runtime=None, runtime_resolver=None):
         self.cfg = StrategyConfig.from_dict(cfg.to_json_dict())
+        self.runtime = runtime or build_builtin_runtime(cfg)
+        self.runtime_resolver = runtime_resolver
         # 未平仓信号以 notional Position 注入，供卖出评估与峰值跟踪。
         # account 存在时与 account.positions 共用同一 list，净值恒等式 run 内持续成立。
         self.positions = positions if positions is not None else (account.positions if account else [])
@@ -153,9 +159,14 @@ class SignalEngine:
                     sell_row = row
                     if row["bar_timestamp"] <= entry_ts:
                         sell_row = {**row, "bar_low": row["bar_close"], "bar_high": row["bar_close"]}
-                    signals = evaluate_sell(p, sell_row, hold_days, cfg, row["intraday_bars"])
-                    if signals:
-                        self.pending.append(self._order(p.code, p.name, signals[0], event.timestamp))
+                    runtime = self._runtime_for(p)
+                    signal = runtime.evaluate_exit(
+                        position=p, row=sell_row, hold_days=hold_days, cfg=cfg,
+                        intraday_bars=row["intraday_bars"], trade_date=day,
+                        timestamp=event.timestamp, phase=event.phase,
+                        account=self._account_dict())
+                    if signal:
+                        self.pending.append(self._order(p.code, p.name, signal, event.timestamp))
                 # 同一根 K 的高点不能反向激活该根 K 内的保护。
                 track_peak(p, row, entry_ts)
         # ── 买入评估（buy-all，无仓位/数量/次数限制） ──
@@ -177,10 +188,7 @@ class SignalEngine:
                     continue
                 if row:
                     self.evaluated[key] = row["bar_timestamp"]
-                detail = explain_buy_candidate(cand, row, cfg, row.get("prev_row") if row else None,
-                                               row.get("hist_rows") if row else None,
-                                               row.get("intraday_bars") if row else None,
-                                               self.sentiment_pct)
+                detail = self._entry_detail(cand, row, cfg, event)
                 result["details"].append(detail)
                 if detail["passed"] and detail.get("full_signal"):
                     signals.append((detail["full_signal"], cand))
@@ -287,26 +295,100 @@ class SignalEngine:
         """实时读影子状态（与 TradingEngine 在 pending/买点两处实时读 state.sold_today 同构）。"""
         return bool(self.account and self.account.sold_today)
 
+    def _account_dict(self) -> dict:
+        cash = self.account.cash if self.account is not None else 0.0
+        equity = cash + sum(
+            p.qty * (self.account.marks.get(p.code, p.entry_price)
+                     if self.account is not None else p.entry_price)
+            for p in self.positions)
+        return {"cash": cash, "equity": equity, "position_count": len(self.positions),
+                "sold_today": self._sold_today()}
+
+    def _active_ref(self) -> dict:
+        ref = dict(getattr(self.runtime, "strategy_ref", {}) or {})
+        ref.setdefault("strategy_id", getattr(self.runtime, "strategy_id", ""))
+        ref.setdefault("schema_version", 1)
+        return ref
+
+    def _runtime_for(self, position):
+        from dragon_quant.review_account.strategy.runtime import ref_identity
+
+        ref = getattr(position, "strategy_ref", None) or {}
+        owner = ref.get("strategy_id")
+        if not owner:
+            return build_builtin_runtime(self.cfg)
+        if ref_identity(ref) == ref_identity(getattr(self.runtime, "strategy_ref", {})):
+            return self.runtime
+        if self.runtime_resolver is None:
+            raise StrategyRuntimeError(
+                owner, "缺少冻结运行时解析器，拒绝用当前源码退出旧持仓")
+        return self.runtime_resolver(owner, ref)
+
+    def _entry_detail(self, cand, row, cfg, event) -> dict:
+        if getattr(self.runtime, "source", "builtin") == "builtin":
+            return explain_buy_candidate(
+                cand, row, cfg, row.get("prev_row") if row else None,
+                row.get("hist_rows") if row else None,
+                row.get("intraday_bars") if row else None, self.sentiment_pct)
+        try:
+            signal = self.runtime.evaluate_entry(
+                candidate=cand, row=row, cfg=cfg,
+                prev_row=row.get("prev_row") if row else None,
+                hist_rows=row.get("hist_rows") if row else None,
+                intraday_bars=row.get("intraday_bars") if row else None,
+                sentiment_pct=self.sentiment_pct,
+                trade_date=event_date(event.timestamp), timestamp=event.timestamp,
+                phase=event.phase, account=self._account_dict())
+        except StrategyRuntimeError:
+            raise
+        passed = bool(signal)
+        detail = {
+            "code": cand.get("code"), "name": cand.get("name", ""),
+            "rank": cand.get("rank"), "passed": passed,
+            "reason_code": (signal["code"] if signal
+                            else (getattr(self.runtime, "last_note_code", None) or "no_signal")),
+            "reason_text": (signal["reason_text"] if signal
+                            else (getattr(self.runtime, "last_note", None) or "策略未给出买入信号")),
+            "signal": (signal or {}).get("signal") or {},
+            "full_signal": signal,
+            "observed_at": row.get("observed_at") if row else None,
+            "phase": row.get("phase") if row else None,
+            "checks": [], "strategy_id": getattr(self.runtime, "strategy_id", ""),
+        }
+        return detail
+
     @staticmethod
     def _order(code: str, name: str, signal: dict, timestamp: int) -> dict:
+        payload = signal.get("signal") or {}
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
-                "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+                "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp,
+                "exit_fraction": payload.get("exit_fraction"),
+                "position_pct": payload.get("position_pct"),
+                "strategy_ref": payload.get("strategy_ref")}
 
     def _fill_signal(self, order: dict, row: dict, price: float, day: str) -> dict:
+        ref = (order.get("strategy_ref")
+               or (order.get("signal") or {}).get("strategy_ref")
+               or self._active_ref())
         return {**order["signal"], "decision_timestamp": order["created_at"],
                 "fill_timestamp": row["observed_at"], "execution_price": row["execution_price"],
-                "delay_seconds": (row["observed_at"] - order["created_at"]) / 1000}
+                "delay_seconds": (row["observed_at"] - order["created_at"]) / 1000,
+                "strategy_ref": dict(ref)}
 
     def _fill_buy(self, order: dict, row: dict, price: float, day: str) -> dict | None:
         """成交买入；预算不足（qty=0）返回 None，与回测 `_fill` 的不建仓语义一致。"""
         qty = notional_quantity(self.cfg, price)
+        pct = order.get("position_pct")
+        if qty and pct is not None and 0 < pct < 100:
+            qty = int(qty * pct / 100 / self.cfg.lot_size) * self.cfg.lot_size
         if not qty:
             return None
         signal = self._fill_signal(order, row, price, day)
         amount, cost_fee = price * qty, fee(price * qty, "BUY", self.cfg)
         self.positions.append(Position(order["stock_code"], order["name"], qty, day, price,
                                        amount + cost_fee, order["code"], order["reason_text"],
-                                       signal, highest_price=price))
+                                       signal, highest_price=price,
+                                       strategy_ref=dict(signal.get("strategy_ref") or {})))
         if self.account is not None:
             self.account.cash -= amount + cost_fee
         return {"code": order["stock_code"], "name": order["name"], "entry_date": day,
@@ -319,7 +401,8 @@ class SignalEngine:
         p = next((p for p in self.positions if p.code == order["stock_code"]), None)
         if p is None or p.entry_date >= day:
             return None
-        fill = apply_sell_fill(p, price, order["code"], self.cfg)
+        signal["strategy_ref"] = dict(getattr(p, "strategy_ref", None) or {})
+        fill = apply_sell_fill(p, price, order["code"], self.cfg, order.get("exit_fraction"))
         if self.account is not None:
             self.account.cash += fill["amount"] - fill["fee"]
             self.account.realized_today += fill["pnl"]

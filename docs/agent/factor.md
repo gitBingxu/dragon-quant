@@ -106,3 +106,9 @@ python -m dragon_quant factor fin status
 - `infra/factor/research_reads.py` 是严格只读适配（assets.db `mode=ro`）：`factor_values` / `factor_registry` / `factor_build_runs` / `factor_models`；缺失 = 无行，不补 0，版本按行返回。
 - `research query --dataset factor_*` 与 `factor list/status/query` 分工：前者用于研究层统一分页与 envelope（大字段 `report` 需显式选择），后者保留既有入库核对输出。两者都不触发构建或评估。
 - `research strategy --kind scan` 暴露当前评分器权重/门槛元信息供解释；不把当前规则回填历史扫描。
+
+## workspace 用户因子（2026-11-11）
+
+- `factor build` / `list` / `query` 新增 `--workspace`：命令层装配 `combined_specs`（内建 + 用户因子）并作为 `specs` 注入；`infra.factor` 不 import workspace，保持分层规则。
+- 用户因子注册名 `ws_<短 workspace_id>.<local>`；版本纳入 spec/模块/helpers 哈希；重复、悬空、循环整体拒绝。
+- 策略读取经 `workspace.factors.FactorReader` 强制 `available_at <= 决策时点`；缺失与未来不可用不补零。详见 [workspace](workspace.md)。

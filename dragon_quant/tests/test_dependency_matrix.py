@@ -281,6 +281,11 @@ _COMMAND_PUBLIC_EXACT = frozenset({
     "dragon_quant.review_account.live_trade.main",
     "dragon_quant.bs_eval.main",
     "dragon_quant.vpa.main",
+    # workspace 公共门面 + 配置/选择持久化（workspace/strategy 命令与 buy/sell/review 共用）。
+    "dragon_quant.workspace",
+    "dragon_quant.workspace.main",
+    "dragon_quant.workspace.config",
+    "dragon_quant.workspace.factors",
 })
 _COMMAND_PUBLIC_TREES = (
     "dragon_quant.commands",

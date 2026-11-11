@@ -52,7 +52,7 @@ class AccountSimulator:
                  start_realized_pnl=0.0, candidate_source=None,
                  auction_source=None, snapshot_loader=None,
                  sentiment_loader=None, factor_loader=None,
-                 factor_model=None):
+                 factor_model=None, runtime=None, runtime_resolver=None):
         """``initial_state`` / ``base_equity`` / ``peak_equity`` 是增量续算入口。
 
         三者缺省时与旧行为逐位一致：``AccountState(cfg.initial_cash)``、
@@ -62,7 +62,8 @@ class AccountSimulator:
         self.cfg = StrategyConfig.from_dict(cfg.to_json_dict())
         self.data = data or MarketData(provider=provider)
         self.state = initial_state or AccountState(cfg.initial_cash)
-        self.engine = TradingEngine(cfg, self.state)
+        self.engine = TradingEngine(cfg, self.state, runtime=runtime,
+                                    runtime_resolver=runtime_resolver)
         self.trades, self.snapshots, self.closed_positions, self.events = [], [], [], []
         self._base_equity = cfg.initial_cash if base_equity is None else base_equity
         self._peak = cfg.initial_cash if peak_equity is None else peak_equity

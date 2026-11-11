@@ -1,0 +1,14 @@
+{
+  "id": "user:example_momentum",
+  "label": "示例·高开承接（动量）",
+  "description": "仅演示 SDK API 的示例策略，无有效性宣称。",
+  "sdk_version": 1,
+  "entrypoint": "create_strategy",
+  "parameters": {
+    "min_open_gap_pct": {"type": "number", "default": 1.0},
+    "take_profit_pct": {"type": "number", "default": 10.0},
+    "stop_loss_pct": {"type": "number", "default": -4.0}
+  },
+  "required_factors": [],
+  "data_requirements": ["1d", "5m"]
+}

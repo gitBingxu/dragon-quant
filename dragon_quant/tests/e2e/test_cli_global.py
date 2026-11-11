@@ -35,6 +35,8 @@ TOP_LEVEL_COMMANDS = (
     "storage",
     "dashboard",
     "bs-eval",
+    "workspace",
+    "strategy",
 )
 
 

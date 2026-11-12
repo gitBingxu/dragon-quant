@@ -89,6 +89,67 @@ def test_workspace_id_mismatch_rejected(tmp_path):
         config.load_workspace(root)
 
 
+def _add_descriptor(root, slug, parameters):
+    strategy_dir = root / "strategies" / slug
+    strategy_dir.mkdir()
+    (strategy_dir / "strategy.py").write_text(
+        "def create_strategy(params):\n    return None\n", encoding="utf-8")
+    (strategy_dir / "strategy.json").write_text(json.dumps({
+        "id": f"user:{slug}", "label": slug, "sdk_version": 1,
+        "parameters": parameters,
+    }), encoding="utf-8")
+    cfg = config.load_workspace(root)
+    cfg.strategies.append(f"strategies/{slug}/strategy.json")
+    config.write_workspace(cfg)
+
+
+def test_parameter_display_metadata_is_validated(tmp_path):
+    root = _init(tmp_path)
+    _add_descriptor(root, "badmeta", {
+        "bad_label": {"type": "number", "default": 1.0, "label": 5},
+        "bad_help": {"type": "number", "default": 1.0, "help": ["x"]},
+        "bad_unit": {"type": "number", "default": 1.0, "unit": 3},
+        "bad_step": {"type": "number", "default": 1.0, "step": 0},
+        "bad_range": {"type": "number", "default": 1.0, "min": 5, "max": 1},
+        "bad_enum": {"type": "string", "default": "a", "enum": ["a", 2]},
+        "bad_enum_default": {"type": "string", "default": "z", "enum": ["a", "b"]},
+        "bad_default": {"type": "int", "default": 1.5},
+    })
+    descriptors = catalog.list_descriptors(config.load_workspace(root))
+    entry = next(d for d in descriptors if d.id == "user:badmeta")
+    joined = "\n".join(entry.errors)
+    assert "bad_label 的 label 必须是字符串" in joined
+    assert "bad_help 的 help 必须是字符串" in joined
+    assert "bad_unit 的 unit 必须是字符串" in joined
+    assert "bad_step 的 step 必须是正数" in joined
+    assert "bad_range 的 min 不能大于 max" in joined
+    assert "bad_enum 的 enum 值类型必须与 type 相容" in joined
+    assert "bad_enum_default 的默认值必须在 enum 内" in joined
+    assert "bad_default 的默认值类型必须是 int" in joined
+
+
+def test_valid_display_metadata_is_kept(tmp_path):
+    root = _init(tmp_path)
+    spec = {"type": "number", "default": 1.0, "min": 0, "max": 5,
+            "step": 0.5, "label": "阈值", "help": "低于该值不参与", "unit": "%"}
+    _add_descriptor(root, "goodmeta", {"threshold": spec})
+    descriptors = catalog.list_descriptors(config.load_workspace(root))
+    entry = next(d for d in descriptors if d.id == "user:goodmeta")
+    assert entry.valid is True, entry.errors
+    assert entry.parameters == {"threshold": spec}
+
+
+def test_builtin_and_templates_expose_display_metadata(tmp_path):
+    root = _init(tmp_path)
+    data = main.list_strategies(str(root))
+    for item in data["strategies"]:
+        for name, spec in item["parameters"].items():
+            assert spec.get("label"), f"{item['id']} / {name} 缺少 label"
+            assert spec.get("help"), f"{item['id']} / {name} 缺少 help"
+    builtin = catalog.builtin_descriptor()
+    assert "兼容" in builtin.parameters["take_profit_pct"]["help"]
+
+
 def test_parameter_schema_validates_type_range_and_enum(tmp_path):
     from dragon_quant.workspace.loader import merge_parameters
 

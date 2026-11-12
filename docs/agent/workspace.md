@@ -52,8 +52,12 @@ snapshots/                # 运行时冻结快照（<sha256>/manifest.json + 源
 ## Web
 
 - `GET /api/strategies` / `GET /api/strategies/current` 只读 descriptor；`POST /api/strategies/selection` 变更选择（同源 + `workspace_writes_enabled`，冲突 409、非法 400）。
+- 只读策略查询遇到尚未初始化的 workspace 路径时回退为内建默认（`workspace/revision = null`），因此首次使用仍可浏览内建策略；若 `workspace.json` 已存在但损坏则继续显式失败。写入、校验与执行路径不做该回退。
 - 不从请求接受宿主任意绝对路径或 Python 源码；workspace 由服务端设置/CLI 解析决定。
 - 账户回测表单可选策略并真正发送 `strategy_id`；省略时消费同一保存选择。
+- `/strategies` 页左侧卡片只负责选择策略，右侧按 `StrategyDescriptor.parameters` 元数据动态渲染参数表单（number/int → 数字输入，bool → 开关，string+enum → 下拉，string → 文本框）；不再手写 JSON 或维护第二份策略下拉框。
+- parameter spec 可选的展示字段 `label` / `help` / `unit` / `step` 只影响展示，不改变保存数据形状；缺失时以参数键名兜底。静态校验覆盖字段类型、`step` 为正数、`min`/`max` 为数值且 `min <= max`、`enum` 值类型与 `type` 相容、默认值在 `enum` 内；校验只读 JSON，不导入用户 Python。
+- 前端保存前按与后端一致的规则就地校验并转换 JSON 类型；通过后仍调用 `POST /api/strategies/selection`，后端 `merge_parameters` 是最终权威。未配置 workspace 或所选策略校验失败时保存禁用；保存只影响未来新开仓，旧仓冻结配置不变。
 
 ## 冻结运行时与 Web 执行（main 验收修订）
 

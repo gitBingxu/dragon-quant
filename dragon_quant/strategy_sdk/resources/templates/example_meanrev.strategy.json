@@ -5,8 +5,22 @@
   "sdk_version": 1,
   "entrypoint": "create_strategy",
   "parameters": {
-    "pullback_pct": {"type": "number", "default": 3.0},
-    "trail_giveback_pct": {"type": "number", "default": 4.0}
+    "pullback_pct": {
+      "type": "number",
+      "default": 3.0,
+      "label": "回踩均线容忍度",
+      "help": "开盘价高于 MA5 的幅度不超过该值时才考虑买入（示例策略）",
+      "unit": "%",
+      "step": 0.1
+    },
+    "trail_giveback_pct": {
+      "type": "number",
+      "default": 4.0,
+      "label": "移动止盈回吐",
+      "help": "自持仓最高价回吐达到该幅度时兑现利润（示例策略）",
+      "unit": "%",
+      "step": 0.1
+    }
   },
   "required_factors": [],
   "data_requirements": ["1d", "5m"]

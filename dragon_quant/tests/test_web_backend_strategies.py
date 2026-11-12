@@ -33,9 +33,62 @@ def test_list_and_current(tmp_path):
     momentum = next(item for item in data["strategies"]
                     if item["id"] == "user:example_momentum")
     assert momentum["effective_parameters"]["min_open_gap_pct"] == 1.0
+    # 参数 schema 原样返回给前端，携带可选的展示元数据。
+    spec = momentum["parameters"]["min_open_gap_pct"]
+    assert spec["label"] == "最小开盘涨幅"
+    assert spec["unit"] == "%"
+    assert isinstance(spec["help"], str) and spec["help"]
+    builtin = next(item for item in data["strategies"]
+                   if item["id"] == "builtin:dragon_pullback_daily")
+    assert builtin["parameters"]["max_hold_days"]["label"] == "最大持有天数"
+    assert builtin["parameters"]["take_profit_pct"]["help"]
 
     current = client.get("/api/strategies/current")
     assert current.json()["strategy_id"] == "builtin:dragon_pullback_daily"
+
+
+def test_list_uninitialized_workspace_falls_back_to_builtin_read_only(tmp_path):
+    root = tmp_path / "not-initialized"
+    client = TestClient(create_app(DashboardSettings(
+        workspace_path=str(root), workspace_writes_enabled=False)),
+        base_url="http://localhost")
+
+    response = client.get("/api/strategies")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["workspace"] is None
+    assert data["workspace_id"] is None
+    assert data["revision"] is None
+    assert data["current"] == "builtin:dragon_pullback_daily"
+    assert [item["id"] for item in data["strategies"]] == [
+        "builtin:dragon_pullback_daily"]
+    builtin = data["strategies"][0]
+    assert builtin["id"] == "builtin:dragon_pullback_daily"
+    assert builtin["current"] is True
+
+    current = client.get("/api/strategies/current")
+    assert current.status_code == 200
+    assert current.json() == {
+        "workspace": None,
+        "workspace_id": None,
+        "revision": None,
+        "strategy_id": "builtin:dragon_pullback_daily",
+        "parameters": {},
+    }
+
+
+def test_list_corrupt_workspace_still_reports_error(tmp_path):
+    root = tmp_path / "corrupt"
+    root.mkdir()
+    (root / "workspace.json").write_text("{broken", encoding="utf-8")
+    client = TestClient(create_app(DashboardSettings(workspace_path=str(root))),
+                        base_url="http://localhost")
+
+    response = client.get("/api/strategies")
+
+    assert response.status_code == 500
+    assert "workspace.json 无法解析" in response.json()["error"]
 
 
 def test_list_never_imports_user_code(tmp_path):

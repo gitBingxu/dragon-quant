@@ -140,7 +140,8 @@ dragon-quant review-account --from 20260101 --to 20260201 --strategy user:exampl
 用户策略放在 `strategies/<slug>/`，通过 `dragon_quant.strategy_sdk` 的只读
 `StrategyContext` / `StrategyIntent` 决策；成交、费用、T+1、手数与风控仍由系统处理。
 切换只影响新开仓，旧持仓按开仓时冻结的版本退出。CLI 与 Web `/strategies` 页共读同一保存
-选择，`--strategy` 只覆盖单次命令。Web 默认只读；需要在本机面板选择/执行用户策略时用
+选择，`--strategy` 只覆盖单次命令；未初始化 workspace 时 Web 仍展示内建策略但保持只读。Web 策略页按 descriptor 元数据动态生成参数表单（标签/
+说明/单位/范围），保存前就地校验，无需手写 JSON。Web 默认只读；需要在本机面板选择/执行用户策略时用
 `dragon-quant dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用，
 用户代码在独立本地 worker 进程执行。安全边界与冻结语义见 [workspace](docs/agent/workspace.md)。
 

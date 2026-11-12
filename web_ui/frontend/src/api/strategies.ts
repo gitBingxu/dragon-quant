@@ -2,6 +2,19 @@
 
 import { getJson, postJson } from "./client";
 
+// 参数 schema 来自 descriptor；除 type/default/范围外，可选择提供展示元数据。
+export type StrategyParameterSpec = {
+  type?: "number" | "int" | "bool" | "string";
+  default?: unknown;
+  min?: number;
+  max?: number;
+  enum?: unknown[] | null;
+  label?: string;
+  help?: string;
+  unit?: string;
+  step?: number;
+};
+
 export type StrategyItem = {
   id: string;
   label: string;
@@ -9,7 +22,7 @@ export type StrategyItem = {
   sdk_version: number;
   description: string;
   entrypoint: string;
-  parameters: Record<string, unknown>;
+  parameters: Record<string, StrategyParameterSpec>;
   effective_parameters: Record<string, unknown>;
   required_factors: string[];
   data_requirements: string[];

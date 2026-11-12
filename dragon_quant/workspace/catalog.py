@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -32,12 +33,31 @@ BUILTIN_DESCRIPTOR = {
     "source": "builtin",
     "entrypoint": "",
     "parameters": {
-        "min_score": {"type": "number", "default": 50.0},
-        "max_open_gap": {"type": "number", "default": 7.0},
-        "stop_loss_pct": {"type": "number", "default": -5.0},
-        "take_profit_pct": {"type": "number", "default": 12.0},
-        "max_hold_days": {"type": "int", "default": 5},
-        "max_positions": {"type": "int", "default": 5},
+        "min_score": {
+            "type": "number", "default": 50.0, "label": "最低综合分",
+            "help": "低于该分数的候选不进入常规买入判断", "unit": "分", "step": 0.1,
+        },
+        "max_open_gap": {
+            "type": "number", "default": 7.0, "label": "最高开盘涨幅",
+            "help": "开盘涨幅超过该值时不再追入", "unit": "%", "step": 0.1,
+        },
+        "stop_loss_pct": {
+            "type": "number", "default": -5.0, "label": "常规止损线",
+            "help": "持仓亏损达到该幅度时执行硬止损（负数）", "unit": "%", "step": 0.1,
+        },
+        "take_profit_pct": {
+            "type": "number", "default": 12.0, "label": "止盈参考值",
+            "help": "兼容/参考参数；当前内建实现不直接读取该值，实际止盈由卖出链规则决定",
+            "unit": "%", "step": 0.1,
+        },
+        "max_hold_days": {
+            "type": "int", "default": 5, "label": "最大持有天数",
+            "help": "到期仍未退出则触发时间止损（封板豁免）", "unit": "天", "step": 1,
+        },
+        "max_positions": {
+            "type": "int", "default": 5, "label": "最大同时持仓",
+            "help": "限制账户同时持有的股票数量", "unit": "只", "step": 1,
+        },
     },
     "required_factors": [],
     "data_requirements": ["1d", "5m"],
@@ -85,6 +105,22 @@ def builtin_descriptor() -> StrategyDescriptor:
     return StrategyDescriptor(**BUILTIN_DESCRIPTOR)
 
 
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _value_matches_type(kind: str, value: object) -> bool:
+    if kind == "bool":
+        return isinstance(value, bool)
+    if kind == "int":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return _is_number(value) and math.isfinite(float(value))
+    if kind == "string":
+        return isinstance(value, str)
+    return True
+
+
 def _validate_parameter_schema(parameters: object) -> list[str]:
     errors: list[str] = []
     if parameters is None:
@@ -101,10 +137,38 @@ def _validate_parameter_schema(parameters: object) -> list[str]:
         kind = schema.get("type")
         if kind not in _PARAM_TYPES:
             errors.append(f"参数 {name} 的 type 必须是 {sorted(_PARAM_TYPES)} 之一")
-        if "default" in schema and kind in {"number", "int"}:
-            default = schema["default"]
-            if isinstance(default, bool) or not isinstance(default, (int, float)):
-                errors.append(f"参数 {name} 的默认值必须是数值")
+            continue
+        for field_name in ("label", "help", "unit"):
+            if field_name in schema and not isinstance(schema[field_name], str):
+                errors.append(f"参数 {name} 的 {field_name} 必须是字符串")
+        if "step" in schema:
+            step = schema["step"]
+            if not _is_number(step) or not math.isfinite(float(step)) or step <= 0:
+                errors.append(f"参数 {name} 的 step 必须是正数")
+        if "default" in schema and not _value_matches_type(kind, schema["default"]):
+            errors.append(f"参数 {name} 的默认值类型必须是 {kind}")
+        bounds: dict[str, float] = {}
+        for bound in ("min", "max"):
+            if bound not in schema:
+                continue
+            value = schema[bound]
+            if kind not in {"number", "int"} or not _is_number(value) \
+                    or not math.isfinite(float(value)):
+                errors.append(
+                    f"参数 {name} 的 {bound} 只支持 number/int 参数且必须是数值")
+            else:
+                bounds[bound] = float(value)
+        if len(bounds) == 2 and bounds["min"] > bounds["max"]:
+            errors.append(f"参数 {name} 的 min 不能大于 max")
+        enum = schema.get("enum")
+        if enum is not None:
+            if not isinstance(enum, list):
+                errors.append(f"参数 {name} 的 enum 必须是列表")
+            else:
+                if any(not _value_matches_type(kind, value) for value in enum):
+                    errors.append(f"参数 {name} 的 enum 值类型必须与 type 相容")
+                elif "default" in schema and schema["default"] not in enum:
+                    errors.append(f"参数 {name} 的默认值必须在 enum 内")
     return errors
 
 

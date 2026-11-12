@@ -134,7 +134,7 @@ dragon-quant factor query --date 20261110 \
 }
 ```
 
-- `id` 必须是 `user:<slug>` 且与目录名一致；`sdk_version` 固定 `1`；`label` 必填；`parameters` 的 `type` 只允许 `number/int/bool/string`。
+- `id` 必须是 `user:<slug>` 且与目录名一致；`sdk_version` 固定 `1`；`label` 必填；`parameters` 的 `type` 只允许 `number/int/bool/string`。参数还可选写 `label/help/unit/step`（以及既有 `min/max/enum`）作为 Web 表单展示元数据，不影响保存数据形状。
 - `required_factors` 写**本地因子名**（或已注册的内建名）；运行时映射为冻结的注册名。缺失/未注册在校验或运行期显式失败，不静默当无信号。
 - `strategy.py` 必须导出 `create_strategy(params) -> Strategy`，实现 `evaluate_entry(ctx)`、`evaluate_exit(ctx)`，可选 `explain(ctx)`。
 

@@ -171,6 +171,14 @@ def _load_config_or_none(path: Optional[str]) -> Optional[WorkspaceConfig]:
     return load_workspace(resolved)
 
 
+def _load_config_for_read(path: Optional[str]) -> Optional[WorkspaceConfig]:
+    """只读查询允许尚未初始化的路径回退到内建默认；坏配置仍显式失败。"""
+    resolved = resolve_workspace_path(path)
+    if resolved is None or not workspace_file(resolved).is_file():
+        return None
+    return load_workspace(resolved)
+
+
 def check_workspace(path: Optional[str] = None) -> dict:
     """检查 workspace 配置与全部策略/因子能否加载（显式验证路径，可执行用户代码）。"""
     config = _load_config_or_none(path)
@@ -225,7 +233,7 @@ def _check_factors(config: WorkspaceConfig) -> dict:
 
 def list_strategies(path: Optional[str] = None) -> dict:
     """策略清单（只读 descriptor，不导入用户 Python）。"""
-    config = _load_config_or_none(path)
+    config = _load_config_for_read(path)
     current = config.selected_strategy_id if config else BUILTIN_STRATEGY_ID
     descriptors = list_descriptors(config)
     items = []
@@ -324,7 +332,7 @@ def resolve_selection(explicit_workspace: Optional[str] = None,
 
 
 def current_selection(path: Optional[str] = None) -> dict:
-    config = _load_config_or_none(path)
+    config = _load_config_for_read(path)
     current = config.selected_strategy_id if config else BUILTIN_STRATEGY_ID
     return {
         "workspace": str(config.root) if config else None,

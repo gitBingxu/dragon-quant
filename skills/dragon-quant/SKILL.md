@@ -1,6 +1,6 @@
 ---
 name: dragon-quant
-description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, 因子入库与读回 factor build/query, 扫描诊断/识别质量归因 research scan-quality, 账户策略优化/消融实验 research experiments, or 历史证据读回 research account/signals/snapshots with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
+description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, 因子入库与读回 factor build/query, 自定义策略/用户因子 workspace/strategy, 扫描诊断/识别质量归因 research scan-quality, 账户策略优化/消融实验 research experiments, or 历史证据读回 research account/signals/snapshots with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
 license: MIT
 compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
@@ -35,7 +35,7 @@ metadata:
 
 1. **CLI 是否存在、版本是否够**：`dragon-quant -v`。项目内优先 `.venv/bin/python -m dragon_quant -v`。低于 `min-cli-version` 时停止，给出升级/安装指引；不要自动安装 Python 包。
 2. **叶子能力探测（最低版本之外）**：对本次要用的**叶子**命令取 help（如 `data quote -h`、`factor build -h`）；关键 flag/字段缺失时降级为只读解释，不猜测旧版行为，也不取父级 `-h` 把未开放子命令带进上下文。只使用白名单列出的参数。
-3. **能力是否在白名单**：只有 `references/commands.md` 的十类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
+3. **能力是否在白名单**：只有 `references/commands.md` 的十一类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
 4. **时点门禁**：统一按 Asia/Shanghai 与交易日判断。`scan` 当日 15:00 前不执行；`prep` 当日 16:40 前不执行；`auction` 当日 09:25 前不执行。时段不满足时说明等待条件，不用 `--force` 绕过。
 5. **数据源**：`data kline/minute` 默认 tdx（无 Cookie）。为空时改用 `--source tencent` 重试一次；仍失败则如实说明数据不可得。
 6. **授权范围（持续有效）**：授权按日期/动作/参数给出的明确范围（如「今天允许跑 prep 和因子 build」）
@@ -45,9 +45,9 @@ metadata:
    / `scan_id` / `run_id`；`json-lines` 逐行解析、空行只表示该行无数据；`human` 不强行 JSON 化，按
    数值与字段核对；`url` 只核对启动日志里的真实地址与进程存活。空行/失败字符串不等于成功。
 
-## 能力白名单（十类）
+## 能力白名单（十一类）
 
-只有下面十类能力可以执行，详细命令与参数见 `references/commands.md`：
+只有下面十一类能力可以执行，详细命令与参数见 `references/commands.md`：
 
 1. **个股行情**：实时行情、日 K、分时、批量行情。
 2. **扫描与真龙**：当日扫描（默认 `--top 5`）→ 用**本次扫描记录**核验（`scan --date D --top 5`
@@ -58,9 +58,10 @@ metadata:
 5. **盘前预案**：`premarket`（T0 只读）+ 外部证据 + 盘前作战卡八段模板；09:25 后缺失竞价时**主动建议**运行 `auction`（T1，需用户授权该动作），完成后重跑 `premarket`。
 6. **龙头回测**：先回测，再用 `dashboard` 打开面板。
 7. **账户回测**：先引导区间/资金，再回测，再用 `dashboard` 打开账户页（URL `/account`）。
-8. **因子入库**：仅三组内置因子的 `factor build --only` 与代表因子 `factor query` 读回。
+8. **因子入库**：内建三组固定名单 + 显式 workspace 用户因子的 `factor build --only`，以及代表因子 `factor query` 读回。
 9. **可视化面板**：`dashboard`（T0 长驻，**默认只读、不生成 BS 派生数据**；显式 `--bs-autogen`/`DQ_BS_AUTOGEN=1` 才开启，此时按 T1 确认）；缺 `[web]` 时只给手动安装指令，禁止 `--yes` 自动安装。
 10. **研究读回与对照实验**：`research datasets/schema/query/scan-quality/account/signals/snapshots/strategy` 与 `research experiments list/show` 为 T0 只读；`research experiments run` 是 T1，必须 `--run-id N --confirm`。用于扫描诊断、识别质量归因、历史证据读回与策略消融；不构造 provider、不自动推广结论。详细问题→覆盖→样本→基线→实验流程见 `references/research.md`，数据集导航见 `references/datasets.md`。
+11. **自定义策略与用户因子**：`workspace init/check`、`strategy list/current/validate/use`、workspace 用户因子的 `factor build/list/query/eval/export`，以及 `review-account` 的 `--workspace/--strategy`。完整渐进流程、FactorSpec/Strategy 契约与最小示例见 `references/workspace.md`；workspace 源码编辑属于用户已授权的开发任务，不逐文件重复确认。
 
 单能力请求只执行用户点名的那一个能力，不隐式附带其他写操作；只有用户明确说“每日全流程 / 每日量化入库 / 今天全套”时才按每日复合 workflow 执行。详见 `references/operations.md`。
 
@@ -77,6 +78,16 @@ metadata:
   显式生成消融结果，比较权益/回撤/交易数/盈利率与基线差；样本不足、版本不一致或
   `status=insufficient_evidence` 时明确「不可比/证据不足」，`no_change` 不能当改进。
 - 两者都不能由单次结果推广默认策略；不自动改权重、阈值或参数。
+
+## 自定义策略与用户因子（workspace）
+
+用户要写自己的策略/因子、注册进 workspace、回测或切换时，按 `references/workspace.md` 的渐进流程执行：`workspace init` → 读 wheel 内 SDK 指南 → 写 `factors/*.py`（字面量 `SPECS`+纯 compute）→ 登记 `workspace.json` → `factor list` 取真实 `ws_<id>.<name>` → `--only` 构建并核对 `status/version/available_at` → 写 `strategies/<slug>/` 并登记 → `strategy validate` → 同输入 `review-account` → `research` 读回/实验。
+
+- 用户授权一个开发任务后，workspace 源码/`workspace.json` 编辑、用户因子 build、回测与（用户明确要求的）`strategy use` 在同一任务范围内连续完成，不逐文件、逐步重复确认；越界或用户撤回才补确认。
+- 用户因子构建需要本地已生成对应源数据（scan/prep/auction/vpa/fin），`missing_source` 不等于 0；不承诺任意数据源。策略回测需要本地行情/缓存与候选池。
+- 研究或实验成功**不会**自动切换活动策略；只有用户明确要求时才 `strategy use`，并用 `strategy current` 核对。
+- `--strategy` 只覆盖单次命令，不改保存默认；旧持仓按开仓时冻结的版本退出，不跟随新策略。
+- 实盘交易信号不在本 Skill 白名单，研究/回测任务不隐含实盘授权，不为此扩大白名单。
 
 ## 胜率/成效解释契约（回答任何胜率前必须带）
 
@@ -155,6 +166,7 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 | `references/evidence.md` | 盘前采集外部政策/公告/外围行情与信源分级时 |
 | `references/playbooks.md` | 遇到行情失败、门禁、空数据、因子缺失、UI 启动失败时 |
 | `references/research.md` | 扫描诊断、识别质量归因、账户策略消融与研究读回流程时 |
+| `references/workspace.md` | 自定义策略/用户因子、workspace 初始化、因子构建、策略校验/切换与 Web 策略页时 |
 | `references/datasets.md` | 需要选择 research 数据集、过滤器或解释 envelope 时 |
 | `references/operations.md` | 单能力/每日复合 workflow、UI 生命周期、因子三组名单时 |
 | `references/schedule.md` | 用户表达每日自动/定时/无人值守意图，或要把跨时点链交给 cron 时 |
@@ -168,6 +180,8 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 - 不要执行白名单以外的能力，也不要在正文、表格或否定示例里列出它们的命令名。
 - 不要在单能力请求里隐式追加写操作；不要默认执行每日复合 workflow。
 - 不要用 `--force` 绕过盘中/盘后/竞价时点。
+- 不要把实验/回测成功自动推广为活动策略，或在用户未明确要求时执行持久切换。
+- 不要在未启用 `--workspace-writes` 时声称 Web 可变更策略；不要从请求接受宿主任意路径或 Python 源码。
 - 不要手工用 SQL 删改业务表。
 - 不要回显 Cookie、token 或同步凭据。
 - 不要把 `unverified`、`daily_fallback`、`degraded`、`missing_source` 的结果说成确定结论或 0。

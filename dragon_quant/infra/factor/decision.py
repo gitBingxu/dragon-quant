@@ -43,6 +43,23 @@ DEGRADED_DATE_FALLBACK = "factor_date_fallback"
 DEGRADED_EMPTY_POOL = "factor_pool_empty"
 DEGRADED_NO_REQUIRED_FACTORS = "model_no_required_factors"
 
+#: 默认等权模型的**显式精选**成员（冻结自「构建全部」之前的 ``default_snapshot()``
+#: 实际输出，排除 ``five_dim_composite`` 以避重复计数）。新注册因子不会自动进入
+#: 默认模型；研究/生产要换成员必须显式保存新的模型快照。
+DEFAULT_MODEL_FACTORS: tuple[str, ...] = (
+    "five_dim_drive",
+    "five_dim_leadership",
+    "five_dim_anti_drop",
+    "five_dim_liquidity",
+    "five_dim_absorption",
+    "five_dim_is_true_dragon",
+    "vpa_health_score",
+    "vpa_vol_amount",
+    "vpa_trend_verify",
+    "vpa_breakout",
+    "vpa_divergence",
+)
+
 
 @dataclass(frozen=True)
 class PoolItem:
@@ -319,17 +336,18 @@ class EqualWeightRankModel:
 def default_snapshot(*, names: Optional[Sequence[str]] = None,
                      model_version: str = DEFAULT_MODEL_VERSION,
                      exclude: Sequence[str] = ("five_dim_composite",)) -> dict:
-    """按注册表 ``default_enabled`` 因子生成等权模型快照（显式 opt-in）。
+    """按**显式精选**成员（``DEFAULT_MODEL_FACTORS``）生成等权模型快照。
 
-    ``five_dim_composite`` 默认排除：它是五维诊断基线，与五个维度分同时入模会
-    重复计数。生产/研究快照应通过 ``storage.save_model_snapshot`` 显式写入，
-    本函数只提供可复现的起点。
+    默认成员是冻结常量，与 ``factor build`` 构建范围解耦：构建全部不会把新因子
+    注入模型。``names`` 显式传入时逐位尊重调用方。``five_dim_composite`` 仍在
+    ``exclude`` 中兼容；它是五维诊断基线，与五个维度分同时入模会重复计数。
+    生产/研究快照应通过 ``storage.save_model_snapshot`` 显式写入，本函数只提供
+    可复现的起点。
     """
     from .registry import compute_version_info, resolve_specs
 
     excluded = set(exclude or ())
-    specs = resolve_specs(list(names) if names else None,
-                          enabled_only=names is None)
+    specs = resolve_specs(list(names) if names else list(DEFAULT_MODEL_FACTORS))
     factor_versions: dict[str, str] = {}
     weights: dict[str, float] = {}
     lower_better: list[str] = []

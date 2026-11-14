@@ -376,7 +376,7 @@ _FACTOR_REGISTRY_FIELDS = (
     f("pit_rule", "string", "PIT 规则", nullable=False),
     f("scope", "object", "作用域"),
     f("params", "object", "参数"),
-    f("default_enabled", "boolean", "默认启用"),
+    f("default_enabled", "boolean", "默认启用（deprecated，不控制构建/模型）"),
     f("valid_from", "date", "生效日"),
     f("deprecated_at", "date", "废弃日"),
     f("owner", "string", "维护者"),

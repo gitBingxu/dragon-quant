@@ -11,6 +11,914 @@
     {
       "build_id": 1,
       "factors": {
+        "auction_dim_direction": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "价格表态分",
+          "meta": {},
+          "name": "auction_dim_direction",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_dim_liquidity": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价流动性分",
+          "meta": {},
+          "name": "auction_dim_liquidity",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_dim_supply": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "供需与转换分",
+          "meta": {},
+          "name": "auction_dim_supply",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_dim_tail_grab": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "末段执行分",
+          "meta": {},
+          "name": "auction_dim_tail_grab",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_dim_vol_price": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "量价协同分",
+          "meta": {},
+          "name": "auction_dim_vol_price",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_direction": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价方向",
+          "meta": {},
+          "name": "auction_direction",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_final_slippage_pct": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "末段指示价滑移",
+          "meta": {},
+          "name": "auction_final_slippage_pct",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_is_weak": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价否决旗标",
+          "meta": {},
+          "name": "auction_is_weak",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_open_gap_pct": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "官方开盘缺口",
+          "meta": {},
+          "name": "auction_open_gap_pct",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_rank": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价池内排名",
+          "meta": {},
+          "name": "auction_rank",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_strength": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价强度",
+          "meta": {},
+          "name": "auction_strength",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_strong_to_weak": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "强转弱事件",
+          "meta": {},
+          "name": "auction_strong_to_weak",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_tail_matched_acceleration": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "末段匹配加速度",
+          "meta": {},
+          "name": "auction_tail_matched_acceleration",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_turnover_pct": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价换手率",
+          "meta": {},
+          "name": "auction_turnover_pct",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_unmatched_matched_ratio": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "未匹配/匹配比",
+          "meta": {},
+          "name": "auction_unmatched_matched_ratio",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_volume_ratio_5d": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "竞价量比5日",
+          "meta": {},
+          "name": "auction_volume_ratio_5d",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "auction_weak_to_strong": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "弱转强事件",
+          "meta": {},
+          "name": "auction_weak_to_strong",
+          "reason": "2026-09-11 无 auction_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "auction",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "fin_bps": {
+          "available_at": "2026-09-11T16:40:00",
+          "codes": 5,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "每股净资产",
+          "meta": {
+            "basis_by_code": {
+              "600001": "observed",
+              "600002": "observed",
+              "600003": "observed",
+              "600004": "observed",
+              "600006": "observed"
+            },
+            "cohort": {
+              "by_period": {
+                "2026-03-31": 1,
+                "2026-06-30": 5
+              },
+              "modal_period": "2026-06-30",
+              "n_cohort": 5,
+              "n_mismatch": 1,
+              "n_total": 6
+            },
+            "cohort_excluded_profile": {
+              "by_period": {
+                "2026-03-31": 1
+              },
+              "codes": [
+                "600005"
+              ],
+              "composite": {
+                "max": 50.0,
+                "median": 50.0,
+                "min": 50.0,
+                "n": 1
+              },
+              "composite_percentile": {
+                "max": 75.0,
+                "median": 75.0,
+                "min": 75.0,
+                "n": 1
+              },
+              "count": 1,
+              "note": "composite 取自当日 scan 池；披露时点与质地相关，剔除组非随机",
+              "size_proxy": null,
+              "true_dragon_ratio": 1.0
+            },
+            "cohort_policy": "modal",
+            "degraded": [],
+            "earliest_available": null,
+            "file_md5s": [],
+            "finance_data_versions": [],
+            "layout_keys": [],
+            "layout_unverified": 0,
+            "period": "2026-06-30",
+            "period_by_code": {
+              "600001": "2026-06-30",
+              "600002": "2026-06-30",
+              "600003": "2026-06-30",
+              "600004": "2026-06-30",
+              "600006": "2026-06-30"
+            },
+            "pit_basis": "observed",
+            "pit_basis_mix": {
+              "observed": 5
+            },
+            "retracted_count": 0,
+            "skipped": {},
+            "stale_days": {
+              "600001": 0,
+              "600002": 0,
+              "600003": 0,
+              "600004": 0,
+              "600006": 0
+            },
+            "warnings": [
+              "stale_calendar_missing",
+              "cohort_selection_bias"
+            ]
+          },
+          "name": "fin_bps",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "fin",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": [
+            "stale_calendar_missing",
+            "cohort_selection_bias"
+          ]
+        },
+        "fin_net_assets": {
+          "available_at": "2026-09-11T16:40:00",
+          "codes": 5,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "净资产",
+          "meta": {
+            "basis_by_code": {
+              "600001": "observed",
+              "600002": "observed",
+              "600003": "observed",
+              "600004": "observed",
+              "600006": "observed"
+            },
+            "cohort": {
+              "by_period": {
+                "2026-03-31": 1,
+                "2026-06-30": 5
+              },
+              "modal_period": "2026-06-30",
+              "n_cohort": 5,
+              "n_mismatch": 1,
+              "n_total": 6
+            },
+            "cohort_excluded_profile": {
+              "by_period": {
+                "2026-03-31": 1
+              },
+              "codes": [
+                "600005"
+              ],
+              "composite": {
+                "max": 50.0,
+                "median": 50.0,
+                "min": 50.0,
+                "n": 1
+              },
+              "composite_percentile": {
+                "max": 75.0,
+                "median": 75.0,
+                "min": 75.0,
+                "n": 1
+              },
+              "count": 1,
+              "note": "composite 取自当日 scan 池；披露时点与质地相关，剔除组非随机",
+              "size_proxy": null,
+              "true_dragon_ratio": 1.0
+            },
+            "cohort_policy": "modal",
+            "degraded": [],
+            "earliest_available": null,
+            "file_md5s": [],
+            "finance_data_versions": [],
+            "layout_keys": [],
+            "layout_unverified": 0,
+            "period": "2026-06-30",
+            "period_by_code": {
+              "600001": "2026-06-30",
+              "600002": "2026-06-30",
+              "600003": "2026-06-30",
+              "600004": "2026-06-30",
+              "600006": "2026-06-30"
+            },
+            "pit_basis": "observed",
+            "pit_basis_mix": {
+              "observed": 5
+            },
+            "retracted_count": 0,
+            "skipped": {},
+            "stale_days": {
+              "600001": 0,
+              "600002": 0,
+              "600003": 0,
+              "600004": 0,
+              "600006": 0
+            },
+            "warnings": [
+              "stale_calendar_missing",
+              "cohort_selection_bias"
+            ]
+          },
+          "name": "fin_net_assets",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "fin",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": [
+            "stale_calendar_missing",
+            "cohort_selection_bias"
+          ]
+        },
+        "fin_net_margin": {
+          "available_at": "2026-09-11T16:40:00",
+          "codes": 5,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "净利率",
+          "meta": {
+            "basis_by_code": {
+              "600001": "observed",
+              "600002": "observed",
+              "600003": "observed",
+              "600004": "observed",
+              "600006": "observed"
+            },
+            "cohort": {
+              "by_period": {
+                "2026-03-31": 1,
+                "2026-06-30": 5
+              },
+              "modal_period": "2026-06-30",
+              "n_cohort": 5,
+              "n_mismatch": 1,
+              "n_total": 6
+            },
+            "cohort_excluded_profile": {
+              "by_period": {
+                "2026-03-31": 1
+              },
+              "codes": [
+                "600005"
+              ],
+              "composite": {
+                "max": 50.0,
+                "median": 50.0,
+                "min": 50.0,
+                "n": 1
+              },
+              "composite_percentile": {
+                "max": 75.0,
+                "median": 75.0,
+                "min": 75.0,
+                "n": 1
+              },
+              "count": 1,
+              "note": "composite 取自当日 scan 池；披露时点与质地相关，剔除组非随机",
+              "size_proxy": null,
+              "true_dragon_ratio": 1.0
+            },
+            "cohort_policy": "modal",
+            "degraded": [],
+            "earliest_available": null,
+            "file_md5s": [],
+            "finance_data_versions": [],
+            "layout_keys": [],
+            "layout_unverified": 0,
+            "period": "2026-06-30",
+            "period_by_code": {
+              "600001": "2026-06-30",
+              "600002": "2026-06-30",
+              "600003": "2026-06-30",
+              "600004": "2026-06-30",
+              "600006": "2026-06-30"
+            },
+            "pit_basis": "observed",
+            "pit_basis_mix": {
+              "observed": 5
+            },
+            "retracted_count": 0,
+            "skipped": {},
+            "stale_days": {
+              "600001": 0,
+              "600002": 0,
+              "600003": 0,
+              "600004": 0,
+              "600006": 0
+            },
+            "warnings": [
+              "stale_calendar_missing",
+              "cohort_selection_bias"
+            ]
+          },
+          "name": "fin_net_margin",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "fin",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": [
+            "stale_calendar_missing",
+            "cohort_selection_bias"
+          ]
+        },
+        "fin_net_profit_yoy": {
+          "available_at": "2026-09-11T16:40:00",
+          "codes": 5,
+          "coverage": 0.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "净利润同比",
+          "meta": {
+            "basis_by_code": {
+              "600001": "observed",
+              "600002": "observed",
+              "600003": "observed",
+              "600004": "observed",
+              "600006": "observed"
+            },
+            "cohort": {
+              "by_period": {
+                "2026-03-31": 1,
+                "2026-06-30": 5
+              },
+              "modal_period": "2026-06-30",
+              "n_cohort": 5,
+              "n_mismatch": 1,
+              "n_total": 6
+            },
+            "cohort_excluded_profile": {
+              "by_period": {
+                "2026-03-31": 1
+              },
+              "codes": [
+                "600005"
+              ],
+              "composite": {
+                "max": 50.0,
+                "median": 50.0,
+                "min": 50.0,
+                "n": 1
+              },
+              "composite_percentile": {
+                "max": 75.0,
+                "median": 75.0,
+                "min": 75.0,
+                "n": 1
+              },
+              "count": 1,
+              "note": "composite 取自当日 scan 池；披露时点与质地相关，剔除组非随机",
+              "size_proxy": null,
+              "true_dragon_ratio": 1.0
+            },
+            "cohort_policy": "modal",
+            "degraded": [],
+            "earliest_available": null,
+            "file_md5s": [],
+            "finance_data_versions": [],
+            "layout_keys": [],
+            "layout_unverified": 0,
+            "missing_prior_or_invalid_base": 5,
+            "period": "2026-06-30",
+            "period_by_code": {
+              "600001": "2026-06-30",
+              "600002": "2026-06-30",
+              "600003": "2026-06-30",
+              "600004": "2026-06-30",
+              "600006": "2026-06-30"
+            },
+            "pit_basis": "observed",
+            "pit_basis_mix": {
+              "observed": 5
+            },
+            "retracted_count": 0,
+            "skipped": {
+              "missing_field": 5
+            },
+            "stale_days": {
+              "600001": 0,
+              "600002": 0,
+              "600003": 0,
+              "600004": 0,
+              "600006": 0
+            },
+            "warnings": [
+              "stale_calendar_missing",
+              "cohort_selection_bias"
+            ]
+          },
+          "name": "fin_net_profit_yoy",
+          "reason": null,
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "fin",
+          "source_scan_id": null,
+          "status": "empty",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": [
+            "stale_calendar_missing",
+            "cohort_selection_bias",
+            "empty_unexpected"
+          ]
+        },
+        "fin_revenue_yoy": {
+          "available_at": "2026-09-11T16:40:00",
+          "codes": 5,
+          "coverage": 0.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "营收同比",
+          "meta": {
+            "basis_by_code": {
+              "600001": "observed",
+              "600002": "observed",
+              "600003": "observed",
+              "600004": "observed",
+              "600006": "observed"
+            },
+            "cohort": {
+              "by_period": {
+                "2026-03-31": 1,
+                "2026-06-30": 5
+              },
+              "modal_period": "2026-06-30",
+              "n_cohort": 5,
+              "n_mismatch": 1,
+              "n_total": 6
+            },
+            "cohort_excluded_profile": {
+              "by_period": {
+                "2026-03-31": 1
+              },
+              "codes": [
+                "600005"
+              ],
+              "composite": {
+                "max": 50.0,
+                "median": 50.0,
+                "min": 50.0,
+                "n": 1
+              },
+              "composite_percentile": {
+                "max": 75.0,
+                "median": 75.0,
+                "min": 75.0,
+                "n": 1
+              },
+              "count": 1,
+              "note": "composite 取自当日 scan 池；披露时点与质地相关，剔除组非随机",
+              "size_proxy": null,
+              "true_dragon_ratio": 1.0
+            },
+            "cohort_policy": "modal",
+            "degraded": [],
+            "earliest_available": null,
+            "file_md5s": [],
+            "finance_data_versions": [],
+            "layout_keys": [],
+            "layout_unverified": 0,
+            "missing_prior_or_invalid_base": 5,
+            "period": "2026-06-30",
+            "period_by_code": {
+              "600001": "2026-06-30",
+              "600002": "2026-06-30",
+              "600003": "2026-06-30",
+              "600004": "2026-06-30",
+              "600006": "2026-06-30"
+            },
+            "pit_basis": "observed",
+            "pit_basis_mix": {
+              "observed": 5
+            },
+            "retracted_count": 0,
+            "skipped": {
+              "missing_field": 5
+            },
+            "stale_days": {
+              "600001": 0,
+              "600002": 0,
+              "600003": 0,
+              "600004": 0,
+              "600006": 0
+            },
+            "warnings": [
+              "stale_calendar_missing",
+              "cohort_selection_bias"
+            ]
+          },
+          "name": "fin_revenue_yoy",
+          "reason": null,
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "fin",
+          "source_scan_id": null,
+          "status": "empty",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": [
+            "stale_calendar_missing",
+            "cohort_selection_bias",
+            "empty_unexpected"
+          ]
+        },
+        "fin_roe": {
+          "available_at": "2026-09-11T16:40:00",
+          "codes": 5,
+          "coverage": 1.0,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "近似年化 ROE",
+          "meta": {
+            "annualization": "approx_4_over_quarter",
+            "basis_by_code": {
+              "600001": "observed",
+              "600002": "observed",
+              "600003": "observed",
+              "600004": "observed",
+              "600006": "observed"
+            },
+            "cohort": {
+              "by_period": {
+                "2026-03-31": 1,
+                "2026-06-30": 5
+              },
+              "modal_period": "2026-06-30",
+              "n_cohort": 5,
+              "n_mismatch": 1,
+              "n_total": 6
+            },
+            "cohort_excluded_profile": {
+              "by_period": {
+                "2026-03-31": 1
+              },
+              "codes": [
+                "600005"
+              ],
+              "composite": {
+                "max": 50.0,
+                "median": 50.0,
+                "min": 50.0,
+                "n": 1
+              },
+              "composite_percentile": {
+                "max": 75.0,
+                "median": 75.0,
+                "min": 75.0,
+                "n": 1
+              },
+              "count": 1,
+              "note": "composite 取自当日 scan 池；披露时点与质地相关，剔除组非随机",
+              "size_proxy": null,
+              "true_dragon_ratio": 1.0
+            },
+            "cohort_policy": "modal",
+            "degraded": [],
+            "earliest_available": null,
+            "file_md5s": [],
+            "finance_data_versions": [],
+            "layout_keys": [],
+            "layout_unverified": 0,
+            "period": "2026-06-30",
+            "period_by_code": {
+              "600001": "2026-06-30",
+              "600002": "2026-06-30",
+              "600003": "2026-06-30",
+              "600004": "2026-06-30",
+              "600006": "2026-06-30"
+            },
+            "pit_basis": "observed",
+            "pit_basis_mix": {
+              "observed": 5
+            },
+            "retracted_count": 0,
+            "skipped": {},
+            "stale_days": {
+              "600001": 0,
+              "600002": 0,
+              "600003": 0,
+              "600004": 0,
+              "600006": 0
+            },
+            "warnings": [
+              "stale_calendar_missing",
+              "cohort_selection_bias"
+            ]
+          },
+          "name": "fin_roe",
+          "reason": null,
+          "rows": 5,
+          "skipped_backfilled": 0,
+          "source": "fin",
+          "source_scan_id": null,
+          "status": "ok",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": [
+            "stale_calendar_missing",
+            "cohort_selection_bias"
+          ]
+        },
         "five_dim_absorption": {
           "available_at": "2026-09-11T15:30:00",
           "codes": 6,
@@ -165,6 +1073,443 @@
           "version_source": "source",
           "warnings": []
         },
+        "prep_chip_concentration": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "筹码集中度",
+          "meta": {},
+          "name": "prep_chip_concentration",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_dim_d1": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "D1 龙头质量",
+          "meta": {},
+          "name": "prep_dim_d1",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_dim_d2": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "D2 主线地位",
+          "meta": {},
+          "name": "prep_dim_d2",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_dim_d3": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "D3 封板质量",
+          "meta": {},
+          "name": "prep_dim_d3",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_dim_d4": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "D4 资金流动",
+          "meta": {},
+          "name": "prep_dim_d4",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_dim_d5": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "D5 筹码位置",
+          "meta": {},
+          "name": "prep_dim_d5",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_dim_d6": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "D6 持续性",
+          "meta": {},
+          "name": "prep_dim_d6",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_distance_high60": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "距 60 日高点回撤",
+          "meta": {},
+          "name": "prep_distance_high60",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_feedback_state": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "T+1 反馈状态",
+          "meta": {},
+          "name": "prep_feedback_state",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_high_days": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "T 日连板高度",
+          "meta": {},
+          "name": "prep_high_days",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_in_pool_today": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "T 日涨停池成员",
+          "meta": {},
+          "name": "prep_in_pool_today",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_limit_up_suc_rate": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "封板成功率",
+          "meta": {},
+          "name": "prep_limit_up_suc_rate",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_main_net_ratio": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "主力净额占比",
+          "meta": {},
+          "name": "prep_main_net_ratio",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_mainline_rank": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "主线名次",
+          "meta": {},
+          "name": "prep_mainline_rank",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_market_state": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "市场状态",
+          "meta": {},
+          "name": "prep_market_state",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_position_pct": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "单票建议仓位",
+          "meta": {},
+          "name": "prep_position_pct",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_review_grade": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "复盘档位",
+          "meta": {},
+          "name": "prep_review_grade",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_review_score": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "复盘总分",
+          "meta": {},
+          "name": "prep_review_score",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_role": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "主线角色",
+          "meta": {},
+          "name": "prep_role",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_seal_ratio": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "封成比",
+          "meta": {},
+          "name": "prep_seal_ratio",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_t_pct": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "T 日涨幅",
+          "meta": {},
+          "name": "prep_t_pct",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_t_turnover": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "T 日换手率",
+          "meta": {},
+          "name": "prep_t_turnover",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
+        "prep_turnover_health": {
+          "available_at": null,
+          "codes": 0,
+          "coverage": null,
+          "elapsed_ms": 0.0,
+          "invalid_value": 0,
+          "label": "换手健康度",
+          "meta": {},
+          "name": "prep_turnover_health",
+          "reason": "2026-09-11 无 prep_snapshots 记录",
+          "rows": 0,
+          "skipped_backfilled": 0,
+          "source": "prep",
+          "source_scan_id": null,
+          "status": "missing_source",
+          "version": "<VERSION>",
+          "version_source": "source",
+          "warnings": []
+        },
         "vpa_breakout": {
           "available_at": "2026-09-11T15:30:00",
           "codes": 4,
@@ -305,7 +1650,7 @@
       },
       "finished_at": "2026-09-11T15:30:00",
       "ok": true,
-      "registry_inserted": 12,
+      "registry_inserted": 58,
       "scan": {
         "candidates": 6,
         "created_at": "2026-09-11 15:30:00",
@@ -325,7 +1670,10 @@
       "started_at": "2026-09-11T15:30:00",
       "timezone_warning": null,
       "trade_date": "2026-09-11",
-      "warnings": []
+      "warnings": [
+        "fin_net_profit_yoy: empty（源可用但当日无值）",
+        "fin_revenue_yoy: empty（源可用但当日无值）"
+      ]
     }
   ],
   "warnings": []

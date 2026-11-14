@@ -137,6 +137,11 @@ class _IncrementalBase(unittest.TestCase):
                   snapshots=None, closed=None):
         cfg_cash = initial_cash if initial_cash else 100_000.0
         cfg = StrategyConfig(initial_cash=cfg_cash)
+        from dragon_quant.workspace import snapshots as snapshot_lib
+        from dragon_quant.workspace.config import BUILTIN_STRATEGY_ID
+
+        ref = snapshot_lib.builtin_ref(strategy_id=BUILTIN_STRATEGY_ID,
+                                       params=cfg.to_json_dict())
         run_id = account_store.create_review_account_run(
             source=source,
             strategy_name="dragon_pullback_daily",
@@ -151,6 +156,7 @@ class _IncrementalBase(unittest.TestCase):
             trade_count=0,
             win_rate=None,
             display_name=display_name,
+            run_meta_json=json.dumps({"strategy_ref": ref}, ensure_ascii=False),
         )
         account_store.save_review_account_results(
             run_id,

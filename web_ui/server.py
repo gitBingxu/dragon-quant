@@ -13,7 +13,8 @@ DEFAULT_UI_PORT = 8765
 
 def start_server(port: int = DEFAULT_UI_PORT, open_browser: bool = True,
                  default_source: str = "v2", default_page: str = "review",
-                 *, block: bool = True, bs_autogen: bool = False):
+                 *, block: bool = True, bs_autogen: bool = False,
+                 workspace_writes: bool = False):
     """启动仪表盘（deprecated）；内部委托 ``start_dashboard``。"""
     from .backend.serve import start_dashboard
 
@@ -21,6 +22,7 @@ def start_server(port: int = DEFAULT_UI_PORT, open_browser: bool = True,
         default_source=default_source if default_source in {"v1", "v2"} else "v2",
         default_page="account" if default_page == "account" else "review",
         bs_autogen=bool(bs_autogen),
+        workspace_writes_enabled=bool(workspace_writes),
     )
     return start_dashboard(
         port=port,

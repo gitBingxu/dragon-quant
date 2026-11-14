@@ -1037,7 +1037,7 @@
     "auction/snapshots.json": "14937f3588d9e7a2a7a5c4ab4bc34e14a16be0577f3edb45be04b9acdbc64570",
     "auction/stdout_collect.txt": "a24e8accb674a8633d7576c7581e3fd84a0d3e5906537ea151e1120d1403d4aa",
     "auction/stdout_snapshot.txt": "e5d727004160676def2f51a03db41d587dbc32a4b9fc712ccacf860647dcc066",
-    "factor/build_single_day.json": "7a088495cc0c69b8de3272d6018663e23d6acba74bb3013b96ec8aa1960b09cd",
+    "factor/build_single_day.json": "8de600af671be2af760b1890f818881127dc2b473d75dce64e4959c3755fb56e",
     "factor/decision_review_auction.json": "a9da955e4a1240277d29e863cb585527032315811c7744a795c6e3148c34308e",
     "factor/decision_review_prep.json": "fcf2e414bbcc1609b3eb63dec055d2bc56d28b09f254aee54fec77864caf28b0",
     "factor/eval_success.json": "0f9039c8f149de4a4e6af7857b5d64edbc7d0f5ed44b98be0a873460559aaf25",

@@ -9,11 +9,21 @@ from dragon_quant.review_account.strategy.priority import RANKING_MODE_LABELS
 from dragon_quant.review_account.strategy.main import BUY_CHECK_STATUS_LABELS
 
 
-def _make_config(source: str, strategy_params: Optional[dict]) -> StrategyConfig:
+def _make_config(source: str, strategy_params: Optional[dict],
+                 selection=None) -> StrategyConfig:
+    if selection is not None and selection.descriptor.source == "builtin":
+        strategy_params = {**selection.parameters, **(strategy_params or {})}
     cfg = StrategyConfig(source=source)
     if strategy_params is not None:
         cfg = StrategyConfig.from_dict({**cfg.to_json_dict(), **strategy_params, "source": source})
     return cfg
+
+
+def _strategy_runtime(selection, cfg):
+    from dragon_quant.review_account.service import _build_strategy_runtime
+
+    runtime, resolver, _ref = _build_strategy_runtime(selection, cfg)
+    return runtime, resolver
 
 
 def _market_data_from_services(services) -> Optional[MarketData]:
@@ -30,24 +40,39 @@ def _market_data_from_services(services) -> Optional[MarketData]:
     return MarketData(provider=bundle.xueqiu)
 
 
-def _make_trader(cfg: StrategyConfig, source: str, services) -> LiveTrader:
+def _make_trader(cfg: StrategyConfig, source: str, services, *,
+                 runtime=None, resolver=None) -> LiveTrader:
     data = _market_data_from_services(services)
-    if data is None:
-        return LiveTrader(cfg, source=source)
-    return LiveTrader(cfg, source=source, data=data)
+    extras = {}
+    if data is not None:
+        extras["data"] = data
+    if runtime is not None:
+        extras["runtime"] = runtime
+    if resolver is not None:
+        extras["runtime_resolver"] = resolver
+    return LiveTrader(cfg, source=source, **extras)
 
 
 def run_buy(trade_date: str, source: str = "v2", verbose: bool = True,
             as_of: Optional[str] = None, strategy_params: Optional[dict] = None,
-            force: bool = False, services=None) -> dict:
+            force: bool = False, services=None, selection=None) -> dict:
     """执行买入信号回放。
 
     ``services`` 为可选 M2 装配注入口：传入且其 ``providers`` 非空时，行情/
     分时使用 ``services.providers.xueqiu``；不传保持既有构造路径。策略、成交、
     信号与输出不变。
+
+    ``selection`` 为 workspace 策略选择；省略时复用内建规则（旧行为不变）。
     """
-    cfg = _make_config(source, strategy_params)
-    result = _make_trader(cfg, source, services).buy(trade_date, as_of, force=force)
+    cfg = _make_config(source, strategy_params, selection)
+    runtime, resolver = _strategy_runtime(selection, cfg)
+    try:
+        result = _make_trader(cfg, source, services, runtime=runtime,
+                              resolver=resolver).buy(trade_date, as_of, force=force)
+    finally:
+        closer = getattr(resolver, "close", None)
+        if callable(closer):
+            closer()
     if verbose:
         _print_buy(trade_date, result)
     return result
@@ -55,10 +80,24 @@ def run_buy(trade_date: str, source: str = "v2", verbose: bool = True,
 
 def run_sell(trade_date: str, source: str = "v2", verbose: bool = True,
              as_of: Optional[str] = None, strategy_params: Optional[dict] = None,
-             force: bool = False, services=None) -> dict:
-    """执行卖出信号回放（``services`` 语义同 :func:`run_buy`）。"""
-    cfg = _make_config(source, strategy_params)
-    result = _make_trader(cfg, source, services).sell(trade_date, as_of, force=force)
+             force: bool = False, services=None, selection=None,
+             only_strategy_id: Optional[str] = None) -> dict:
+    """执行卖出信号回放（``services`` 语义同 :func:`run_buy`）。
+
+    ``only_strategy_id`` 仅按持仓归属筛选（不替换退出规则）；省略时评估全部归属。
+    """
+    cfg = _make_config(source, strategy_params, selection)
+    runtime, resolver = _strategy_runtime(selection, cfg)
+    trader = _make_trader(cfg, source, services, runtime=runtime, resolver=resolver)
+    kwargs = {"force": force}
+    if only_strategy_id is not None:
+        kwargs["only_strategy_id"] = only_strategy_id
+    try:
+        result = trader.sell(trade_date, as_of, **kwargs)
+    finally:
+        closer = getattr(resolver, "close", None)
+        if callable(closer):
+            closer()
     if verbose:
         _print_sell(trade_date, result)
     return result
@@ -172,18 +211,24 @@ def _print_buy(trade_date: str, result: dict):
 def _print_sell(trade_date: str, result: dict):
     print(f"【卖出建议 · {trade_date}】")
     _print_forced(result)
+    strategy_filter = result.get("strategy_filter")
+    if strategy_filter:
+        skipped = result.get("skipped_by_filter") or 0
+        print(f"  仅评估策略 {strategy_filter} 的持仓（筛选掉 {skipped} 只其他归属）")
     for s in result.get("sells", []):
         action = "减半仓" if s.get("partial") else "卖出"
         mark = "" if s.get("persisted", True) else "（未落库：信号状态已变化）"
+        owner = s.get("strategy_id") or "内建"
         print(f"  🔴 {action} {s['name'] or s['code']}（{s['code']}）@{s['exit_price']:.2f}"
-              f"，持有 {s['hold_days']} 天{mark}")
+              f"，持有 {s['hold_days']} 天［{owner}］{mark}")
         print(f"     理由：{s['reason_text']}")
     if not result.get("sells"):
         print(f"  {result.get('reason_text', '')}")
     for h in result.get("held", []):
         half = "（已减半仓）" if h.get("took_profit_half") else ""
+        owner = h.get("strategy_id") or "内建"
         print(f"  🟢 继续持有 {h['name'] or h['code']}（{h['code']}）{half}"
-              f"，当前最高 {h['highest_return']:+.1f}%")
+              f"，当前最高 {h['highest_return']:+.1f}%［{owner}］")
     _print_quality(result)
 
 

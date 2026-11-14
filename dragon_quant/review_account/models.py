@@ -269,6 +269,8 @@ class Position:
     period_start_mark: Optional[float] = None
     period_start_realized_pnl: float = 0.0
     period_start_cost: float = 0.0
+    #: 开仓时冻结的策略归属（strategy_ref）；旧记录为空 → legacy 内建兼容路径。
+    strategy_ref: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.initial_qty <= 0:

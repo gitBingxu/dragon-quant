@@ -51,7 +51,7 @@ def test_api_router_and_nav_are_wired():
     router = _read(FRONTEND / "router.tsx")
     assert "BsPage" in router and "/^\\/bs$/" in router
     shell = _read(FRONTEND / "AppShell.tsx")
-    assert 'to: "/bs"' in shell and 'label: "买卖策略"' in shell
+    assert 'to: "/bs"' in shell and 'label: "策略回测"' in shell
 
 
 def test_new_source_uses_typography_tokens_not_tailwind_scale():

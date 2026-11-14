@@ -390,7 +390,8 @@ def evaluate_factor(name: str, date_from: str, date_to: str, *,
                     version: Optional[str] = None,
                     data=None,
                     min_days: int = 20, min_cross_section: int = 10,
-                    pit_policy: str = "strict", db_path=None) -> dict:
+                    pit_policy: str = "strict", db_path=None,
+                    specs=None) -> dict:
     """评估单因子；返回结构见方案 §4.6（永不返回裸数字）。"""
     start = _normalize_date(date_from)
     end = _normalize_date(date_to)
@@ -407,7 +408,12 @@ def evaluate_factor(name: str, date_from: str, date_to: str, *,
     if data is None:
         raise ValueError("evaluate_factor 需要注入 data（MarketData 鸭子类型）")
     try:
-        spec = get_spec(name)
+        if specs is None:
+            spec = get_spec(name)
+        else:
+            spec = next((s for s in specs if s.name == name), None)
+            if spec is None:
+                raise FactorRegistryError(f"未知因子: {name!r}")
     except FactorRegistryError as exc:
         raise ValueError(str(exc)) from exc
 

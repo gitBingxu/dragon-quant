@@ -17,9 +17,14 @@ def handle(args, services):
     from dragon_quant.infra.factor import CleanConfig, service
 
     as_json = getattr(args, "json", False)
+    workspace = _workspace_config(args)
+    # list/status 是只读查询：不得导入用户 Python，只用 AST 元数据清单。
+    specs = (_workspace_specs(workspace)
+             if workspace is not None and action in {"build", "query", "eval", "export"}
+             else None)
     try:
         if action == "build":
-            payload = service.build(
+            build_kwargs = dict(
                 date=args.date,
                 date_from=getattr(args, "from_date", None),
                 date_to=getattr(args, "to_date", None),
@@ -27,10 +32,18 @@ def handle(args, services):
                 all_factors=getattr(args, "all_factors", False),
                 services=services,
             )
+            if specs is not None:
+                build_kwargs["specs"] = specs
+            payload = service.build(**build_kwargs)
         elif action == "list":
-            payload = {"ok": True, "factors": service.list_factors()}
+            factors_payload = service.list_factors()
+            if workspace is not None:
+                from dragon_quant.workspace.factors import metadata_only_specs
+
+                factors_payload = factors_payload + metadata_only_specs(workspace)
+            payload = {"ok": True, "factors": factors_payload}
         elif action == "query":
-            payload = service.query(
+            query_kwargs = dict(
                 date=args.date,
                 date_from=getattr(args, "from_date", None),
                 date_to=getattr(args, "to_date", None),
@@ -38,8 +51,15 @@ def handle(args, services):
                 code=args.code,
                 version=args.version,
             )
+            if specs is not None:
+                query_kwargs["specs"] = specs
+            payload = service.query(**query_kwargs)
         elif action == "status":
             payload = service.status()
+            if workspace is not None:
+                from dragon_quant.workspace.factors import metadata_only_specs
+
+                payload["workspace_factors"] = metadata_only_specs(workspace)
         elif action == "export":
             names = service.parse_only(args.names)
             if not names:
@@ -61,19 +81,25 @@ def handle(args, services):
                 # identity_clean() 等价：原始值视图（不缩尾、不归一）。
                 clean = CleanConfig(
                     missing="nan", winsorize="none", normalize="none")
-            payload = service.export_matrix(
-                args.from_date, args.to_date, names=names,
+            export_kwargs = dict(
                 version=args.version, codes=service.parse_only(args.codes),
                 clean=clean, fmt=args.fmt, out_path=args.out_path)
+            if specs is not None:
+                export_kwargs["specs"] = specs
+            payload = service.export_matrix(
+                args.from_date, args.to_date, names=names, **export_kwargs)
         elif action == "eval":
             from dragon_quant.review_account.main import MarketData
             provider = getattr(getattr(services, "providers", None), "xueqiu", None)
             data = MarketData(provider=provider) if provider is not None else MarketData()
-            payload = service.evaluate_factor(
-                args.name, args.from_date, args.to_date, data=data,
+            eval_kwargs = dict(
                 horizon=args.horizon, groups=args.groups, version=args.version,
                 min_days=args.min_days, min_cross_section=args.min_cross_section,
                 pit_policy=args.pit_policy)
+            if specs is not None:
+                eval_kwargs["specs"] = specs
+            payload = service.evaluate_factor(
+                args.name, args.from_date, args.to_date, data=data, **eval_kwargs)
         elif action == "decision-review":
             from dragon_quant.review_account.main import MarketData
             provider = getattr(getattr(services, "providers", None), "xueqiu", None)
@@ -168,12 +194,11 @@ def _emit_factor_error(payload: dict, as_json: bool, exit_code: int) -> None:
 def _print_factor_human(action: str, payload: dict) -> None:
     """factor 子命令的人读输出（默认模式；JSON 契约不受影响）。"""
     if action == "list":
-        print(f"{'因子':28s} {'版本':14s} {'源':6s} {'阶段':8s} {'PIT':10s} 默认")
-        print("-" * 78)
+        print(f"{'因子':28s} {'版本':14s} {'源':6s} {'阶段':8s} {'PIT':10s}")
+        print("-" * 72)
         for item in payload.get("factors") or []:
             print(f"{item['name']:28s} {item['version']:14s} {item['source']:6s} "
-                  f"{item['available_phase']:8s} {item['pit_rule']:10s} "
-                  f"{'开' if item['default_enabled'] else '关'}")
+                  f"{item['available_phase']:8s} {item['pit_rule']:10s}")
         return
 
     if action == "build":
@@ -401,3 +426,22 @@ def _print_fin_human(action: str, payload: dict) -> None:
         return
 
 
+
+
+def _workspace_config(args):
+    """解析 --workspace > DQ_WORKSPACE > 本机登记；未配置返回 None（内建零副作用）。"""
+    from dragon_quant.workspace.config import load_workspace, resolve_workspace_path
+
+    path = resolve_workspace_path(getattr(args, "workspace", None))
+    if path is None:
+        return None
+    return load_workspace(path)
+
+
+def _workspace_specs(workspace):
+    """workspace 用户因子注册表（导入执行；仅供 build/query/eval/export 显式路径）。"""
+    if workspace is None:
+        return None
+    from dragon_quant.workspace.factors import combined_specs
+
+    return combined_specs(workspace)

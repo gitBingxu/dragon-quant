@@ -116,7 +116,9 @@ def run_account_experiment(*, run_id: int, sell_rules: Optional[list[str]],
                            confirm: bool, account, factor_store, load_bars,
                            load_calendar, loader_factory, snapshot_reader, assets,
                            save_experiment: Callable[..., int],
-                           heavy_lock=None, lock_path: Optional[Path] = None) -> dict:
+                           heavy_lock=None, lock_path: Optional[Path] = None,
+                           use_worker: bool = True,
+                           parameter_variants: Optional[list] = None) -> dict:
     from dragon_quant.review_account import experiments
     from dragon_quant.review_account.models import StrategyConfig
     from .local_account_market import LocalAccountMarket
@@ -198,10 +200,48 @@ def run_account_experiment(*, run_id: int, sell_rules: Optional[list[str]],
                     extra_codes=[p.get("code")
                                  for p in (run.get("start_positions") or [])],
                 )
+                # 冻结策略身份：基准 run 有 strategy_ref 时按快照执行（用户策略真正参与实验）。
+                runtime = resolver = None
+                strategy_ref = None
+                base_ref = (run.get("run_meta") or {}).get("strategy_ref") \
+                    if isinstance(run.get("run_meta"), dict) else None
+                runtime = resolver = None
+                strategy_ref = None
+                provider = None
+                runtime_factory = None
+                baseline_factory = None
+                if isinstance(base_ref, dict) and base_ref.get("strategy_id"):
+                    from dragon_quant.review_account.service import _factor_reader_factory
+                    from dragon_quant.review_account.strategy.runtime import (
+                        make_frozen_runtime_factories, make_provider,
+                        make_worker_factory,
+                    )
+
+                    try:
+                        provider = make_provider(
+                            cfg, factor_reader_factory=_factor_reader_factory,
+                            worker_factory=(make_worker_factory() if use_worker else None))
+                        strategy_ref = dict(base_ref)
+                        runtime = provider.build(strategy_ref)
+                    except ValueError as exc:
+                        raise ExperimentInputError(
+                            str(exc), code="strategy_version_unavailable",
+                            status=400) from exc
+                    resolver = provider.resolve
+                    baseline_factory, runtime_factory = make_frozen_runtime_factories(
+                        provider, strategy_ref)
                 data = LocalAccountMarket(frozen["bars"], frozen["data_calendar"])
-                report = experiments.run_experiments(
-                    run=run, cfg=cfg, data=data, frozen=frozen, seed=seed,
-                    sell_rules=sell_rules)
+                try:
+                    report = experiments.run_experiments(
+                        run=run, cfg=cfg, data=data, frozen=frozen, seed=seed,
+                        sell_rules=sell_rules, runtime=runtime,
+                        runtime_resolver=resolver, strategy_ref=strategy_ref,
+                        parameter_variants=parameter_variants,
+                        runtime_factory=baseline_factory,
+                        variant_runtime_factory=runtime_factory)
+                finally:
+                    if provider is not None:
+                        provider.close()
             except ValueError as exc:
                 raise ExperimentInputError(str(exc)) from exc
             experiment_id = save_experiment(
@@ -328,7 +368,8 @@ def show_experiment(experiment_id: int, *, run_id: int | None = None) -> dict:
 
 
 def experiment_run(run_id: int, *, confirm: bool, sell_rules: Optional[list[str]],
-                   lock_path: Optional[Path] = None) -> dict:
+                   lock_path: Optional[Path] = None,
+                   strategy_params: Optional[list] = None) -> dict:
     """CLI 入口：本地仓储 + 进程级单飞。"""
     from dragon_quant.infra.assets import db as assets_db
     from dragon_quant.infra.factor import storage as factor_store
@@ -347,6 +388,7 @@ def experiment_run(run_id: int, *, confirm: bool, sell_rules: Optional[list[str]
         assets=assets_db,
         save_experiment=storage.save_review_account_experiment,
         lock_path=lock_path or (paths.DATA_DIR / "locks" / "account_experiment.lock"),
+        parameter_variants=strategy_params,
     )
     return envelope(
         command="research experiments",

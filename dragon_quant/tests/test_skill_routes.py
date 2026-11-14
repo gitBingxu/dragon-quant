@@ -21,12 +21,16 @@ ALLOWED_TOP = {
     "review-account",
     "research",
     "dashboard",
+    "workspace",
+    "strategy",
 }
 ALLOWED_DATA = {"quote", "kline", "minute", "batch-quote"}
 ALLOWED_FACTOR = {"build", "list", "status", "query", "export", "eval",
                   "decision-review"}
 ALLOWED_RESEARCH = {"datasets", "schema", "query", "scan-quality", "account",
                     "signals", "snapshots", "strategy", "experiments"}
+ALLOWED_WORKSPACE = {"init", "check"}
+ALLOWED_STRATEGY = {"list", "current", "validate", "use"}
 
 EXCLUDED_DATA = ["sector", "components", "cookie-status", "cookie-fetch", "cookie-set"]
 EXCLUDED_FACTOR = ["fin"]
@@ -109,6 +113,10 @@ class TestSkillRoutes(unittest.TestCase):
                 self.assertIn(sub, ALLOWED_FACTOR, route["command"])
             elif parent == "research":
                 self.assertIn(sub, ALLOWED_RESEARCH, route["command"])
+            elif parent == "workspace":
+                self.assertIn(sub, ALLOWED_WORKSPACE, route["command"])
+            elif parent == "strategy":
+                self.assertIn(sub, ALLOWED_STRATEGY, route["command"])
             else:
                 self.assertIsNone(sub, route["command"])
 
@@ -133,6 +141,44 @@ class TestSkillRoutes(unittest.TestCase):
     def test_safety_is_t0_t1_only(self):
         for row in _safety():
             self.assertIn(row["tier"], {"T0", "T1"}, row["command"])
+
+    def test_workspace_and_strategy_routes(self):
+        routes = {route["command"]: route for route in _routes()}
+        expected = {
+            "dragon-quant workspace init": "T1",
+            "dragon-quant workspace check": "T0",
+            "dragon-quant strategy list": "T0",
+            "dragon-quant strategy current": "T0",
+            "dragon-quant strategy validate": "T0",
+            "dragon-quant strategy use": "T1",
+            "dragon-quant review-account": "T1",
+        }
+        for command, write_class in expected.items():
+            self.assertIn(command, routes, command)
+            self.assertEqual(routes[command]["write_class"], write_class, command)
+        self.assertIn("--workspace", routes["dragon-quant strategy list"]["key_flags"])
+        self.assertIn("--strategy", routes["dragon-quant review-account"]["key_flags"])
+        self.assertIn("--workspace", routes["dragon-quant review-account"]["key_flags"])
+        rows = _safety()
+        workspace_rows = {row["flags"]: row["tier"] for row in rows
+                          if row["command"] == "workspace"}
+        strategy_rows = {row["flags"]: row["tier"] for row in rows
+                         if row["command"] == "strategy"}
+        self.assertEqual(workspace_rows["init --json"], "T1")
+        self.assertEqual(workspace_rows["check --workspace --json"], "T0")
+        self.assertEqual(strategy_rows["use --workspace --json"], "T1")
+        self.assertEqual(strategy_rows["list/current --workspace --json"], "T0")
+        self.assertEqual(strategy_rows["validate --workspace --json"], "T0")
+
+    def test_factor_user_routes_accept_workspace(self):
+        routes = {route["command"]: route for route in _routes()}
+        for command in ("dragon-quant factor build", "dragon-quant factor list",
+                        "dragon-quant factor query", "dragon-quant factor eval",
+                        "dragon-quant factor export"):
+            self.assertIn(command, routes, command)
+            self.assertIn("--workspace", routes[command]["key_flags"], command)
+        # status 目前不接受 --workspace，避免文档承诺不存在的参数。
+        self.assertNotIn("--workspace", routes["dragon-quant factor status"]["key_flags"])
 
     def test_safety_explains_long_running_ui(self):
         text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")

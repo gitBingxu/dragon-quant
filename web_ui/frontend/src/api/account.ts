@@ -46,6 +46,9 @@ export interface CreateAccountRunInput {
   date_to: string;
   initial_cash?: number;
   strategy_name?: string;
+  /** 显式策略选择（覆盖保存选择）；省略时后端消费同一保存状态。 */
+  strategy_id?: string;
+  strategy_parameters?: Record<string, unknown>;
 }
 
 export interface AccountSnapshot {

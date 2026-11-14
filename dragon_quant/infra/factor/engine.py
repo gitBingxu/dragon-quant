@@ -798,7 +798,7 @@ def _now_str() -> str:
 
 def build_date(trade_date: str, *, names: Optional[Iterable[str]] = None,
                db_path=None, calendar: Iterable[str] = (),
-               services=None) -> dict:
+               services=None, specs: Optional[Iterable] = None) -> dict:
     """构建某交易日全部（或指定）因子，写审计报告，返回报告 dict。
 
     - 逐因子隔离：单因子失败不中断，状态进 ``factors``；
@@ -807,9 +807,9 @@ def build_date(trade_date: str, *, names: Optional[Iterable[str]] = None,
     """
     started_at = _now_str()
     cache: dict = {}
-    # names=None = 只构建 default_enabled 因子（P0.5 财务因子默认关，不得被静默计算）；
-    # 显式 --only 不受影响（用户点名的因子即使默认关也构建）。
-    specs = resolve_specs(names, enabled_only=names is None)
+    # names=None = 构建当前注册表全部因子（「全量物化 + 显式消费」：构建全部
+    # 不代表策略/模型使用全部；default_enabled 仅保留为废弃元数据）。
+    specs = resolve_specs(names, enabled_only=False, specs=specs)
     versions: dict[str, str] = {}
     reports: dict[str, dict] = {}
     fin_valid_from: dict[str, str] = {}

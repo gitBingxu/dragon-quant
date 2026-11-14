@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from dragon_quant.infra.factor import storage as fstore
 from dragon_quant.infra.factor.decision import (
+    DEFAULT_MODEL_FACTORS,
     DEGRADED_BELOW_MIN_COVERAGE, DEGRADED_DATE_FALLBACK,
     DEGRADED_FACTOR_READ_ERROR, DEGRADED_MODEL_MISSING,
     DEGRADED_MODEL_READ_ERROR,
@@ -177,6 +178,34 @@ class TestModelSnapshotStorage(TempDbBase):
         flag = "five_dim_is_true_dragon"
         self.assertEqual(snapshot["params"]["weights"][flag], 0.0)
         self.assertIn(flag, snapshot["params"]["neutral"])
+
+    def test_default_snapshot_members_are_frozen_constant(self):
+        # KR2：常量内容本身被冻结，防止未来新增因子或误改精选集悄悄改变生产模型。
+        self.assertEqual(DEFAULT_MODEL_FACTORS, (
+            "five_dim_drive",
+            "five_dim_leadership",
+            "five_dim_anti_drop",
+            "five_dim_liquidity",
+            "five_dim_absorption",
+            "five_dim_is_true_dragon",
+            "vpa_health_score",
+            "vpa_vol_amount",
+            "vpa_trend_verify",
+            "vpa_breakout",
+            "vpa_divergence",
+        ))
+        snapshot = default_snapshot()
+        self.assertEqual(set(snapshot["factor_versions"]),
+                         set(DEFAULT_MODEL_FACTORS))
+        # 构建全部不会污染模型：prep/auction/fin 等非精选因子绝不入默认模型。
+        for name in snapshot["factor_versions"]:
+            self.assertFalse(name.startswith(("prep_", "auction_", "fin_")))
+        self.assertNotIn("five_dim_composite", DEFAULT_MODEL_FACTORS)
+
+    def test_explicit_names_still_select_research_factors(self):
+        snapshot = default_snapshot(names=["prep_t_pct", "five_dim_drive"])
+        self.assertEqual(set(snapshot["factor_versions"]),
+                         {"prep_t_pct", "five_dim_drive"})
 
     def test_save_default_model_snapshot(self):
         self.assertTrue(save_default_model_snapshot())

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import pytest
 from dragon_quant.tests.e2e.harness.sandbox import EnvSandbox
 
 NOW = "2026-09-11T15:30:00+08:00"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
@@ -223,7 +225,12 @@ def test_n6_missing_and_too_low_cli(sandbox):
     assert low_doctor.returncode == 1
     low_checks = {check["id"]: check for check in _payload(low_doctor)["checks"]}
     assert low_checks["cli.version"]["status"] == "fail"
-    assert ">= 0.8.0" in low_checks["cli.version"]["detail"]
+    skill = (REPO_ROOT / "skills" / "dragon-quant" / "SKILL.md").read_text(
+        encoding="utf-8")
+    frontmatter = skill.split("---\n", 2)[1]
+    min_cli_version = re.search(
+        r'^  min-cli-version: "([^"]+)"$', frontmatter, re.MULTILINE).group(1)
+    assert f">= {min_cli_version}" in low_checks["cli.version"]["detail"]
 
 
 def test_n7_low_node_version_exits_two(sandbox):

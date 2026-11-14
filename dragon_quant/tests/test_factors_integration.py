@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from dragon_quant.infra.factor import engine
 from dragon_quant.infra.factor import storage as fstore
-from dragon_quant.infra.factor.registry import compute_version_info
+from dragon_quant.infra.factor.registry import compute_version_info, spec_names
 from dragon_quant.infra.factor.types import FactorSpec, FactorValue
 from dragon_quant.infra.factor import sql as store
 
@@ -152,11 +152,13 @@ class FactorIntegrationBase(unittest.TestCase):
 
 
 class TestMigrationLoop(FactorIntegrationBase):
-    def test_twelve_factors_written_with_lineage(self):
+    def test_all_factors_reported_with_lineage(self):
         report = self._build()
         self.assertTrue(report["ok"], report["warnings"])
         self.assertIsNotNone(report["build_id"])
-        self.assertEqual(len(report["factors"]), 12)
+        # 默认构建当前注册表全部因子；无源族只报告 missing/no_report_yet，不伪造行。
+        self.assertEqual(len(report["factors"]), len(spec_names()))
+        self.assertEqual(set(report["factors"]), set(spec_names()))
 
         names = {r[0] for r in self._query(
             "SELECT DISTINCT factor_name FROM factor_values")}
@@ -215,9 +217,10 @@ class TestMigrationLoop(FactorIntegrationBase):
 
     def test_registry_snapshot_written_once(self):
         self._build()
-        self.assertEqual(len(self._query("SELECT * FROM factor_registry")), 12)
+        count = len(spec_names())
+        self.assertEqual(len(self._query("SELECT * FROM factor_registry")), count)
         self._build()   # 幂等：DO NOTHING
-        self.assertEqual(len(self._query("SELECT * FROM factor_registry")), 12)
+        self.assertEqual(len(self._query("SELECT * FROM factor_registry")), count)
 
     def test_build_run_report_persisted(self):
         report = self._build()

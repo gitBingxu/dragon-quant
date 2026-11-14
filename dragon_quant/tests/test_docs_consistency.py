@@ -52,6 +52,7 @@ EXPECTED_MODULE_DOCS = {
     "factor.md",
     "development.md",
     "bs_eval.md",
+    "workspace.md",
 }
 
 # token -> owner module doc.  Each token is module-owned and must NOT reappear in

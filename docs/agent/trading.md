@@ -108,3 +108,9 @@ python -m dragon_quant sell --force
 - `review_account/research_reads.py` 提供专用只读查询（runs / snapshots / trades / positions / events / signals / experiments），`mode=ro`、不触发回测、不建 schema。研究 `account --view summary` 复用既有 `evaluation.metrics_from_rows`；胜率分母与贡献口径不变，缺 run 是空态而非 0 账户。
 - `review-account --json` 是兼容回执：只新增 JSON 输出（`run_id` + 区间/汇总），人读默认格式不变。Agent 必须先取真实 `run_id`，再用 `research account --run-id` 读回；禁止猜“最新批次就是本次”。
 - 对照实验的共享用例在 `dragon_quant/research/experiments.py`：Web 与 CLI 共用冻结期初/上游、未知 sell-rule 参数错误、进程内锁 + `locks/account_experiment.lock` 进程级互斥与异常释放；`list/show` 只读且不建锁文件。`no_change` / `insufficient_evidence` 不是改进。
+
+## workspace 策略接入（2026-11-11）
+
+- `buy` / `sell` / `review-account` 新增 `--workspace`、`--strategy`；`review-account` 另在 Web 表单与 `/api/account/runs` 接受 `strategy_id`。
+- 选择优先级：显式 `--strategy` > 已保存选择 > 内建默认。`sell --strategy ID` 只筛选该归属持仓，不替换退出规则；旧持仓无 `strategy_ref` 走 legacy 内建。
+- 引擎经 `review_account/strategy/runtime.py` 统一决策；T+1、成交、费用、手数、仓位与同 code 幂等仍由系统执行。详见 [workspace](workspace.md)。

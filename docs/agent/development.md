@@ -80,7 +80,7 @@
   Playwright 脚本验证；fixture 使用独立 `DQ_DATA_DIR`、种子脚本与离线 provider，不打开真实
   库、不触网。脚本与启动命令见 `docs/solutions/2026-11-05-dashboard-user-reported-fixes.md`。
 - **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 70 个 parser 节点 / 19 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。`bs-eval` 的 BS1–BS5 映射到 `test_bs_eval.py`，只读 Web API + SPA fallback（`/bs`）映射到 `cross_cutting.bs_eval_api` 与 `web_spa_fallback`；`dashboard` 节点 flags 含 `--no-bs-autogen`，D13 映射 BS 自动生成 fail-soft。计数（70/19）由 `dragon_quant/tests/e2e/test_coverage_map.py` 与 parser 快照断言。
+- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 78 个 parser 节点 / 21 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。`bs-eval` 的 BS1–BS5 映射到 `test_bs_eval.py`，只读 Web API + SPA fallback（`/bs`）映射到 `cross_cutting.bs_eval_api` 与 `web_spa_fallback`；`dashboard` 节点 flags 含 `--no-bs-autogen`，D13 映射 BS 自动生成 fail-soft。计数（78/21）由 `dragon_quant/tests/e2e/test_coverage_map.py` 与 parser 快照断言。
 - **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
 
 ## 打包边界

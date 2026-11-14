@@ -10,9 +10,35 @@
 - 截至主分支 `aafe8e0`，覆盖 18 次 MR 合入（编号为 1～5、8～18、20～21）。`v0.2.3` 标签不在 main 历史中，不列作主分支发布；尚未合入 main 的分支提交不计入已发布版本。
 - `0.1.0` 无对应 Git 标签，保留首版日期并按早期提交校正功能归属；后续版本均注明标签与版本提交。
 
-## [0.8.1] - 未发布
+## [0.8.2] - 未发布
 
-> 草稿：覆盖 0.8.0 合入后的发布修复与数据链路变更；完成版本提交后补记版本依据。
+> 草稿：覆盖 0.8.1 发布后合入的策略 Workspace / 用户因子 / 策略参数与因子全量构建；完成版本提交后补记版本依据。
+
+### Added
+- **用户策略 Workspace**：新增 `workspace init|check` 与 `strategy list|current|use|validate` 两个顶层命令组。workspace 独立于 site-packages，**显式 init 才创建**，含 `workspace.json`（内容 `revision` CAS，冲突保留原文件）、`strategies/<slug>/`、`helpers/`、`factors/`、`snapshots/`；路径优先级 `--workspace` > `DQ_WORKSPACE` > 本机登记（`DQ_DATA_DIR/workspace-selection.json`）；未初始化时所有内建行为不变。
+- **稳定策略 SDK `dragon_quant.strategy_sdk`**：只读 `StrategyContext` 与 `StrategyIntent`（买入 / 退出意图、解释、排序建议、建议仓位）；随包提供 momentum / meanrev 两个示例策略与 agent 说明模板。T+1、下一可成交事件、手数、费用、涨跌停与同 code 幂等仍由系统执行层强制，策略返回值不可绕过；`exit_fraction` 只接受 0.5 / 1。
+- **统一策略运行时**：`review_account/strategy/runtime.py` 以 Adapter 把内建规则包装成同一接口（逐位复用 `evaluate_buy` / `evaluate_sell`），用户策略经方向 / NaN / 越界 / 结构校验，非法输出显式失败、不静默退回内建。`buy` / `review-account` 支持 `--workspace/--strategy`；`sell --strategy` 只筛选该归属持仓，不替换退出规则。持仓 `strategy_ref` 冻结开仓策略与参数：切换只影响新开仓，旧持仓按开仓时版本退出，无 ref 的旧持仓走 legacy 内建。
+- **Web `/strategies` 页与只读 API**：新增 `GET /api/strategies`、`GET /api/strategies/current`、`POST /api/strategies/selection`；页面展示内建 / 用户归属、校验状态、当前选择、参数、源码指纹、因子覆盖与最近回测摘要，并可「用于新开仓 / 按此策略新建回测」。默认只读；`dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用 Web 选择 / 执行用户策略，用户代码在独立本地 worker 子进程运行，HTTP 进程不导入用户代码。
+- **workspace 用户因子**：`factor build/query/list/eval/export` 支持 `--workspace`；用户因子命名 `ws_<short>.<local>`，注册表校验重名 / 悬空依赖 / 环路。`factor list --workspace` 与 Web 因子页只读 AST 静态元数据（字面量 `SPECS`），**不导入不执行用户 Python**；已构建值可经 `/api/factors/values` 查询，名称校验用静态白名单放行、版本仍由注册表解析。
+- **策略参数表单**：策略参数 schema 增加 `label / help / unit / step` 与类型 / 有限性校验；前端 `ParamField` + `strategyParams` 按 schema 渲染数字 / 整数 / 布尔输入；参数优先级 descriptor 默认 < workspace 保存值 < 本次显式参数，保存只影响未来新开仓。
+- **研究实验接入冻结策略**：`research experiments run` 在基准 run 记录 `strategy_ref` 时真正执行该策略的冻结运行时，报告写入 `frozen.strategy_ref`（身份 / 参数 / 因子版本），支持 `--strategy-param k=v` 变体。
+
+### Changed
+- **`factor build` 默认构建全部注册因子**（内建 + 当前 workspace 用户因子）：`default_enabled` 降级为 **deprecated / ignored** 兼容元数据，不再控制 build 或默认模型；`--all` 变为与默认等价的兼容参数，仍与 `--only` 互斥；`engine.build_date(names=None)` 同样构建全部。构建全部只表示物化数据：策略仍只读 `required_factors`，默认模型改用冻结常量 `DEFAULT_MODEL_FACTORS`（原 `default_enabled` 精选集，排除 `five_dim_composite`），新注册因子不会自动进入模型。默认构建纳入 `fin_*`：无本地财务原始数据时仍零网络、按 `missing_source` 落审计。
+- **因子页重做**：删除「默认启用」列，新增「归属」（系统内建 / Workspace）并把 `source` 明确为「数据来源」；工具栏支持名称 / 标签 / 说明搜索、归属与数据来源筛选、清空筛选与「筛选结果 N / 共 M」；注册表复用共享 `PaginatedDataTable`（默认 10 条 / 页，超过 10 条才分页，筛选变化回第 1 页）；点击行（或 Enter / Space）只同步顶部查询因子，不自动发请求。
+- **因子 Web API**：`/api/factors` 移除 `enabled` / `enabled_only`，新增 `origin`（`builtin` / `workspace`）与 `owner`；内建与 workspace 静态元数据按 name 去重稳定排序；未初始化 workspace 只列内建，损坏 `workspace.json` 显式 500。
+- **CLI 人读输出**：`factor list` 删除「默认」列；`factor build -h` 说明默认构建全部、`--all` 为兼容等价；`factor list --json` 保留 `default_enabled`（deprecated / ignored）以兼容既有脚本与数据库列（不迁移）。
+- **Agent Skill 扩到十一类能力**：新增 workspace / strategy 路由与 `references/workspace.md`；安全分级覆盖 `validate`（T0）与 init / use / Web 选择（T1），研究 / 实验成功不自动切换活动策略。
+- **覆盖映射**：coverage-map 同步为 **78 个 parser 节点 / 21 个顶层命令**；E2E scan golden 的版本字段改为 `<DRAGON_QUANT_VERSION>` 占位并在比对时解析，版本升级不再引起 golden 漂移。
+
+### Fixed
+- 独立入口与 skill `min-cli-version` 断言改为跟随当前元数据，不再硬编码 `0.8.0` / 固定版本字符串。
+- 策略参数保存与 Web 选择补全错误处理：非法参数类型 / 非有限数 / 越界步长显式拒绝；workspace CAS 冲突 Web 返回 409、CLI 非零退出。
+
+### Docs
+- 新增 `docs/agent/workspace.md` 与方案 `docs/solutions/2026-11-11-workspace-bs-strategies.md`；`factor` / `trading` / `development` owner 文档、`README.md` 与 skill references 同步 workspace、用户因子、策略冻结与全量构建语义。
+
+## [0.8.1] - 2026-11-08
 
 ### Fixed
 - `publish.sh` 输错发布密码时不再让原始异常冒泡：错误口令下 openssl 解出垃圾字节，`subprocess` 的严格 UTF-8 解码在 `returncode` 判断前抛 `UnicodeDecodeError` 绕过 `except ReleaseError` 裸冒 traceback。改为字节捕获 + 先判 `returncode` 再解码，解密失败统一收敛为「密码错误」干净报错（exit 1）；padding 巧合解出的垃圾按 `pypi-` 前缀拒收，不送进 twine；`main()` 顶层补兜底，未预期异常打印阶段与 `--resume` 提示。

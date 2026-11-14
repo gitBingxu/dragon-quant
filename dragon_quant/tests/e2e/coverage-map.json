@@ -1153,7 +1153,7 @@
         "tests": [
           "dragon_quant/tests/e2e/test_factor.py::test_f2_build_single_day_pit_rows_audit_and_reviewed_golden",
           "dragon_quant/tests/e2e/test_factor.py::test_f3_build_range_expands_only_scan_days",
-          "dragon_quant/tests/e2e/test_factor.py::test_f4_only_builds_named_factors_and_default_off_stays_off",
+          "dragon_quant/tests/e2e/test_factor.py::test_f4_only_builds_named_factors_and_default_builds_all_without_extra_rows",
           "dragon_quant/tests/e2e/test_factor.py::test_f5_all_builds_every_registered_factor_and_stays_offline",
           "dragon_quant/tests/e2e/test_factor.py::test_f13b_fin_factor_build_applies_modal_cohort_and_pit_phase",
           "dragon_quant/tests/e2e/test_factor.py::test_f15_parameter_errors_exit_2_with_json_error"

@@ -194,12 +194,11 @@ def _emit_factor_error(payload: dict, as_json: bool, exit_code: int) -> None:
 def _print_factor_human(action: str, payload: dict) -> None:
     """factor 子命令的人读输出（默认模式；JSON 契约不受影响）。"""
     if action == "list":
-        print(f"{'因子':28s} {'版本':14s} {'源':6s} {'阶段':8s} {'PIT':10s} 默认")
-        print("-" * 78)
+        print(f"{'因子':28s} {'版本':14s} {'源':6s} {'阶段':8s} {'PIT':10s}")
+        print("-" * 72)
         for item in payload.get("factors") or []:
             print(f"{item['name']:28s} {item['version']:14s} {item['source']:6s} "
-                  f"{item['available_phase']:8s} {item['pit_rule']:10s} "
-                  f"{'开' if item['default_enabled'] else '关'}")
+                  f"{item['available_phase']:8s} {item['pit_rule']:10s}")
         return
 
     if action == "build":

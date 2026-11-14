@@ -277,8 +277,12 @@ def metadata_only_specs(config: WorkspaceConfig) -> list[dict]:
         path = Path(config.root) / rel
         module_hash = _hash_paths([path])
         for entry in literal_factor_metadata(path):
-            result.append({**entry, "name": f"ws_{short}.{entry['name']}",
+            # ``owner`` 只进展示元数据，不参与 ``_static_version`` 的哈希输入：
+            # 版本公式必须与执行路径（``load_workspace_factor_specs``）逐位一致。
+            result.append({**entry,
+                           "name": f"ws_{short}.{entry['name']}",
                            "module": rel,
+                           "owner": "workspace",
                            "version": _static_version(entry, helpers_hash, module_hash)})
     return result
 

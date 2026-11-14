@@ -852,6 +852,8 @@ def test_scans_sort_pagination_and_detail():
 
 
 class FakeFactorService:
+    last_known_names = None
+
     def list_factors(self):
         return [{
             "name": "five_dim_composite", "label": "五维综合", "version": "1.0",
@@ -863,7 +865,8 @@ class FakeFactorService:
         }]
 
     def query(self, *, date=None, date_from=None, date_to=None, name=None,
-              code=None, version=None, db_path=None):
+              code=None, version=None, known_names=None, db_path=None):
+        type(self).last_known_names = known_names
         if name == "unknown":
             raise ValueError("未知因子: 'unknown'")
         return {
@@ -873,6 +876,27 @@ class FakeFactorService:
             "available_at": {"600001": {"f": "2026-08-17 15:31:00"}},
             "source_scan_id": {"600001": {"f": "v2_20260817_5"}},
         }
+
+
+class FakeWorkspaceModule:
+    """静态 workspace 因子元数据（不导入用户代码）。"""
+
+    def __init__(self, entries=None, error=None):
+        self._entries = list(entries or [])
+        self._error = error
+
+    def list_factor_metadata(self, path=None):
+        if self._error is not None:
+            raise self._error
+        return list(self._entries)
+
+
+WORKSPACE_FACTOR = {
+    "name": "ws_demo.sentiment_x", "label": "自定义情绪",
+    "source": "computed", "frequency": "1d", "direction": "higher_better",
+    "unit": "score", "available_phase": "close", "pit_rule": "recorded",
+    "lookback": 0, "depends_on": [], "owner": "workspace", "version": "vabc123",
+}
 
 
 class FakeFactorStorage:
@@ -895,12 +919,13 @@ class FakeFactorStorage:
 
 def test_factors_registry_values_and_runs():
     client = make_client(factor_service=FakeFactorService(),
-                         factor_storage=FakeFactorStorage())
+                         factor_storage=FakeFactorStorage(),
+                         workspace_module=FakeWorkspaceModule())
     listing = client.get("/api/factors").json()
     assert listing["count"] == 1
     item = listing["data"][0]
     assert item["db_version"] == "1.0" and item["db_registered"] is True
-    assert item["enabled"] is True
+    assert item["origin"] == "builtin" and "enabled" not in item
     values = client.get("/api/factors/values?trade_date=20260817").json()
     assert values["resolved_versions"] == {"f": "1.0"}
     assert values["rows"][0]["code"] == "600001"
@@ -915,6 +940,47 @@ def test_factors_registry_values_and_runs():
     with_report = client.get(
         "/api/factors/runs?trade_date=20260817&include_report=true").json()
     assert with_report["data"][0]["report"]["ok"] is True
+
+
+def test_factors_include_static_workspace_metadata_and_query_names():
+    """KR3：workspace 用户因子静态出现在目录；查询只做名称放行，不导入用户代码。"""
+    service = FakeFactorService()
+    client = make_client(
+        factor_service=service, factor_storage=FakeFactorStorage(),
+        workspace_module=FakeWorkspaceModule([WORKSPACE_FACTOR]))
+    listing = client.get("/api/factors").json()
+    assert listing["count"] == 2
+    by_name = {item["name"]: item for item in listing["data"]}
+    builtin = by_name["five_dim_composite"]
+    assert builtin["origin"] == "builtin"
+    workspace = by_name["ws_demo.sentiment_x"]
+    assert workspace["origin"] == "workspace"
+    assert workspace["owner"] == "workspace"
+    assert workspace["code_version"] == "vabc123"
+    assert workspace["db_registered"] is False
+    # 目录按 name 稳定排序
+    assert [item["name"] for item in listing["data"]] == sorted(by_name)
+
+    response = client.get(
+        "/api/factors/values?trade_date=20260817&name=ws_demo.sentiment_x")
+    assert response.status_code == 200
+    assert service.last_known_names == ["ws_demo.sentiment_x"]
+
+    bad = client.get("/api/factors/values?trade_date=20260817&name=unknown")
+    assert bad.status_code == 400
+    assert service.last_known_names == ["ws_demo.sentiment_x"]
+
+
+def test_factors_workspace_error_fails_explicitly():
+    from dragon_quant.workspace.config import WorkspaceError
+
+    client = make_client(
+        factor_service=FakeFactorService(), factor_storage=FakeFactorStorage(),
+        workspace_module=FakeWorkspaceModule(error=WorkspaceError("坏配置")))
+    response = client.get("/api/factors")
+    assert response.status_code == 500
+    assert response.json()["error"] == "workspace_invalid"
+    assert "坏配置" in response.json()["detail"]
 
 
 # ─── prep / auction ────────────────────────────────────────────────────────

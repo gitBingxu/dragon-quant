@@ -47,10 +47,10 @@ const SECONDARY_NAV = [
   { to: "/scans", label: "龙头扫描", icon: IconRadar, match: (p: string) => p.startsWith("/scans") },
   { to: "/prep", label: "复盘", icon: IconCalendar, match: (p: string) => p === "/prep" },
   { to: "/auction", label: "竞价", icon: IconClock, match: (p: string) => p === "/auction" },
-  { to: "/bs", label: "买卖策略", icon: IconTrendUp, match: (p: string) => p === "/bs" },
-  { to: "/strategies", label: "策略", icon: IconSigma, match: (p: string) => p === "/strategies" },
+  { to: "/bs", label: "策略回测", icon: IconTrendUp, match: (p: string) => p === "/bs" },
+  { to: "/strategies", label: "策略配置", icon: IconSigma, match: (p: string) => p === "/strategies" },
   { to: "/research", label: "扫描研究", icon: IconRadar, match: (p: string) => p === "/research" },
-  { to: "/factors", label: "因子", icon: IconSigma, match: (p: string) => p === "/factors" },
+  { to: "/factors", label: "因子检索", icon: IconSigma, match: (p: string) => p === "/factors" },
 ];
 
 /**

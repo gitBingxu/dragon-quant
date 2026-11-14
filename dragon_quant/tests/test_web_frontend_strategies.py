@@ -21,7 +21,7 @@ def test_router_has_reachable_strategies_page():
 def test_nav_exposes_strategies_entry():
     shell = _read("src", "AppShell.tsx")
     assert 'to: "/strategies"' in shell
-    assert 'label: "策略"' in shell
+    assert 'label: "策略配置"' in shell
 
 
 def test_api_calls_backend_endpoints():

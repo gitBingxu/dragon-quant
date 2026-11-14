@@ -147,3 +147,61 @@ def test_factor_list_uses_metadata_without_importing_user_code(tmp_path, capsys)
     payload = json.loads(buf.getvalue())
     names = {entry["name"] for entry in payload["factors"]}
     assert any(name.startswith("ws_") for name in names)
+
+
+def test_metadata_only_specs_marks_workspace_owner(tmp_path):
+    workspace = _workspace_with_factor(tmp_path)
+    entries = factors.metadata_only_specs(workspace)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["name"].startswith("ws_")
+    assert entry["owner"] == "workspace"
+    assert entry["version"].startswith("v")
+    # 展示字段 owner 不得改变静态版本公式：与执行路径逐位一致。
+    execution = factors.load_workspace_factor_specs(workspace)[0]
+    assert entry["version"] == execution.version_override
+
+
+def test_main_facade_lists_static_factor_metadata(tmp_path):
+    root = tmp_path / "ws"
+    assert main.list_factor_metadata(str(root)) == []  # 未初始化 workspace
+    _workspace_with_factor(tmp_path)
+    entries = main.list_factor_metadata(str(root))
+    assert [entry["name"].split(".", 1)[1] for entry in entries] == ["sentiment_x"]
+    assert entries[0]["owner"] == "workspace"
+
+
+def test_main_facade_fails_explicitly_on_corrupt_workspace(tmp_path):
+    root = tmp_path / "ws"
+    main.init_workspace(str(root))
+    (root / "workspace.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(config.WorkspaceError):
+        main.list_factor_metadata(str(root))
+
+
+def test_service_query_accepts_known_names_without_importing_code(tmp_path, monkeypatch):
+    from dragon_quant.infra.factor import service, storage as fstore
+
+    root = tmp_path / "ws"
+    main.init_workspace(str(root))
+    (root / "factors" / "custom.py").write_text(
+        "raise RuntimeError('must not import')\n"
+        "SPECS = [FactorSpec(name='sentiment_x', label='自定义', frequency='1d',"
+        " source='computed', compute=None, impl_key='custom', owner='workspace')]\n",
+        encoding="utf-8")
+    cfg = config.load_workspace(root)
+    cfg.factors = ["factors/custom.py"]
+    config.write_workspace(cfg)
+    names = [entry["name"] for entry in main.list_factor_metadata(str(root))]
+    assert names
+    monkeypatch.setattr(fstore, "get_day_values", lambda *a, **k: {
+        "trade_date": "2026-11-11", "rows": 0, "resolved_versions": {},
+        "missing_versions": [], "values": {}, "available_at": {},
+        "source_scan_id": {},
+    })
+    # 静态名字通过校验，进入存储层（无值 → 空集，而非 ValueError）
+    payload = service.query(date="20261111", name=names[0], known_names=names)
+    assert payload["ok"] is True and payload["rows"] == 0
+    with pytest.raises(ValueError):
+        service.query(date="20261111", name="ws_nope.sentiment_x",
+                      known_names=names)

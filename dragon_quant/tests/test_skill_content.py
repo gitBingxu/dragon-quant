@@ -177,13 +177,16 @@ class TestSkillContent(unittest.TestCase):
                       "--all", "不能只看退出码"):
             self.assertIn(token, text)
 
-    def test_operations_forbids_default_build_and_all(self):
+    def test_operations_build_is_full_but_consumption_explicit(self):
         text = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+        self.assertIn("默认构建**当前注册表全部因子**", text)
+        self.assertIn("不等于策略/模型使用全部", text)
+        self.assertIn("`--all` 是等价兼容参数", text)
         forbidden = [line for line in text.splitlines() if line.startswith("**禁止**")]
         self.assertTrue(forbidden, "operations.md 缺少禁止段")
         for line in forbidden:
-            self.assertIn("默认 build", line)
-            self.assertIn("--all", line)
+            self.assertIn("把缺失", line)
+            self.assertIn("当作 0", line)
 
     def test_safety_t0_t1_only(self):
         text = (ROOT / "references" / "safety.md").read_text(encoding="utf-8")

@@ -99,7 +99,11 @@ dragon-quant factor list --workspace /path/to/my-workspace --json
 ## 5. 构建与读回用户因子
 
 ```bash
-# 显式 --only + 精确注册名；日期格式 YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD
+# 默认构建当前注册表全部因子（内建 + 本 workspace 用户因子）
+dragon-quant factor build --date 20261110 \
+  --workspace /path/to/my-workspace --json
+
+# 只补/核对单个用户因子时，用精确注册名收窄
 dragon-quant factor build --date 20261110 \
   --only ws_0123456789ab.prep_review_pct \
   --workspace /path/to/my-workspace --json

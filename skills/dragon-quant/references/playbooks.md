@@ -51,11 +51,11 @@
 - **处理**：解释回退原因；回退池不是当日盘前推荐，解读要降权；历史缺口不要假装能补采。
 - **停止条件**：候选池与回退池都为空时停止，明确说“无参与标的”。
 
-## 8. 因子缺失或默认关闭
+## 8. 因子缺失或未构建
 
 - **症状**：`factor query` 无行；`factor build` 报告 `missing_source`；代表因子读回 `rows=0`。
-- **诊断**：看 `reports[0].factors[].status` 与 `warnings`；确认源（scan/prep/auction）是否已生成、日期是否一致；确认 `--only` 名单与目标一致（内建三组或 workspace 用户因子的精确注册名 `ws_<id>.<local>`）。
-- **处理**：显式 `--only` 构建对应组；`missing_source` 说明源不可用或配置 fail-closed，**不等于 0**；`empty` 说明源可用但当日无值；`no_scan_for_date` 对 prep/auction-only 组是预期。
+- **诊断**：看 `reports[0].factors[].status` 与 `warnings`；确认源（scan/prep/auction/fin）是否已生成、日期是否一致；确认目标因子在注册表内（内建名或 workspace 用户因子精确名 `ws_<id>.<local>`）。默认 build 已构建全部，故「没构建」不再由 `--only` 遗漏解释；`missing_source` 说明源不可用或配置 fail-closed，**不等于 0**；`empty` 说明源可用但当日无值；`no_scan_for_date` 对 prep/auction-only 组是预期。
+- **处理**：先补齐对应源（scan/prep/auction/fin sync）再重建；用户因子确认 workspace 与字面量 `SPECS`。不得用 0 或中性分填充。
 - **停止条件**：源整体不可用且没有历史行时停止，不要用 0 或中性分填充。
 
 ## 9. UI 面板启动失败

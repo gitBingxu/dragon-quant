@@ -588,10 +588,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 
     factor_build = factor_subs.add_parser(
         "build",
-        help="构建因子值（只读迁移现有 scan / vpa 产物）",
+        help="构建因子值：默认构建全部注册因子",
         usage="dragon-quant factor build --date D | --from D --to D [options]",
-        description="单日或区间构建。区间按「区间内有扫描记录的交易日」逐日展开，"
-                    "每日独立事务与审计报告；缺失源不删除既有因子行。",
+        description="单日或区间构建。默认构建当前注册表全部因子（内建 + workspace "
+                    "用户因子）；构建全部只表示物化数据，策略/模型仍显式选择所需因子。"
+                    "区间按「区间内有扫描记录的交易日」逐日展开，每日独立事务与审计报告；"
+                    "缺失源不删除既有因子行。",
     )
     factor_build.add_argument("--date", default=None,
                               help="交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
@@ -602,7 +604,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     factor_build.add_argument("--only", default=None,
                               help="只构建指定因子（逗号分隔，如 five_dim_drive,vpa_breakout）")
     factor_build.add_argument("--all", dest="all_factors", action="store_true",
-                              help="构建全部注册因子（含默认关；与 --only 互斥）")
+                              help="兼容参数：与默认行为等价（构建全部注册因子），"
+                                   "与 --only 互斥")
     factor_build.add_argument("--json", dest="json", action="store_true",
                               help="输出完整 JSON（默认人读摘要）")
     factor_build.add_argument("--workspace", default=None,

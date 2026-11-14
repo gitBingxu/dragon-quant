@@ -231,6 +231,21 @@ def _check_factors(config: WorkspaceConfig) -> dict:
     return {"modules": entries, "errors": errors}
 
 
+def list_factor_metadata(path: Optional[str] = None) -> list[dict]:
+    """当前 workspace 用户因子的**静态**元数据清单（不导入/执行用户 Python）。
+
+    复用 ``workspace.factors.metadata_only_specs``：只做 AST 字面量解析与源码
+    哈希版本。未初始化 workspace（无 ``workspace.json``）→ 空列表；``workspace.json``
+    存在但损坏 → 显式抛 ``WorkspaceError``（与策略只读查询同一回退口径）。
+    """
+    config = _load_config_for_read(path)
+    if config is None:
+        return []
+    from dragon_quant.workspace.factors import metadata_only_specs
+
+    return metadata_only_specs(config)
+
+
 def list_strategies(path: Optional[str] = None) -> dict:
     """策略清单（只读 descriptor，不导入用户 Python）。"""
     config = _load_config_for_read(path)

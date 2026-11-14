@@ -28,6 +28,7 @@ export function FactorsPage() {
   const urlCode = search.get("code") ?? "";
 
   const [factors, setFactors] = useState<FactorSpecView[]>([]);
+  const [catalogReady, setCatalogReady] = useState(false);
   const [selected, setSelected] = useState(urlFactor);
   const [tradeDate, setTradeDate] = useState(urlDate || today());
   const [code, setCode] = useState(urlCode);
@@ -95,13 +96,21 @@ export function FactorsPage() {
     fetchFactors()
       .then((payload) => {
         setFactors(payload.data);
-        if (payload.data.length > 0) setSelected((prev) => prev || payload.data[0].name);
+        // Catalog 加载后：URL 中因子合法则保留，否则选第一个可用因子。
+        setSelected((prev) => {
+          const names = payload.data.map((factor) => factor.name);
+          if (prev && names.includes(prev)) return prev;
+          return names[0] ?? "";
+        });
       })
-      .catch((exc: unknown) => setError(exc instanceof Error ? exc.message : String(exc)));
+      .catch((exc: unknown) => setError(exc instanceof Error ? exc.message : String(exc)))
+      .finally(() => setCatalogReady(true));
   }, []);
 
   // URL → 状态：直链打开与浏览器后退/前进；本页写回 URL 时跳过，避免重复请求。
+  // 等 catalog 就绪后再解析因子：URL 合法则保留，非法/为空则用第一个可用因子。
   useEffect(() => {
+    if (!catalogReady) return;
     const signature = `${urlDate}|${urlFactor}|${urlCode}`;
     const self = window.location.search === selfWritten.current;
     if (self) return;
@@ -113,15 +122,21 @@ export function FactorsPage() {
       lastRequested.current = "";
       return;
     }
-    if (signature === lastRequested.current) return;
     const nextDate = urlDate || today();
-    const nextFactor = urlFactor || selectedRef.current;
+    const names = factors.map((factor) => factor.name);
+    const fallback = names[0] ?? "";
+    const nextFactor = names.includes(urlFactor)
+      ? urlFactor
+      : urlFactor
+        ? fallback
+        : selectedRef.current || fallback;
     const nextCode = urlCode;
+    if (`${nextDate}|${nextFactor}|${nextCode}` === lastRequested.current) return;
     setTradeDate(nextDate);
     setSelected(nextFactor);
     setCode(nextCode);
     void runQuery(nextDate, nextFactor, nextCode);
-  }, [urlDate, urlFactor, urlCode, runQuery]);
+  }, [catalogReady, factors, urlDate, urlFactor, urlCode, runQuery]);
 
   const handleDate = (value: string) => {
     setTradeDate(value);
@@ -181,7 +196,12 @@ export function FactorsPage() {
               value={selected}
               options={
                 factors.length
-                  ? factors.map((factor) => ({ value: factor.name, label: factor.name }))
+                  ? factors.map((factor) => ({
+                      value: factor.name,
+                      label: factor.label
+                        ? `${factor.label}（${factor.name}）`
+                        : factor.name,
+                    }))
                   : [{ value: "", label: "无可用因子" }]
               }
               onChange={handleFactor}
@@ -207,13 +227,17 @@ export function FactorsPage() {
 
         <Section
           title="因子注册表"
-          description="代码版本 vs DB 版本；点击行切换查询因子"
+          description="按归属 / 数据来源筛选与搜索；点击行切换查询因子（不自动请求）"
           bodyClassName="p-0"
         >
           <RegistryTable
             factors={factors}
             selected={selected}
-            onSelect={(name) => setSelected(name)}
+            onSelect={(name) => {
+              // 只同步顶部因子选择并清除旧错误；日期、代码保持不变，也不发请求。
+              setSelected(name);
+              setError(null);
+            }}
           />
         </Section>
 

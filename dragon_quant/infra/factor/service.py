@@ -77,8 +77,9 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
     区间按「区间内有扫描记录的交易日」逐日展开（无扫描的日期无法产出因子，
     不伪造空跑记录）；每日独立事务、独立审计报告，单日失败不影响其他日。
 
-    ``all_factors=True``（``--all``）展开为**显式全量名单**（含默认关因子），
-    与 ``--only`` 互斥；``enabled_only`` 只在 ``names is None`` 时生效。
+    默认（不传 ``only``）构建当前注册表**全部因子**；``all_factors=True``
+    （``--all``）是等价的兼容参数，同样展开为显式全量名单，与 ``--only`` 互斥。
+    构建全部只表示物化数据，不代表策略/模型消费全部（消费方显式选择）。
 
     财务因子需要真实交易日历做 stale 逾期判定。**触网边界**：只有本地已存在
     财务原始数据（``storage.finance.has_any_fin_data()``）时才经
@@ -90,14 +91,15 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
     """
     names = parse_only(only)
     source_specs = list(specs) if specs is not None else None
-    if all_factors:
-        if names is not None:
-            raise ValueError("--all 与 --only 互斥，请只指定其中一个")
+    if all_factors and names is not None:
+        raise ValueError("--all 与 --only 互斥，请只指定其中一个")
+    if names is None:
+        # 默认与 --all 同一语义：显式解析完整注册表（内建 + workspace 用户因子）。
         names = [spec.name for spec in (source_specs or FACTOR_SPECS)]
     dates, mode = _resolve_dates(date, date_from, date_to)
     calendar: tuple[str, ...] = ()
     warnings: list[str] = []
-    specs = resolve_specs(names, enabled_only=names is None, specs=source_specs)
+    specs = resolve_specs(names, enabled_only=False, specs=source_specs)
     if any(spec.source == "fin" for spec in specs):
         from . import finance_store as fin_store
 
@@ -162,11 +164,19 @@ def list_factors(specs=None) -> list[dict]:
 def query(*, date: Optional[str] = None, date_from: Optional[str] = None,
           date_to: Optional[str] = None, name: Optional[str] = None,
           code: Optional[str] = None, version: Optional[str] = None,
+          known_names: Optional[Iterable[str]] = None,
           db_path=None, specs=None) -> dict:
-    """点查（``--date``）或单因子区间时序（``--from/--to + --name``）。"""
+    """点查（``--date``）或单因子区间时序（``--from/--to + --name``）。
+
+    ``known_names`` 是窄接口扩展：只读层可传入**静态元数据**得到的合法名称
+    （如未导入执行代码的 workspace 用户因子），仅用于名称校验；因子版本仍由
+    存储层按注册表解析，不存在跳过校验的逃生开关。
+    """
     if name:
         # 提前校验因子名，避免返回空集被误读为「该因子无值」
         valid_names = {s.name for s in (specs if specs is not None else FACTOR_SPECS)}
+        if known_names is not None:
+            valid_names |= {str(item) for item in known_names if item}
         if name not in valid_names:
             raise ValueError(f"未知因子: {name!r}（合法值 {sorted(valid_names)}）")
 

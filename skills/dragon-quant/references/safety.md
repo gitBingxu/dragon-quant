@@ -32,7 +32,7 @@
 | strategy | validate --workspace --json | T0 | 显式导入并调用 create_strategy；只读 |
 | strategy | use --workspace --json | T1 | 持久切换保存选择（revision CAS）；只在用户明确要求时执行 |
 | dashboard | --port --no-browser --bs-autogen --no-bs-autogen --workspace-writes --no-workspace-writes | T0 | 长驻；默认只读；显式 --bs-autogen / DQ_BS_AUTOGEN=1 才生成 BS 派生数据，该分支按 T1 确认；--no-bs-autogen / DQ_BS_AUTOGEN=0 优先；禁止 --yes 自动安装 |
-| factor | build --date --only --json --workspace | T1 | 内建三组或显式用户因子精确名单；禁止默认 build 与 --all |
+| factor | build --date --only --json --workspace | T1 | 默认构建全部注册因子（--all 为兼容等价）；构建≠策略/模型消费 |
 | factor | list --json --workspace / status --json / query --date --from --to --code --name --version --json --workspace | T0 | 本地只读；list 用 AST 元数据不导入用户因子；status 不支持 --workspace |
 | factor | export --from --to --name --out --workspace | T1 | 写用户明确 --out 路径与 sidecar meta |
 | factor | eval --from --to --name --json --workspace | T1 | 可能触网并写本地数据缓存；不宣称纯离线 |

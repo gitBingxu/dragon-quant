@@ -19,7 +19,7 @@
 | 盘后复盘 | dragon-quant prep | --date --recompute --force --json | T1 | human/json | 当日 ≥16:40；--force 不绕门禁 |
 | 集合竞价 | dragon-quant auction | --force --recompute --json | T1 | human/json | 当日 ≥09:25；命中快照本次只读；无 --date |
 | 盘前预案 | dragon-quant premarket | --date --json | T0 | human/json | 只读；不写库；缺数据降级 exit0；不触网 |
-| 因子构建 | dragon-quant factor build | --date --only --json --workspace | T1 | human/json | 内建三组或显式用户因子的精确名单；禁止默认 build 与 --all |
+| 因子构建 | dragon-quant factor build | --date --only --json --workspace | T1 | human/json | 默认构建全部注册因子；--all 为兼容等价；构建≠策略/模型消费 |
 | 因子注册表 | dragon-quant factor list | --json --workspace | T0 | human/json | 只读注册表快照；--workspace 用 AST 元数据列用户因子，不导入 |
 | 因子状态 | dragon-quant factor status | --json | T0 | human/json | 只读内建覆盖/构建状态；缺失不等于 0；不支持 --workspace |
 | 因子读回 | dragon-quant factor query | --date --from --to --code --name --version --json --workspace | T0 | human/json | 本地只读；用户因子已注册名 ws_<id>.<local> |

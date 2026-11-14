@@ -123,7 +123,7 @@
 
 ## 因子入库（内建三组 + 用户因子）
 
-日常入库只构建下面三组内建因子，按名称排序，逐字使用。用户因子只在用户明确要求、且 workspace 已登记时，用 `factor list --workspace` 给出的**精确注册名** `ws_<id>.<local>` 配 `--only` 显式构建；不做隐式混入。读回/核对可额外使用白名单内的 `factor list` / `status` / `query`（含区间+code+version）/ `export` / `eval` / `decision-review`。完整用户因子流程见 `references/workspace.md`。
+日常入库默认构建**当前注册表全部因子**（内建 + 已登记 workspace 用户因子）：`factor build --date D --json`。`--all` 是等价兼容参数，与默认同义、与 `--only` 互斥。构建全部只表示物化数据，**不等于策略/模型使用全部**——消费方仍按 `required_factors` 或模型快照显式选择。若只想补/核对某一组，可用下方三组精确名单 `--only`；用户因子需带 `--workspace`，其精确注册名 `ws_<id>.<local>` 可用 `factor list --workspace` 获取。读回/核对可额外使用白名单内的 `factor list` / `status` / `query`（含区间+code+version）/ `export` / `eval` / `decision-review`。完整用户因子流程见 `references/workspace.md`。
 
 ```text
 <!-- factor-groups:start -->
@@ -135,13 +135,13 @@ auction: auction_dim_direction,auction_dim_liquidity,auction_dim_supply,auction_
 
 **构建与核对**：
 
-1. 确认日期 D 与要入库的组；T1 确认后每组单独执行 `factor build --date D --only <组名单> --json`。用户因子加 `--workspace <PATH>` 并把 `--only` 换成精确注册名。
-2. **不能只看退出码**：exit 0 不等于全部成功。逐条检查 `reports[0].factors[<name>].status`：`ok` 有行；`empty` 源可用但当日无值；`missing_source` 源不可用或配置 fail-closed，**不等于 0**；`error` 必须报告。用户因子还要核对 `version` 与 `factor list --workspace` 一致、`available_at` 符合源时点。
-3. 区分 `warnings`：`no_scan_for_date` 对 prep/auction-only 组是预期，对 scan 组是失败信号。
+1. 确认日期 D；T1 确认后执行 `factor build --date D --json`（默认全量）。只需某一组时用 `--only <组名单>`；用户因子加 `--workspace <PATH>`（默认全量已包含，无需再点名）。
+2. **不能只看退出码**：exit 0 不等于全部成功。逐条检查 `reports[0].factors[<name>].status`：`ok` 有行；`empty` 源可用但当日无值；`missing_source` 源不可用或配置 fail-closed，**不等于 0**；`error` 必须报告。全量构建下 `missing_source` 常见于当日未生成的 prep/auction 源，属预期而非失败。用户因子还要核对 `version` 与 `factor list --workspace` 一致、`available_at` 符合源时点。
+3. 区分 `warnings`：`no_scan_for_date` 对 prep/auction-only 组是预期，对 scan 组是失败信号；fin 的 `empty` 警告说明源可用但当日无值。
 4. 代表因子读回：`factor query --date D --name five_dim_composite --json`、`prep_review_score`、`auction_is_weak`（二次抽查可加 `auction_strength`）；用户因子用 `factor query --workspace <PATH> --date D --name ws_<id>.<local> --json`。检查 `rows`/`values` 有行且 `resolved_versions` 含该因子。auction 数据不足时可合法无行，需说明原因。
 5. 输出入库核对表：组 / 预期数 / `ok` 数 / `empty` 数 / `missing_source` 数 / 读回行数 / 缺失原因。
 
-**禁止**：默认 build（会漏 prep/auction 与用户因子）；`--all`（会混入无关因子族与用户因子）；把缺失当 0。
+**禁止**：把缺失/`missing_source` 当作 0 或中性分；把「已构建」说成「策略/模型已使用」。
 
 ## 报告保存
 

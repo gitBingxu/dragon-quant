@@ -10,7 +10,9 @@ export interface FactorSpecView {
   available_phase: string | null;
   pit_rule: string | null;
   lookback: number | null;
-  enabled: boolean;
+  /** 归属：系统内建 / 当前 Workspace。 */
+  origin: "builtin" | "workspace";
+  owner: string | null;
   depends_on: string[];
   valid_from: string | null;
   deprecated_at: string | null;
@@ -61,9 +63,9 @@ export interface FactorRun {
   report_error: string | null;
 }
 
-export function fetchFactors(opts: { source?: string; enabledOnly?: boolean } = {}) {
+export function fetchFactors(opts: { source?: string } = {}) {
   return getJson<{ data: FactorSpecView[]; count: number }>(
-    `/api/factors${qs({ source: opts.source, enabled_only: opts.enabledOnly ?? false })}`
+    `/api/factors${qs({ source: opts.source })}`
   );
 }
 

@@ -119,7 +119,7 @@ export function StrategiesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="策略"
+        eyebrow="策略配置"
         title="内建与用户策略"
         description="选择策略决定买卖逻辑；右侧只调整该策略开放的阈值与选项。保存只影响未来新开仓，已有持仓继续使用开仓时冻结的配置。"
       />

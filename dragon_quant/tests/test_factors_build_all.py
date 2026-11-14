@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dragon_quant.infra.factor import service
-from dragon_quant.infra.factor.registry import spec_names
+from dragon_quant.infra.factor.registry import FACTOR_SPECS as SPECS, spec_names
 
 
 class BuildAllBase(unittest.TestCase):
@@ -41,21 +41,49 @@ class BuildAllBase(unittest.TestCase):
 
 
 class TestBuildAllSelection(BuildAllBase):
-    def test_all_expands_to_every_registered_factor(self):
+    def test_default_build_expands_to_every_registered_factor(self):
         fake = {"ok": True, "build_id": 1, "factors": {}}
         with patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
-            out = service.build(date="2026-10-19", all_factors=True)
+            out = service.build(date="2026-10-19")
         names = build_date.call_args.kwargs["names"]
         self.assertEqual(set(names), set(spec_names()))
         self.assertEqual(out["mode"], "date")
 
-    def test_default_build_keeps_enabled_only(self):
+    def test_all_expands_to_same_set_as_default(self):
+        fake = {"ok": True, "build_id": 1, "factors": {}}
+        with patch("dragon_quant.infra.factor.service.engine.build_date",
+                   return_value=fake) as default_build:
+            service.build(date="2026-10-19")
+        with patch("dragon_quant.infra.factor.service.engine.build_date",
+                   return_value=fake) as all_build:
+            service.build(date="2026-10-19", all_factors=True)
+        self.assertEqual(set(default_build.call_args.kwargs["names"]),
+                         set(all_build.call_args.kwargs["names"]))
+        self.assertEqual(set(all_build.call_args.kwargs["names"]),
+                         set(spec_names()))
+
+    def test_default_build_includes_workspace_specs(self):
+        from dragon_quant.infra.factor.types import FactorSpec
+
+        def compute(ctx):  # pragma: no cover - never executed here
+            return None
+
+        extra = FactorSpec(name="ws_demo.custom", label="自定义",
+                           frequency="1d", source="computed",
+                           compute=compute, impl_key="custom")
         fake = {"ok": True, "build_id": 1, "factors": {}}
         with patch("dragon_quant.infra.factor.service.engine.build_date",
                    return_value=fake) as build_date:
-            service.build(date="2026-10-19")
-        self.assertIsNone(build_date.call_args.kwargs["names"])
+            service.build(date="2026-10-19", specs=[*list(SPECS), extra])
+        self.assertIn("ws_demo.custom", build_date.call_args.kwargs["names"])
+
+    def test_only_still_restricts_to_named_factors(self):
+        fake = {"ok": True, "build_id": 1, "factors": {}}
+        with patch("dragon_quant.infra.factor.service.engine.build_date",
+                   return_value=fake) as build_date:
+            service.build(date="2026-10-19", only="five_dim_drive")
+        self.assertEqual(build_date.call_args.kwargs["names"], ["five_dim_drive"])
 
     def test_all_and_only_are_mutually_exclusive(self):
         with self.assertRaises(ValueError) as cm:

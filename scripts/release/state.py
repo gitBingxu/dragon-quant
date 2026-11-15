@@ -259,6 +259,35 @@ class ReleaseState:
         self.steps[name] = entry
         self.save()
 
+    def accept(self, name: str, **identity) -> None:
+        """Record an upload *accepted receipt* without claiming the step is done.
+
+        The registry accepted our upload command, but propagation/verification
+        has not happened yet.  A resume must then only re-verify (never
+        re-upload).  The receipt lives inside the step ``result`` so schema=2
+        states from earlier runs stay readable (they simply lack ``accepted``).
+        """
+        entry = dict(self.entry(name))
+        entry.update(
+            {
+                "state": "accepted",
+                "done": bool(entry.get("done")),
+                "result": {
+                    **(entry.get("result") or {}),
+                    **identity,
+                    "accepted": True,
+                    "accepted_at": now(),
+                },
+                "updated_at": now(),
+            }
+        )
+        self.steps[name] = entry
+        self.save()
+
+    def accepted(self, name: str) -> bool:
+        """True when this step recorded an upload-accepted receipt."""
+        return bool(self.entry(name).get("result", {}).get("accepted"))
+
     def skip(self, name: str, message: str, **result) -> None:
         entry = dict(self.entry(name))
         entry.update(

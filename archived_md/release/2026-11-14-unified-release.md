@@ -41,6 +41,35 @@ flowchart LR
 
 **测试**：`test_unified_release.py` 新增内存流进度/心跳/耗时断言、0.5s 超时杀进程且心跳停止/无 secret/无存活线程、无 reporter 兼容、CLI stderr-only + 心跳可见、in-process CLI 超时记录 `prepare` 失败并保留 resume 状态、已完成批次 resume 不重放执行日志。
 
+## Registry 传播等待（2026-11-15 增量）
+
+**根因**：真实发布三次报错都源于「上传成功 ≠ 立刻可见」。PyPI 上传 15:22:34 完成，9 秒后 `min_cli` 查询报版本不存在，4 分钟后 `resume` 报工件缺失；随后实时 API 的 SHA256 与状态完全一致。项目级 JSON 响应带 `Cache-Control: max-age=900`。npm 15:39:05 上传后立即核验报 integrity 缺失/不一致，稍后 registry 返回的 integrity 与本地完全一致。主流程只在远端立即查询一次，把传播延迟误判为「没有」；还存在「上传已成功但确认未完成」的中断窗口，`resume` 可能再次上传。
+
+**设计**：新增叶子 `scripts/release/consistency.py`，用 **Strategy（策略）** 隔离「等多久/怎么等」，两个适配器只提供 registry 细节的 **Predicate**（判定暂不可见 vs 终态）：
+
+```mermaid
+flowchart LR
+  A[上传命令成功] --> B[持久化 accepted receipt]
+  B --> C[只读核验固定工件]
+  C -->|暂不可见/瞬态网络| W[进度+有界等待]
+  W --> C
+  C -->|精确一致且依赖可用| D[完成记录/下一个包/Release]
+  C -->|真实冲突/预算耗尽| E[停止并保留 resume]
+  R[resume 有 receipt 或 done] --> C
+```
+
+- KR1 端点：PyPI 查版本级 `/pypi/dragon-quant/<version>/json` 的 `urls`，带 `Accept`、`User-Agent`、`Cache-Control: no-cache`；**不声称** no-cache 绕过 CDN。`DQ_RELEASE_PYPI_URL` 覆盖继续可用（支持 `{version}` 占位，项目级 `releases` 形状兼容）；缺失字段/格式错硬失败，绝不当「不存在」。
+- KR2 等待：新鲜上传或 receipt/done 的 resume 遇到版本/工件暂不可见，按 15 秒间隔有界等待，默认总预算 960 秒（覆盖 900 秒缓存窗口）；`monotonic` deadline 先判后探测（预算耗尽不再发查询，`sleep` 不超过剩余预算），单次探测的 socket/子进程超时按剩余预算收紧（urllib 超时是逐 socket 操作级上限，不构成慢速分段响应的整请求硬截止）；`clock`/`sleep` 可注入，测试不真实等待；预算/间隔必须是有限正数——env 非法值（`inf`/`nan`/0/负数/非数字）回退默认，显式 `WaitPolicy` 直接拒绝；整个等待上下文（含首次查询）复用同一条 `ProgressReporter` 任务，立即输出开始行、等待与查询期间都有默认 10 秒心跳，成功/失败/中断都 stop/join，stderr 明确「等待PyPI/npm传播」、尝试次数、已耗时与剩余预算，stdout 仍只有最终 JSON；Ctrl-C 可中断。
+- KR3 分类：只重试暂不可见、integrity 暂缺、有限传输超时/连接错误/429/5xx；401/403、结构损坏、未知错误立即失败；网络失败绝不转为 404/可重新上传。已返回不同 hash/integrity 或额外不明工件立即失败，不用等待掩盖冲突。npm E404 与「已有版本但 integrity 暂缺」都是 pending；`remote_facts` 等既有读取接口语义不变。
+- KR4 receipt：上传命令成功返回后、任何远端核验前，把固定 version+工件身份写入该步骤 `result` 的 `accepted` receipt（不置 done，schema=2 历史状态无需迁移）。resume 见 receipt 或 done 只核验等待，绝不再调 `twine`/`npm publish`。命令成功到 receipt 落盘之间仍有不可避免的中断窗口（持续时间未经测量）：进程若在此崩溃，resume 回退到一次性对账，最坏是向 registry 再发一次上传并被拒绝（fail-closed），不保证 exactly-once。
+- KR5 全路径：`_upload_need`、`_reconcile_git_before_credentials`、上传步骤与完成批次路径都走同一等待/核验；done 语义保留，预算耗尽后失败可 `--resume`；既有 hash/staging/HEAD/remote/tag 身份校验不变。
+- KR6 min-cli：fresh 分支复用本轮已核验的 PyPI 版本工件证据（至少一个未 yanked 文件），避免刚确认 hash 后又命中旧项目缓存；已发布的不同最低 CLI 仍做真实可用性检查。
+- KR7 顺序与隔离：npm dist-tag 与 GitHub Release 只在工件核验通过后继续；dry-run 仍零 registry/零凭据、stdout JSON 纯净；token/密码/OTP 不进状态或日志。
+- KR8 文档：`README.md`、`docs/agent/development.md` 与本文同步；旧的「远端暂不可见立即退出、不重试」描述已按本文修正。
+
+**风险与验证**：预算耗尽只是可恢复失败（receipt 保留、不重复上传）；等待期间出现真实哈希冲突立即失败，不会被 960 秒等待掩盖。已知残余风险：urllib/子进程的 timeout 是单次 socket 操作与进程级上限，慢速分段响应或子进程内部长阻塞可能略超剩余预算，因此不宣称严格端到端硬截止（预算耗尽后仍不会额外发起查询）。验证：`test_release_propagation.py` 用本地 HTTP 服务器做真实只读传播模拟（404 → 部分 → 完整、503 重试、401/坏 JSON 终止、预算耗尽、Ctrl-C、npm E404/缺 integrity → 正确 integrity、hash/integrity 冲突立即失败、lag + receipt 的 resume 不再上传、dry-run 零请求），并覆盖等待进度任务的开始/心跳先于慢查询返回、失败/中断无残留线程、假 clock 的 deadline 精确边界、env 非法值与显式策略非有限/非正值拒绝；`test_unified_release.py` 断言 fresh min_cli 不再二次查询；既有 `test_release_publish.py` / `test_unified_release.py` 全绿。
+
+
 ## 需求、证据与取舍
 
 用户提出六项目标：主流程统一分支/Git/tag/GitHub Release；PyPI/npm 子流程仅构建上传；任意失败可 resume；交互选择包与版本并确认；双包先 PyPI 后 npm 并处理 min-cli；一次密码解密两个独立 token。
@@ -131,7 +160,7 @@ Release notes 由主流程固化：保留现有 PyPI CHANGELOG 对应段作为�
 | npm upload | 按精确 package/version 的 dist.integrity 或下载工件哈希对账；匹配即补记，不重复 publish；dist-tag 单独对账，只补本批次缺失设置、不覆盖外部新版本 |
 | GitHub Release | 查固定 repo/tag 已有 Release 与提交、正文身份；准确匹配补记，冲突拒绝，不重复创建 |
 
-不能仅靠 done 布尔实现跳过。每个有副作用步骤先落 intent/预期身份再执行，之后记结果；恢复先核实真实状态。网络错误不是不存在，明确404才可判断缺失；远端暂不可见时退出待恢复，不忙重试、不盲目上传。已完成上传在恢复时只读核对，不能再次调用上传。
+不能仅靠 done 布尔实现跳过。每个有副作用步骤先落 intent/预期身份再执行，之后记结果；恢复先核实真实状态。网络错误不是不存在，明确 404 才可判断缺失；真实上传或已接受上传的版本/工件暂不可见时按**有界传播等待**（见「Registry 传播等待」增量），既不盲目上传，也不把暂不可见当作缺失；预算耗尽后退出待恢复。已完成上传在恢复时只读核对，不能再次调用上传。
 
 ## 一次密码与密文准备
 

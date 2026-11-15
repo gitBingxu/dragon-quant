@@ -186,6 +186,7 @@ scripts/publish.sh --packages both --pypi-version 0.8.2 --npm-version 1.0.3 \
 - **运行进度**：预检、构建与上传会在 stderr 输出中文阶段、每 10 秒心跳和完成耗时；网络/构建/上传均有分级超时，失败后按提示使用 `--resume` 对账续跑。stdout 仍只保留最终结果。
 - **凭据**：PyPI / npm 各一份密文（`scripts/publish_token.enc`、`scripts/npm_token.enc`）共用同一密码；`scripts/encrypt_token.sh` 交互加密，凭据与密码不进入 argv；输入被中断时自动恢复终端回显。也可用 `TWINE_PASSWORD` / `NPM_TOKEN` 覆盖，2FA 用 `NPM_OTP`。
 - **恢复**：状态在 `.release/batches/<batch_id>/`（含持久 staging 与冻结工件），不靠 done 布尔；已记录成功的 commit/tag/push/上传/Release 若远端消失会 fail-closed，不会重复执行。仓库级活动指针写在 git common dir（跨 linked worktree、不受 `--status-dir` 影响）。
+- **传播等待**：PyPI 按版本级 `/pypi/dragon-quant/<version>/json` 的 `urls` 精确核验；上传命令成功后先落「已接受上传」receipt，再进入只读核验。新鲜上传或带 receipt/done 的 `--resume` 遇到版本/工件暂不可见时，按 15 秒间隔有界等待（默认 960 秒，覆盖 PyPI 900 秒缓存窗口），超时失败仍可 `--resume`；绝不因传播延迟重复上传，hash/integrity 不一致或出现额外工件立即失败。整个等待上下文（含首次查询）共用一条 stderr 进度任务：立即输出开始行、运行期每 10 秒心跳，成功/失败/中断都停止，stdout 仍只有最终 JSON；预算/间隔必须是有限正数，env 非法值回退默认、显式非法策略直接拒绝。查询超时是单次 socket/子进程级上限，不构成慢速分段响应的整请求硬截止。
 - **完成与预演**：已完成批次 `--resume` 只报告结果；失败的 `--dry-run` 可用 `--dry-run --resume` 继续，或直接再次预演（旧预演历史保留）。
 - **版本契约**：npm 与 Skill 版本相等；Python `pyproject` 与 `_version` 相等；`min-cli-version` 是**最低依赖**，不得高于本次构建验证的 CLI，不再要求等于仓库当前版本。
 

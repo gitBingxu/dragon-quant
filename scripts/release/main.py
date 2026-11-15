@@ -328,6 +328,8 @@ def print_resume_status(state: ReleaseState) -> None:
             continue
         if entry.get("done"):
             status = "已完成"
+        elif entry.get("state") == "accepted":
+            status = "上传已被接受，将对账等待传播"
         elif entry.get("state") == "skipped":
             status = "pending/skipped"
         elif entry.get("state") == "failed":

@@ -14,10 +14,12 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from release import consistency
 from release.common import (
     BUILD_TIMEOUT,
     REGISTRY_PROBE_TIMEOUT,
     UPLOAD_TIMEOUT,
+    ProgressReporter,
     ReleaseError,
     Runner,
     compare_versions,
@@ -287,35 +289,91 @@ def verify_local(staging: Path, expected: dict) -> Path:
 
 # ─── registry ─────────────────────────────────────────────────────────────
 
+# npm reports failures as text.  Only clearly transient transport / 429 / 5xx
+# codes are retried; auth and anything unknown fail immediately so a network
+# problem can never be read as "version does not exist".
+_TRANSIENT_MARKERS = (
+    "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND",
+    "ENETUNREACH", "socket hang up", "network request", "E429",
+    "E500", "E502", "E503", "E504", "503 Service", "502 Bad", "504 Gateway",
+)
+_AUTH_MARKERS = ("E401", "E403", "ENEEDAUTH", "401 Unauthorized",
+                 "403 Forbidden", "OTP", "EOTP")
 
-def remote_facts(version: str, runner: Runner,
-                 *, stage: str = "upload_npm") -> dict | None:
-    """Return remote ``dist`` facts or ``None`` when the version is absent."""
-    result = _npm(runner, ["view", f"{PACKAGE_NAME}@{version}", "dist", "--json",
-                           f"--registry={REGISTRY}"],
-                  stage=stage, offline=False, allow_failure=True,
-                  progress_label=f"查询 npm 版本 {PACKAGE_NAME}@{version}",
-                  timeout=REGISTRY_PROBE_TIMEOUT)
+
+def _classify_failure(stage: str, detail: str) -> None:
+    """Raise the right error for a failed ``npm view`` (never returns)."""
+    text = detail.lower()
+    if any(marker.lower() in text for marker in _AUTH_MARKERS):
+        raise ReleaseError(
+            stage,
+            "npm registry 鉴权失败（401/403 或 OTP）；请检查 NPM_TOKEN/NPM_OTP："
+            + detail.strip()[:400],
+        )
+    if any(marker.lower() in text for marker in _TRANSIENT_MARKERS):
+        raise consistency.PendingVisibility(
+            stage,
+            "npm registry 暂时无法访问（传输错误/429/5xx），将按传播等待重试："
+            + detail.strip()[:400],
+        )
+    raise ReleaseError(
+        stage,
+        "无法确认 npm registry 版本状态（网络失败不能当作版本不存在）："
+        + detail.strip()[:400],
+    )
+
+
+def _probe(version: str, runner: Runner, *, stage: str, timeout: float,
+           progress_label: str | None) -> dict:
+    """Classify the version as absent / incomplete / ok without writing."""
+    try:
+        result = _npm(runner, ["view", f"{PACKAGE_NAME}@{version}", "dist", "--json",
+                               f"--registry={REGISTRY}"],
+                      stage=stage, offline=False, allow_failure=True,
+                      progress_label=progress_label,
+                      timeout=max(min(timeout, REGISTRY_PROBE_TIMEOUT), 0.1))
+    except ReleaseError as exc:
+        # A killed ``npm view`` is a transport timeout, not a terminal answer.
+        if "命令超时" in str(exc):
+            raise consistency.PendingVisibility(stage, str(exc)) from exc
+        raise
     if result.returncode != 0:
         detail = f"{result.stderr or ''}{result.stdout or ''}"
         if "E404" in detail or "404 Not Found" in detail:
-            return None
-        raise ReleaseError(
-            stage,
-            "无法确认 npm registry 版本状态（网络失败不能当作版本不存在）："
-            + detail.strip()[:400],
-        )
+            return {"state": "absent"}
+        _classify_failure(stage, detail)
+        raise AssertionError("unreachable")  # pragma: no cover
     text = (result.stdout or "").strip()
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ReleaseError("upload_npm", f"无法解析 npm view dist 输出：{exc}") from exc
+        raise ReleaseError(stage, f"无法解析 npm view dist 输出：{exc}") from exc
     if isinstance(data, str):
         data = {"integrity": data}
-    if not isinstance(data, dict) or not data.get("integrity"):
+    if not isinstance(data, dict):
+        raise ReleaseError(stage, "npm view dist 输出结构异常；拒绝猜测")
+    if not data.get("integrity"):
+        # Version visible but its integrity has not replicated yet.
+        return {"state": "incomplete"}
+    return {"state": "ok", "facts": data}
+
+
+def remote_facts(version: str, runner: Runner,
+                 *, stage: str = "upload_npm") -> dict | None:
+    """Return remote ``dist`` facts or ``None`` when the version is absent.
+
+    A version that is visible without ``dist.integrity`` stays a hard failure
+    here (preflight cannot verify it); only :func:`reconcile` treats it as a
+    propagation state, so existing read-only consumers keep failing closed.
+    """
+    probe = _probe(version, runner, stage=stage, timeout=REGISTRY_PROBE_TIMEOUT,
+                   progress_label=f"查询 npm 版本 {PACKAGE_NAME}@{version}")
+    if probe["state"] == "absent":
+        return None
+    if probe["state"] == "incomplete":
         raise ReleaseError(
             "upload_npm", "远端版本缺少 dist.integrity；无法对账，请人工处理")
-    return data
+    return probe["facts"]
 
 
 def dist_tags(runner: Runner) -> dict:
@@ -338,17 +396,49 @@ def dist_tags(runner: Runner) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def reconcile(version: str, integrity: str, runner: Runner) -> bool:
-    """True when the exact version already exists with the same integrity."""
-    facts = remote_facts(version, runner)
-    if facts is None:
+def _judge(version: str, probe: dict, integrity: str, *, waitable: bool) -> bool:
+    state = probe["state"]
+    if state == "absent":
+        if waitable:
+            raise consistency.PendingVisibility(
+                "upload_npm", f"版本 {PACKAGE_NAME}@{version} 暂不可见")
         return False
-    if facts.get("integrity") != integrity:
+    if state == "incomplete":
+        if waitable:
+            raise consistency.PendingVisibility(
+                "upload_npm", f"版本 {PACKAGE_NAME}@{version} 已出现但 integrity 暂不可见")
+        raise ReleaseError(
+            "upload_npm", "远端版本缺少 dist.integrity；无法对账，请人工处理")
+    if probe["facts"].get("integrity") != integrity:
         raise ReleaseError(
             "upload_npm",
             f"远端已存在 {PACKAGE_NAME}@{version} 但 integrity 不一致，停止重传",
         )
     return True
+
+
+def reconcile(version: str, integrity: str, runner: Runner, *,
+              stage: str = "upload_npm", wait: bool = False,
+              policy: consistency.WaitPolicy | None = None,
+              progress: ProgressReporter | None = None) -> bool:
+    """True when the exact version exists with the same integrity.
+
+    ``wait=True`` is the resume/post-upload path: "absent" and "visible without
+    integrity" are propagation states and are re-probed within the budget, so a
+    recorded upload is never repeated.  A different integrity fails at once.
+    """
+    if wait:
+        def probe(remaining: float) -> bool:
+            result = _probe(version, runner, stage=stage, timeout=remaining,
+                            progress_label=None)
+            return _judge(version, result, integrity, waitable=True)
+
+        return consistency.wait_for_settled(
+            probe, stage=stage, subject=f"npm {PACKAGE_NAME}@{version} 工件",
+            policy=policy, progress=progress)
+    result = _probe(version, runner, stage=stage, timeout=REGISTRY_PROBE_TIMEOUT,
+                    progress_label=f"对账 npm 版本 {PACKAGE_NAME}@{version}")
+    return _judge(version, result, integrity, waitable=False)
 
 
 def _auth_scratch(runner: Runner, token: str):

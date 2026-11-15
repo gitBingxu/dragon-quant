@@ -526,9 +526,17 @@ def _entry_env(fixture: ReleaseFixture, monkeypatch) -> None:
     monkeypatch.setenv("DQ_RELEASE_PYTHON", str(fixture.fake_python))
     monkeypatch.setenv("PATH", f"{fixture.bin}:{os.environ['PATH']}")
     monkeypatch.setenv("HOME", str(fixture.tmp / "home"))
+    monkeypatch.setenv("TMPDIR", str(fixture.tmp / "tmpdir"))
     monkeypatch.setenv("DQ_RELEASE_PYPI_URL", fixture.pypi_json_path.as_uri())
     monkeypatch.setenv("FAKE_PY_LOG", str(fixture.py_log))
     monkeypatch.setenv("FAKE_PY_UPDATE_PYPI", "1")
+    monkeypatch.setenv("FAKE_NPM_STATE", str(fixture.npm_state))
+    monkeypatch.setenv("FAKE_GH_STATE", str(fixture.gh_state))
+    monkeypatch.setenv("FAKE_GH_LOG", str(fixture.gh_log))
+    monkeypatch.setenv("DQ_RELEASE_PROPAGATION_BUDGET", "1.0")
+    monkeypatch.setenv("DQ_RELEASE_PROPAGATION_INTERVAL", "0.05")
+    (fixture.tmp / "home").mkdir(exist_ok=True)
+    (fixture.tmp / "tmpdir").mkdir(exist_ok=True)
 
 
 def test_resume_confirmation_defaults_to_no_and_eof_cancels(
@@ -672,6 +680,30 @@ def test_all_yanked_min_cli_blocks_npm_upload(tmp_path):
     assert "不在 PyPI" in result.stderr
     assert not any(call[:1] == ["publish"] for call in fixture.npm_calls())
     assert fixture.git("tag", "--list").stdout.strip() == ""
+
+
+def test_fresh_min_cli_reuses_verified_artifact_evidence(tmp_path, monkeypatch):
+    """A just-verified PyPI version must not be re-read through the old cache."""
+    fixture = ReleaseFixture(tmp_path)
+    from release import main as entry, publish_pypi
+
+    _entry_env(fixture, monkeypatch)
+    monkeypatch.setenv("TWINE_PASSWORD", "pypi-secret")
+    monkeypatch.setenv("NPM_TOKEN", "npm-secret")
+    calls: list[str] = []
+
+    def _should_not_query(version, *args, **kwargs):
+        calls.append(version)
+        raise AssertionError(
+            "fresh min-cli must reuse this run's verified artifact evidence")
+
+    monkeypatch.setattr(publish_pypi, "version_exists", _should_not_query)
+    rc = entry.main(["--packages", "both", "--pypi-version", "1.2.3",
+                     "--npm-version", "1.0.3", "--min-cli-version", "1.2.3",
+                     "--yes", "--repo-root", str(fixture.repo)])
+    assert rc == 0, calls
+    assert calls == []
+    assert fixture.state()["steps"]["upload_pypi"]["result"]["installable"] is True
 
 
 # ─── rework: dist-tag downgrade guard before publish (M8) ─────────────────

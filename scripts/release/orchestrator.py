@@ -27,7 +27,7 @@ import shutil
 from contextlib import contextmanager
 from pathlib import Path
 
-from release import credentials, git_ops, publish_npm, publish_pypi
+from release import consistency, credentials, git_ops, publish_npm, publish_pypi
 from release.common import (
     ProgressReporter,
     ReleaseError,
@@ -622,10 +622,11 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
 
         # ── upload need + credentials (before any Git write) ─────────────
         if resume:
+            current = "credentials"
             _reconcile_git_before_credentials(repo, runner, state)
         current = "credentials"
         with _step(state, "credentials"):
-            need = _upload_need(plan, state.data["artifacts"], runner)
+            need = _upload_need(plan, state.data["artifacts"], runner, state)
             tokens: dict[str, str] = {}
             creds = credentials.Credentials(repo, runner)
             if "pypi" in need:
@@ -741,27 +742,35 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
             current = "upload_pypi"
             with _step(state, "upload_pypi", version=plan["pypi_version"]):
                 expected = state.data["artifacts"]["pypi"]
-                missing = publish_pypi.reconcile(
-                    plan["pypi_version"], expected, progress=runner.progress)
-                if state.done("upload_pypi") and missing:
-                    raise ReleaseError(
-                        "upload_pypi",
-                        f"状态记录上传已完成，但远端缺少工件：{missing}；拒绝重传")
-                if missing:
-                    token = tokens.get("pypi") or creds.pypi_token()
-                    paths = [Path(staging) / "dist" / name for name in missing]
-                    publish_pypi.upload(paths, python, runner, token)
-                    remaining = publish_pypi.reconcile(
+                recorded = (state.done("upload_pypi")
+                            or state.accepted("upload_pypi"))
+                uploaded = state.result("upload_pypi").get("uploaded")
+                missing: list[str] = []
+                if recorded:
+                    # A recorded success (or accepted receipt) is final: wait for
+                    # propagation and verify, never call twine again.
+                    verified = _settle_pypi(
+                        plan["pypi_version"], expected, runner, recorded=True)
+                else:
+                    missing = publish_pypi.reconcile(
                         plan["pypi_version"], expected, progress=runner.progress)
-                    if remaining:
-                        raise ReleaseError(
-                            "upload_pypi",
-                            f"上传后核验仍有缺失：{remaining}；请人工核对")
+                    if missing:
+                        token = tokens.get("pypi") or creds.pypi_token()
+                        paths = [Path(staging) / "dist" / name for name in missing]
+                        publish_pypi.upload(paths, python, runner, token)
+                        # KR4: persist an upload-accepted receipt *before* any
+                        # remote verification, so a resume verifies rather than
+                        # uploads again during the propagation window.
+                        state.accept("upload_pypi", version=plan["pypi_version"],
+                                     artifacts=expected)
+                    verified = _settle_pypi(
+                        plan["pypi_version"], expected, runner,
+                        recorded=bool(missing))
                 state.finish(
                     "upload_pypi",
-                    uploaded=sorted(set(state.result("upload_pypi").get("uploaded")
-                                        or []) | set(missing)),
-                    version=plan["pypi_version"])
+                    uploaded=sorted(set(uploaded or []) | set(missing)),
+                    version=plan["pypi_version"],
+                    installable=bool(verified["installable"]))
 
         if "npm" in packages:
             current = "min_cli"
@@ -776,15 +785,30 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
                 elif fresh:
                     # Preflight only validated the plan/build version; confirm
                     # the resulting PyPI upload actually landed before npm.
-                    if not state.done("upload_pypi"):
+                    if not (state.done("upload_pypi")
+                            or state.accepted("upload_pypi")):
                         raise ReleaseError(
                             "min_cli",
                             "最低 CLI 为本批次 PyPI 目标，但 PyPI 上传尚未成功；停止 npm 上传")
-                    if not publish_pypi.version_exists(
-                            min_cli, stage="min_cli", progress=runner.progress):
+                    evidence = state.result("upload_pypi").get("installable")
+                    if evidence is None:
+                        # Historical/older state has no recorded evidence: run a
+                        # real availability check instead of trusting a boolean.
+                        if not publish_pypi.version_exists(
+                                min_cli, stage="min_cli",
+                                progress=runner.progress):
+                            raise ReleaseError(
+                                "min_cli",
+                                f"最低 CLI 版本 {min_cli} 上传后仍不在 PyPI；"
+                                "停止 npm 上传")
+                    elif not evidence:
+                        # This run verified the exact artifacts: reuse that
+                        # evidence instead of re-reading the project cache, but
+                        # a fully yanked version is still not installable.
                         raise ReleaseError(
                             "min_cli",
-                            f"最低 CLI 版本 {min_cli} 上传后仍不在 PyPI；停止 npm 上传")
+                            f"本轮上传的最低 CLI 版本 {min_cli} 没有未撤回工件；"
+                            "停止 npm 上传")
                 elif not publish_pypi.version_exists(
                         min_cli, stage="min_cli", progress=runner.progress):
                     raise ReleaseError(
@@ -797,28 +821,34 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
             with _step(state, "upload_npm", version=plan["npm_version"]):
                 npm_artifact = state.data["artifacts"]["npm"]
                 tarball = Path(staging) / "npm-dist" / npm_artifact["filename"]
-                present = publish_npm.reconcile(
-                    plan["npm_version"], npm_artifact["integrity"], runner)
-                if state.done("upload_npm") and not present:
-                    raise ReleaseError(
-                        "upload_npm",
-                        "状态记录 npm 上传已完成，但远端版本缺失；拒绝重传")
+                integrity = npm_artifact["integrity"]
+                recorded = (state.done("upload_npm")
+                            or state.accepted("upload_npm"))
                 uploaded = bool(state.result("upload_npm").get("uploaded"))
-                if not present:
-                    # npm publish reassigns the dist-tag itself: guard before
-                    # the irreversible upload, not after.
-                    publish_npm.guard_dist_tag(
-                        plan["npm_version"], plan["npm_tag"], runner)
-                    token = tokens.get("npm") or creds.npm_token()
-                    otp = runner.env_for().get("NPM_OTP") or None
-                    publish_npm.upload(
-                        tarball, runner, token, plan["npm_tag"],
-                        plan["npm_access"], otp)
-                    if not publish_npm.reconcile(
-                            plan["npm_version"], npm_artifact["integrity"], runner):
-                        raise ReleaseError(
-                            "upload_npm", "上传后核验失败：远端 integrity 不一致或缺失")
-                    uploaded = True
+                if recorded:
+                    # Never publish again: wait for the read replica and verify
+                    # the exact integrity, then repair only the dist-tag.
+                    _settle_npm(plan["npm_version"], integrity, runner,
+                                recorded=True)
+                else:
+                    present = publish_npm.reconcile(
+                        plan["npm_version"], integrity, runner)
+                    if not present:
+                        # npm publish reassigns the dist-tag itself: guard before
+                        # the irreversible upload, not after.
+                        publish_npm.guard_dist_tag(
+                            plan["npm_version"], plan["npm_tag"], runner)
+                        token = tokens.get("npm") or creds.npm_token()
+                        otp = runner.env_for().get("NPM_OTP") or None
+                        publish_npm.upload(
+                            tarball, runner, token, plan["npm_tag"],
+                            plan["npm_access"], otp)
+                        # KR4: receipt before verification; resume only re-reads.
+                        state.accept("upload_npm", version=plan["npm_version"],
+                                     integrity=integrity)
+                        _settle_npm(plan["npm_version"], integrity, runner,
+                                    recorded=True)
+                        uploaded = True
                 tagged = publish_npm.ensure_dist_tag(
                     plan["npm_version"], plan["npm_tag"], runner,
                     lambda: tokens.get("npm") or creds.npm_token(),
@@ -1025,25 +1055,19 @@ def _reconcile_git_before_credentials(repo: Path, runner: Runner,
             raise ReleaseError(
                 "push", "状态记录推送已完成，但远端引用与记录不一致；拒绝改写")
     # A recorded successful upload is a fact: if the remote copy is gone, stop
-    # before prompting for credentials instead of uploading it again.
+    # before prompting for credentials instead of uploading it again.  A short
+    # propagation delay is waited out instead of being misread as "gone".
     artifacts = state.data.get("artifacts") or {}
     packages = (state.data.get("plan") or {}).get("packages") or []
-    if "pypi" in packages and state.done("upload_pypi"):
-        missing = publish_pypi.reconcile(
-            state.data["plan"]["pypi_version"], artifacts.get("pypi") or {},
-            progress=runner.progress)
-        if missing:
-            raise ReleaseError(
-                "upload_pypi",
-                f"状态记录上传已完成，但远端缺少工件：{missing}；拒绝重传")
-    if "npm" in packages and state.done("upload_npm"):
+    if "pypi" in packages and (state.done("upload_pypi")
+                               or state.accepted("upload_pypi")):
+        _settle_pypi(state.data["plan"]["pypi_version"],
+                     artifacts.get("pypi") or {}, runner, recorded=True)
+    if "npm" in packages and (state.done("upload_npm")
+                              or state.accepted("upload_npm")):
         npm_artifact = artifacts.get("npm") or {}
-        if not publish_npm.reconcile(
-                state.data["plan"]["npm_version"],
-                npm_artifact.get("integrity", ""), runner):
-            raise ReleaseError(
-                "upload_npm",
-                "状态记录 npm 上传已完成，但远端版本缺失；拒绝重传")
+        _settle_npm(state.data["plan"]["npm_version"],
+                    npm_artifact.get("integrity", ""), runner, recorded=True)
 
 
 def release_paths(packages: list[str]) -> list[str]:
@@ -1137,16 +1161,52 @@ def _verify_local(staging: Path, state: ReleaseState, packages: list[str],
         )
 
 
-def _upload_need(plan: dict, artifacts: dict, runner: Runner) -> set[str]:
+def _settle_pypi(version: str, expected: dict[str, str], runner: Runner, *,
+                 recorded: bool) -> dict:
+    """Bounded propagation wait for PyPI artifacts (read-only)."""
+    try:
+        return publish_pypi.settle(version, expected, progress=runner.progress)
+    except consistency.PropagationExhausted as exc:
+        if recorded:
+            raise ReleaseError(
+                "upload_pypi",
+                f"状态记录上传已完成，但{exc}；拒绝重传") from exc
+        raise
+
+
+def _settle_npm(version: str, integrity: str, runner: Runner, *,
+                recorded: bool) -> bool:
+    """Bounded propagation wait for npm artifacts (read-only)."""
+    try:
+        return publish_npm.reconcile(version, integrity, runner, wait=True,
+                                     progress=runner.progress)
+    except consistency.PropagationExhausted as exc:
+        if recorded:
+            raise ReleaseError(
+                "upload_npm",
+                f"状态记录 npm 上传已完成，但{exc}；拒绝重传") from exc
+        raise
+
+
+def _upload_need(plan: dict, artifacts: dict, runner: Runner,
+                 state: ReleaseState) -> set[str]:
     need: set[str] = set()
     if "pypi" in plan["packages"]:
-        if publish_pypi.reconcile(
+        if state.done("upload_pypi") or state.accepted("upload_pypi"):
+            # Resume: wait and verify; never request a token for, or repeat, an
+            # upload the registry already accepted.
+            _settle_pypi(plan["pypi_version"], artifacts["pypi"], runner,
+                         recorded=True)
+        elif publish_pypi.reconcile(
                 plan["pypi_version"], artifacts["pypi"],
                 progress=runner.progress):
             need.add("pypi")
     if "npm" in plan["packages"]:
         npm_artifact = artifacts["npm"]
-        if not publish_npm.reconcile(
+        if state.done("upload_npm") or state.accepted("upload_npm"):
+            _settle_npm(plan["npm_version"], npm_artifact["integrity"], runner,
+                        recorded=True)
+        elif not publish_npm.reconcile(
                 plan["npm_version"], npm_artifact["integrity"], runner):
             need.add("npm")
     return need

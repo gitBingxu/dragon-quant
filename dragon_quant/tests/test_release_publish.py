@@ -79,10 +79,13 @@ if args[:2] == ["-m", "build"]:
 
 if args[:3] == ["-m", "twine", "upload"]:
     url = os.environ.get("DQ_RELEASE_PYPI_URL", "")
-    if url.startswith("file:") and os.environ.get("FAKE_PY_UPDATE_PYPI") == "1":
+    target = os.environ.get("FAKE_PY_PYPI_PATH")
+    if not target and url.startswith("file:"):
         from urllib.parse import urlparse
         from urllib.request import url2pathname
-        path = Path(url2pathname(urlparse(url).path))
+        target = url2pathname(urlparse(url).path)
+    if target and os.environ.get("FAKE_PY_UPDATE_PYPI") == "1":
+        path = Path(target)
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"releases": {}}
         for item in args[3:]:
             artifact = Path(item)
@@ -92,6 +95,10 @@ if args[:3] == ["-m", "twine", "upload"]:
             data.setdefault("releases", {}).setdefault(version, []).append(
                 {"filename": artifact.name, "digests": {"sha256": digest}})
         path.write_text(json.dumps(data), encoding="utf-8")
+        # Optional lag simulation: the "CDN" serves 404 for this many reads.
+        lag_path = os.environ.get("FAKE_PY_LAG_PATH")
+        if lag_path:
+            Path(lag_path).write_text(os.environ.get("FAKE_PY_LAG", "0"), encoding="utf-8")
     raise SystemExit(0)
 
 raise SystemExit(0)
@@ -195,6 +202,14 @@ if args[:1] == ["view"]:
     if field == "dist-tags":
         print(json.dumps(state.get("dist_tags", {})))
         raise SystemExit(0)
+    # Optional lag simulation: the read replica keeps returning E404 for the
+    # first N reads after a publish.
+    lag = state.get("lag", {}).get(version, 0)
+    if lag:
+        state.setdefault("lag", {})[version] = lag - 1
+        save()
+        print("npm error code E404", file=sys.stderr)
+        raise SystemExit(1)
     facts = state.get("published", {}).get(version)
     if not facts:
         print("npm error code E404", file=sys.stderr)
@@ -222,6 +237,7 @@ if args[:1] == ["publish"]:
         if arg.startswith("--tag="):
             tag = arg.split("=", 1)[1]
     state.setdefault("dist_tags", {})[tag] = version
+    state.setdefault("lag", {})[version] = int(os.environ.get("FAKE_NPM_LAG", "0"))
     save()
     raise SystemExit(0)
 
@@ -372,6 +388,10 @@ class ReleaseFixture:
             "FAKE_GH_LOG": str(self.gh_log),
             "FAKE_GH_STATE": str(self.gh_state),
             "HOME": str(self.tmp / "home"),
+            # Keep propagation waits short by default: a test that deliberately
+            # exercises lag overrides these in ``extra``.
+            "DQ_RELEASE_PROPAGATION_BUDGET": "1.0",
+            "DQ_RELEASE_PROPAGATION_INTERVAL": "0.05",
         }
         (self.tmp / "home").mkdir(exist_ok=True)
         (self.tmp / "tmpdir").mkdir(exist_ok=True)

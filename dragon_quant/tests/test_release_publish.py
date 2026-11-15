@@ -1,8 +1,10 @@
-"""Release-flow safety tests (fake commands, no network, no real publishing).
+"""Unified release-flow safety tests (fake commands, no network, no real publishing).
 
-Covers KR1: version injection rejection, dry-run isolation, ordering (build and
-check before any git mutation), exact release files, atomic push without
-fallback, credential handling, artifact identity and resume.
+Covers the residual PyPI-flow safety contract after the unified entry replaced
+``publish_pypi.py``'s own orchestration: version injection rejection, dry-run
+isolation, build-before-git ordering, exact release files, atomic push without
+fallback, credential handling, artifact identity, resume reconciliation and
+state tamper rejection.
 """
 
 from __future__ import annotations
@@ -12,14 +14,12 @@ import os
 import stat
 import subprocess
 import sys
-import tarfile
-import zipfile
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-HELPER = REPO / "scripts" / "release" / "publish_pypi.py"
+ENTRY = REPO / "scripts" / "release" / "main.py"
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -28,20 +28,36 @@ def _write_executable(path: Path, body: str) -> None:
 
 
 FAKE_PYTHON = r"""#!/usr/bin/env python3
-import json, os, sys, tarfile, zipfile
+import hashlib, io, json, os, re, sys, tarfile, zipfile
 from pathlib import Path
 
+args = sys.argv[1:]
+order = os.environ.get("FAKE_ORDER_LOG")
+if order:
+    with open(order, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"tool": "py", "argv": args}) + "\n")
 log = os.environ.get("FAKE_PY_LOG")
 if log:
     with open(log, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"argv": sys.argv[1:], "env_password": os.environ.get("TWINE_PASSWORD")}) + "\n")
-if os.environ.get("FAKE_PY_FAIL_TEST") and sys.argv[1:3] == ["-m", "pytest"]:
-    print("test gate failed", file=sys.stderr)
-    raise SystemExit(1)
-if os.environ.get("FAKE_PY_FAIL_BUILD") and sys.argv[1:3] == ["-m", "build"]:
-    print("boom", file=sys.stderr)
-    raise SystemExit(1)
-if sys.argv[1:3] == ["-m", "build"]:
+        fh.write(json.dumps({
+            "argv": args,
+            "env_password": os.environ.get("TWINE_PASSWORD"),
+            "env_publish_password": os.environ.get("DQ_PUBLISH_PASSWORD"),
+            "env_npm_token": os.environ.get("NPM_TOKEN"),
+        }) + "\n")
+
+
+def _fail(env, prefix):
+    if os.environ.get(env) and args[:len(prefix)] == list(prefix):
+        print("boom", file=sys.stderr)
+        raise SystemExit(1)
+
+
+_fail("FAKE_PY_FAIL_TEST", ["-m", "pytest"])
+_fail("FAKE_PY_FAIL_BUILD", ["-m", "build"])
+_fail("FAKE_PY_FAIL_TWINE", ["-m", "twine", "upload"])
+
+if args[:2] == ["-m", "build"]:
     version = "0.0.0"
     for line in Path("pyproject.toml").read_text(encoding="utf-8").splitlines():
         if line.startswith("version = "):
@@ -50,36 +66,218 @@ if sys.argv[1:3] == ["-m", "build"]:
     wheel = dist / f"dragon_quant-{version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as zf:
         zf.writestr("dragon_quant/__init__.py", "")
-        zf.writestr(f"dragon_quant-{version}.dist-info/METADATA", "Name: dragon-quant\n")
         zf.writestr("web_ui/dist/index.html", "<!doctype html>")
     sdist = dist / f"dragon_quant-{version}.tar.gz"
     with tarfile.open(sdist, "w:gz") as tf:
-        for name, text in (("dragon_quant-0/PKG-INFO", "x"),):
-            data = text.encode()
-            info = tarfile.TarInfo(name); info.size = len(data)
-            import io; tf.addfile(info, io.BytesIO(data))
+        data = b"x"; info = tarfile.TarInfo("dragon_quant-0/PKG-INFO"); info.size = 1
+        tf.addfile(info, io.BytesIO(data))
+    raise SystemExit(0)
+
+if args[:3] == ["-m", "twine", "upload"]:
+    url = os.environ.get("DQ_RELEASE_PYPI_URL", "")
+    if url.startswith("file:") and os.environ.get("FAKE_PY_UPDATE_PYPI") == "1":
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
+        path = Path(url2pathname(urlparse(url).path))
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"releases": {}}
+        for item in args[3:]:
+            artifact = Path(item)
+            match = re.match(r"dragon_quant-([0-9]+\.[0-9]+\.[0-9]+)", artifact.name)
+            version = match.group(1) if match else artifact.name.split("-")[1]
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            data.setdefault("releases", {}).setdefault(version, []).append(
+                {"filename": artifact.name, "digests": {"sha256": digest}})
+        path.write_text(json.dumps(data), encoding="utf-8")
+    raise SystemExit(0)
+
 raise SystemExit(0)
 """
 
-FAKE_NPM = r"""#!/bin/sh
-set -eu
-if [ -n "${FAKE_NPM_LOG:-}" ]; then
-  printf '%s\n' "$@" >> "$FAKE_NPM_LOG"
-fi
-case "$1" in
-  --prefix)
-    mkdir -p web_ui/dist
-    printf '<!doctype html>\n' > web_ui/dist/index.html
-    ;;
-esac
-exit 0
+FAKE_NPM = r"""#!/usr/bin/env python3
+import base64, hashlib, json, os, re, sys
+from pathlib import Path
+
+args = sys.argv[1:]
+order = os.environ.get("FAKE_ORDER_LOG")
+if order:
+    with open(order, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"tool": "npm", "argv": args}) + "\n")
+log = os.environ.get("FAKE_NPM_LOG")
+if log:
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(args) + "\n")
+env_log = os.environ.get("FAKE_NPM_ENV_LOG")
+if env_log:
+    with open(env_log, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "argv": args,
+            "otp": os.environ.get("npm_config_otp"),
+            "npm_otp": os.environ.get("NPM_OTP"),
+            "password": os.environ.get("DQ_PUBLISH_PASSWORD"),
+        }) + "\n")
+
+state_path = os.environ.get("FAKE_NPM_STATE")
+state = {"published": {}, "dist_tags": {}}
+if state_path and Path(state_path).exists():
+    state = json.loads(Path(state_path).read_text(encoding="utf-8"))
+
+
+def save():
+    if state_path:
+        Path(state_path).write_text(json.dumps(state), encoding="utf-8")
+
+
+for arg in args:
+    if arg.startswith("--userconfig=") and os.environ.get("FAKE_NPM_CONFIG_COPY"):
+        cfg = Path(arg.split("=", 1)[1])
+        Path(os.environ["FAKE_NPM_CONFIG_COPY"]).write_text(cfg.read_text(), encoding="utf-8")
+
+if "--prefix" in args and "run" in args and "build" in args:
+    Path("web_ui/dist").mkdir(parents=True, exist_ok=True)
+    Path("web_ui/dist/index.html").write_text("<!doctype html>", encoding="utf-8")
+    raise SystemExit(0)
+
+if args[:1] == ["test"]:
+    raise SystemExit(1 if os.environ.get("FAKE_NPM_FAIL_TEST") else 0)
+
+if args[:1] == ["pack"]:
+    staging = args[1]
+    if "--dry-run" in args:
+        # Real npm returns a one-element list with a nested files array.
+        version = json.loads(
+            Path(staging, "package.json").read_text(encoding="utf-8"))["version"]
+        print(json.dumps([{
+            "id": f"dragon-quant-skills@{version}",
+            "name": "dragon-quant-skills",
+            "version": version,
+            "size": 1,
+            "unpackedSize": 5,
+            "filename": f"dragon-quant-skills-{version}.tgz",
+            "files": [
+                {"path": "bin/dragon-quant-skills.mjs", "size": 1, "mode": 493},
+                {"path": "lib/cli.mjs", "size": 1, "mode": 420},
+                {"path": "skills/dragon-quant/SKILL.md", "size": 1, "mode": 420},
+                {"path": "README.md", "size": 1, "mode": 420},
+                {"path": "LICENSE", "size": 1, "mode": 420},
+            ],
+            "entryCount": 5,
+            "bundled": [],
+        }]))
+        raise SystemExit(0)
+    dest = "."
+    for index, arg in enumerate(args):
+        if arg == "--pack-destination":
+            dest = args[index + 1]
+    version = json.loads(Path(staging, "package.json").read_text(encoding="utf-8"))["version"]
+    target = Path(dest); target.mkdir(parents=True, exist_ok=True)
+    name = f"dragon-quant-skills-{version}.tgz"
+    (target / name).write_bytes(f"tarball-{version}".encode())
+    print(name)
+    raise SystemExit(0)
+
+if args[:1] == ["install"]:
+    prefix = "."
+    for index, arg in enumerate(args):
+        if arg == "--prefix":
+            prefix = args[index + 1]
+    entry = Path(prefix) / "node_modules" / "dragon-quant-skills" / "bin"
+    entry.mkdir(parents=True, exist_ok=True)
+    (entry / "dragon-quant-skills.mjs").write_text("", encoding="utf-8")
+    raise SystemExit(0)
+
+if args[:1] == ["view"]:
+    field = args[2]
+    package, _, version = args[1].partition("@")
+    if field == "dist-tags":
+        print(json.dumps(state.get("dist_tags", {})))
+        raise SystemExit(0)
+    facts = state.get("published", {}).get(version)
+    if not facts:
+        print("npm error code E404", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(facts))
+    raise SystemExit(0)
+
+if args[:1] == ["publish"]:
+    if os.environ.get("FAKE_NPM_SLEEP_PUBLISH"):
+        import time
+        Path(os.environ["FAKE_NPM_SLEEP_MARKER"]).write_text("publishing")
+        time.sleep(2)
+    if os.environ.get("FAKE_NPM_FAIL_PUBLISH"):
+        print("publish failed", file=sys.stderr)
+        raise SystemExit(1)
+    tarball = Path(args[1])
+    match = re.match(r"dragon-quant-skills-(.+)\.tgz", tarball.name)
+    version = match.group(1)
+    integrity = "sha512-" + base64.b64encode(
+        hashlib.sha512(tarball.read_bytes()).digest()).decode()
+    state.setdefault("published", {})[version] = {
+        "integrity": integrity, "tarball": str(tarball)}
+    tag = "latest"
+    for arg in args:
+        if arg.startswith("--tag="):
+            tag = arg.split("=", 1)[1]
+    state.setdefault("dist_tags", {})[tag] = version
+    save()
+    raise SystemExit(0)
+
+if args[:2] == ["dist-tag", "add"]:
+    version = args[2].split("@")[-1]
+    tag = args[3]
+    state.setdefault("dist_tags", {})[tag] = version
+    save()
+    raise SystemExit(0)
+
+raise SystemExit(0)
+"""
+
+FAKE_GH = r"""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if os.environ.get("FAKE_GH_LOG"):
+    with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(args) + "\n")
+state_path = os.environ.get("FAKE_GH_STATE")
+state = {"releases": {}}
+if state_path and Path(state_path).exists():
+    state = json.loads(Path(state_path).read_text(encoding="utf-8"))
+
+if args[:2] == ["release", "view"]:
+    if os.environ.get("FAKE_GH_FAIL_VIEW"):
+        print("dial tcp: network unreachable", file=sys.stderr)
+        raise SystemExit(1)
+    tag = args[2]
+    release = state.get("releases", {}).get(tag)
+    if not release:
+        print("release not found", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps({"tagName": tag, "isDraft": False, "body": release["body"]}))
+    raise SystemExit(0)
+
+if args[:2] == ["release", "create"]:
+    tag = args[2]
+    notes = ""
+    for index, arg in enumerate(args):
+        if arg == "--notes-file":
+            notes = Path(args[index + 1]).read_text(encoding="utf-8")
+    state.setdefault("releases", {})[tag] = {
+        "body": notes, "verify_tag": "--verify-tag" in args}
+    if state_path:
+        Path(state_path).write_text(json.dumps(state), encoding="utf-8")
+    raise SystemExit(0)
+
+raise SystemExit(0)
 """
 
 
 class ReleaseFixture:
-    def __init__(self, tmp_path: Path, version: str = "1.2.3"):
+    def __init__(self, tmp_path: Path, *, pypi_current: str = "0.0.1",
+                 npm_current: str = "1.0.0"):
         self.tmp = tmp_path
-        self.version = version
+        self.pypi_current = pypi_current
+        self.npm_current = npm_current
         self.repo = tmp_path / "repo"
         self.repo.mkdir()
         self.bin = tmp_path / "bin"
@@ -89,29 +287,41 @@ class ReleaseFixture:
         self.fake_python = self.bin / "fake-python"
         _write_executable(self.fake_python, FAKE_PYTHON)
         _write_executable(self.bin / "npm", FAKE_NPM)
+        _write_executable(self.bin / "gh", FAKE_GH)
         self.py_log = self.logs / "python.jsonl"
         self.npm_log = self.logs / "npm.log"
         self.gh_log = self.logs / "gh.log"
-        _write_executable(self.bin / "gh", f"""#!/bin/sh
-printf '%s\\n' "$@" >> "{self.gh_log}"
-exit 0
-""")
+        self.npm_state = self.logs / "npm-state.json"
+        self.gh_state = self.logs / "gh-state.json"
+        self.pypi_json_path = tmp_path / "pypi.json"
+        self.pypi_json_path.write_text(json.dumps({"releases": {}}), encoding="utf-8")
         self._init_repo()
 
     def _init_repo(self):
         (self.repo / "pyproject.toml").write_text(
-            '[project]\nname = "dragon-quant"\nversion = "0.0.1"\n', encoding="utf-8")
+            f'[project]\nname = "dragon-quant"\nversion = "{self.pypi_current}"\n',
+            encoding="utf-8")
         (self.repo / "dragon_quant").mkdir()
         (self.repo / "dragon_quant" / "_version.py").write_text(
-            '__version__ = "0.0.1"\n', encoding="utf-8")
-        (self.repo / "CHANGELOG.md").write_text(
-            f"# Changelog\n\n## [{self.version}]\n\n### Added\n- research facade\n\n## [0.0.1]\n- old\n",
+            f'__version__ = "{self.pypi_current}"\n', encoding="utf-8")
+        (self.repo / "package.json").write_text(json.dumps({
+            "name": "dragon-quant-skills", "version": self.npm_current,
+        }, indent=2) + "\n", encoding="utf-8")
+        (self.repo / "skills" / "dragon-quant").mkdir(parents=True)
+        (self.repo / "skills" / "dragon-quant" / "SKILL.md").write_text(
+            "---\nname: dragon-quant\nlicense: MIT\nmetadata:\n"
+            f'  skill-version: "{self.npm_current}"\n'
+            f'  min-cli-version: "{self.pypi_current}"\n---\n\n# skill\n',
             encoding="utf-8")
+        (self.repo / "CHANGELOG.md").write_text(
+            "# Changelog\n\n## [1.2.3]\n\n### Added\n- unified release\n\n"
+            f"## [{self.pypi_current}]\n- old\n", encoding="utf-8")
         frontend = self.repo / "web_ui" / "frontend"
         (frontend / "node_modules").mkdir(parents=True)
         (frontend / "node_modules" / ".keep").write_text("", encoding="utf-8")
         (self.repo / "web_ui" / "dist").mkdir(parents=True)
-        (self.repo / "web_ui" / "dist" / "index.html").write_text("old", encoding="utf-8")
+        (self.repo / "web_ui" / "dist" / "index.html").write_text(
+            "old", encoding="utf-8")
         self.git("init", "-q", "-b", "release/test")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Test")
@@ -126,58 +336,120 @@ exit 0
         return subprocess.run(["git", "-C", str(self.repo), *args], text=True,
                               capture_output=True, check=check)
 
-    def pypi_json(self, existing: bool) -> str:
-        path = self.tmp / "pypi.json"
-        releases = {self.version: []} if existing else {}
-        path.write_text(json.dumps({"releases": releases}), encoding="utf-8")
-        return path.as_uri()
+    def set_pypi_releases(self, releases: dict) -> None:
+        self.pypi_json_path.write_text(json.dumps({"releases": releases}),
+                                       encoding="utf-8")
 
-    def env(self, *, existing_version: bool = False, extra: dict | None = None,
-            fake_path: str | None = None) -> dict:
+    def env(self, *, extra: dict | None = None, fake_path: str | None = None,
+            with_gh: bool = True) -> dict:
+        if with_gh:
+            path = f"{fake_path or self.bin}:{os.environ['PATH']}"
+        else:
+            no_gh = self.tmp / "no-gh-bin"
+            no_gh.mkdir(exist_ok=True)
+            for name in ("npm", "fake-python"):
+                link = no_gh / name
+                if not link.exists():
+                    link.symlink_to(self.bin / name)
+            path = f"{fake_path or no_gh}:/usr/bin:/bin"
         env = {
             **os.environ,
-            "PATH": fake_path or f"{self.bin}:{os.environ['PATH']}",
+            "PATH": path,
             "DQ_RELEASE_PYTHON": str(self.fake_python),
-            "DQ_RELEASE_PYPI_URL": self.pypi_json(existing_version),
+            "DQ_RELEASE_PYPI_URL": self.pypi_json_path.as_uri(),
             "DQ_RELEASE_STATUS_DIR": str(self.tmp / "state"),
             "FAKE_PY_LOG": str(self.py_log),
+            "FAKE_PY_UPDATE_PYPI": "1",
             "FAKE_NPM_LOG": str(self.npm_log),
+            "FAKE_NPM_ENV_LOG": str(self.logs / "npm-env.jsonl"),
+            "FAKE_NPM_STATE": str(self.npm_state),
+            "FAKE_ORDER_LOG": str(self.logs / "order.jsonl"),
+            "TMPDIR": str(self.tmp / "tmpdir"),
+            "FAKE_GH_LOG": str(self.gh_log),
+            "FAKE_GH_STATE": str(self.gh_state),
             "HOME": str(self.tmp / "home"),
         }
         (self.tmp / "home").mkdir(exist_ok=True)
+        (self.tmp / "tmpdir").mkdir(exist_ok=True)
         env.update(extra or {})
         return env
 
     def run(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(HELPER), "--repo-root", str(self.repo), *args],
+            [sys.executable, str(ENTRY), "--repo-root", str(self.repo), *args],
             text=True, capture_output=True, env=env or self.env())
+
+    def state_file(self) -> Path:
+        paths = sorted((self.tmp / "state" / "batches").glob("*/state.json"))
+        assert len(paths) == 1, paths
+        return paths[0]
+
+    def state(self) -> dict:
+        return json.loads(self.state_file().read_text(encoding="utf-8"))
+
+    def py_calls(self) -> list[dict]:
+        if not self.py_log.exists():
+            return []
+        return [json.loads(line) for line in self.py_log.read_text().splitlines()]
+
+    def npm_calls(self) -> list[list[str]]:
+        if not self.npm_log.exists():
+            return []
+        return [json.loads(line) for line in self.npm_log.read_text().splitlines()]
+
+
+def _pypi_args(version: str = "1.2.3", *extra: str) -> list[str]:
+    return ["--packages", "pypi", "--pypi-version", version, *extra]
 
 
 def test_version_injection_is_rejected_before_any_command(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    result = fixture.run('--v', '1.2.3"; import os; #')
+    result = fixture.run("--packages", "pypi", "--pypi-version", '1.2.3"; import os; #')
     assert result.returncode == 2
     assert not fixture.py_log.exists()
     assert not fixture.npm_log.exists()
 
 
-def test_legacy_passwd_is_rejected_with_replacement(tmp_path):
+def test_legacy_secret_and_otp_args_are_rejected(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    result = fixture.run("--v", "1.2.3", "--passwd", "hunter2")
+    for args in (["--passwd", "hunter2"], ["--token", "pypi-secret"],
+                 ["--otp", "123456"]):
+        result = fixture.run(*_pypi_args(), *args)
+        assert result.returncode == 2
+        assert "hunter2" not in result.stdout + result.stderr
+    assert not fixture.py_log.exists()
+
+
+def test_non_tty_real_release_requires_yes_and_has_zero_side_effects(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    before = fixture.git("rev-parse", "HEAD").stdout.strip()
+    result = fixture.run(*_pypi_args())
     assert result.returncode == 2
-    assert "DQ_PUBLISH_PASSWORD" in result.stderr
-    assert "hunter2" not in result.stdout + result.stderr
+    assert "--yes" in result.stderr
+    assert not (fixture.tmp / "state").exists()
+    assert not fixture.py_log.exists()
+    assert fixture.git("rev-parse", "HEAD").stdout.strip() == before
+
+
+def test_legacy_v_alias_selects_pypi(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    result = fixture.run("--v", "1.2.3", "--dry-run", env=fixture.env(extra={
+        "TWINE_PASSWORD": "must-not-be-used"}))
+    assert result.returncode == 0, result.stderr
+    assert '"packages": [' in result.stdout
+    assert "pypi" in result.stdout
 
 
 def test_dry_run_is_credential_free_and_does_not_mutate_repo(tmp_path):
     fixture = ReleaseFixture(tmp_path)
     before_head = fixture.git("rev-parse", "HEAD").stdout.strip()
     before_pyproject = (fixture.repo / "pyproject.toml").read_text(encoding="utf-8")
-    before_version = (fixture.repo / "dragon_quant" / "_version.py").read_text(encoding="utf-8")
+    before_version = (fixture.repo / "dragon_quant" / "_version.py").read_text(
+        encoding="utf-8")
 
-    result = fixture.run("--v", fixture.version, "--dry-run", env=fixture.env(extra={
-        "TWINE_PASSWORD": "must-not-be-used", "NPM_TOKEN": "must-not-be-used"}))
+    result = fixture.run(*_pypi_args("1.2.3", "--dry-run"), env=fixture.env(extra={
+        "TWINE_PASSWORD": "must-not-be-used",
+        "DQ_PUBLISH_PASSWORD": "must-not-be-used"}))
 
     assert result.returncode == 0, result.stderr
     assert '"dry_run": true' in result.stdout
@@ -185,17 +457,23 @@ def test_dry_run_is_credential_free_and_does_not_mutate_repo(tmp_path):
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == before_head
     assert fixture.git("tag", "--list").stdout.strip() == ""
     assert (fixture.repo / "pyproject.toml").read_text(encoding="utf-8") == before_pyproject
-    assert (fixture.repo / "dragon_quant" / "_version.py").read_text(encoding="utf-8") == before_version
-    assert (fixture.repo / "web_ui" / "dist" / "index.html").read_text(encoding="utf-8") == "old"
-    # 关键顺序：dry-run 未触发任何 git 写命令与上传（twine check 允许）。
-    py_calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    assert not any(call["argv"][:3] == ["-m", "twine", "upload"] for call in py_calls)
+    assert (fixture.repo / "dragon_quant" / "_version.py").read_text(
+        encoding="utf-8") == before_version
+    assert (fixture.repo / "web_ui" / "dist" / "index.html").read_text(
+        encoding="utf-8") == "old"
+    calls = fixture.py_calls()
+    assert not any(call["argv"][:3] == ["-m", "twine", "upload"] for call in calls)
+    # Build/test subprocesses must not inherit credentials.
+    assert all(call["env_publish_password"] is None for call in calls)
+    assert all(call["env_password"] is None for call in calls)
+    # No registry access: the fake PyPI file is untouched.
+    assert json.loads(fixture.pypi_json_path.read_text()) == {"releases": {}}
 
 
 def test_dirty_worktree_blocks_release_before_build(tmp_path):
     fixture = ReleaseFixture(tmp_path)
     (fixture.repo / "scratch.txt").write_text("x", encoding="utf-8")
-    result = fixture.run("--v", fixture.version, env=fixture.env())
+    result = fixture.run(*_pypi_args(), "--yes")
     assert result.returncode == 1
     assert "工作区不干净" in result.stderr
     assert not fixture.py_log.exists()
@@ -203,7 +481,10 @@ def test_dirty_worktree_blocks_release_before_build(tmp_path):
 
 def test_existing_registry_version_blocks_release(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    result = fixture.run("--v", fixture.version, env=fixture.env(existing_version=True))
+    fixture.set_pypi_releases({
+        "1.2.3": [{"filename": "dragon_quant-1.2.3-py3-none-any.whl",
+                   "digests": {"sha256": "0" * 64}}]})
+    result = fixture.run(*_pypi_args(), "--yes")
     assert result.returncode == 1
     assert "已存在版本" in result.stderr
     assert fixture.git("tag", "--list").stdout.strip() == ""
@@ -212,18 +493,17 @@ def test_existing_registry_version_blocks_release(tmp_path):
 def test_build_failure_leaves_zero_git_mutation(tmp_path):
     fixture = ReleaseFixture(tmp_path)
     before_head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    result = fixture.run("--v", fixture.version, env=fixture.env(
-        extra={"FAKE_PY_FAIL_BUILD": "1"}))
+    result = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
+        extra={"FAKE_PY_FAIL_BUILD": "1", "TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
-    assert "prepare" in result.stderr
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == before_head
     assert fixture.git("tag", "--list").stdout.strip() == ""
-    assert (fixture.repo / "pyproject.toml").read_text(encoding="utf-8").count("0.0.1") == 1
+    assert "0.0.1" in (fixture.repo / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_success_commits_only_release_files_and_uploads_same_artifacts(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    result = fixture.run("--v", fixture.version, env=fixture.env(extra={
+    result = fixture.run(*_pypi_args(), "--yes", env=fixture.env(extra={
         "TWINE_PASSWORD": "secret-token-value"}))
     assert result.returncode == 0, result.stderr
 
@@ -234,16 +514,17 @@ def test_success_commits_only_release_files_and_uploads_same_artifacts(tmp_path)
     assert "CHANGELOG.md" not in changed
     assert "secret-token-value" not in result.stdout + result.stderr
 
-    assert fixture.git("tag", "--list", f"v{fixture.version}").stdout.strip() == f"v{fixture.version}"
-    state = json.loads((fixture.tmp / "state" / "state.json").read_text())
+    assert fixture.git("tag", "--list", "v1.2.3").stdout.strip() == "v1.2.3"
+    state = fixture.state()
     assert state["upstream"] == "origin/release/test"
     assert len(state["push_target_fingerprint"]) == 64
+    assert state["complete"] is True
     remote_tags = subprocess.run(
-        ["git", "ls-remote", "--tags", str(fixture.origin), f"refs/tags/v{fixture.version}"],
+        ["git", "ls-remote", "--tags", str(fixture.origin), "refs/tags/v1.2.3"],
         text=True, capture_output=True, check=True).stdout
     assert remote_tags.strip()
 
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
+    calls = fixture.py_calls()
     builds = [call for call in calls if call["argv"][:2] == ["-m", "build"]]
     assert builds and "--no-isolation" in builds[0]["argv"]
     uploads = [call for call in calls if call["argv"][:3] == ["-m", "twine", "upload"]]
@@ -253,30 +534,31 @@ def test_success_commits_only_release_files_and_uploads_same_artifacts(tmp_path)
     artifact_names = {Path(arg).name for arg in uploads[0]["argv"][3:]}
     assert any(name.endswith(".whl") for name in artifact_names)
     assert any(name.endswith(".tar.gz") for name in artifact_names)
+    # GitHub Release created once with verify-tag.
+    gh_calls = fixture.gh_log.read_text().splitlines()
+    assert any('"release", "create"' in line for line in gh_calls)
 
 
 def test_release_succeeds_when_version_already_prepared(tmp_path):
-    """手工准备过版本时（pyproject/_version/dist 已是目标状态）复用 HEAD，不建空提交。"""
+    """手工准备过版本时（pyproject/_version/dist 已是目标状态）复用 HEAD。"""
     fixture = ReleaseFixture(tmp_path)
     (fixture.repo / "pyproject.toml").write_text(
-        f'[project]\nname = "dragon-quant"\nversion = "{fixture.version}"\n',
-        encoding="utf-8")
+        '[project]\nname = "dragon-quant"\nversion = "1.2.3"\n', encoding="utf-8")
     (fixture.repo / "dragon_quant" / "_version.py").write_text(
-        f'__version__ = "{fixture.version}"\n', encoding="utf-8")
+        '__version__ = "1.2.3"\n', encoding="utf-8")
     (fixture.repo / "web_ui" / "dist" / "index.html").write_text(
-        "<!doctype html>\n", encoding="utf-8")
+        "<!doctype html>", encoding="utf-8")
     fixture.git("add", "-A")
     fixture.git("commit", "-q", "-m", "prepare release version")
     head = fixture.git("rev-parse", "HEAD").stdout.strip()
 
-    result = fixture.run("--v", fixture.version,
+    result = fixture.run(*_pypi_args(), "--yes",
                          env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 0, result.stderr
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
-    assert fixture.git("tag", "--list", f"v{fixture.version}").stdout.strip() == (
-        f"v{fixture.version}")
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    assert any(call["argv"][:3] == ["-m", "twine", "upload"] for call in calls)
+    assert fixture.git("tag", "--list", "v1.2.3").stdout.strip() == "v1.2.3"
+    assert any(call["argv"][:3] == ["-m", "twine", "upload"]
+               for call in fixture.py_calls())
 
 
 def test_atomic_push_failure_does_not_fall_back(tmp_path):
@@ -292,7 +574,7 @@ for arg in "$@"; do
 done
 exec "{real_git}" "$@"
 """)
-    result = fixture.run("--v", fixture.version, env=fixture.env(
+    result = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
         fake_path=f"{fixture.bin}:{wrapper_dir}:{os.environ['PATH']}",
         extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
@@ -300,35 +582,31 @@ exec "{real_git}" "$@"
     calls = (tmp_path / "git-calls.log").read_text().splitlines()
     assert any("push --atomic" in call for call in calls)
     assert not any(call.startswith("push ") and "--atomic" not in call for call in calls)
-    assert not any("twine upload" in call for call in fixture.py_log.read_text().splitlines())
+    assert not any(call["argv"][:3] == ["-m", "twine", "upload"]
+                   for call in fixture.py_calls())
+
+
+def _fail_upload_env(fixture: ReleaseFixture) -> dict:
+    return fixture.env(extra={"TWINE_PASSWORD": "x", "FAKE_PY_FAIL_TWINE": "1"})
 
 
 def test_resume_after_upload_failure_reuses_commit_tag_and_artifacts(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    fail_env = fixture.env(extra={"TWINE_PASSWORD": "x", "FAKE_PY_FAIL_TWINE": "1"})
-    # First attempt fails at upload because twine exits non-zero for upload.
-    helper = Path(fixture.fake_python)
-    _write_executable(helper, FAKE_PYTHON.replace(
-        'if sys.argv[1:3] == ["-m", "build"]:',
-        'if os.environ.get("FAKE_PY_FAIL_TWINE") and sys.argv[1:4] == ["-m", "twine", "upload"]:\n'
-        '    raise SystemExit(1)\n'
-        'if sys.argv[1:3] == ["-m", "build"]:'))
-    first = fixture.run("--v", fixture.version, env=fail_env)
+    first = fixture.run(*_pypi_args(), "--yes", env=_fail_upload_env(fixture))
     assert first.returncode == 1
     head = fixture.git("rev-parse", "HEAD").stdout.strip()
     tags = fixture.git("tag", "--list").stdout.strip()
-    assert tags == f"v{fixture.version}"
-    state = json.loads((fixture.tmp / "state" / "state.json").read_text())
-    digests = dict(state["artifacts"])
+    assert tags == "v1.2.3"
+    digests = dict(fixture.state()["artifacts"]["pypi"])
 
-    second = fixture.run("--v", fixture.version, "--resume", env=fixture.env(
+    second = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env(
         extra={"TWINE_PASSWORD": "x"}))
     assert second.returncode == 0, second.stderr
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
     assert fixture.git("tag", "--list").stdout.strip() == tags
-    final_state = json.loads((fixture.tmp / "state" / "state.json").read_text())
-    assert final_state["artifacts"] == digests
-    assert final_state["stages"]["upload"]["done"] is True
+    final = fixture.state()
+    assert final["artifacts"]["pypi"] == digests
+    assert final["steps"]["upload_pypi"]["done"] is True
 
 
 def test_package_boundary_rejects_private_files(tmp_path):
@@ -337,160 +615,272 @@ def test_package_boundary_rejects_private_files(tmp_path):
         'zf.writestr("web_ui/dist/index.html", "<!doctype html>")',
         'zf.writestr("web_ui/dist/index.html", "<!doctype html>")\n'
         '        zf.writestr("dragon_quant/tests/test_secret.py", "")'))
-    result = fixture.run("--v", fixture.version, env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    result = fixture.run(*_pypi_args(), "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
     assert "不该发布" in result.stderr
     assert fixture.git("tag", "--list").stdout.strip() == ""
 
 
-def test_distribution_versions_are_consistent():
-    import json as _json
-    import re as _re
-
-    package = _json.loads((REPO / "package.json").read_text(encoding="utf-8"))
-    skill = (REPO / "skills" / "dragon-quant" / "SKILL.md").read_text(encoding="utf-8")
-    front = skill.split("---\n", 2)[1]
-    skill_version = _re.search(r'skill-version:\s*"([^"]+)"', front).group(1)
-    min_cli = _re.search(r'min-cli-version:\s*"([^"]+)"', front).group(1)
-    pyproject_version = _re.search(
-        r'^version = "([^"]+)"$', (REPO / "pyproject.toml").read_text(encoding="utf-8"),
-        _re.MULTILINE).group(1)
-    module_version = _re.search(
-        r'^__version__ = "([^"]+)"$',
-        (REPO / "dragon_quant" / "_version.py").read_text(encoding="utf-8"),
-        _re.MULTILINE).group(1)
-    assert package["version"] == skill_version
-    assert min_cli == pyproject_version == module_version
-
-
-def test_resume_after_github_release_failure_does_not_reupload(tmp_path):
-    fixture = ReleaseFixture(tmp_path)
-    gh = fixture.bin / "gh"
-    _write_executable(gh, "#!/bin/sh\nexit 1\n")
-    first = fixture.run("--v", fixture.version, env=fixture.env(
-        extra={"TWINE_PASSWORD": "x"}))
-    assert first.returncode == 1
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    uploads = [c for c in calls if c["argv"][:3] == ["-m", "twine", "upload"]]
-    assert len(uploads) == 1
-    _write_executable(gh, "#!/bin/sh\nexit 0\n")
-    second = fixture.run("--v", fixture.version, "--resume",
-                         env=fixture.env(extra={}))
-    assert second.returncode == 0, second.stderr
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    uploads = [c for c in calls if c["argv"][:3] == ["-m", "twine", "upload"]]
-    assert len(uploads) == 1, "resume must not upload the same version twice"
-
-
-def _staged_artifacts(tmp_path: Path) -> dict:
-    state = json.loads((tmp_path / "state" / "state.json").read_text())
-    return state
-
-
-def _fail_upload_env(fixture: ReleaseFixture, tmp_path: Path) -> dict:
-    helper = Path(fixture.fake_python)
-    _write_executable(helper, globals()["FAKE_PYTHON"].replace(
-        'if sys.argv[1:3] == ["-m", "build"]:',
-        'if os.environ.get("FAKE_PY_FAIL_TWINE") and sys.argv[1:4] == '
-        '["-m", "twine", "upload"]:\n    raise SystemExit(1)\n'
-        'if sys.argv[1:3] == ["-m", "build"]:'))
-    # First attempt reaches upload; twine fails after commit/tag/push.
-    return fixture.env(extra={"TWINE_PASSWORD": "x", "FAKE_PY_FAIL_TWINE": "1"})
-
-
 def test_release_tests_failure_blocks_before_any_git_mutation(tmp_path):
     fixture = ReleaseFixture(tmp_path)
     before_head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    result = fixture.run("--v", fixture.version, env=fixture.env(
+    result = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
         extra={"FAKE_PY_FAIL_TEST": "1", "TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
-    assert "prepare" in result.stderr
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == before_head
     assert fixture.git("tag", "--list").stdout.strip() == ""
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    assert any(c["argv"][:2] == ["-m", "pytest"] for c in calls)
+    assert any(call["argv"][:2] == ["-m", "pytest"] for call in fixture.py_calls())
 
 
-def test_non_resume_refuses_existing_state(tmp_path):
+def test_non_resume_refuses_unfinished_batch(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    first = fixture.run("--v", fixture.version, env=fixture.env(
+    first = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
         extra={"TWINE_PASSWORD": "x", "FAKE_PY_FAIL_BUILD": "1"}))
     assert first.returncode == 1
-    second = fixture.run("--v", fixture.version, env=fixture.env(
+    second = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
         extra={"TWINE_PASSWORD": "x"}))
     assert second.returncode == 1
-    assert "--resume" in second.stderr
+    assert "未完成发布批次" in second.stderr
 
 
 def test_resume_refuses_head_change(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(fixture, tmp_path)).returncode == 1
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
     fixture.git("commit", "--allow-empty", "-m", "new commit")
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    result = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env())
     assert result.returncode == 1
     assert "HEAD 已变化" in result.stderr
 
 
 def test_resume_refuses_missing_remote_tag(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(fixture, tmp_path)).returncode == 1
-    fixture.git("push", "origin", f":refs/tags/v{fixture.version}")
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    fixture.git("push", "origin", ":" + "refs/tags/v1.2.3")
+    result = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env())
     assert result.returncode == 1
-    assert "远端标签" in result.stderr
+    assert "远端" in result.stderr
 
 
 def test_resume_refuses_changed_artifacts(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    staging = Path(state["staging"])
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    staging = Path(fixture.state()["staging"])
     artifact = next((staging / "dist").glob("*.whl"))
     artifact.write_bytes(artifact.read_bytes() + b"tamper")
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    result = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env())
     assert result.returncode == 1
     assert "哈希变化" in result.stderr
 
 
-def _write_pypi_artifacts(tmp_path: Path, version: str, artifacts: dict,
-                          *, tamper: str | None = None) -> None:
-    entries = []
-    for name, digest in artifacts.items():
-        entries.append({
-            "filename": name,
-            "digests": {"sha256": ("0" * 64 if tamper == name else digest)},
-        })
-    path = tmp_path / "pypi-partial.json"
-    path.write_text(json.dumps({"releases": {version: entries}}), encoding="utf-8")
+def _remote_entries(artifacts: dict, *, tamper: str | None = None) -> list[dict]:
+    return [
+        {"filename": name,
+         "digests": {"sha256": ("0" * 64 if tamper == name else digest)}}
+        for name, digest in artifacts.items()
+    ]
 
 
 def test_resume_skips_already_uploaded_identical_artifacts(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    _write_pypi_artifacts(tmp_path, fixture.version, state["artifacts"])
-    env = fixture.env()
-    env["DQ_RELEASE_PYPI_URL"] = (tmp_path / "pypi-partial.json").as_uri()
-    env.pop("TWINE_PASSWORD", None)
-    result = fixture.run("--v", fixture.version, "--resume", env=env)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    artifacts = fixture.state()["artifacts"]["pypi"]
+    wheel = next(name for name in artifacts if name.endswith(".whl"))
+    fixture.set_pypi_releases({"1.2.3": _remote_entries(
+        {wheel: artifacts[wheel]})})
+    env = fixture.env(extra={"TWINE_PASSWORD": "x"})
+    result = fixture.run(*_pypi_args(), "--resume", "--yes", env=env)
     assert result.returncode == 0, result.stderr
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    uploads = [c for c in calls if c["argv"][:3] == ["-m", "twine", "upload"]]
-    assert len(uploads) == 1, "identical remote artifacts must not be re-uploaded"
+    uploads = [c for c in fixture.py_calls()
+               if c["argv"][:3] == ["-m", "twine", "upload"]]
+    assert len(uploads) == 2  # failed first attempt + one retry
+    names = {Path(arg).name for arg in uploads[-1]["argv"][3:]}
+    assert wheel not in names and len(names) == 1
 
 
 def test_resume_refuses_remote_artifact_hash_mismatch(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    _write_pypi_artifacts(tmp_path, fixture.version, state["artifacts"],
-                          tamper=next(iter(state["artifacts"])))
-    env = fixture.env()
-    env["DQ_RELEASE_PYPI_URL"] = (tmp_path / "pypi-partial.json").as_uri()
-    env["TWINE_PASSWORD"] = "x"
-    result = fixture.run("--v", fixture.version, "--resume", env=env)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    artifacts = fixture.state()["artifacts"]["pypi"]
+    fixture.set_pypi_releases({"1.2.3": _remote_entries(
+        artifacts, tamper=next(iter(artifacts)))})
+    result = fixture.run(*_pypi_args(), "--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
     assert "哈希不一致" in result.stderr
+
+
+def test_resume_refuses_third_content_in_release_file(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    first = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
+        extra={"FAKE_PY_FAIL_BUILD": "1", "TWINE_PASSWORD": "x"}))
+    assert first.returncode == 1
+    # A content that is neither the old (0.0.1) nor the target (1.2.3) value.
+    (fixture.repo / "pyproject.toml").write_text(
+        '[project]\nname = "dragon-quant"\nversion = "9.9.9"\n', encoding="utf-8")
+    result = fixture.run(*_pypi_args(), "--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 1
+    assert "拒绝覆盖" in result.stderr
+    assert fixture.git("tag", "--list").stdout.strip() == ""
+
+
+def test_resume_after_commit_requires_clean_worktree(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    (fixture.repo / "pyproject.toml").write_text("tampered\n", encoding="utf-8")
+    result = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env())
+    assert result.returncode == 1
+    assert "工作区不干净" in result.stderr
+
+
+def test_resume_refuses_tampered_plan(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    state_path = fixture.state_file()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["plan"]["pypi_version"] = "9.9.9"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    assert result.returncode == 1
+    assert "哈希不一致" in result.stderr
+
+
+def test_legacy_schema_state_is_rejected(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    legacy = fixture.tmp / "state" / "state.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(json.dumps({"version": "1.2.3", "stages": {
+        "commit": {"done": True}}}), encoding="utf-8")
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    assert result.returncode == 1
+    assert "不是统一发布状态" in result.stderr or "旧发布状态" in result.stderr
+
+
+def test_resume_refuses_corrupt_and_foreign_batches(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    batch = fixture.tmp / "state" / "batches" / "20260101T000000Z-aaaaaa"
+    batch.mkdir(parents=True)
+    (batch / "state.json").write_text("{broken", encoding="utf-8")
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    # Corrupt batch is skipped by discovery; no resumable batch is reported.
+    assert result.returncode == 1
+    assert "没有可恢复" in result.stderr or "无法读取发布状态" in result.stderr
+
+    (batch / "state.json").write_text(json.dumps({
+        "schema": 2, "batch_id": batch.name, "repo": str(tmp_path / "other"),
+        "plan": {}, "plan_hash": "", "complete": False, "steps": {},
+    }), encoding="utf-8")
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    assert result.returncode == 1
+
+
+def test_resume_refuses_upstream_change_without_writing(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=_fail_upload_env(fixture)).returncode == 1
+    state = fixture.state()
+    head = fixture.git("rev-parse", "HEAD").stdout.strip()
+    tags = fixture.git("tag", "--list").stdout.strip()
+    remote = fixture.git("ls-remote", str(fixture.origin)).stdout
+    fixture.git("update-ref", "refs/remotes/origin/other", "HEAD")
+    fixture.git("config", "branch.release/test.merge", "refs/heads/other")
+    result = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env())
+    assert result.returncode == 1
+    assert "upstream" in result.stderr
+    assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
+    assert fixture.git("tag", "--list").stdout.strip() == tags
+    assert fixture.git("ls-remote", str(fixture.origin)).stdout == remote
+    current = fixture.state()
+    assert current["upstream"] == state["upstream"]
+    assert current["push_target_fingerprint"] == state["push_target_fingerprint"]
+
+
+def test_fresh_release_refuses_non_origin_tracking_branch(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    fixture.git("update-ref", "refs/remotes/origin/other", "HEAD")
+    fixture.git("config", "branch.release/test.merge", "refs/heads/other")
+    result = fixture.run(*_pypi_args(), "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 1
+    assert "固定发布目标" in result.stderr
+    assert not (fixture.tmp / "state" / "batches").exists() or not list(
+        (fixture.tmp / "state" / "batches").glob("*/state.json"))
+
+
+def test_wrong_publish_password_reports_clean_error(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    enc = fixture.repo / "scripts" / "publish_token.enc"
+    enc.parent.mkdir()
+    enc.write_bytes((REPO / "scripts" / "publish_token.enc").read_bytes())
+    fixture.git("add", "scripts/publish_token.enc")
+    fixture.git("commit", "-q", "-m", "add encrypted token")
+    result = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
+        extra={"DQ_PUBLISH_PASSWORD": "definitely-not-the-passphrase"},
+        with_gh=False))
+    assert result.returncode == 1
+    assert "密码错误" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert fixture.git("tag", "--list").stdout.strip() == ""
+
+
+def test_distribution_versions_satisfy_min_cli_contract():
+    import re
+
+    package = json.loads((REPO / "package.json").read_text(encoding="utf-8"))
+    skill = (REPO / "skills" / "dragon-quant" / "SKILL.md").read_text(encoding="utf-8")
+    front = skill.split("---\n", 2)[1]
+    skill_version = re.search(r'skill-version:\s*"([^"]+)"', front).group(1)
+    min_cli = re.search(r'min-cli-version:\s*"([^"]+)"', front).group(1)
+    pyproject_version = re.search(
+        r'^version = "([^"]+)"$',
+        (REPO / "pyproject.toml").read_text(encoding="utf-8"), re.MULTILINE).group(1)
+    module_version = re.search(
+        r'^__version__ = "([^"]+)"$',
+        (REPO / "dragon_quant" / "_version.py").read_text(encoding="utf-8"),
+        re.MULTILINE).group(1)
+    assert package["version"] == skill_version
+    assert pyproject_version == module_version
+    # min-cli is a *minimum dependency* contract, not an equality with the
+    # current CLI version.
+    def _tuple(value):
+        return tuple(int(part) for part in value.split("."))
+    assert _tuple(min_cli) <= _tuple(pyproject_version)
+
+
+def test_resume_after_github_release_failure_does_not_reupload(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    first = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
+        extra={"TWINE_PASSWORD": "x", "FAKE_GH_FAIL_VIEW": "1"}))
+    assert first.returncode == 1
+    assert "pending" in first.stderr or "未整体完成" in first.stderr
+    uploads = [c for c in fixture.py_calls()
+               if c["argv"][:3] == ["-m", "twine", "upload"]]
+    assert len(uploads) == 1
+
+    second = fixture.run(*_pypi_args(), "--resume", "--yes", env=fixture.env())
+    assert second.returncode == 0, second.stderr
+    uploads = [c for c in fixture.py_calls()
+               if c["argv"][:3] == ["-m", "twine", "upload"]]
+    assert len(uploads) == 1, "resume must not upload the same version twice"
+
+
+def test_missing_gh_keeps_release_pending(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    result = fixture.run(*_pypi_args(), "--yes", env=fixture.env(
+        extra={"TWINE_PASSWORD": "x"}, with_gh=False))
+    assert result.returncode == 1
+    assert "pending" in result.stderr
+    state = fixture.state()
+    assert state["complete"] is False
+    assert state["steps"]["release"].get("skipped") is True
 
 
 def test_real_wheel_and_sdist_contain_runtime_research_and_dist(tmp_path):
@@ -503,6 +893,8 @@ def test_real_wheel_and_sdist_contain_runtime_research_and_dist(tmp_path):
     assert result.returncode == 0, result.stderr[-2000:]
     wheel = next(out.glob("*.whl"))
     sdist = next(out.glob("*.tar.gz"))
+    import tarfile
+    import zipfile
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
     assert any(name.startswith("dragon_quant/research/") for name in names)
@@ -516,212 +908,379 @@ def test_real_wheel_and_sdist_contain_runtime_research_and_dist(tmp_path):
                 if "/tests/" in name or name.endswith(".enc")]
 
 
-def _write_state(tmp_path: Path, payload: str) -> None:
-    path = tmp_path / "state" / "state.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload, encoding="utf-8")
-
-
-def test_resume_refuses_corrupt_cross_version_and_cross_repo_state(tmp_path):
+def test_unexpected_internal_error_is_reported_not_bubbled(tmp_path, monkeypatch, capsys):
     fixture = ReleaseFixture(tmp_path)
-    before_head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    _write_state(tmp_path, "{broken")
-    bad = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
-    assert bad.returncode == 1
-    assert "无法读取发布状态" in bad.stderr
+    sys.path.insert(0, str(REPO / "scripts"))
+    import release.orchestrator as orchestrator
 
-    _write_state(tmp_path, json.dumps({
-        "version": "9.9.9", "repo": str(fixture.repo.resolve()),
-        "base_commit": "x", "stages": {}}))
-    wrong_version = fixture.run("--v", fixture.version, "--resume",
-                                env=fixture.env())
-    assert wrong_version.returncode == 1
-    assert "不一致" in wrong_version.stderr
+    monkeypatch.setattr(orchestrator.git_ops, "resolve_identity",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setenv("DQ_RELEASE_STATUS_DIR", str(fixture.tmp / "state"))
+    from release import main as entry
 
-    _write_state(tmp_path, json.dumps({
-        "version": fixture.version, "repo": str(tmp_path / "other-repo"),
-        "base_commit": "x", "stages": {}}))
-    wrong_repo = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
-    assert wrong_repo.returncode == 1
-    assert "仓库" in wrong_repo.stderr
-    assert fixture.git("rev-parse", "HEAD").stdout.strip() == before_head
+    rc = entry.main(["--packages", "pypi", "--pypi-version", "1.2.3", "--yes",
+                     "--repo-root", str(fixture.repo)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "未预期异常" in err and "boom" in err and "--resume" in err
+
+
+# ─── rework: recorded success is authoritative (M2) ───────────────────────
+
+
+def _upload_calls(fixture: ReleaseFixture) -> list[dict]:
+    return [call for call in fixture.py_calls()
+            if call["argv"][:3] == ["-m", "twine", "upload"]]
+
+
+def _no_credentials_env(fixture: ReleaseFixture) -> dict:
+    env = fixture.env()
+    env.pop("TWINE_PASSWORD", None)
+    env.pop("DQ_PUBLISH_PASSWORD", None)
+    env.pop("NPM_TOKEN", None)
+    return env
+
+
+def test_resume_refuses_reupload_when_recorded_upload_vanished(tmp_path):
+    """M2: a recorded successful upload must fail closed if the remote vanished."""
+    fixture = ReleaseFixture(tmp_path)
+    first = fixture.run(*_pypi_args(), "--yes", env=fixture.env(extra={
+        "TWINE_PASSWORD": "x", "FAKE_GH_FAIL_VIEW": "1"}))
+    assert first.returncode == 1
+    assert fixture.state()["steps"]["upload_pypi"]["done"] is True
+    uploads = len(_upload_calls(fixture))
+
+    fixture.set_pypi_releases({})
+    second = fixture.run("--resume", "--yes", env=fixture.env())
+    assert second.returncode == 1
+    assert "拒绝重传" in second.stderr
+    assert len(_upload_calls(fixture)) == uploads, "must not upload twice"
+
+
+def test_resume_adopts_unrecorded_upload_without_reuploading(tmp_path):
+    """Crash after a real upload but before its result was recorded."""
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes", env=fixture.env(extra={
+        "TWINE_PASSWORD": "x", "FAKE_GH_FAIL_VIEW": "1"})).returncode == 1
+    state_path = fixture.state_file()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    del state["steps"]["upload_pypi"]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    uploads = len(_upload_calls(fixture))
+
+    second = fixture.run("--resume", "--yes", env=fixture.env())
+    assert second.returncode == 0, second.stderr
+    assert len(_upload_calls(fixture)) == uploads
+    assert fixture.state()["steps"]["upload_pypi"]["done"] is True
+
+
+def _common_dir(fixture: ReleaseFixture) -> Path:
+    raw = fixture.git("rev-parse", "--git-common-dir").stdout.strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = (fixture.repo / path).resolve()
+    return path
+
+
+def _git_wrapper(tmp_path: Path) -> tuple[Path, Path]:
+    wrapper_dir = tmp_path / "gitwrap-unrecorded"
+    wrapper_dir.mkdir()
+    log = tmp_path / "git-unrecorded.log"
+    real_git = subprocess.run(["which", "git"], text=True, capture_output=True,
+                              check=True).stdout.strip()
+    _write_executable(wrapper_dir / "git", f"""#!/bin/sh
+printf '%s\\n' "$*" >> "{log}"
+exec "{real_git}" "$@"
+""")
+    return wrapper_dir, log
+
+
+def test_resume_adopts_unrecorded_push_without_repushing(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes", env=fixture.env(extra={
+        "TWINE_PASSWORD": "x", "FAKE_GH_FAIL_VIEW": "1"})).returncode == 1
+    state_path = fixture.state_file()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    del state["steps"]["push"]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    wrapper_dir, log = _git_wrapper(tmp_path)
+
+    second = fixture.run("--resume", "--yes", env=fixture.env(
+        fake_path=f"{fixture.bin}:{wrapper_dir}:{os.environ['PATH']}"))
+    assert second.returncode == 0, second.stderr
+    pushes = [line for line in log.read_text().splitlines()
+              if line.startswith("push ")]
+    assert pushes == [], pushes
+    assert fixture.state()["steps"]["push"]["done"] is True
+
+
+def test_resume_adopts_unrecorded_release_without_recreating(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=fixture.env(extra={"TWINE_PASSWORD": "x"})).returncode == 0
+    state_path = fixture.state_file()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["complete"] = False
+    del state["steps"]["release"]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    creates = sum(1 for line in fixture.gh_log.read_text().splitlines()
+                  if '"release", "create"' in line)
+
+    second = fixture.run("--resume", "--yes", env=fixture.env())
+    assert second.returncode == 0, second.stderr
+    creates_after = sum(1 for line in fixture.gh_log.read_text().splitlines()
+                        if '"release", "create"' in line)
+    assert creates_after == creates, "must not create the Release twice"
+    assert fixture.state()["steps"]["release"]["done"] is True
+
+
+# ─── rework: staged content identity is frozen (M3) ───────────────────────
+
+
+def _stop_before_commit(fixture: ReleaseFixture) -> None:
+    """Prepare/build succeed, then credentials fail (no Git write happened)."""
+    head = fixture.git("rev-parse", "HEAD").stdout.strip()
+    first = fixture.run(*_pypi_args(), "--yes",
+                        env=_no_credentials_env(fixture))
+    assert first.returncode == 1
+    assert "token" in first.stderr
+    assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
     assert fixture.git("tag", "--list").stdout.strip() == ""
 
 
-def _remote_refs(fixture: ReleaseFixture) -> str:
-    return fixture.git("ls-remote", str(fixture.origin)).stdout
+def test_resume_refuses_tampered_staging_source(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    _stop_before_commit(fixture)
+    staging = Path(fixture.state()["staging"])
+    pyproject = staging / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8").replace('"1.2.3"', '"9.9.9"'),
+        encoding="utf-8")
+    head = fixture.git("rev-parse", "HEAD").stdout.strip()
 
-
-def _assert_identity_failure_left_no_traces(fixture, *, head: str, tags: str,
-                                            remote: str, state: dict,
-                                            uploads: int) -> None:
+    result = fixture.run("--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 1
+    assert "冻结身份" in result.stderr and "pyproject.toml" in result.stderr
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
-    assert fixture.git("tag", "--list").stdout.strip() == tags
-    assert _remote_refs(fixture) == remote
-    current = json.loads((fixture.tmp / "state" / "state.json").read_text())
-    assert current.get("upstream") == state.get("upstream")
-    assert current.get("push_target_fingerprint") == state.get(
-        "push_target_fingerprint")
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    upload_count = sum(1 for c in calls
-                       if c["argv"][:3] == ["-m", "twine", "upload"])
-    assert upload_count == uploads
-    assert not fixture.gh_log.exists() or not fixture.gh_log.read_text().strip()
+    assert fixture.git("tag", "--list").stdout.strip() == ""
 
 
-def test_resume_refuses_upstream_change_without_writing(tmp_path):
+def test_resume_refuses_tampered_staging_dist(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(
-        fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    tags = fixture.git("tag", "--list").stdout.strip()
-    remote = _remote_refs(fixture)
-    fixture.git("update-ref", "refs/remotes/origin/other", "HEAD")
-    fixture.git("config", "branch.release/test.merge", "refs/heads/other")
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    _stop_before_commit(fixture)
+    staging = Path(fixture.state()["staging"])
+    index = staging / "web_ui" / "dist" / "index.html"
+    index.write_text("tampered", encoding="utf-8")
+
+    result = fixture.run("--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
-    assert "upstream" in result.stderr
-    _assert_identity_failure_left_no_traces(
-        fixture, head=head, tags=tags, remote=remote, state=state, uploads=1)
+    assert "冻结身份" in result.stderr and "web_ui/dist/index.html" in result.stderr
 
 
-def test_resume_refuses_missing_upstream(tmp_path):
+def test_resume_refuses_missing_staging_file(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(
-        fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    tags = fixture.git("tag", "--list").stdout.strip()
-    remote = _remote_refs(fixture)
-    fixture.git("config", "--unset", "branch.release/test.merge")
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    _stop_before_commit(fixture)
+    staging = Path(fixture.state()["staging"])
+    (staging / "dragon_quant" / "_version.py").unlink()
+
+    result = fixture.run("--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
-    assert "upstream" in result.stderr
-    _assert_identity_failure_left_no_traces(
-        fixture, head=head, tags=tags, remote=remote, state=state, uploads=1)
+    assert "冻结身份" in result.stderr and "_version.py" in result.stderr
 
 
-def test_resume_refuses_push_target_change(tmp_path):
+def test_resume_refuses_foreign_commit_with_same_subject(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(
-        fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    tags = fixture.git("tag", "--list").stdout.strip()
-    remote = _remote_refs(fixture)
-    other = tmp_path / "other-origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(other)], check=True)
-    fixture.git("remote", "set-url", "--push", "origin", str(other))
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    _stop_before_commit(fixture)
+    # Same subject and parent as the release commit, but different content.
+    fixture.git("commit", "--allow-empty", "-m", "🔖 发布：PyPI 1.2.3")
+    result = fixture.run("--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
-    assert "push URL" in result.stderr
-    _assert_identity_failure_left_no_traces(
-        fixture, head=head, tags=tags, remote=remote, state=state, uploads=1)
+    assert "不一致" in result.stderr or "拒绝继续" in result.stderr
+    assert fixture.git("tag", "--list").stdout.strip() == ""
 
 
-def test_resume_refuses_legacy_state_without_identity(tmp_path):
+# ─── rework: notes frozen before external writes (M5) ─────────────────────
+
+
+def test_missing_changelog_section_uses_git_fallback_and_releases(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    assert fixture.run("--v", fixture.version, env=_fail_upload_env(
-        fixture, tmp_path)).returncode == 1
-    state = _staged_artifacts(tmp_path)
-    state.pop("upstream", None)
-    state.pop("push_target_fingerprint", None)
-    (tmp_path / "state" / "state.json").write_text(json.dumps(state),
-                                                   encoding="utf-8")
-    head = fixture.git("rev-parse", "HEAD").stdout.strip()
-    tags = fixture.git("tag", "--list").stdout.strip()
-    remote = _remote_refs(fixture)
-    result = fixture.run("--v", fixture.version, "--resume", env=fixture.env())
+    changelog = fixture.repo / "CHANGELOG.md"
+    changelog.write_text("# Changelog\n\n## [0.0.1]\n- old\n", encoding="utf-8")
+    before = changelog.read_text(encoding="utf-8")
+    fixture.git("add", "-A")
+    fixture.git("commit", "-q", "-m", "changelog without 1.2.3")
+
+    result = fixture.run(*_pypi_args(), "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 0, result.stderr
+    assert changelog.read_text(encoding="utf-8") == before, "CHANGELOG must not be rewritten"
+    notes = fixture.state()["release_notes"]
+    assert "git 变更列表" in notes["text"]
+    gh = json.loads(fixture.gh_state.read_text(encoding="utf-8"))
+    assert gh["releases"]["v1.2.3"]["body"] == notes["text"]
+    changed = set(fixture.git("show", "--name-only", "--pretty=format:",
+                              "HEAD").stdout.split())
+    assert "CHANGELOG.md" not in changed
+
+
+def test_existing_release_body_conflict_is_not_overwritten(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    fixture.gh_state.write_text(json.dumps({"releases": {
+        "v1.2.3": {"body": "someone else's notes", "verify_tag": True}}}),
+        encoding="utf-8")
+    result = fixture.run(*_pypi_args(), "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
     assert result.returncode == 1
-    assert "旧状态缺少 upstream" in result.stderr
-    current = json.loads((tmp_path / "state" / "state.json").read_text())
-    assert "upstream" not in current
-    assert "push_target_fingerprint" not in current
+    assert "正文与记录不一致" in result.stderr
+    gh = json.loads(fixture.gh_state.read_text(encoding="utf-8"))
+    assert gh["releases"]["v1.2.3"]["body"] == "someone else's notes"
+    assert fixture.state()["complete"] is False
+
+
+def test_resume_refuses_tampered_release_notes(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    _stop_before_commit(fixture)
+    state_path = fixture.state_file()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["release_notes"]["text"]
+    state["release_notes"]["text"] += "\n- injected\n"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    result = fixture.run("--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 1
+    assert "notes 内容哈希" in result.stderr
+
+
+# ─── rework: completed batches and dry-run recovery (M6) ──────────────────
+
+
+def test_resume_reports_completed_batch_without_side_effects(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=fixture.env(extra={"TWINE_PASSWORD": "x"})).returncode == 0
+    head = fixture.git("rev-parse", "HEAD").stdout.strip()
+    uploads = len(_upload_calls(fixture))
+
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    assert result.returncode == 0, result.stderr
+    assert "已完成" in result.stdout and "未执行任何新步骤" in result.stdout
+    assert len(_upload_calls(fixture)) == uploads
     assert fixture.git("rev-parse", "HEAD").stdout.strip() == head
-    assert fixture.git("tag", "--list").stdout.strip() == tags
-    assert _remote_refs(fixture) == remote
-    calls = [json.loads(line) for line in fixture.py_log.read_text().splitlines()]
-    assert sum(1 for c in calls if c["argv"][:3] == ["-m", "twine", "upload"]) == 1
 
 
-def test_fresh_release_refuses_non_origin_tracking_branch(tmp_path):
+def test_failed_dry_run_can_be_restarted(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    fixture.git("update-ref", "refs/remotes/origin/other", "HEAD")
-    fixture.git("config", "branch.release/test.remote", "origin")
-    fixture.git("config", "branch.release/test.merge", "refs/heads/other")
-    result = fixture.run("--v", fixture.version, env=fixture.env(
-        extra={"TWINE_PASSWORD": "x"}))
-    assert result.returncode == 1
-    assert "固定发布目标" in result.stderr
-    assert not (fixture.repo / ".release" / "publish" / "state.json").exists()
+    first = fixture.run(*_pypi_args("1.2.3", "--dry-run"),
+                        env=fixture.env(extra={"FAKE_PY_FAIL_BUILD": "1"}))
+    assert first.returncode == 1
+    second = fixture.run(*_pypi_args("1.2.3", "--dry-run"),
+                         env=fixture.env())
+    assert second.returncode == 0, second.stderr
+    summary = json.loads(second.stdout[second.stdout.index("{"):])
+    assert len(summary["abandoned_dry_batches"]) == 1
+    batches = sorted((fixture.tmp / "state" / "batches").glob("*/state.json"))
+    assert len(batches) == 2, "history is kept, not deleted"
 
 
-def _load_release_module():
-    import importlib.util
-    import sys
-
-    spec = importlib.util.spec_from_file_location("release_publish_pypi", HELPER)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["release_publish_pypi"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_wrong_publish_password_reports_password_error_not_traceback(tmp_path):
-    """输错发布密码：控制台打印「密码错误」并 exit 1，不得让异常裸 traceback 冒泡。
-
-    真实 .enc + 错误密码：openssl 解出垃圾字节，subprocess 的严格 UTF-8 解码
-    会抛 UnicodeDecodeError（ValueError 子类），旧实现直接冒泡成 traceback。
-    """
+def test_dry_run_resume_continues_failed_preview(tmp_path):
     fixture = ReleaseFixture(tmp_path)
-    enc = fixture.repo / "scripts" / "publish_token.enc"
-    enc.parent.mkdir()
-    enc.write_bytes((REPO / "scripts" / "publish_token.enc").read_bytes())
-    fixture.git("add", "scripts/publish_token.enc")
-    fixture.git("commit", "-q", "-m", "add encrypted token")
-    result = fixture.run("--v", fixture.version, env=fixture.env(
-        extra={"DQ_PUBLISH_PASSWORD": "definitely-not-the-passphrase"}))
+    first = fixture.run(*_pypi_args("1.2.3", "--dry-run"),
+                        env=fixture.env(extra={"FAKE_PY_FAIL_BUILD": "1"}))
+    assert first.returncode == 1
+    batch = fixture.state()["batch_id"]
+
+    second = fixture.run("--dry-run", "--resume", "--yes",
+                         env=fixture.env())
+    assert second.returncode == 0, second.stderr
+    summary = json.loads(second.stdout[second.stdout.index("{"):])
+    assert summary["batch"] == batch
+    assert summary["artifacts"]
+
+
+# ─── rework: persistent staging + canonical active pointer (M9) ───────────
+
+
+def test_persistent_staging_lives_in_batch_dir_not_tmpdir(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    _stop_before_commit(fixture)
+    staging = Path(fixture.state()["staging"])
+    assert staging.is_dir()
+    assert str(staging).startswith(str(fixture.tmp / "state"))
+    assert (staging / "pyproject.toml").is_file()
+    # Scratch under TMPDIR may be cleaned; the frozen staging must remain.
+    import shutil as _shutil
+    _shutil.rmtree(fixture.tmp / "tmpdir", ignore_errors=True)
+    result = fixture.run("--resume", "--yes",
+                         env=fixture.env(extra={"TWINE_PASSWORD": "x"}))
+    assert result.returncode == 0, result.stderr
+
+
+def test_unfinished_release_blocks_other_status_dir_and_pointer_resumes(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    first = fixture.run(*_pypi_args(), "--yes", env=fixture.env(extra={
+        "TWINE_PASSWORD": "x", "FAKE_PY_FAIL_BUILD": "1"}))
+    assert first.returncode == 1
+    other_root = fixture.tmp / "other-state"
+
+    blocked = fixture.run(*_pypi_args(), "--yes", env=fixture.env(extra={
+        "TWINE_PASSWORD": "x", "DQ_RELEASE_STATUS_DIR": str(other_root)}))
+    assert blocked.returncode == 1
+    assert "未完成发布批次" in blocked.stderr
+    assert not (other_root / "batches").exists()
+
+    resumed = fixture.run("--resume", "--yes", env=fixture.env(extra={
+        "TWINE_PASSWORD": "x", "DQ_RELEASE_STATUS_DIR": str(other_root)}))
+    assert resumed.returncode == 0, resumed.stderr
+    assert fixture.state()["complete"] is True
+    common = _common_dir(fixture)
+    assert not (common / "dq-release-active.json").exists(), "pointer released"
+
+
+def test_completed_batch_releases_pointer(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=fixture.env(extra={"TWINE_PASSWORD": "x"})).returncode == 0
+    common = _common_dir(fixture)
+    assert not (common / "dq-release-active.json").exists()
+
+
+def test_resume_fails_closed_when_recorded_release_vanished(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=fixture.env(extra={"TWINE_PASSWORD": "x"})).returncode == 0
+    state_path = fixture.state_file()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["complete"] = False
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    fixture.gh_state.write_text(json.dumps({"releases": {}}), encoding="utf-8")
+    creates = sum(1 for line in fixture.gh_log.read_text().splitlines()
+                  if '"release", "create"' in line)
+
+    result = fixture.run("--resume", "--yes", env=fixture.env())
     assert result.returncode == 1
-    assert "密码错误" in result.stderr
-    assert "Traceback" not in result.stderr
+    assert "拒绝重建" in result.stderr
+    assert "pending" not in result.stderr
+    current = fixture.state()
+    assert current["steps"]["release"]["done"] is True
+    assert current["complete"] is False
+    creates_after = sum(1 for line in fixture.gh_log.read_text().splitlines()
+                        if '"release", "create"' in line)
+    assert creates_after == creates
 
 
-def test_obtain_token_wrong_password_raises_clean_release_error(tmp_path, monkeypatch):
-    """解密失败必须转成含「密码错误」的 ReleaseError，不得让 UnicodeDecodeError 冒泡。
+def test_resume_refuses_local_tag_loss_when_recorded_done(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes", env=_fail_upload_env(
+        fixture)).returncode == 1
+    assert fixture.state()["steps"]["tag"]["done"] is True
+    fixture.git("tag", "-d", "v1.2.3")
 
-    用已知口令加密垃圾明文：错误口令解密时 openssl 无论报错还是碰巧解出
-    垃圾（1/256 padding 巧合），都必须收敛为 ReleaseError（密码错误）。
-    """
-    mod = _load_release_module()
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    subprocess.run(
-        ["openssl", "enc", "-aes-256-cbc", "-pbkdf2",
-         "-pass", "pass:correct-horse",
-         "-out", str(scripts / "publish_token.enc")],
-        input=b"garbage-not-a-token\n", check=True, capture_output=True)
-    runner = mod.Runner(cwd=tmp_path)
-    monkeypatch.setenv("DQ_PUBLISH_PASSWORD", "wrong-battery")
-    with pytest.raises(mod.ReleaseError) as exc_info:
-        mod.obtain_token(tmp_path, runner)
-    assert exc_info.value.stage == "upload"
-    assert "密码错误" in str(exc_info.value)
-
-
-def test_unexpected_internal_error_is_reported_not_bubbled(tmp_path, monkeypatch, capsys):
-    """main 顶层兜底：未预期异常打印阶段与错误信息 + resume 提示，不裸 traceback。"""
-    mod = _load_release_module()
-    monkeypatch.setenv("DQ_RELEASE_STATUS_DIR", str(tmp_path / "state"))
-
-    def _boom(*args, **kwargs):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(mod, "resolve_identity", _boom)
-    rc = mod.main(["--v", "1.2.3", "--repo-root", str(tmp_path)])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "未预期异常" in err
-    assert "RuntimeError" in err
-    assert "boom" in err
-    assert "--resume" in err
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    assert result.returncode == 1
+    assert "标签" in result.stderr
+    assert fixture.git("tag", "--list").stdout.strip() == "", "must not recreate"

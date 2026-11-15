@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# PyPI 发布入口（薄壳）。所有编排在 scripts/release/publish_pypi.py：
-# 版本经 argv 传入、先准备与校验、仅在成功后做精确 git 变更与原子推送。
+# 统一发布入口（薄壳）。所有编排在 scripts/release/：
+# 参数/交互 → main.py；批次状态机 → orchestrator.py；PyPI / npm → 两个 adapter。
 #
-# 用法: scripts/publish.sh --v X.Y.Z [--dry-run] [--resume]
-# 凭据: DQ_PUBLISH_PASSWORD（解密 scripts/publish_token.enc）或 TWINE_PASSWORD
+# 用法: scripts/publish.sh [--dry-run] [--resume] [--packages pypi|npm|both]
+#                         [--pypi-version X.Y.Z] [--npm-version X.Y.Z]
+#                         [--min-cli-version X.Y.Z] [--status-dir DIR] [--yes]
+# 凭据: DQ_PUBLISH_PASSWORD（解密 scripts/*_token.enc）或 TWINE_PASSWORD / NPM_TOKEN
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,4 +21,4 @@ if [ -z "${PYTHON}" ] || [ ! -x "${PYTHON}" ]; then
   exit 1
 fi
 
-exec "${PYTHON}" "${SCRIPT_DIR}/release/publish_pypi.py" --repo-root "${REPO_ROOT}" "$@"
+exec "${PYTHON}" "${SCRIPT_DIR}/release/main.py" --repo-root "${REPO_ROOT}" "$@"

@@ -10,9 +10,7 @@
 - 截至主分支 `aafe8e0`，覆盖 18 次 MR 合入（编号为 1～5、8～18、20～21）。`v0.2.3` 标签不在 main 历史中，不列作主分支发布；尚未合入 main 的分支提交不计入已发布版本。
 - `0.1.0` 无对应 Git 标签，保留首版日期并按早期提交校正功能归属；后续版本均注明标签与版本提交。
 
-## [0.8.2] - 未发布
-
-> 草稿：覆盖 0.8.1 发布后合入的策略 Workspace / 用户因子 / 策略参数与因子全量构建；完成版本提交后补记版本依据。
+## [0.8.2] - 2026-11-14
 
 ### Added
 - **用户策略 Workspace**：新增 `workspace init|check` 与 `strategy list|current|use|validate` 两个顶层命令组。workspace 独立于 site-packages，**显式 init 才创建**，含 `workspace.json`（内容 `revision` CAS，冲突保留原文件）、`strategies/<slug>/`、`helpers/`、`factors/`、`snapshots/`；路径优先级 `--workspace` > `DQ_WORKSPACE` > 本机登记（`DQ_DATA_DIR/workspace-selection.json`）；未初始化时所有内建行为不变。

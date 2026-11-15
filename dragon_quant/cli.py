@@ -273,7 +273,9 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     acct_p.add_argument("--capital", type=float, default=100000.0,
                         help="初始资金 (默认 100000)")
     acct_p.add_argument("--strategy", default="dragon_pullback_daily",
-                        help="账户策略名 (默认 dragon_pullback_daily)")
+                        help="策略 ID（user:<slug> / builtin:...；默认沿用保存选择或内建）")
+    acct_p.add_argument("--workspace", default=None,
+                        help="workspace 路径（默认按 DQ_WORKSPACE / 本机登记解析）")
     acct_p.add_argument("--source", default="v2", choices=["v1", "v2"],
                         help="候选数据来源体系 (默认 v2)")
     acct_p.add_argument("--ui", action="store_true", help="回测后启动账户 Web UI")
@@ -586,10 +588,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
 
     factor_build = factor_subs.add_parser(
         "build",
-        help="构建因子值（只读迁移现有 scan / vpa 产物）",
+        help="构建因子值：默认构建全部注册因子",
         usage="dragon-quant factor build --date D | --from D --to D [options]",
-        description="单日或区间构建。区间按「区间内有扫描记录的交易日」逐日展开，"
-                    "每日独立事务与审计报告；缺失源不删除既有因子行。",
+        description="单日或区间构建。默认构建当前注册表全部因子（内建 + workspace "
+                    "用户因子）；构建全部只表示物化数据，策略/模型仍显式选择所需因子。"
+                    "区间按「区间内有扫描记录的交易日」逐日展开，每日独立事务与审计报告；"
+                    "缺失源不删除既有因子行。",
     )
     factor_build.add_argument("--date", default=None,
                               help="交易日 (YYYYMMDD / YYYY-MM-DD / YYYY/MM/DD)")
@@ -600,14 +604,19 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     factor_build.add_argument("--only", default=None,
                               help="只构建指定因子（逗号分隔，如 five_dim_drive,vpa_breakout）")
     factor_build.add_argument("--all", dest="all_factors", action="store_true",
-                              help="构建全部注册因子（含默认关；与 --only 互斥）")
+                              help="兼容参数：与默认行为等价（构建全部注册因子），"
+                                   "与 --only 互斥")
     factor_build.add_argument("--json", dest="json", action="store_true",
                               help="输出完整 JSON（默认人读摘要）")
+    factor_build.add_argument("--workspace", default=None,
+                            help="workspace 路径（用户因子注册表覆盖）")
 
     factor_list = factor_subs.add_parser(
         "list", help="列出注册表中的因子", usage="dragon-quant factor list [--json]")
     factor_list.add_argument("--json", dest="json", action="store_true",
                              help="输出完整 JSON")
+    factor_list.add_argument("--workspace", default=None,
+                            help="workspace 路径（用户因子注册表覆盖）")
 
     factor_query = factor_subs.add_parser(
         "query", help="查询因子值（点查或单因子时序）",
@@ -627,6 +636,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                               help="因子版本（默认按注册表最新版本）")
     factor_query.add_argument("--json", dest="json", action="store_true",
                               help="输出完整 JSON（默认人读表格）")
+    factor_query.add_argument("--workspace", default=None,
+                            help="workspace 路径（用户因子注册表覆盖）")
 
     factor_status = factor_subs.add_parser(
         "status", help="查看因子存储/注册表/build 状态",
@@ -675,6 +686,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                                help="quantile 缩尾分位（默认 0.05,0.95）")
     factor_export.add_argument("--json", dest="json", action="store_true",
                                help="输出完整 JSON（默认人读摘要）")
+    factor_export.add_argument("--workspace", default=None,
+                               help="workspace 路径（用户因子注册表覆盖）")
 
     # 因子评估（P1）
     factor_eval = factor_subs.add_parser(
@@ -708,6 +721,8 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                              help="PIT 口径（strict 默认剔除 statutory_backfilled）")
     factor_eval.add_argument("--json", dest="json", action="store_true",
                              help="输出完整 JSON（默认人读摘要）")
+    factor_eval.add_argument("--workspace", default=None,
+                             help="workspace 路径（用户因子注册表覆盖）")
 
     # 决策结果回测（只读冻结快照，不要求 factor build）
     factor_decision = factor_subs.add_parser(
@@ -840,9 +855,16 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     for trade_parser in (buy_p, sell_p):
         trade_parser.add_argument("--at", help="历史回放截止时刻 HH:MM，仅与 --date 配合")
         trade_parser.add_argument("--config", help="共享策略参数 JSON 文件")
+        trade_parser.add_argument("--workspace", default=None,
+                                  help="workspace 路径（默认按 DQ_WORKSPACE / 本机登记解析）")
+        trade_parser.add_argument("--strategy", default=None,
+                                  help="策略 ID（user:<slug> / builtin:...）；sell 仅筛选归属持仓")
         trade_parser.add_argument(
             "--force", action="store_true",
             help="非交易时段仍强制跑当日回放（09:30 前仍拒绝；15:00–15:06 宽限窗口无需 --force）")
+
+    sell_p.add_argument("--json", dest="json", action="store_true",
+                        help="输出完整 JSON（含持仓归属与筛选结果）")
 
     # bs-eval 子命令（离线批量回放 dragons_v2，生成假想买卖点）
     bs_p = sub.add_parser(
@@ -938,6 +960,10 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                              help="不自动打开浏览器")
     dashboard_p.add_argument("--yes", action="store_true",
                              help="[web] 未安装时直接安装，不再询问（等同 DQ_WEB_AUTO_INSTALL=1）")
+    dashboard_p.add_argument("--workspace-writes", dest="workspace_writes", action="store_true",
+                             help="显式允许 Web 选择/执行本机用户策略（默认只读）")
+    dashboard_p.add_argument("--no-workspace-writes", dest="no_workspace_writes", action="store_true",
+                             help="强制 Web 只读（优先于 --workspace-writes / 环境变量）")
     dashboard_p.add_argument("--bs-autogen", action="store_true",
                              help="显式启用启动时后台增量生成 BS 派生数据"
                                   "（默认只读；也可用 DQ_BS_AUTOGEN=1）")
@@ -1090,7 +1116,59 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                          help="显式确认消耗本地算力并写入实验报告")
     exp_run.add_argument("--sell-rule", dest="sell_rule", action="append",
                          default=None, help="消融的卖出规则名（可重复）")
+    exp_run.add_argument("--strategy-param", dest="strategy_param", action="append",
+                         default=None,
+                         help="用户策略参数变体 k=v（可重复；需基准 run 有 strategy_ref）")
     exp_run.add_argument("--json", dest="json", action="store_true")
+
+    # workspace 子命令：初始化 / 检查用户策略工作区
+    ws_p = sub.add_parser(
+        "workspace",
+        help="用户策略工作区：初始化 / 检查",
+        usage="dragon-quant workspace {init PATH | check} [options]",
+        description="初始化独立于 site-packages 的 workspace，或在显式验证路径检查配置与策略。",
+        epilog="""Examples:
+  dragon-quant workspace init /path/to/my-workspace
+  dragon-quant workspace check --workspace /path/to/my-workspace
+""",
+    )
+    ws_subs = ws_p.add_subparsers(dest="workspace_action", metavar="<action>")
+    ws_init = ws_subs.add_parser("init", help="初始化 workspace（不覆盖已有文件）",
+                                 usage="dragon-quant workspace init PATH")
+    ws_init.add_argument("path", help="workspace 目录")
+    ws_init.add_argument("--json", dest="json", action="store_true", help="输出 JSON")
+    ws_check = ws_subs.add_parser("check", help="检查 workspace 配置与策略",
+                                  usage="dragon-quant workspace check [--workspace PATH] [--json]")
+    ws_check.add_argument("--workspace", default=None, help="workspace 路径")
+    ws_check.add_argument("--json", dest="json", action="store_true", help="输出 JSON")
+
+    # strategy 子命令：策略清单 / 当前选择 / 持久切换 / 校验
+    stg_p = sub.add_parser(
+        "strategy",
+        help="内建与用户策略：list / current / use / validate",
+        usage="dragon-quant strategy {list,current,use,validate} [options]",
+        description="列出内建与 workspace 用户策略、查看/持久切换当前选择、校验策略。",
+        epilog="""Examples:
+  dragon-quant strategy list --workspace /path/to/my-workspace --json
+  dragon-quant strategy current
+  dragon-quant strategy use user:example_momentum --workspace /path/to/my-workspace
+  dragon-quant strategy validate user:example_momentum
+""",
+    )
+    stg_subs = stg_p.add_subparsers(dest="strategy_action", metavar="<action>")
+    stg_list = stg_subs.add_parser("list", help="列出策略（只读 descriptor）",
+                                   usage="dragon-quant strategy list [--workspace PATH] [--json]")
+    stg_current = stg_subs.add_parser("current", help="查看当前保存选择",
+                                      usage="dragon-quant strategy current [--workspace PATH] [--json]")
+    stg_use = stg_subs.add_parser("use", help="持久切换当前策略",
+                                  usage="dragon-quant strategy use ID [--workspace PATH] [--json]")
+    stg_use.add_argument("strategy_id", help="策略 ID")
+    stg_validate = stg_subs.add_parser("validate", help="校验单个策略",
+                                       usage="dragon-quant strategy validate ID [--workspace PATH] [--json]")
+    stg_validate.add_argument("strategy_id", help="策略 ID")
+    for stg in (stg_list, stg_current, stg_use, stg_validate):
+        stg.add_argument("--workspace", default=None, help="workspace 路径")
+        stg.add_argument("--json", dest="json", action="store_true", help="输出 JSON")
 
     argv = sys.argv[1:]
     if argv and argv[0] == "scan_v2":

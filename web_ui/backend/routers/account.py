@@ -22,7 +22,9 @@ from ..deps import (
     evaluation_module,
     run_account_backtest,
     run_incremental_account_backtest,
+    workspace_module,
 )
+from ..http_guards import origin_allowed
 
 router = APIRouter(tags=["account"])
 
@@ -66,9 +68,16 @@ def account_runs(request: Request, account=Depends(account_repository),
 @router.post("/api/account/runs", response_model=None)
 @mutation_errors
 def create_account_run(payload: dict | None = Body(default=None),
+                       request: Request = None,
                        account=Depends(account_repository),
                        run_account=Depends(run_account_backtest),
-                       settings=Depends(dashboard_settings)):
+                       settings=Depends(dashboard_settings),
+                       workspace=Depends(workspace_module)):
+    origin = request.headers.get("origin") if request is not None else None
+    if origin and not origin_allowed(origin):
+        raise ValueError("跨站来源不允许启动账户回测")
+    payload = payload if isinstance(payload, dict) else {}
+    selection = _resolve_selection(payload, settings, workspace)
     if not _account_run_lock.acquire(blocking=False):
         return JSONResponse(
             status_code=409,
@@ -76,12 +85,40 @@ def create_account_run(payload: dict | None = Body(default=None),
         )
     try:
         result = compat.create_account_run(
-            payload or {}, default_source=settings.default_source,
-            run_account=run_account, account=account,
+            payload, default_source=settings.default_source,
+            run_account=run_account, account=account, selection=selection,
         )
     finally:
         _account_run_lock.release()
     return JSONResponse(status_code=201, content=result)
+
+
+def _resolve_selection(payload: dict, settings, workspace):
+    """账户回测的策略选择：显式 strategy_id > 已保存选择；无 workspace 时 None。
+
+    用户策略（会执行本地 Python）必须显式本机启用；默认 dashboard 只读。
+    """
+    strategy_id = payload.get("strategy_id")
+    if strategy_id is not None and (not isinstance(strategy_id, str) or not strategy_id.strip()):
+        raise ValueError("strategy_id 必须是非空字符串")
+    parameters = payload.get("strategy_parameters")
+    if parameters is not None and not isinstance(parameters, dict):
+        raise ValueError("strategy_parameters 必须是对象")
+    path = getattr(settings, "workspace_path", None)
+    try:
+        current = workspace.current_selection(path)
+    except Exception:
+        current = {}
+    if not (strategy_id or current.get("workspace")):
+        return None
+    try:
+        selection = workspace.resolve_selection(path, strategy_id, parameters)
+    except workspace.WorkspaceError as exc:  # type: ignore[attr-defined]
+        raise ValueError(str(exc)) from exc
+    if selection.descriptor.source == "user" and not getattr(
+            settings, "workspace_writes_enabled", False):
+        raise ValueError("本机未启用 Web 用户策略执行（dashboard --workspace-writes）")
+    return selection
 
 
 @router.post("/api/account/runs/incremental", response_model=None)

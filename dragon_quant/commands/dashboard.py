@@ -140,7 +140,7 @@ def ensure_web_extra(*, auto: bool = False) -> bool:
 
 
 def _start_server(port: int, *, open_browser: bool, default_page: str,
-                  bs_autogen: bool):
+                  bs_autogen: bool, workspace_writes: bool):
     from web_ui.server import start_server
 
     return start_server(
@@ -149,7 +149,22 @@ def _start_server(port: int, *, open_browser: bool, default_page: str,
         default_source="v2",
         default_page=default_page,
         bs_autogen=bs_autogen,
+        workspace_writes=workspace_writes,
     )
+
+
+def _resolve_workspace_writes(args) -> bool:
+    """Web 本地策略执行/选择开关：默认只读，必须显式本机启用。
+
+    优先级（高 → 低）：``--no-workspace-writes`` / ``DQ_DASHBOARD_WORKSPACE_WRITES=0``
+    → 关；``--workspace-writes`` / ``DQ_DASHBOARD_WORKSPACE_WRITES=1`` → 开；否则关。
+    """
+    env = os.environ.get("DQ_DASHBOARD_WORKSPACE_WRITES", "").strip().lower()
+    if getattr(args, "no_workspace_writes", False) or env in _FALSE_VALUES:
+        return False
+    if getattr(args, "workspace_writes", False) or env in _TRUE_VALUES:
+        return True
+    return False
 
 
 def start_ui(args, *, default_page: str = "review") -> None:
@@ -159,10 +174,11 @@ def start_ui(args, *, default_page: str = "review") -> None:
     port = requested if explicit else DEFAULT_UI_PORT
     open_browser = not getattr(args, "no_browser", False)
     bs_autogen = _resolve_bs_autogen(args)
+    workspace_writes = _resolve_workspace_writes(args)
 
     try:
         _start_server(port, open_browser=open_browser, default_page=default_page,
-                      bs_autogen=bs_autogen)
+                      bs_autogen=bs_autogen, workspace_writes=workspace_writes)
         return
     except OSError as exc:
         if not is_addr_in_use(exc):
@@ -180,7 +196,7 @@ def start_ui(args, *, default_page: str = "review") -> None:
         file=sys.stderr,
     )
     _start_server(0, open_browser=open_browser, default_page=default_page,
-                  bs_autogen=bs_autogen)
+                  bs_autogen=bs_autogen, workspace_writes=workspace_writes)
 
 
 def handle(args, services) -> None:

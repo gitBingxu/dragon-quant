@@ -140,6 +140,11 @@ COMMANDS: dict[str, LazyCommand] = {
     "research": LazyCommand(
         "dragon_quant.commands.research",
         needs_providers=_never_providers),
+    # workspace / strategy：本地配置与策略清单，查询不导入用户代码、不触网。
+    "workspace": LazyCommand(
+        "dragon_quant.commands.workspace", needs_providers=_never_providers),
+    "strategy": LazyCommand(
+        "dragon_quant.commands.strategy", needs_providers=_never_providers),
 }
 
 

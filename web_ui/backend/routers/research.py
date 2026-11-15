@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -24,12 +24,14 @@ from ..deps import (
     bar_calendar_loader,
     candidate_loader_factory,
     clock_module,
+    dashboard_settings,
     factor_storage,
     local_bars_loader,
     prep_snapshot_reader,
     scan_repository,
 )
 from ..errors import ApiError
+from ..http_guards import origin_allowed
 from ..locks import ACCOUNT_HEAVY_LOCK
 from ..presenters import scan_quality as quality_view
 
@@ -81,6 +83,8 @@ def scan_quality(date_from: str | None = None, date_to: str | None = None,
 
 @router.post("/api/account/experiments", response_model=None)
 def create_account_experiments(payload: dict | None = Body(default=None),
+                               request: Request = None,
+                               settings=Depends(dashboard_settings),
                                account=Depends(account_repository),
                                assets=Depends(assets_repository),
                                factor_store=Depends(factor_storage),
@@ -97,6 +101,17 @@ def create_account_experiments(payload: dict | None = Body(default=None),
     )
 
     body = ExperimentRequest(**(payload or {}))
+    origin = request.headers.get("origin") if request is not None else None
+    if origin and not origin_allowed(origin):
+        return JSONResponse(status_code=400,
+                            content={"error": "跨站来源不允许运行对照实验"})
+    run = account.get_review_account_run(body.run_id)
+    ref = (run or {}).get("run_meta", {}).get("strategy_ref") if run else None
+    if isinstance(ref, dict) and str(ref.get("strategy_id", "")).startswith("user:"):
+        if not getattr(settings, "workspace_writes_enabled", False):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "本机未启用 Web 用户策略执行（dashboard --workspace-writes）"})
     try:
         report = run_account_experiment(
             run_id=body.run_id,
@@ -113,6 +128,7 @@ def create_account_experiments(payload: dict | None = Body(default=None),
                 *args, **kwargs),
             heavy_lock=ACCOUNT_HEAVY_LOCK,
             lock_path=paths.DATA_DIR / "locks" / "account_experiment.lock",
+            use_worker=getattr(settings, "workspace_writes_enabled", False),
         )
     except InvalidRequest as exc:
         raise ApiError(400, exc.code, exc.message) from exc

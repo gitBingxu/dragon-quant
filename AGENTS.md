@@ -61,6 +61,7 @@ python -m dragon_quant dashboard          # 本地可视化面板（[web] 可选
 | [premarket](docs/agent/premarket.md) | 改 `premarket`、盘前只读上下文、三锚/行动上限、盘前 JSON 契约 | 只读语义 / 严格 T-1 / 降级原因码 / 行动上限 |
 | [assets](docs/agent/assets.md) | 改 `assets push/pull/status/verify`、分区与水位、恢复回填、`dragons` 镜像 | 同步运维语义 / 分区 / 水位 / 恢复 / 退出码 |
 | [factor](docs/agent/factor.md) | 改因子层、财务与 PIT、矩阵导出/评估、决策接入、新增或修改因子 | 因子层契约 / 财务 PIT / 矩阵与评估 / 排序注入 |
+| [workspace](docs/agent/workspace.md) | 改 `workspace init/check`、`strategy` 命令、策略 SDK、`--workspace/--strategy`、冻结/归属、Web `/strategies` | workspace 契约 / 选择持久化 / 统一运行时 / 快照与因子 |
 | [development](docs/agent/development.md) | 改 Agent Skill 包、Web UI 前端构建、E2E 安全边界 / golden / 覆盖图、打包边界 | 开发与发布流程 |
 
 **已有权威（本文与模块文档只引用、不复制正文）**：
@@ -110,7 +111,7 @@ python -m dragon_quant dashboard          # 本地可视化面板（[web] 可选
 npm test
 ```
 - **E2E 安全边界**：永不打开真实 `dragon.db` / `assets.db` / `prep.db`，每命令在独立临时根下运行并隔离网络 / Cookie / 云端；真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射与 golden**：`coverage-map.json` 固定 70 个 parser 节点 / 19 个顶层命令，新增命令必须同步；golden 只在批准的行为变更时更新，结构重构不得改 golden。
+- **覆盖映射与 golden**：`coverage-map.json` 固定 78 个 parser 节点 / 21 个顶层命令，新增命令必须同步；golden 只在批准的行为变更时更新，结构重构不得改 golden。
 - 细则（哨兵比对、fake provider 注入、打包边界）见 [development](docs/agent/development.md)。
 
 ### Git 规范

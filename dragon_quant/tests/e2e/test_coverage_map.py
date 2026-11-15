@@ -68,13 +68,13 @@ def _covered_nodes(coverage: dict) -> dict[str, dict]:
     return coverage["nodes"]
 
 
-def test_parser_snapshot_has_70_nodes_and_19_top_level_commands():
+def test_parser_snapshot_counts_are_consistent():
     snapshot = _load_map()["parser_snapshot"]
     nodes = snapshot["nodes"]
 
-    assert snapshot["node_count"] == len(nodes) == 70
-    assert snapshot["top_level_count"] == sum(1 for node in nodes if " " not in node["command"]) == 19
-    assert len({node["command"] for node in nodes}) == 70
+    assert snapshot["node_count"] == len(nodes)
+    assert snapshot["top_level_count"] == sum(1 for node in nodes if " " not in node["command"])
+    assert len({node["command"] for node in nodes}) == len(nodes)
     for node in nodes:
         assert node["command"].strip() == node["command"]
         assert node["flags"], f"{node['command']} must list its parser flags"

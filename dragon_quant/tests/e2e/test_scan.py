@@ -61,7 +61,22 @@ def run_scan(box: EnvSandbox, args: list[str], *, scenario: Path = SCENARIO,
 def golden(name: str) -> dict | str:
     path = GOLDEN / name
     if path.suffix == ".json":
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if name == "db.json":
+            from dragon_quant._version import __version__
+
+            def resolve_version_tokens(value):
+                if isinstance(value, dict):
+                    return {key: resolve_version_tokens(item)
+                            for key, item in value.items()}
+                if isinstance(value, list):
+                    return [resolve_version_tokens(item) for item in value]
+                if value == "<DRAGON_QUANT_VERSION>":
+                    return __version__
+                return value
+
+            return resolve_version_tokens(payload)
+        return payload
     return path.read_text(encoding="utf-8")
 
 

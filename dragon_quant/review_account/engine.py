@@ -8,14 +8,22 @@ from dragon_quant.review_account.models import (
 )
 from dragon_quant.review_account.strategy.priority import TRI_LABELS, key_components, rank_key
 from dragon_quant.review_account.strategy.risk import risk_governor
+from dragon_quant.review_account.strategy.runtime import (
+    StrategyRuntimeError, build_builtin_runtime,
+)
 from dragon_quant.review_account.strategy.main import (
-    evaluate_sell, explain_buy_candidate, explain_buy_checks,
+    explain_buy_candidate, explain_buy_checks,
 )
 
 
 class TradingEngine:
-    def __init__(self, cfg: StrategyConfig, state: AccountState):
+    def __init__(self, cfg: StrategyConfig, state: AccountState, runtime=None,
+                 runtime_resolver=None):
         self.cfg, self.state = cfg, state
+        # runtime=None 时逐位复用既有内建规则（默认行为不变）。
+        self.runtime = runtime or build_builtin_runtime(cfg)
+        # 混合归属：按持仓冻结归属解析退出运行时（旧/未知归属回退内建）。
+        self.runtime_resolver = runtime_resolver
 
     def step(self, event: MarketEvent) -> dict:
         state, cfg = self.state, self.cfg
@@ -86,9 +94,14 @@ class TradingEngine:
                     sell_row = row
                     if row["bar_timestamp"] <= entry_ts:
                         sell_row = {**row, "bar_low": row["bar_close"], "bar_high": row["bar_close"]}
-                    signals = evaluate_sell(p, sell_row, hold_days, cfg, row["intraday_bars"])
-                    if signals:
-                        state.pending.append(self._order(p.code, p.name, signals[0], event.timestamp))
+                    runtime = self._runtime_for(p)
+                    signal = runtime.evaluate_exit(
+                        position=p, row=sell_row, hold_days=hold_days, cfg=cfg,
+                        intraday_bars=row["intraday_bars"], trade_date=day,
+                        timestamp=event.timestamp, phase=event.phase,
+                        account=self._account_dict(equity))
+                    if signal:
+                        state.pending.append(self._order(p.code, p.name, signal, event.timestamp))
                 # The current bar cannot activate protection retroactively within that same bar.
                 track_peak(p, row, entry_ts)
             buy_window = (event.phase != "close" and event.allow_buy and risk_allow_buy
@@ -120,10 +133,8 @@ class TradingEngine:
                         continue
                     if row:
                         state.evaluated[key] = row["bar_timestamp"]
-                    detail = explain_buy_candidate(cand, row, cfg, row.get("prev_row") if row else None,
-                                                   row.get("hist_rows") if row else None,
-                                                   row.get("intraday_bars") if row else None,
-                                                   state.sentiment_pct)
+                    detail = self._entry_detail(cand, row, cfg, event, equity,
+                                                state.sentiment_pct)
                     result["details"].append(detail)
                     if detail["passed"] and detail.get("full_signal"):
                         signals.append((detail["full_signal"], cand))
@@ -168,8 +179,12 @@ class TradingEngine:
 
     @staticmethod
     def _order(code, name, signal, timestamp):
+        payload = signal.get("signal") or {}
         return {"stock_code": code, "name": name, "side": signal["action"], "code": signal["code"],
-                "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp}
+                "reason_text": signal["reason_text"], "signal": signal["signal"], "created_at": timestamp,
+                "exit_fraction": payload.get("exit_fraction"),
+                "position_pct": payload.get("position_pct"),
+                "strategy_ref": payload.get("strategy_ref")}
 
     def _unavailable_details(self, event) -> list[dict]:
         """停牌/不可用候选的 detail：在买窗闸门外产出，每 code 每日一条。"""
@@ -232,6 +247,78 @@ class TradingEngine:
         return self.state.cash + sum(p.qty * self.state.marks.get(p.code, p.entry_price)
                                      for p in self.state.positions)
 
+    def _account_dict(self, equity: float) -> dict:
+        return {"cash": self.state.cash, "equity": equity,
+                "position_count": len(self.state.positions),
+                "sold_today": self.state.sold_today}
+
+    def _active_ref(self) -> dict:
+        """活跃策略的冻结归属（无 service 冻结时给最小可路由身份）。"""
+        ref = dict(getattr(self.runtime, "strategy_ref", {}) or {})
+        ref.setdefault("strategy_id", getattr(self.runtime, "strategy_id", ""))
+        ref.setdefault("schema_version", 1)
+        return ref
+
+    def _runtime_for(self, position):
+        """严格按持仓冻结身份选择退出运行时。
+
+        - 无 ref 的旧仓 → legacy 内建（不冒用当前活动策略）；
+        - 身份与活动运行时完全一致（含 snapshot/params_hash/factor_versions）才复用；
+        - 其余已知归属必须由解析器从快照构造；构造失败显式上抛，不静默退当前/内建。
+        """
+        from dragon_quant.review_account.strategy.runtime import ref_identity
+
+        ref = getattr(position, "strategy_ref", None) or {}
+        owner = ref.get("strategy_id")
+        if not owner:
+            return build_builtin_runtime(self.cfg)
+        if ref_identity(ref) == ref_identity(getattr(self.runtime, "strategy_ref", {})):
+            return self.runtime
+        if self.runtime_resolver is None:
+            raise StrategyRuntimeError(
+                owner, "缺少冻结运行时解析器，拒绝用当前源码退出旧持仓")
+        return self.runtime_resolver(owner, ref)
+
+    def _entry_detail(self, cand, row, cfg, event, equity, sentiment_pct):
+        """买入评估：内建走既有诊断投影；用户策略构造简化 detail。"""
+        prev_row = row.get("prev_row") if row else None
+        hist_rows = row.get("hist_rows") if row else None
+        intraday = row.get("intraday_bars") if row else None
+        if getattr(self.runtime, "source", "builtin") == "builtin":
+            return explain_buy_candidate(cand, row, cfg, prev_row, hist_rows,
+                                         intraday, sentiment_pct)
+        try:
+            signal = self.runtime.evaluate_entry(
+                candidate=cand, row=row, cfg=cfg, prev_row=prev_row,
+                hist_rows=hist_rows, intraday_bars=intraday,
+                sentiment_pct=sentiment_pct, trade_date=event_date(event.timestamp),
+                timestamp=event.timestamp, phase=event.phase,
+                account=self._account_dict(equity))
+        except StrategyRuntimeError:
+            raise
+        return self._user_detail(cand, row, signal)
+
+    def _user_detail(self, cand, row, signal) -> dict:
+        passed = bool(signal)
+        detail = {
+            "code": cand.get("code"), "name": cand.get("name", ""),
+            "rank": cand.get("rank"), "passed": passed,
+            "reason_code": (signal["code"] if signal
+                            else (getattr(self.runtime, "last_note_code", None) or "no_signal")),
+            "reason_text": (signal["reason_text"] if signal
+                            else (getattr(self.runtime, "last_note", None) or "策略未给出买入信号")),
+            "signal": (signal or {}).get("signal") or {},
+            "full_signal": signal,
+            "observed_at": row.get("observed_at") if row else None,
+            "phase": row.get("phase") if row else None,
+            "checks": [], "strategy_id": getattr(self.runtime, "strategy_id", ""),
+        }
+        if signal:
+            detail["priority_key"] = key_components(
+                signal, cand, self.cfg.auction_ranking_enabled,
+                getattr(self.cfg, "factor_ranking_enabled", False))
+        return detail
+
     def _raw_fill_price(self, order, row):
         """日K兜底日的卖出按原因近似定价；盘中及买入仍用 execution_price。"""
         if order["side"] == "SELL" and row.get("data_quality") == "daily_fallback":
@@ -242,9 +329,12 @@ class TradingEngine:
 
     def _fill(self, order, row, price, day):
         state, cfg = self.state, self.cfg
+        ref = order.get("strategy_ref") or (
+            (order.get("signal") or {}).get("strategy_ref")) or self._active_ref()
         signal = {**order["signal"], "decision_timestamp": order["created_at"],
                   "fill_timestamp": row["observed_at"], "execution_price": row["execution_price"],
-                  "delay_seconds": (row["observed_at"] - order["created_at"]) / 1000}
+                  "delay_seconds": (row["observed_at"] - order["created_at"]) / 1000,
+                  "strategy_ref": dict(ref)}
         code, side = order["stock_code"], order["side"]
         if side == "BUY":
             if any(p.code == code for p in state.positions) or len(state.positions) >= cfg.max_positions:
@@ -254,13 +344,18 @@ class TradingEngine:
             budget_scale = delevel
             if cfg.sentiment_sizing_enabled and state.sentiment_pct is not None:
                 budget_scale *= state.sentiment_pct
+            # 用户策略的 position_pct 是建议上限，仍受共享仓位/现金/风险预算约束。
+            pct = order.get("position_pct")
+            if pct is not None and 0 < pct < 100:
+                budget_scale *= pct / 100
             qty = buy_quantity(state.cash, equity, price, cfg, budget_scale)
             if not qty:
                 return None, None
             amount, cost_fee = price * qty, fee(price * qty, side, cfg)
             state.cash -= amount + cost_fee
             p = Position(code, order["name"], qty, day, price, amount + cost_fee,
-                         order["code"], order["reason_text"], signal, highest_price=price)
+                         order["code"], order["reason_text"], signal, highest_price=price,
+                         strategy_ref=dict(ref))
             state.positions.append(p)
             state.buys_today += 1
             return Trade(day, code, p.name, side, price, qty, amount, cost_fee, -cost_fee,
@@ -268,7 +363,9 @@ class TradingEngine:
         p = next((p for p in state.positions if p.code == code), None)
         if p is None or p.entry_date >= day:
             return None, None
-        fill = apply_sell_fill(p, price, order["code"], cfg)
+        # 出场信号携带持仓自己的冻结归属，而不是当前活动策略。
+        signal["strategy_ref"] = dict(getattr(p, "strategy_ref", None) or {})
+        fill = apply_sell_fill(p, price, order["code"], cfg, order.get("exit_fraction"))
         state.cash += fill["amount"] - fill["fee"]
         state.sold_today = True
         state.realized_today += fill["pnl"]

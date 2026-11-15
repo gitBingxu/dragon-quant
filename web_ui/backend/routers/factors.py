@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from .. import params
-from ..deps import factor_service, factor_storage
+from ..deps import (
+    dashboard_settings,
+    factor_service,
+    factor_storage,
+    workspace_module,
+)
 from ..errors import ApiError
 
 router = APIRouter(tags=["factors"])
@@ -24,7 +29,8 @@ class FactorSpecView(BaseModel):
     available_phase: str | None = None
     pit_rule: str | None = None
     lookback: int | None = None
-    enabled: bool = False
+    origin: Literal["builtin", "workspace"] = "builtin"
+    owner: str | None = None
     depends_on: list[str] = []
     valid_from: str | None = None
     deprecated_at: str | None = None
@@ -94,42 +100,89 @@ def _registry_map(registry: list[dict]) -> dict[str, dict]:
     return mapping
 
 
+def _builtin_view(spec: dict, registry: dict[str, dict]) -> FactorSpecView:
+    db_row = registry.get(spec["name"]) or {}
+    return FactorSpecView(
+        name=spec["name"],
+        label=spec.get("label"),
+        direction=spec.get("direction"),
+        unit=spec.get("unit"),
+        frequency=spec.get("frequency"),
+        source=spec.get("source"),
+        available_phase=spec.get("available_phase"),
+        pit_rule=spec.get("pit_rule"),
+        lookback=spec.get("lookback"),
+        origin="builtin",
+        owner=spec.get("owner"),
+        depends_on=list(spec.get("depends_on") or []),
+        valid_from=spec.get("valid_from"),
+        deprecated_at=spec.get("deprecated_at"),
+        description=spec.get("description"),
+        code_version=spec.get("version"),
+        code_version_source=spec.get("version_source"),
+        db_version=db_row.get("factor_version"),
+        db_registered=bool(db_row),
+        params=db_row.get("params"),
+        spec_hash=db_row.get("spec_hash"),
+    )
+
+
+def _workspace_view(entry: dict, registry: dict[str, dict]) -> FactorSpecView:
+    """workspace 用户因子只来自静态 AST 元数据；不导入/执行用户 Python。"""
+    db_row = registry.get(entry["name"]) or {}
+    return FactorSpecView(
+        name=entry["name"],
+        label=entry.get("label"),
+        direction=entry.get("direction"),
+        unit=entry.get("unit"),
+        frequency=entry.get("frequency"),
+        source=entry.get("source"),
+        available_phase=entry.get("available_phase"),
+        pit_rule=entry.get("pit_rule"),
+        lookback=entry.get("lookback"),
+        origin="workspace",
+        owner=entry.get("owner") or "workspace",
+        depends_on=list(entry.get("depends_on") or []),
+        description=entry.get("description"),
+        code_version=entry.get("version"),
+        # 静态版本与执行版本同源（规范化元数据 + 源码/helpers 哈希）。
+        code_version_source="override",
+        db_version=db_row.get("factor_version"),
+        db_registered=bool(db_row),
+        params=db_row.get("params"),
+        spec_hash=db_row.get("spec_hash"),
+    )
+
+
+def _workspace_entries(module, settings) -> list[dict]:
+    """静态 workspace 因子元数据；坏配置显式 500（不静默吞掉）。"""
+    try:
+        return module.list_factor_metadata(settings.workspace_path)
+    except Exception as exc:  # noqa: BLE001 - 只读目录必须暴露 workspace 损坏
+        raise ApiError(500, "workspace_invalid", str(exc)) from exc
+
+
 @router.get("/api/factors")
-def list_factors(source: str | None = None, enabled_only: bool = False,
+def list_factors(source: str | None = None,
                  service=Depends(factor_service),
-                 storage=Depends(factor_storage)) -> dict:
-    specs = service.list_factors()
+                 storage=Depends(factor_storage),
+                 module=Depends(workspace_module),
+                 settings=Depends(dashboard_settings)) -> dict:
     registry = _registry_map(storage.list_registry())
-    data: list[FactorSpecView] = []
-    for spec in specs:
+    data: dict[str, FactorSpecView] = {}
+    for spec in service.list_factors():
         if source and spec.get("source") != source:
             continue
-        if enabled_only and not spec.get("default_enabled"):
+        view = _builtin_view(spec, registry)
+        data.setdefault(view.name, view)
+    # 未初始化 workspace → 空列表；损坏 workspace → 显式 500。
+    for entry in _workspace_entries(module, settings):
+        if source and entry.get("source") != source:
             continue
-        db_row = registry.get(spec["name"]) or {}
-        data.append(FactorSpecView(
-            name=spec["name"],
-            label=spec.get("label"),
-            direction=spec.get("direction"),
-            unit=spec.get("unit"),
-            frequency=spec.get("frequency"),
-            source=spec.get("source"),
-            available_phase=spec.get("available_phase"),
-            pit_rule=spec.get("pit_rule"),
-            lookback=spec.get("lookback"),
-            enabled=bool(spec.get("default_enabled")),
-            depends_on=list(spec.get("depends_on") or []),
-            valid_from=spec.get("valid_from"),
-            deprecated_at=spec.get("deprecated_at"),
-            description=spec.get("description"),
-            code_version=spec.get("version"),
-            code_version_source=spec.get("version_source"),
-            db_version=db_row.get("factor_version"),
-            db_registered=bool(db_row),
-            params=db_row.get("params"),
-            spec_hash=db_row.get("spec_hash"),
-        ))
-    return {"data": [item.model_dump() for item in data], "count": len(data)}
+        view = _workspace_view(entry, registry)
+        data.setdefault(view.name, view)
+    ordered = [data[name] for name in sorted(data)]
+    return {"data": [item.model_dump() for item in ordered], "count": len(ordered)}
 
 
 def _coverage_entry(entry: dict) -> FactorCoverage:
@@ -146,12 +199,20 @@ def _coverage_entry(entry: dict) -> FactorCoverage:
 def factor_values(trade_date: str | None = None, name: str | None = None,
                   code: str | None = None, version: str | None = None,
                   service=Depends(factor_service),
-                  storage=Depends(factor_storage)) -> FactorDayView:
+                  storage=Depends(factor_storage),
+                  module=Depends(workspace_module),
+                  settings=Depends(dashboard_settings)) -> FactorDayView:
     if not trade_date:
         raise ApiError(400, "invalid_request", "trade_date 必填")
+    # 用户因子名称来自静态元数据（不导入用户代码）；存储层仍按注册表解析版本。
+    known_names = None
+    if name:
+        known_names = [entry["name"]
+                       for entry in _workspace_entries(module, settings)]
     try:
         day = params.normalize_date(trade_date)
-        payload = service.query(date=day, name=name, code=code, version=version)
+        payload = service.query(date=day, name=name, code=code, version=version,
+                                known_names=known_names)
     except ValueError as exc:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 

@@ -1,0 +1,35 @@
+{
+  "id": "user:example_momentum",
+  "label": "示例·高开承接（动量）",
+  "description": "仅演示 SDK API 的示例策略，无有效性宣称。",
+  "sdk_version": 1,
+  "entrypoint": "create_strategy",
+  "parameters": {
+    "min_open_gap_pct": {
+      "type": "number",
+      "default": 1.0,
+      "label": "最小开盘涨幅",
+      "help": "开盘涨幅低于该值时不考虑买入",
+      "unit": "%",
+      "step": 0.1
+    },
+    "take_profit_pct": {
+      "type": "number",
+      "default": 10.0,
+      "label": "止盈线",
+      "help": "收盘收益率达到该值时退出（示例策略）",
+      "unit": "%",
+      "step": 0.1
+    },
+    "stop_loss_pct": {
+      "type": "number",
+      "default": -4.0,
+      "label": "止损线",
+      "help": "最低价相对开仓价的亏损达到该幅度时退出（示例策略，负数）",
+      "unit": "%",
+      "step": 0.1
+    }
+  },
+  "required_factors": [],
+  "data_requirements": ["1d", "5m"]
+}

@@ -165,7 +165,7 @@ web_ui.serve / routers.bs → bs_runner.BsRunner（标准库 only）
 - E2E：`tests/e2e/test_bs_eval.py` BS1–BS6（真实 CLI + fake provider + 临时库；BS6 真实 Web 子进程）；
   `test_dashboard.py` D1 断言沙箱 `autogen_enabled=false`、D13 断言开关打开但 `procguard` 禁止
   子进程时 fail-soft（`failed` + `spawn_failed`，`/api/meta` 仍 200）。
-- 覆盖映射：`coverage-map.json` 70 个 parser 节点 / 19 个顶层命令（dashboard flags 含 `--no-bs-autogen`）。
+- 覆盖映射：`coverage-map.json` 78 个 parser 节点 / 21 个顶层命令（dashboard flags 含 `--no-bs-autogen`）。
 
 ## 评测器 `bs_eval/2`（2026-11-05，A2/A3/A12）
 

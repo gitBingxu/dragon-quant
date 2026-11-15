@@ -60,6 +60,8 @@ TOP_LEVEL_COMMANDS = (
     "storage",
     "dashboard",
     "bs-eval",
+    "workspace",
+    "strategy",
 )
 
 # Every top-level command runs through its own handler module.
@@ -155,7 +157,7 @@ class TestCommandRegistry(unittest.TestCase):
     def test_every_top_level_command_has_its_own_handler_module(self):
         from dragon_quant import commands
 
-        self.assertEqual(len(MIGRATED_COMMANDS), 19)
+        self.assertEqual(len(MIGRATED_COMMANDS), len(TOP_LEVEL_COMMANDS))
         for name in MIGRATED_COMMANDS:
             with self.subTest(command=name):
                 entry = commands.COMMANDS[name]
@@ -669,7 +671,7 @@ class TestMigratedHandlers(unittest.TestCase):
     def test_every_migrated_handler_accepts_args_and_services(self):
         from dragon_quant import commands
 
-        self.assertEqual(len(MIGRATED_COMMANDS), 19)
+        self.assertEqual(len(MIGRATED_COMMANDS), len(TOP_LEVEL_COMMANDS))
         for name in MIGRATED_COMMANDS:
             with self.subTest(command=name):
                 handler = commands.COMMANDS[name].load()

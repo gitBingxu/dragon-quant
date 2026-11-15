@@ -68,7 +68,6 @@ OPT_OUT_FILES = (
     "pages/account/EquityDataTable.tsx",
     "pages/scans/ScansPage.tsx",
     "pages/scans/ScanDetailPage.tsx",
-    "pages/factors/RegistryTable.tsx",
     "pages/factors/BuildAudit.tsx",
     "pages/factors/DayValues.tsx",
 )

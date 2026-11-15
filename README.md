@@ -68,10 +68,12 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 | 「回测一下这批龙头」 | `review` → 双口径回测统计，打开面板 |
 | 「跑 5 月账户回测」 | `review-account` → 权益、回撤、买点统计与逐笔交易 |
 | 「识别质量最近有改善吗？」 | `research scan-quality` + 回测证据 → 口径与归因 |
+| 「写个自己的因子/策略」 | `workspace init` → 用户因子 build/query → `strategy validate` → 账户回测 |
 | 「买卖点胜率如何？」 | `bs-eval` 假想回放 → `/bs` 页面数据 |
 
-安全边界：Agent 只开放**十类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
-必须先经你确认，不提供投资建议。安装矩阵与交互协议详见
+安全边界：Agent 只开放**十一类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
+必须先经你确认，不提供投资建议。自定义策略/用户因子的完整流程见
+[workspace 指南](skills/dragon-quant/references/workspace.md)。安装矩阵与交互协议详见
 [development 模块文档](docs/agent/development.md)。
 
 ## Web 面板
@@ -124,6 +126,25 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 [STRATEGY.md](dragon_quant/review_account/strategy/STRATEGY.md)，回放口径见
 [bs_eval 模块文档](docs/agent/bs_eval.md)。
 
+### 自定义策略与 Workspace
+
+只装 PyPI 包也能在独立 workspace 里写 Python 策略，复用内建或自定义因子：
+
+```bash
+dragon-quant workspace init ~/my-workspace          # 生成模板 + agent 说明
+dragon-quant strategy list --workspace ~/my-workspace
+dragon-quant strategy use user:example_momentum --workspace ~/my-workspace
+dragon-quant review-account --from 20260101 --to 20260201 --strategy user:example_momentum
+```
+
+用户策略放在 `strategies/<slug>/`，通过 `dragon_quant.strategy_sdk` 的只读
+`StrategyContext` / `StrategyIntent` 决策；成交、费用、T+1、手数与风控仍由系统处理。
+切换只影响新开仓，旧持仓按开仓时冻结的版本退出。CLI 与 Web `/strategies` 页共读同一保存
+选择，`--strategy` 只覆盖单次命令；未初始化 workspace 时 Web 仍展示内建策略但保持只读。Web 策略页按 descriptor 元数据动态生成参数表单（标签/
+说明/单位/范围），保存前就地校验，无需手写 JSON。Web 默认只读；需要在本机面板选择/执行用户策略时用
+`dragon-quant dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用，
+用户代码在独立本地 worker 进程执行。安全边界与冻结语义见 [workspace](docs/agent/workspace.md)。
+
 ### 双口径回测（review / review-account）
 
 `review` 回测入选龙头：宽松口径按入选后首个非一字板交易日最低价买入，统计第 2~5 个交易日
@@ -144,6 +165,32 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 cron/launchd 定时运行（时间窗与模板见 [schedule.md](skills/dragon-quant/references/schedule.md)）。
 用 Claude Code / Codex 的用户在会话里说「每天自动跑」，agent 会按 skill 生成配置；
 资金操作（`buy`/`sell`）不做无人值守。
+
+## 发布流程（维护者）
+
+维护者只使用一个入口：
+
+```bash
+scripts/publish.sh                                  # 交互：选 PyPI / npm / 两者，确认版本
+scripts/publish.sh --dry-run                        # 隔离预演：不读凭据、不访问 registry、不改源码/Git
+scripts/publish.sh --resume                         # 恢复未完成批次：只对账真实状态并补缺失步骤
+
+# 非交互完整参数（真实发布必须 --yes）
+scripts/publish.sh --packages both --pypi-version 0.8.2 --npm-version 1.0.3 \
+  --min-cli-version 0.8.2 --yes
+```
+
+- **唯一编排**：分支/远端预检、版本写入、精确提交、`vX.Y.Z` / `skills-vA.B.C` 标签、原子 push 与一份 GitHub Release 都由主流程负责；PyPI/npm 适配器只构建、校验与上传。
+- **顺序**：全部所选工件先隔离构建并固化哈希，再 Git 写入；PyPI 上传并核验成功后才允许 npm 上传；Release 最后创建（gh 缺失/失败保持 pending，`--resume` 只补建）。
+- **前置校验**：已发布的最低 CLI 可用性（未撤回）在任何 Git/registry 写入前检查；npm dist-tag 若已指向更高版本会在上传前拒绝降级。
+- **运行进度**：预检、构建与上传会在 stderr 输出中文阶段、每 10 秒心跳和完成耗时；网络/构建/上传均有分级超时，失败后按提示使用 `--resume` 对账续跑。stdout 仍只保留最终结果。
+- **凭据**：PyPI / npm 各一份密文（`scripts/publish_token.enc`、`scripts/npm_token.enc`）共用同一密码；`scripts/encrypt_token.sh` 交互加密，凭据与密码不进入 argv；输入被中断时自动恢复终端回显。也可用 `TWINE_PASSWORD` / `NPM_TOKEN` 覆盖，2FA 用 `NPM_OTP`。
+- **恢复**：状态在 `.release/batches/<batch_id>/`（含持久 staging 与冻结工件），不靠 done 布尔；已记录成功的 commit/tag/push/上传/Release 若远端消失会 fail-closed，不会重复执行。仓库级活动指针写在 git common dir（跨 linked worktree、不受 `--status-dir` 影响）。
+- **传播等待**：PyPI 按版本级 `/pypi/dragon-quant/<version>/json` 的 `urls` 精确核验；上传命令成功后先落「已接受上传」receipt，再进入只读核验。新鲜上传或带 receipt/done 的 `--resume` 遇到版本/工件暂不可见时，按 15 秒间隔有界等待（默认 960 秒，覆盖 PyPI 900 秒缓存窗口），超时失败仍可 `--resume`；绝不因传播延迟重复上传，hash/integrity 不一致或出现额外工件立即失败。整个等待上下文（含首次查询）共用一条 stderr 进度任务：立即输出开始行、运行期每 10 秒心跳，成功/失败/中断都停止，stdout 仍只有最终 JSON；预算/间隔必须是有限正数，env 非法值回退默认、显式非法策略直接拒绝。查询超时是单次 socket/子进程级上限，不构成慢速分段响应的整请求硬截止。
+- **完成与预演**：已完成批次 `--resume` 只报告结果；失败的 `--dry-run` 可用 `--dry-run --resume` 继续，或直接再次预演（旧预演历史保留）。
+- **版本契约**：npm 与 Skill 版本相等；Python `pyproject` 与 `_version` 相等；`min-cli-version` 是**最低依赖**，不得高于本次构建验证的 CLI，不再要求等于仓库当前版本。
+
+详细契约见 [development](docs/agent/development.md)；方案与恢复矩阵见 [统一发布方案](archived_md/release/2026-11-14-unified-release.md)。
 
 ## 稳定性状态
 

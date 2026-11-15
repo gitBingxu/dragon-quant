@@ -203,15 +203,19 @@ def get_spec(name: str) -> FactorSpec:
 
 
 def resolve_specs(names: Optional[Iterable[str]] = None,
-                  *, enabled_only: bool = False) -> list[FactorSpec]:
+                  *, enabled_only: bool = False,
+                  specs: Optional[Iterable[FactorSpec]] = None) -> list[FactorSpec]:
     """按名字解析 spec；``names=None`` → 全部（或仅 ``default_enabled``）。
 
-    返回按 name 升序，保证 build / 报告顺序确定。
+    ``specs`` 为可选注册表覆盖（workspace 用户因子）；省略时使用内建
+    ``FACTOR_SPECS``，默认路径逐位兼容。返回按 name 升序，保证 build / 报告顺序确定。
     """
+    source = list(FACTOR_SPECS) if specs is None else list(specs)
+    by_name = {spec.name: spec for spec in source}
     if names is None:
-        specs = list(FACTOR_SPECS)
+        specs_out = list(source)
         if enabled_only:
-            specs = [s for s in specs if s.default_enabled]
+            specs_out = [s for s in specs_out if s.default_enabled]
     else:
         ordered: list[FactorSpec] = []
         unknown: list[str] = []
@@ -220,16 +224,16 @@ def resolve_specs(names: Optional[Iterable[str]] = None,
             if name in seen:
                 continue
             seen.add(name)
-            spec = _BY_NAME.get(name)
+            spec = by_name.get(name)
             if spec is None:
                 unknown.append(name)
                 continue
             ordered.append(spec)
         if unknown:
             raise FactorRegistryError(
-                f"未知因子: {sorted(unknown)}（合法值 {spec_names()}）")
-        specs = ordered
-    return sorted(specs, key=lambda s: s.name)
+                f"未知因子: {sorted(unknown)}（合法值 {sorted(by_name)}）")
+        specs_out = ordered
+    return sorted(specs_out, key=lambda s: s.name)
 
 
 def spec_to_registry_row(spec: FactorSpec, version: str,

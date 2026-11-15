@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { createAccountRun, type AccountRun } from "../../api/account";
+import { fetchStrategies, type StrategyItem } from "../../api/strategies";
 import { Modal } from "../../components/Modal";
+import { Select } from "../../components/Select";
 import { IconAlert } from "../../components/icons-extra";
 import { defaultDateRange, defaultRunName } from "../../lib/format";
 
@@ -17,6 +19,8 @@ export function CreateRunModal({
   const [dateTo, setDateTo] = useState("");
   const [name, setName] = useState("");
   const [initialCash, setInitialCash] = useState("100000");
+  const [strategies, setStrategies] = useState<StrategyItem[]>([]);
+  const [strategyId, setStrategyId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +32,15 @@ export function CreateRunModal({
     setName(defaultRunName(range.dateFrom, range.dateTo));
     setInitialCash("100000");
     setError(null);
+    void fetchStrategies()
+      .then((payload) => {
+        setStrategies(payload.strategies.filter((item) => item.valid));
+        setStrategyId(payload.current);
+      })
+      .catch(() => {
+        setStrategies([]);
+        setStrategyId("");
+      });
   }, [open]);
 
   const submit = async () => {
@@ -54,6 +67,7 @@ export function CreateRunModal({
         date_from: dateFrom,
         date_to: dateTo,
         initial_cash: cash,
+        ...(strategyId ? { strategy_id: strategyId } : {}),
       });
       onCreated(resp.data);
       onClose();
@@ -140,6 +154,22 @@ export function CreateRunModal({
             onChange={(event) => setInitialCash(event.currentTarget.value)}
           />
         </label>
+        <Select
+          label="策略"
+          value={strategyId}
+          options={
+            strategies.length > 0
+              ? strategies.map((item) => ({
+                  value: item.id,
+                  label: `${item.label}（${item.source === "builtin" ? "内建" : "用户"}）`,
+                }))
+              : [{ value: "", label: "沿用保存选择 / 内建默认" }]
+          }
+          onChange={setStrategyId}
+        />
+        <p className="text-caption text-ink-3">
+          省略选择时消费「策略」页保存的同一状态；此处的显式选择只影响本次回测。
+        </p>
       </div>
     </Modal>
   );

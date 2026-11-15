@@ -176,7 +176,7 @@ def account_runs(account, params, default_source: str = "v2") -> dict:
 
 
 def create_account_run(payload: dict, *, default_source: str,
-                       run_account, account) -> dict:
+                       run_account, account, selection=None) -> dict:
     payload = payload if isinstance(payload, dict) else {}
 
     date_from = normalize_api_date(str(payload.get("date_from") or "").strip())
@@ -221,6 +221,7 @@ def create_account_run(payload: dict, *, default_source: str,
         verbose=False,
         display_name=display_name,
         strategy_params=params,
+        **({"selection": selection} if selection is not None else {}),
     )
     run = account.get_review_account_run(int(result["run_id"]))
     return {"data": run, "run_id": result["run_id"]}

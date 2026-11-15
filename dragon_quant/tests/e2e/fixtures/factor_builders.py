@@ -130,7 +130,8 @@ EXPECTED_FACTOR_NAMES = (
     "vpa_health_score", "vpa_trend_verify", "vpa_vol_amount",
 )
 
-#: ``default_enabled=True`` factors (``factor build`` without ``--only``).
+#: 旧 ``default_enabled=True`` 元数据集合（deprecated：不再控制 build 或默认模型，
+#: 仅用于断言注册表 JSON 的兼容字段；场景里也是默认 build 下有可用源、会落行的因子集）。
 DEFAULT_ENABLED_NAMES = (
     "five_dim_absorption", "five_dim_anti_drop", "five_dim_composite",
     "five_dim_drive", "five_dim_is_true_dragon", "five_dim_leadership",
@@ -155,7 +156,19 @@ VPA_ROWS = {
     "vpa_breakout": 3,
     "vpa_divergence": 4,
 }
-SINGLE_DAY_FACTOR_ROWS = 58   # sum(FIVE_DIM_ROWS) + sum(VPA_ROWS)
+#: 2026-09-11 (frozen "today") auto-syncs the same-day finance snapshot from the
+#: fake provider, so the fin factors with verified layout produce rows.
+FIN_ROWS = {
+    "fin_bps": 5,
+    "fin_net_assets": 5,
+    "fin_net_margin": 5,
+    "fin_net_profit_yoy": 0,   # empty (source available, no value today)
+    "fin_revenue_yoy": 0,      # empty
+    "fin_roe": 5,
+}
+SINGLE_DAY_FACTOR_ROWS = (
+    sum(FIVE_DIM_ROWS.values()) + sum(VPA_ROWS.values())
+    + sum(FIN_ROWS.values()))
 
 FIN_LEDGER = {code: _fin_values(index)
               for index, code in enumerate(("600001", "600002", "600003",

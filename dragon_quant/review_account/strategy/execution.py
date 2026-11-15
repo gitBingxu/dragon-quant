@@ -81,7 +81,13 @@ def _half_qty(qty: int, lot_size: int) -> int:
     return (qty // 2 // lot_size) * lot_size or qty
 
 
-def sell_quantity(position: Position, reason: str, cfg: StrategyConfig) -> int:
+def sell_quantity(position: Position, reason: str, cfg: StrategyConfig,
+                  fraction: float | None = None) -> int:
+    if fraction is not None:
+        # 用户策略显式声明的退出比例：仅支持 0.5（减半）或 1（整仓）。
+        if abs(fraction - 0.5) < 1e-9:
+            return _half_qty(position.qty, cfg.lot_size)
+        return position.qty
     if reason not in _HALF_REASONS:
         return position.qty
     return _half_qty(position.qty, cfg.lot_size)
@@ -95,14 +101,16 @@ def notional_quantity(cfg: StrategyConfig, price: float) -> int:
     return buy_quantity(cfg.initial_cash, cfg.initial_cash, price, cfg)
 
 
-def apply_sell_fill(position: Position, price: float, reason_code: str, cfg: StrategyConfig) -> dict:
+def apply_sell_fill(position: Position, price: float, reason_code: str, cfg: StrategyConfig,
+                    fraction: float | None = None) -> dict:
     """卖出成交的仓位记账原语（TradingEngine._fill 与 live_trade.SignalEngine._fill_sell 共用）。
 
     副作用：扣减 position.qty/cost、累加 realized_pnl、半仓时置 took_profit_half。
     返回 {qty, amount, fee, cost, pnl, partial}；账户/信号簿记（现金、realized_today、
-    ClosedPosition、DB 路由）由调用方负责。
+    ClosedPosition、DB 路由）由调用方负责。``fraction`` 为用户策略显式声明的退出
+    比例（0.5 / 1）；``None`` 时沿用既有按 reason_code 的半仓模型。
     """
-    qty = sell_quantity(position, reason_code, cfg)
+    qty = sell_quantity(position, reason_code, cfg, fraction)
     amount, cost_fee = price * qty, fee(price * qty, "SELL", cfg)
     cost = position.cost * qty / position.qty
     pnl = amount - cost_fee - cost
@@ -110,7 +118,9 @@ def apply_sell_fill(position: Position, price: float, reason_code: str, cfg: Str
     position.qty -= qty
     position.cost -= cost
     partial = bool(position.qty)
-    if partial and reason_code in _HALF_REASONS:
+    is_half = (fraction is not None and abs(fraction - 0.5) < 1e-9) or (
+        fraction is None and reason_code in _HALF_REASONS)
+    if partial and is_half:
         position.took_profit_half = True
     return {"qty": qty, "amount": amount, "fee": cost_fee, "cost": cost,
             "pnl": pnl, "partial": partial}

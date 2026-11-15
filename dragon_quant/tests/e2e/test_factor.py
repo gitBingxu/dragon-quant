@@ -217,7 +217,8 @@ def test_scenario_fixture_matches_reviewed_builder():
     assert json.loads(SCENARIO.read_text(encoding="utf-8")) == fb.scenario_payload()
     assert set(fb.DEFAULT_ENABLED_NAMES) < set(fb.EXPECTED_FACTOR_NAMES)
     assert fb.SINGLE_DAY_FACTOR_ROWS == (
-        sum(fb.FIVE_DIM_ROWS.values()) + sum(fb.VPA_ROWS.values()))
+        sum(fb.FIVE_DIM_ROWS.values()) + sum(fb.VPA_ROWS.values())
+        + sum(fb.FIN_ROWS.values()))
 
 
 def test_f1_list_json_and_human_match_registry():
@@ -249,15 +250,16 @@ def test_f1_list_json_and_human_match_registry():
         human = run(box, "factor", "list")
         assert_exit(human, 0)
         lines = human.stdout.splitlines()
-        assert lines[0].split() == ["因子", "版本", "源", "阶段", "PIT", "默认"]
+        assert lines[0].split() == ["因子", "版本", "源", "阶段", "PIT"]
         assert lines[1].startswith("------")
         assert len(lines) == 2 + 58
         assert lines[2].startswith("auction_dim_direction")
         assert re.fullmatch(
-            r"five_dim_composite\s+v[0-9a-f]{12}\s+scan\s+close\s+recorded\s+开",
-            next(line for line in lines if line.startswith("five_dim_composite")))
+            r"five_dim_composite\s+v[0-9a-f]{12}\s+scan\s+close\s+recorded",
+            next(line for line in lines
+                 if line.startswith("five_dim_composite")).rstrip())
         assert lines[-1].startswith("vpa_vol_amount")
-        assert lines[-1].endswith("开")
+        assert not lines[-1].rstrip().endswith("开")
 
 
 # ─── F2: build single day (PIT + audit + missing semantics) ────────────────
@@ -285,8 +287,11 @@ def test_f2_build_single_day_pit_rows_audit_and_reviewed_golden():
         assert report["sector_snapshot"] == {
             "status": "ok", "rows": 6, "skipped": 0,
             "by_category": {"hy": 6}, "scan_id": "v2_20260911_5"}
-        assert report["registry_inserted"] == 12
-        assert report["warnings"] == []
+        assert report["registry_inserted"] == 58
+        assert sorted(report["warnings"]) == [
+            "fin_net_profit_yoy: empty（源可用但当日无值）",
+            "fin_revenue_yoy: empty（源可用但当日无值）",
+        ]
         assert report["timezone_warning"] is None
         # A frozen clock makes both audit timestamps exact.
         assert report["started_at"] == "2026-09-11T15:30:00"
@@ -295,7 +300,8 @@ def test_f2_build_single_day_pit_rows_audit_and_reviewed_golden():
         assert report["build_id"] == 1
 
         factors = report["factors"]
-        assert list(factors) == list(fb.DEFAULT_ENABLED_NAMES)
+        # 默认 build 构建当前注册表全部因子（内建 58 个）。
+        assert list(factors) == list(fb.EXPECTED_FACTOR_NAMES)
         expected_rows = {**fb.FIVE_DIM_ROWS, **fb.VPA_ROWS}
         for name, rows in expected_rows.items():
             entry = factors[name]
@@ -313,6 +319,17 @@ def test_f2_build_single_day_pit_rows_audit_and_reviewed_golden():
         for name in fb.VPA_ROWS:
             assert factors[name]["source"] == "vpa"
             assert factors[name]["source_scan_id"] is None
+        # 09-11 是冻结「今天」：同日财务观测由 fake provider 自动补采。
+        fin_ok_rows = {name: rows for name, rows in fb.FIN_ROWS.items() if rows}
+        for name, rows in fin_ok_rows.items():
+            entry = factors[name]
+            assert entry["status"] == "ok", (name, entry)
+            assert entry["rows"] == rows
+            # ``codes`` = cohort size (5 of the 6 candidates pass the PIT gate).
+            assert entry["codes"] == 5
+            assert entry["available_at"] == "2026-09-11T16:40:00"
+            assert entry["source"] == "fin"
+            assert entry["version_source"] == "source"
         assert factors["vpa_breakout"]["meta"] == {
             "skipped_backfilled": 1,
             "skipped_backfilled_samples": ["600005"],
@@ -322,15 +339,29 @@ def test_f2_build_single_day_pit_rows_audit_and_reviewed_golden():
         assert factors["five_dim_composite"]["meta"] == {
             "missing": 0, "scan_id": "v2_20260911_5"}
 
+        # 全量构建不伪造数据：无源因子 fail-closed，既有源照常落行。
+        statuses = {name: entry["status"] for name, entry in factors.items()}
+        assert {name for name, status in statuses.items() if status == "ok"} == \
+            set(expected_rows) | set(fin_ok_rows)
+        assert {name for name, status in statuses.items() if status == "empty"} == {
+            name for name, rows in fb.FIN_ROWS.items() if not rows}
+        for name in factors:
+            if name.startswith(("prep_", "auction_")):
+                assert statuses[name] == "missing_source", name
+
         # ── persisted rows: PIT, version consistency, missing = no row ────
         rows = _factor_rows(box, order_by="factor_name, code")
         assert len(rows) == fb.SINGLE_DAY_FACTOR_ROWS
-        assert {row["factor_name"] for row in rows} == set(fb.DEFAULT_ENABLED_NAMES)
-        assert {row["available_at"] for row in rows} == {"2026-09-11T15:30:00"}
-        assert {row["trade_date"] for row in rows} == {"2026-09-11"}
+        assert {row["factor_name"] for row in rows} == (
+            set(fb.DEFAULT_ENABLED_NAMES) | set(fin_ok_rows))
         for row in rows:
             assert row["factor_version"] == factors[row["factor_name"]]["version"]
-            expected_source = "vpa" if row["factor_name"].startswith("vpa_") else "scan"
+            if row["factor_name"].startswith("vpa_"):
+                expected_source = "vpa"
+            elif row["factor_name"].startswith("fin_"):
+                expected_source = "fin"
+            else:
+                expected_source = "scan"
             assert row["source"] == expected_source
         by_factor: dict[str, list[dict]] = {}
         for row in rows:
@@ -361,7 +392,7 @@ def test_f2_build_single_day_pit_rows_audit_and_reviewed_golden():
         # stored report deliberately has no build_id key.
         assert "build_id" not in stored
         assert stored["ok"] is True
-        assert list(stored["factors"]) == list(fb.DEFAULT_ENABLED_NAMES)
+        assert list(stored["factors"]) == list(fb.EXPECTED_FACTOR_NAMES)
 
         assert_json_equal(_project_build(payload),
                           golden_json("build_single_day.json"))
@@ -410,10 +441,10 @@ def test_f3_build_range_expands_only_scan_days():
         assert json.loads(slash.stdout)["dates"] == ["2026-09-11"]
 
 
-# ─── F4: --only and default-off factors ────────────────────────────────────
+# ─── F4: --only vs 默认全量 ────────────────────────────────────────────────
 
 
-def test_f4_only_builds_named_factors_and_default_off_stays_off():
+def test_f4_only_builds_named_factors_and_default_builds_all_without_extra_rows():
     with sandbox("f4") as box:
         seed_scans(box)
         only = run(box, "factor", "build", "--date", "20260911",
@@ -429,10 +460,12 @@ def test_f4_only_builds_named_factors_and_default_off_stays_off():
         default = run(box, "factor", "build", "--date", "20260911", "--json")
         assert_exit(default, 0)
         default_report = json.loads(default.stdout)["reports"][0]
-        assert list(default_report["factors"]) == list(fb.DEFAULT_ENABLED_NAMES)
+        assert list(default_report["factors"]) == list(fb.EXPECTED_FACTOR_NAMES)
         produced = {row["factor_name"] for row in _factor_rows(box)}
-        assert not {"prep_t_pct", "auction_strength", "fin_roe"} & produced
-        assert produced == set(fb.DEFAULT_ENABLED_NAMES)
+        # 构建全部 ≠ 消费全部：无源因子不产行；09-11 同日财务观测会补采落行。
+        assert not {"prep_t_pct", "auction_strength"} & produced
+        fin_ok = {name for name, rows in fb.FIN_ROWS.items() if rows}
+        assert produced == set(fb.DEFAULT_ENABLED_NAMES) | fin_ok
 
         # An explicit --only is a user opt-in even for a default-off factor.
         # 退役因子不可再显式构建：未知因子 → exit 2（不静默成功）
@@ -497,9 +530,10 @@ def test_f6_query_day_series_and_version_resolution():
         assert list(payload) == QUERY_DAY_KEYS
         assert payload["rows"] == fb.SINGLE_DAY_FACTOR_ROWS
         assert set(payload["values"]) == set(fb.CODES)
-        assert payload["resolved_versions"] == {
-            name: factors["version"]
-            for name, factors in report["factors"].items()}
+        expected_versions = {
+            name: entry["version"] for name, entry in report["factors"].items()
+            if entry["status"] == "ok"}
+        assert payload["resolved_versions"] == expected_versions
         assert payload["missing_versions"] == []
         assert payload["values"]["600002"]["five_dim_composite"] == 20.0
         assert "five_dim_liquidity" not in payload["values"]["600002"]
@@ -575,7 +609,7 @@ def test_f7_status_counts_and_human_output():
         assert payload["factor_values"] == {
             "rows": 117, "dates": 3, "factors": 7,
             "first_date": "2026-09-08", "last_date": "2026-09-10"}
-        assert payload["factor_registry"] == {"rows": 12, "factors": 12}
+        assert payload["factor_registry"] == {"rows": 58, "factors": 58}
         assert payload["factor_sector_snapshots"] == {
             "rows": 18, "dates": 3, "by_category": {"hy": 18}}
         runs = payload["build_runs"]
@@ -587,26 +621,22 @@ def test_f7_status_counts_and_human_output():
         assert isinstance(runs["last"]["created_at"], str) and \
             runs["last"]["created_at"]
         registered = payload["registered_versions"]
-        assert set(registered) == set(fb.DEFAULT_ENABLED_NAMES)
+        assert set(registered) == set(fb.EXPECTED_FACTOR_NAMES)
         for version in registered.values():
             assert VERSION_RE.fullmatch(version)
         factors = payload["factors"]
         assert len(factors) == 58
         assert {item["name"] for item in factors
                 if item["registered_version"] is not None} == \
-            set(fb.DEFAULT_ENABLED_NAMES)
+            set(fb.EXPECTED_FACTOR_NAMES)
 
         human = run(box, "factor", "status")
         assert_exit(human, 0)
-        missing = ", ".join(
-            name for name in fb.EXPECTED_FACTOR_NAMES
-            if name not in set(fb.DEFAULT_ENABLED_NAMES))
         assert human.stdout == (
             "因子值：117 行 / 7 因子 / 3 交易日 (2026-09-08 ~ 2026-09-10)\n"
-            "注册表快照：12 行 / 12 因子\n"
+            "注册表快照：58 行 / 58 因子\n"
             "主板块快照：18 行 / 3 交易日 {'hy': 18}\n"
-            "build 审计：3 次，最近 build_id=3 @ 2026-09-10\n"
-            f"未注册（尚未 build）：{missing}\n")
+            "build 审计：3 次，最近 build_id=3 @ 2026-09-10\n")
 
 
 # ─── F8: export ────────────────────────────────────────────────────────────
@@ -1231,8 +1261,12 @@ def test_m9b2_runtime_clock_mode_drives_build_export_and_captured_at():
         report = payload["reports"][0]
         assert report["started_at"] == "2026-09-11T15:30:00"
         assert report["finished_at"] == "2026-09-11T15:30:00"
-        for entry in report["factors"].values():
-            assert entry["available_at"] == "2026-09-11T15:30:00"
+        for name, entry in report["factors"].items():
+            if entry["status"] != "ok":
+                continue
+            expected_at = ("2026-09-11T16:40:00" if name.startswith("fin_")
+                           else "2026-09-11T15:30:00")
+            assert entry["available_at"] == expected_at
 
         out = box.out / "runtime.csv"
         export = run(box, "factor", "export",

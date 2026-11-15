@@ -109,6 +109,12 @@
 
 > 注：`现状策略基线.md` / `择时与仓位技术方案.md` 中的「9 条 SellRule、首日 -3.5% 盘中止损」为 2026-10-14 的历史快照；现行规则链为 10 条并新增 `first_day_stop`（默认关），以 `review_account/STRATEGY.md` 为准。
 
+## release/
+
+| 日期 | 主题 | 文件 | 原路径 |
+|------|------|------|--------|
+| 2026-11-14 | PyPI / npm 统一交互发布与断点恢复 | [2026-11-14-unified-release.md](release/2026-11-14-unified-release.md) | `docs/solutions/2026-11-14-unified-release.md` |
+
 ## agents/
 
 | 日期 | 主题 | 文件 | 原路径 |

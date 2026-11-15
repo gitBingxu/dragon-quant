@@ -357,12 +357,12 @@ def test_se1_sell_closes_signal_with_reason_and_hold_days():
 def test_se2_half_then_full_close():
     with sandbox("m1e2-se2") as box:
         seed_account(box)
-        assert run_cli(box, ["buy", *MAIN_ARGS]).returncode == 0
         config = write_config(box, "first_day.json",
                               {"sell_rule_toggles": {"first_day_stop": True}})
+        # 参数在开仓时冻结：buy 使用 config，后续 sell 按持仓冻结参数退出。
+        assert run_cli(box, ["buy", *MAIN_ARGS, "--config", config]).returncode == 0
 
-        first = run_cli(box, ["sell", "--date", "20260908", "--at", "10:00",
-                              "--config", config])
+        first = run_cli(box, ["sell", "--date", "20260908", "--at", "10:00"])
         assert first.returncode == 0, first.stderr
         assert "🔴 减半仓 样本（600001）@9.98，持有 1 天" in first.stdout
         assert "🟢 继续持有 样本（600001）（已减半仓）" in first.stdout
@@ -374,8 +374,7 @@ def test_se2_half_then_full_close():
         assert floats_close(half["half_exit_price"], want["half_exit_price"],
                             rel=0, abs_tol=1e-9)
 
-        second = run_cli(box, ["sell", "--date", "20260909", "--at", "10:00",
-                               "--config", config])
+        second = run_cli(box, ["sell", "--date", "20260909", "--at", "10:00"])
         assert second.returncode == 0, second.stderr
         assert "🔴 卖出 样本（600001）@9.98，持有 2 天" in second.stdout
         closed = signals(box)[0]
@@ -425,11 +424,14 @@ def test_se5_suspended_position_is_frozen():
         assert row["exit_date"] is None
 
 
-def test_se6_sell_has_no_json_option():
+def test_se6_sell_accepts_json_option():
+    """SE6（workspace 契约 §13.1）：sell 支持 --json 供验证与 agent 消费。"""
     with sandbox("m1e2-se6") as box:
-        result = run_cli(box, ["sell", "--json"])
-        assert result.returncode == 2
-        assert "unrecognized arguments: --json" in result.stderr
+        result = run_cli(box, ["sell", "-h"])
+        assert result.returncode == 0, result.stderr
+        assert "--json" in result.stdout
+        assert "--strategy" in result.stdout
+        assert "--workspace" in result.stdout
 
 
 # ─── BU12 / SE7: dual-mode clock (M9B1) ────────────────────────────────────

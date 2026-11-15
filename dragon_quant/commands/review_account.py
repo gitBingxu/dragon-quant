@@ -23,8 +23,10 @@ def handle(args, services):
         {"strategy_params": _shared.load_strategy_params(args.config)}
         if args.config else {}
     )
+    selection = _resolve_selection(getattr(args, "workspace", None),
+                                   getattr(args, "strategy", None))
     want_json = bool(getattr(args, "json", False))
-    result = run_review_account(
+    call_kwargs = dict(
         date_from=_normalize_cli_date(args.date_from),
         date_to=_normalize_cli_date(args.date_to),
         initial_cash=args.capital,
@@ -32,8 +34,11 @@ def handle(args, services):
         strategy_name=args.strategy,
         verbose=not want_json,
         services=services,
-        **(options or {}),
     )
+    # 无 workspace 选择时不传 selection，保持既有调用签名（旧测试/兼容层逐位兼容）。
+    if selection is not None:
+        call_kwargs["selection"] = selection
+    result = run_review_account(**call_kwargs, **(options or {}))
     if want_json:
         # 兼容回执：只新增 JSON 输出，人读默认格式不变；供 Agent 取得真实 run_id
         # 后再用 `research account --run-id` 读回。
@@ -51,6 +56,8 @@ def handle(args, services):
             "max_drawdown": result.get("max_drawdown"),
             "trade_count": result.get("trade_count"),
             "win_rate": result.get("win_rate"),
+            "strategy_id": result.get("strategy_id"),
+            "strategy_ref": result.get("strategy_ref"),
         }, ensure_ascii=False, indent=2))
 
     if args.ui:
@@ -79,3 +86,20 @@ def _start_ui(args):
 def _normalize_cli_date(d: str) -> str:
     from dragon_quant.commands._shared import normalize_cli_date
     return normalize_cli_date(d)
+
+
+_LEGACY_STRATEGY_NAMES = {None, "", "dragon_pullback_daily"}
+
+
+def _resolve_selection(workspace, strategy_name):
+    """解析本次回测的策略选择；无 workspace 且未给出策略 ID 时返回 None（旧行为）。"""
+    explicit = None if strategy_name in _LEGACY_STRATEGY_NAMES else strategy_name
+    from dragon_quant.workspace.config import resolve_workspace_path
+
+    looks_like_id = bool(explicit and ":" in explicit)
+    if not (workspace or looks_like_id or resolve_workspace_path(None) is not None):
+        return None
+    from dragon_quant.workspace.main import resolve_selection
+
+    return resolve_selection(explicit_workspace=workspace,
+                             explicit_strategy_id=explicit)

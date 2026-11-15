@@ -71,14 +71,15 @@ def _resolve_dates(date: Optional[str], date_from: Optional[str],
 
 def build(date: Optional[str] = None, date_from: Optional[str] = None,
           date_to: Optional[str] = None, only=None, *, all_factors: bool = False,
-          db_path=None, services=None) -> dict:
+          db_path=None, services=None, specs=None) -> dict:
     """单日 / 区间 build。
 
     区间按「区间内有扫描记录的交易日」逐日展开（无扫描的日期无法产出因子，
     不伪造空跑记录）；每日独立事务、独立审计报告，单日失败不影响其他日。
 
-    ``all_factors=True``（``--all``）展开为**显式全量名单**（含默认关因子），
-    与 ``--only`` 互斥；``enabled_only`` 只在 ``names is None`` 时生效。
+    默认（不传 ``only``）构建当前注册表**全部因子**；``all_factors=True``
+    （``--all``）是等价的兼容参数，同样展开为显式全量名单，与 ``--only`` 互斥。
+    构建全部只表示物化数据，不代表策略/模型消费全部（消费方显式选择）。
 
     财务因子需要真实交易日历做 stale 逾期判定。**触网边界**：只有本地已存在
     财务原始数据（``storage.finance.has_any_fin_data()``）时才经
@@ -89,14 +90,16 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
     bundle（不另起默认 ``TdxProvider``）；不传时保持既有构造路径。
     """
     names = parse_only(only)
-    if all_factors:
-        if names is not None:
-            raise ValueError("--all 与 --only 互斥，请只指定其中一个")
-        names = list(spec_names())          # 显式全量 → enabled_only 不再生效
+    source_specs = list(specs) if specs is not None else None
+    if all_factors and names is not None:
+        raise ValueError("--all 与 --only 互斥，请只指定其中一个")
+    if names is None:
+        # 默认与 --all 同一语义：显式解析完整注册表（内建 + workspace 用户因子）。
+        names = [spec.name for spec in (source_specs or FACTOR_SPECS)]
     dates, mode = _resolve_dates(date, date_from, date_to)
     calendar: tuple[str, ...] = ()
     warnings: list[str] = []
-    specs = resolve_specs(names, enabled_only=names is None)
+    specs = resolve_specs(names, enabled_only=False, specs=source_specs)
     if any(spec.source == "fin" for spec in specs):
         from . import finance_store as fin_store
 
@@ -115,7 +118,7 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
                 warnings.append(error)
     reports = [
         engine.build_date(trade_date, names=names, db_path=db_path,
-                          calendar=calendar, services=services)
+                          calendar=calendar, services=services, specs=specs)
         for trade_date in dates
     ]
     if mode == "range" and not dates:
@@ -131,10 +134,11 @@ def build(date: Optional[str] = None, date_from: Optional[str] = None,
     }
 
 
-def list_factors() -> list[dict]:
-    """当前代码注册表（代码是唯一真值；不读 DB）。"""
+def list_factors(specs=None) -> list[dict]:
+    """当前代码注册表（代码是唯一真值；不读 DB）。``specs`` 覆盖内建注册表。"""
     result = []
-    for spec in sorted(FACTOR_SPECS, key=lambda s: s.name):
+    source = list(specs) if specs is not None else list(FACTOR_SPECS)
+    for spec in sorted(source, key=lambda s: s.name):
         version, version_source = compute_version_info(spec)
         result.append({
             "name": spec.name,
@@ -160,12 +164,21 @@ def list_factors() -> list[dict]:
 def query(*, date: Optional[str] = None, date_from: Optional[str] = None,
           date_to: Optional[str] = None, name: Optional[str] = None,
           code: Optional[str] = None, version: Optional[str] = None,
-          db_path=None) -> dict:
-    """点查（``--date``）或单因子区间时序（``--from/--to + --name``）。"""
+          known_names: Optional[Iterable[str]] = None,
+          db_path=None, specs=None) -> dict:
+    """点查（``--date``）或单因子区间时序（``--from/--to + --name``）。
+
+    ``known_names`` 是窄接口扩展：只读层可传入**静态元数据**得到的合法名称
+    （如未导入执行代码的 workspace 用户因子），仅用于名称校验；因子版本仍由
+    存储层按注册表解析，不存在跳过校验的逃生开关。
+    """
     if name:
         # 提前校验因子名，避免返回空集被误读为「该因子无值」
-        if name not in spec_names():
-            raise ValueError(f"未知因子: {name!r}（合法值 {spec_names()}）")
+        valid_names = {s.name for s in (specs if specs is not None else FACTOR_SPECS)}
+        if known_names is not None:
+            valid_names |= {str(item) for item in known_names if item}
+        if name not in valid_names:
+            raise ValueError(f"未知因子: {name!r}（合法值 {sorted(valid_names)}）")
 
     if date:
         trade_date = normalize_date(date)
@@ -289,25 +302,25 @@ def fin_status(*, db_path=None) -> dict:
 
 def export_matrix(date_from: str, date_to: str, *, names, version=None,
                   codes=None, clean=None, fmt: str = "csv",
-                  out_path=None, db_path=None) -> dict:
+                  out_path=None, db_path=None, specs=None) -> dict:
     """``factor export``：长表 → ``date × code`` 矩阵 + sidecar。"""
     from .matrix import export_matrix as _export
     return _export(
         date_from, date_to, names=names, version=version, codes=codes,
-        clean=clean, fmt=fmt, out_path=out_path, db_path=db_path)
+        clean=clean, fmt=fmt, out_path=out_path, db_path=db_path, specs=specs)
 
 
 def evaluate_factor(name: str, date_from: str, date_to: str, *, data,
                     horizon: int = 1, groups: int = 2, version=None,
                     min_days: int = 20, min_cross_section: int = 10,
-                    pit_policy: str = "strict", db_path=None) -> dict:
+                    pit_policy: str = "strict", db_path=None, specs=None) -> dict:
     """``factor eval``：RankIC / ICIR / NW-t / 分组 / 覆盖率 / PIT 口径。"""
     from .evaluation import evaluate_factor as _evaluate
     payload = _evaluate(
         name, date_from, date_to, horizon=horizon, groups=groups,
         version=version, data=data, min_days=min_days,
         min_cross_section=min_cross_section, pit_policy=pit_policy,
-        db_path=db_path)
+        db_path=db_path, specs=specs)
     # CLI 以 ok 决定退出码；insufficient_data 是有效结论（exit 0），不是失败。
     payload.setdefault("ok", True)
     return payload

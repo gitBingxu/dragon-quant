@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from . import stats as fstats
 from . import storage as fstore
-from .registry import get_spec
+from .registry import FactorRegistryError, get_spec
 from dragon_quant.infra import clock
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -170,7 +170,7 @@ def export_matrix(date_from: str, date_to: str, *, names: Iterable[str],
                   codes: Optional[Iterable[str]] = None,
                   clean: Optional[CleanConfig] = None,
                   fmt: str = "csv", out_path: Optional[str] = None,
-                  db_path=None) -> dict:
+                  db_path=None, specs=None) -> dict:
     """导出因子矩阵；``clean=None`` 等同「原始值」（方案 §4.7 默认）。
 
     需要清洗时显式传 ``CleanConfig()``（MAD + rank）或自定义配置。
@@ -187,8 +187,14 @@ def export_matrix(date_from: str, date_to: str, *, names: Iterable[str],
     requested = [name.strip() for name in (names or []) if name and name.strip()]
     if not requested:
         raise ValueError("export 至少需要一个 --name")
-    for name in requested:
-        get_spec(name)          # 提前校验：未知因子立即报错，不返回空矩阵
+    known = {s.name for s in specs} if specs is not None else None
+    if known is None:
+        for name in requested:
+            get_spec(name)          # 提前校验：未知因子立即报错，不返回空矩阵
+    else:
+        for name in requested:
+            if name not in known:
+                raise FactorRegistryError(f"未知因子: {name!r}")
 
     resolved: dict[str, str] = {}
     missing_versions: list[str] = []

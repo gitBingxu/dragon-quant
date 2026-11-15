@@ -21,6 +21,10 @@ class DashboardSettings:
     default_page: str = "review"
     # 启动时后台增量生成 BS 派生数据（程序化 / 测试默认安全关闭）。
     bs_autogen: bool = False
+    # 服务端固定的 workspace 路径（None = 沿用 CLI 的解析优先级）。
+    workspace_path: str | None = None
+    # 是否允许 Web 变更策略选择/执行本地代码（默认只读；显式本机启用）。
+    workspace_writes_enabled: bool = False
 
     def normalized_source(self) -> str:
         return self.default_source if self.default_source in {"v1", "v2"} else "v2"

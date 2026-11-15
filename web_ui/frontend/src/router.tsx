@@ -8,6 +8,7 @@ import { AuctionPage } from "./pages/auction/AuctionPage";
 import { AccountPage } from "./pages/account/AccountPage";
 import { BsPage } from "./pages/bs/BsPage";
 import { ResearchPage } from "./pages/research/ResearchPage";
+import { StrategiesPage } from "./pages/strategies/StrategiesPage";
 
 type RouteDef = {
   match: RegExp;
@@ -26,6 +27,7 @@ const ROUTES: RouteDef[] = [
   { match: /^\/auction$/, render: () => <AuctionPage /> },
   { match: /^\/account$/, render: () => <AccountPage /> },
   { match: /^\/bs$/, render: () => <BsPage /> },
+  { match: /^\/strategies$/, render: () => <StrategiesPage /> },
   { match: /^\/research$/, render: () => <ResearchPage /> },
 ];
 

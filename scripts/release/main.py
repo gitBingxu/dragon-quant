@@ -23,6 +23,8 @@ if __package__ in (None, ""):  # executed as a script, not imported as a package
 
 from release import git_ops, orchestrator, publish_npm, publish_pypi  # noqa: E402
 from release.common import (  # noqa: E402
+    DEFAULT_HEARTBEAT_SECONDS,
+    ProgressReporter,
     ReleaseError,
     Runner,
     compare_versions,
@@ -372,6 +374,18 @@ def _sigterm(signum, frame):  # noqa: ANN001
     raise KeyboardInterrupt()
 
 
+def _heartbeat_seconds() -> float:
+    """Heartbeat cadence; ``DQ_RELEASE_HEARTBEAT_SECONDS`` tunes it for tests."""
+    raw = os.environ.get("DQ_RELEASE_HEARTBEAT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_HEARTBEAT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_HEARTBEAT_SECONDS
+    return value if value > 0 else DEFAULT_HEARTBEAT_SECONDS
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     repo_default = Path(__file__).resolve().parents[2]
@@ -381,7 +395,9 @@ def main(argv: list[str] | None = None) -> int:
         return int(exc.code or 0)
     repo = Path(args.repo_root).resolve()
     root = status_root(args, repo)
-    runner = Runner(cwd=repo)
+    # Progress goes to stderr only, so stdout stays the machine-readable result.
+    runner = Runner(cwd=repo,
+                    progress=ProgressReporter(heartbeat_interval=_heartbeat_seconds()))
     signal.signal(signal.SIGTERM, _sigterm)
 
     try:

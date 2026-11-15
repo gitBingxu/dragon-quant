@@ -57,6 +57,10 @@ _fail("FAKE_PY_FAIL_TEST", ["-m", "pytest"])
 _fail("FAKE_PY_FAIL_BUILD", ["-m", "build"])
 _fail("FAKE_PY_FAIL_TWINE", ["-m", "twine", "upload"])
 
+if args[:2] == ["-m", "build"] and os.environ.get("FAKE_PY_SLEEP_BUILD"):
+    import time
+    time.sleep(float(os.environ["FAKE_PY_SLEEP_BUILD"]))
+
 if args[:2] == ["-m", "build"]:
     version = "0.0.0"
     for line in Path("pyproject.toml").read_text(encoding="utf-8").splitlines():

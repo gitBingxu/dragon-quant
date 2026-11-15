@@ -12,6 +12,35 @@
 - 文档：`README.md`、`docs/agent/development.md` 已同步；本文件不再标记“待确认”。
 - **验收返工（M1–M10 / S1–S2）**：npm 按真实 `npm pack --json` 单包 `files[]` 结构解析并用真实本地 pack 验证；`ReleaseState.begin` 不再清零已记录成功，commit/tag/push/upload/Release 恢复一律 fail-closed 且只在操作前记录的 tree/intent 上采纳；prepare 冻结 `staging_identity`（发布文件 + `web_ui/dist` 哈希），resume 先校验内容才允许提交；交互 EOF/Ctrl-C 全程取消（恢复确认默认否），加密脚本信号恢复回显、双密文替换失败回滚；Release notes 在任何外部写入前生成并冻结（CHANGELOG 缺段走 git 变更 fallback），恢复校验哈希、远端正文冲突不覆盖；已完成批次 `--resume` 只报告结果，失败预演可 `--dry-run --resume` 或重开；min-cli 检查排除全部 yanked 工件并前置到外部写入前，dist-tag 上传前拒绝降级并支持 `NPM_OTP`；staging 迁入批次目录，git common-dir 活动指针统一发现未完成批次并覆盖 linked worktree；发布提交主题为中文 emoji。
 
+## 进度可观测性与超时（2026-11-15 增量）
+
+**根因**：`Runner.run` 用 `subprocess.run(capture_output=True)` 且无 timeout。真实发布时两个顺序 `git ls-remote` 各约 10 秒、PyPI 查询约 2.8 秒，随后构建/测试可静默数分钟，用户无法区分"正在工作"与"卡死"，实测 `preflight` 被 Ctrl-C 中断。
+
+**设计**：在 `common.py` 增加可注入的 `ProgressReporter`（Observer 式文本报告器）与 `Runner` 的 `progress_label` / `timeout` 参数；orchestrator 只把 `runner.progress` 透传给叶子调用，不新增状态字段或 schema。CLI 装配 stderr 报告器，测试注入内存流与短心跳。
+
+```mermaid
+flowchart LR
+  O[orchestrator 状态机] --> R[Runner.run]
+  R --> P[ProgressReporter / stderr]
+  R --> C[受控子进程树<br/>start_new_session]
+  C -->|运行中| P
+  C -->|成功/失败/超时| R
+  R --> O
+  O --> S[state.json / --resume]
+```
+
+**行为**：
+
+- KR1 进度：每个可能超过 1 秒的步骤开始前立即输出 `▶ [stage] label 开始`；覆盖远端 tag 检查、`ls-remote` 对账、PyPI/npm 版本查询、离线测试、前端构建、wheel/sdist 构建与 `twine check`、npm pack/白名单/安装冒烟、上传、原子 push、GitHub Release 查询/创建、源码快照复制与暂存哈希。阶段前缀沿用状态机名，不新增持久字段。
+- KR2 心跳：长任务运行期间每 10 秒输出 `… label 仍在运行（已耗时 Xs）`，结束输出 `✅/❌ label（耗时）`；`DQ_RELEASE_HEARTBEAT_SECONDS` 可调间隔（默认 10）。
+- KR3 分级超时：只读/本地 git 探针 60s（也是兜底默认）、远端 registry/Release 读 60s、离线测试/构建/pack/安装冒烟 20 分钟、registry 上传/push/Release 创建 15 分钟；PyPI urllib 查询保留既有 10s 并包裹进度。超时击杀整个子进程树并以当前 stage 的 `ReleaseError` 失败，`state.json` 记录失败步骤，`--resume` 语义不变。
+- KR4 输出通道：进度与心跳只写 stderr；stdout 的 JSON、dry-run 结果与摘要契约不变，无 spinner/ANSI。
+- KR5 脱敏：label 只含版本/tag 等静态文本，不打印完整命令、secret env 或子进程原始 stdout/stderr；既有 token/密码/OTP scrub 与错误 redact 不变。
+- KR6 清理：心跳 daemon 线程在任务结束（含成功、失败、超时、Ctrl-C）前 stop/join；子进程在独立 session 中，超时与中断都会回收，不留孤儿进程；状态机仍准确记录失败步骤。
+- KR7 文档：`docs/agent/development.md` 与本文同 commit 同步。
+
+**测试**：`test_unified_release.py` 新增内存流进度/心跳/耗时断言、0.5s 超时杀进程且心跳停止/无 secret/无存活线程、无 reporter 兼容、CLI stderr-only + 心跳可见、in-process CLI 超时记录 `prepare` 失败并保留 resume 状态、已完成批次 resume 不重放执行日志。
+
 ## 需求、证据与取舍
 
 用户提出六项目标：主流程统一分支/Git/tag/GitHub Release；PyPI/npm 子流程仅构建上传；任意失败可 resume；交互选择包与版本并确认；双包先 PyPI 后 npm 并处理 min-cli；一次密码解密两个独立 token。

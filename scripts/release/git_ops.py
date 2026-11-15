@@ -15,6 +15,9 @@ import tempfile
 from pathlib import Path
 
 from release.common import (
+    GIT_PROBE_TIMEOUT,
+    REGISTRY_PROBE_TIMEOUT,
+    UPLOAD_TIMEOUT,
     ReleaseError,
     Runner,
     redact,
@@ -26,13 +29,17 @@ from release.common import (
 
 def git(repo: Path, runner: Runner, *args: str, stage: str = "git",
         env: dict | None = None,
-        allow_failure: bool = False) -> subprocess.CompletedProcess:
+        allow_failure: bool = False,
+        progress_label: str | None = None,
+        timeout: float = GIT_PROBE_TIMEOUT) -> subprocess.CompletedProcess:
     return runner.run(
         ["git", "-C", str(repo), *args],
         stage=stage,
         env=env,
         scrub=True,
         allow_failure=allow_failure,
+        progress_label=progress_label,
+        timeout=timeout,
     )
 
 
@@ -195,7 +202,8 @@ def check_new_tags(repo: Path, runner: Runner, tags: list[str]) -> None:
         if local_tag_commit(repo, runner, tag):
             raise ReleaseError("preflight", f"本地已存在标签 {tag}")
         remote = git(repo, runner, "ls-remote", "--exit-code", "--tags", "origin",
-                     f"refs/tags/{tag}", stage="preflight", allow_failure=True)
+                     f"refs/tags/{tag}", stage="preflight", allow_failure=True,
+                     progress_label=f"检查远端标签 {tag}")
         if remote.returncode == 0 and remote.stdout.strip():
             raise ReleaseError("preflight", f"远端已存在标签 {tag}")
         if remote.returncode not in (0, 2):
@@ -208,7 +216,7 @@ def check_new_tags(repo: Path, runner: Runner, tags: list[str]) -> None:
 
 def ls_remote(repo: Path, runner: Runner, ref: str) -> dict[str, str]:
     result = git(repo, runner, "ls-remote", "origin", ref, stage="resume",
-                 allow_failure=True)
+                 allow_failure=True, progress_label=f"核验远端引用 {ref}")
     if result.returncode != 0:
         detail = redact((result.stderr or result.stdout or "").strip(), runner.secrets)
         raise ReleaseError("resume", f"无法核验远端引用 {ref}：{detail}")
@@ -468,6 +476,7 @@ def atomic_push(repo: Path, runner: Runner, branch: str, commit: str,
         f"{commit}:refs/heads/{branch}",
         *[f"refs/tags/{tag}" for tag in tags],
         stage="push", allow_failure=True,
+        progress_label="原子推送提交与标签", timeout=UPLOAD_TIMEOUT,
     )
     if result.returncode == 0:
         return
@@ -519,6 +528,8 @@ def gh_release_view(repo: Path, runner: Runner, tag: str) -> dict | None:
     result = runner.run(
         ["gh", "release", "view", tag, "--json", "tagName,isDraft,body"],
         cwd=repo, stage="release", scrub=True, allow_failure=True,
+        progress_label=f"查询 GitHub Release {tag}",
+        timeout=REGISTRY_PROBE_TIMEOUT,
     )
     if result.returncode != 0:
         detail = (result.stderr or "").lower()
@@ -541,4 +552,5 @@ def gh_release_create(repo: Path, runner: Runner, tag: str, title: str,
         ["gh", "release", "create", tag, "--title", title,
          "--notes-file", str(notes_path), "--verify-tag"],
         cwd=repo, stage="release", scrub=True,
+        progress_label=f"创建 GitHub Release {tag}", timeout=UPLOAD_TIMEOUT,
     )

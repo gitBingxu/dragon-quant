@@ -183,12 +183,13 @@ scripts/publish.sh --packages both --pypi-version 0.8.2 --npm-version 1.0.3 \
 - **唯一编排**：分支/远端预检、版本写入、精确提交、`vX.Y.Z` / `skills-vA.B.C` 标签、原子 push 与一份 GitHub Release 都由主流程负责；PyPI/npm 适配器只构建、校验与上传。
 - **顺序**：全部所选工件先隔离构建并固化哈希，再 Git 写入；PyPI 上传并核验成功后才允许 npm 上传；Release 最后创建（gh 缺失/失败保持 pending，`--resume` 只补建）。
 - **前置校验**：已发布的最低 CLI 可用性（未撤回）在任何 Git/registry 写入前检查；npm dist-tag 若已指向更高版本会在上传前拒绝降级。
+- **运行进度**：预检、构建与上传会在 stderr 输出中文阶段、每 10 秒心跳和完成耗时；网络/构建/上传均有分级超时，失败后按提示使用 `--resume` 对账续跑。stdout 仍只保留最终结果。
 - **凭据**：PyPI / npm 各一份密文（`scripts/publish_token.enc`、`scripts/npm_token.enc`）共用同一密码；`scripts/encrypt_token.sh` 交互加密，凭据与密码不进入 argv；输入被中断时自动恢复终端回显。也可用 `TWINE_PASSWORD` / `NPM_TOKEN` 覆盖，2FA 用 `NPM_OTP`。
 - **恢复**：状态在 `.release/batches/<batch_id>/`（含持久 staging 与冻结工件），不靠 done 布尔；已记录成功的 commit/tag/push/上传/Release 若远端消失会 fail-closed，不会重复执行。仓库级活动指针写在 git common dir（跨 linked worktree、不受 `--status-dir` 影响）。
 - **完成与预演**：已完成批次 `--resume` 只报告结果；失败的 `--dry-run` 可用 `--dry-run --resume` 继续，或直接再次预演（旧预演历史保留）。
 - **版本契约**：npm 与 Skill 版本相等；Python `pyproject` 与 `_version` 相等；`min-cli-version` 是**最低依赖**，不得高于本次构建验证的 CLI，不再要求等于仓库当前版本。
 
-详细契约见 [development](docs/agent/development.md)；方案与恢复矩阵见 [统一发布方案](docs/solutions/2026-11-14-unified-release.md)。
+详细契约见 [development](docs/agent/development.md)；方案与恢复矩阵见 [统一发布方案](archived_md/release/2026-11-14-unified-release.md)。
 
 ## 稳定性状态
 

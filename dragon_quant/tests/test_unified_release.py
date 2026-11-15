@@ -8,6 +8,7 @@ gating, dist-tag repair, one-password credentials and zero-side-effect cancel.
 from __future__ import annotations
 
 import fcntl
+import io
 import json
 import os
 import pty
@@ -16,6 +17,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -796,3 +798,141 @@ def test_resume_dist_tag_repair_passes_npm_otp(tmp_path):
     # The OTP is passed explicitly; it must not leak into build/test subprocesses.
     assert all(call["otp"] is None for call in calls
                if call["argv"][:1] in (["test"], ["pack"], ["install"]))
+
+
+# ─── progress observability: start / heartbeat / timeout ──────────────────
+
+
+def _stream_runner(tmp_path: Path, stream, *, interval: float):
+    from release.common import ProgressReporter, Runner
+
+    reporter = ProgressReporter(stream, heartbeat_interval=interval)
+    return Runner(cwd=tmp_path,
+                  env={"PATH": os.environ["PATH"], "HOME": str(tmp_path / "home")},
+                  progress=reporter)
+
+
+def _alive_progress_threads() -> list[threading.Thread]:
+    return [thread for thread in threading.enumerate()
+            if thread.name == "dq-release-progress"]
+
+
+def test_runner_progress_reports_start_heartbeat_and_elapsed_success(tmp_path):
+    stream = io.StringIO()
+    runner = _stream_runner(tmp_path, stream, interval=0.05)
+    result = runner.run(
+        [sys.executable, "-c", "import time; time.sleep(0.3)"],
+        stage="prepare", progress_label="慢步骤", timeout=10)
+    assert result.returncode == 0
+    text = stream.getvalue()
+    assert "▶ [prepare] 慢步骤 开始" in text
+    assert "仍在运行（已耗时" in text
+    assert "✅ [prepare] 慢步骤（" in text
+    assert _alive_progress_threads() == [], "heartbeat thread must not outlive the task"
+
+
+def test_runner_timeout_kills_child_reports_stage_and_stops_heartbeat(tmp_path):
+    from release.common import ReleaseError
+
+    stream = io.StringIO()
+    marker = tmp_path / "child-started"
+    runner = _stream_runner(tmp_path, stream, interval=0.05)
+    runner.secrets.append("top-secret-token")
+    started = time.monotonic()
+    with pytest.raises(ReleaseError) as excinfo:
+        runner.run(
+            [sys.executable, "-c",
+             "import pathlib, time; "
+             f"pathlib.Path({str(marker)!r}).write_text('x'); time.sleep(30)"],
+            stage="prepare", progress_label="休眠命令", timeout=0.5)
+    elapsed = time.monotonic() - started
+    error = excinfo.value
+    assert error.stage == "prepare"
+    assert "超时" in str(error)
+    assert "top-secret-token" not in str(error)
+    text = stream.getvalue()
+    assert "❌ [prepare] 休眠命令 失败" in text
+    assert "top-secret-token" not in text
+    assert marker.is_file(), "the child really ran before being killed"
+    assert elapsed < 10, "timeout must terminate the child, not wait it out"
+    assert text.strip().splitlines()[-1].startswith("❌"), "no heartbeat after the end"
+    assert _alive_progress_threads() == []
+
+
+def test_runner_without_reporter_stays_compatible_and_silent(tmp_path):
+    from release.common import Runner
+
+    runner = Runner(cwd=tmp_path)
+    result = runner.run([sys.executable, "-c", "print('hi')"], stage="prepare",
+                        progress_label="no reporter wired")
+    assert result.stdout.strip() == "hi"
+    assert result.returncode == 0
+
+
+def test_timeout_and_failure_messages_never_echo_registered_secrets(tmp_path):
+    from release.common import ReleaseError
+
+    stream = io.StringIO()
+    runner = _stream_runner(tmp_path, stream, interval=0)
+    runner.secrets.append("argv-leak-token")
+    with pytest.raises(ReleaseError) as excinfo:
+        runner.run([sys.executable, "-c", "import time; time.sleep(30)",
+                    "argv-leak-token"],
+                   stage="prepare", progress_label="超时", timeout=0.3)
+    assert "argv-leak-token" not in str(excinfo.value)
+    assert "***" in str(excinfo.value)
+
+    with pytest.raises(ReleaseError) as excinfo:
+        runner.run([sys.executable, "-c",
+                    "import sys; sys.stderr.write('argv-leak-token\\n'); "
+                    "raise SystemExit(3)", "argv-leak-token"],
+                   stage="prepare", progress_label="失败", timeout=10)
+    message = str(excinfo.value)
+    assert "argv-leak-token" not in message and "***" in message
+
+
+def test_cli_progress_is_stderr_only_with_visible_heartbeat(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    env = fixture.env(extra={
+        "TWINE_PASSWORD": "x",
+        "FAKE_PY_SLEEP_BUILD": "1.5",
+        "DQ_RELEASE_HEARTBEAT_SECONDS": "0.3",
+    })
+    result = fixture.run(*_pypi_args(), "--yes", env=env)
+    assert result.returncode == 0, result.stderr
+    assert "▶ [preflight] 检查远端标签 v1.2.3 开始" in result.stderr
+    assert "▶ [preflight] 查询 PyPI 远端版本信息 开始" in result.stderr
+    assert "▶ [prepare] 构建 Python wheel/sdist 开始" in result.stderr
+    assert "仍在运行" in result.stderr
+    assert "构建 Python wheel/sdist" not in result.stdout
+    assert "▶ [" not in result.stdout and "仍在运行" not in result.stdout
+
+
+def test_cli_timeout_records_failed_stage_and_keeps_resume_state(
+        tmp_path, monkeypatch, capsys):
+    fixture = ReleaseFixture(tmp_path)
+    from release import main as entry, publish_pypi
+
+    _entry_env(fixture, monkeypatch)
+    monkeypatch.setattr(publish_pypi, "BUILD_TIMEOUT", 0.5)
+    monkeypatch.setenv("FAKE_PY_SLEEP_BUILD", "30")
+    rc = entry.main(["--packages", "pypi", "--pypi-version", "1.2.3", "--yes",
+                     "--repo-root", str(fixture.repo)])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "超时" in err and "prepare" in err
+    assert _alive_progress_threads() == []
+    state = fixture.state()
+    assert not state.get("complete")
+    assert state["steps"]["prepare"]["state"] == "failed"
+    assert "超时" in state["steps"]["prepare"]["error"]
+
+
+def test_completed_resume_reports_without_replaying_progress(tmp_path):
+    fixture = ReleaseFixture(tmp_path)
+    assert fixture.run(*_pypi_args(), "--yes",
+                       env=fixture.env(extra={"TWINE_PASSWORD": "x"})).returncode == 0
+    result = fixture.run("--resume", "--yes", env=fixture.env())
+    assert result.returncode == 0, result.stderr
+    assert "已完成" in result.stdout
+    assert "▶" not in result.stderr, "a finished batch must not replay step logs"

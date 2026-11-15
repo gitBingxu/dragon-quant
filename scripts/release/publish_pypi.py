@@ -18,7 +18,15 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from release.common import ReleaseError, Runner, sha256_file
+from release.common import (
+    BUILD_TIMEOUT,
+    UPLOAD_TIMEOUT,
+    ProgressReporter,
+    ReleaseError,
+    Runner,
+    progress_task,
+    sha256_file,
+)
 
 NAME = "pypi"
 RELEASE_FILES = ("pyproject.toml", "dragon_quant/_version.py")
@@ -64,6 +72,7 @@ def build_frontend(staging: Path, runner: Runner) -> None:
         cwd=staging, stage="prepare", scrub=True,
         env={"PATH": runner.env_for().get("PATH", ""),
              "HOME": runner.env_for().get("HOME", "")},
+        progress_label="构建前端产物（npm run build）", timeout=BUILD_TIMEOUT,
     )
     if not (staging / "web_ui" / "dist" / "index.html").is_file():
         raise ReleaseError("prepare", "前端构建未产出 web_ui/dist/index.html")
@@ -82,6 +91,7 @@ def run_release_tests(staging: Path, python: str, runner: Runner) -> None:
             env={"PYTHONPATH": str(staging), "HOME": str(scratch / "home"),
                  "TMPDIR": str(scratch), "TMP": str(scratch),
                  "DQ_DATA_DIR": str(scratch / "data")},
+            progress_label="运行 Python 发布离线测试", timeout=BUILD_TIMEOUT,
         )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -92,7 +102,8 @@ def build_artifacts(staging: Path, python: str, runner: Runner) -> list[Path]:
     # ``--no-isolation`` keeps the build offline: missing backends are a clear
     # preflight failure, never an implicit network install.
     runner.run([python, "-m", "build", "--no-isolation"], cwd=staging,
-               stage="prepare", scrub=True)
+               stage="prepare", scrub=True,
+               progress_label="构建 Python wheel/sdist", timeout=BUILD_TIMEOUT)
     artifacts = sorted(
         path for path in (staging / "dist").iterdir()
         if path.is_file() and (path.suffix == ".whl" or path.name.endswith(".tar.gz"))
@@ -101,7 +112,8 @@ def build_artifacts(staging: Path, python: str, runner: Runner) -> list[Path]:
             p.name.endswith(".tar.gz") for p in artifacts):
         raise ReleaseError("prepare", f"构建产物不完整：{[p.name for p in artifacts]}")
     runner.run([python, "-m", "twine", "check", *[str(p) for p in artifacts]],
-               cwd=staging, stage="verify", scrub=True)
+               cwd=staging, stage="verify", scrub=True,
+               progress_label="twine check 校验工件", timeout=BUILD_TIMEOUT)
     return artifacts
 
 
@@ -166,23 +178,26 @@ def verify_local(staging: Path, expected: dict[str, str]) -> list[Path]:
 # ─── registry reconciliation ──────────────────────────────────────────────
 
 
-def _payload(stage: str = "upload_pypi") -> dict:
+def _payload(stage: str = "upload_pypi",
+             progress: ProgressReporter | None = None) -> dict:
     url = os.environ.get("DQ_RELEASE_PYPI_URL", DEFAULT_PYPI_JSON)
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return {"releases": {}}
-        raise ReleaseError(stage, f"查询 PyPI 失败（HTTP {exc.code}）") from exc
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise ReleaseError(
-            stage, f"无法连接 PyPI 核验（网络失败不能当作不存在）：{exc}") from exc
+    with progress_task(progress, f"[{stage}] 查询 PyPI 远端版本信息"):
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return {"releases": {}}
+            raise ReleaseError(stage, f"查询 PyPI 失败（HTTP {exc.code}）") from exc
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise ReleaseError(
+                stage, f"无法连接 PyPI 核验（网络失败不能当作不存在）：{exc}") from exc
 
 
-def remote_artifacts(version: str, stage: str = "upload_pypi") -> dict[str, str] | None:
+def remote_artifacts(version: str, stage: str = "upload_pypi",
+                     progress: ProgressReporter | None = None) -> dict[str, str] | None:
     """Return ``{filename: sha256}`` already on the registry, or ``None``."""
-    releases = _payload(stage).get("releases") or {}
+    releases = _payload(stage, progress).get("releases") or {}
     if version not in releases:
         return None
     result: dict[str, str] = {}
@@ -201,13 +216,14 @@ def remote_artifacts(version: str, stage: str = "upload_pypi") -> dict[str, str]
     return result
 
 
-def version_exists(version: str, stage: str = "preflight") -> bool:
+def version_exists(version: str, stage: str = "preflight",
+                   progress: ProgressReporter | None = None) -> bool:
     """True only when the version has at least one usable, non-yanked artifact.
 
     A version whose every file is yanked is not installable, so it cannot
     satisfy the npm package's minimum-CLI dependency.
     """
-    releases = _payload(stage).get("releases") or {}
+    releases = _payload(stage, progress).get("releases") or {}
     entries = releases.get(version) or []
     for item in entries:
         if not isinstance(item, dict):
@@ -219,9 +235,10 @@ def version_exists(version: str, stage: str = "preflight") -> bool:
     return False
 
 
-def reconcile(version: str, expected: dict[str, str]) -> list[str]:
+def reconcile(version: str, expected: dict[str, str],
+              progress: ProgressReporter | None = None) -> list[str]:
     """Return filenames that still need an upload; reject any mismatch."""
-    remote = remote_artifacts(version)
+    remote = remote_artifacts(version, progress=progress)
     if remote is None:
         return sorted(expected)
     extra = sorted(set(remote) - set(expected))
@@ -240,6 +257,7 @@ def upload(artifacts: list[Path], python: str, runner: Runner, token: str) -> No
         [python, "-m", "twine", "upload", *[str(p) for p in artifacts]],
         stage="upload_pypi", scrub=True,
         env={"TWINE_USERNAME": "__token__", "TWINE_PASSWORD": token},
+        progress_label="上传 PyPI 工件（twine upload）", timeout=UPLOAD_TIMEOUT,
     )
 
 

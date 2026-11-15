@@ -15,6 +15,9 @@ import tempfile
 from pathlib import Path
 
 from release.common import (
+    BUILD_TIMEOUT,
+    REGISTRY_PROBE_TIMEOUT,
+    UPLOAD_TIMEOUT,
     ReleaseError,
     Runner,
     compare_versions,
@@ -42,7 +45,8 @@ def _env(runner: Runner, *, offline: bool, extra: dict | None = None) -> dict:
 
 def _npm(runner: Runner, argv: list[str], *, stage: str, offline: bool,
          cwd: Path | None = None, allow_failure: bool = False,
-         extra_env: dict | None = None):
+         extra_env: dict | None = None, progress_label: str | None = None,
+         timeout: float | None = None):
     return runner.run(
         ["npm", *argv],
         cwd=cwd,
@@ -50,6 +54,8 @@ def _npm(runner: Runner, argv: list[str], *, stage: str, offline: bool,
         scrub=True,
         env=_env(runner, offline=offline, extra=extra_env),
         allow_failure=allow_failure,
+        progress_label=progress_label,
+        timeout=timeout,
     )
 
 
@@ -144,6 +150,7 @@ def _run_skill_tests(staging: Path, python: str, runner: Runner) -> None:
             env={"PYTHONPATH": str(staging), "HOME": str(scratch / "home"),
                  "TMPDIR": str(scratch), "TMP": str(scratch),
                  "DQ_DATA_DIR": str(scratch / "data")},
+            progress_label="运行 Skill 离线测试", timeout=BUILD_TIMEOUT,
         )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
@@ -158,7 +165,8 @@ def _pack_whitelist(staging: Path, runner: Runner) -> None:
     silently empty whitelist.
     """
     result = _npm(runner, ["pack", str(staging), "--dry-run", "--json",
-                           "--ignore-scripts"], stage="prepare", offline=True)
+                           "--ignore-scripts"], stage="prepare", offline=True,
+                  progress_label="校验 npm 打包白名单", timeout=BUILD_TIMEOUT)
     try:
         document = json.loads(result.stdout or "")
     except json.JSONDecodeError as exc:
@@ -202,7 +210,9 @@ def _pack(staging: Path, runner: Runner) -> Path:
     shutil.rmtree(dist, ignore_errors=True)
     dist.mkdir(parents=True, exist_ok=True)
     result = _npm(runner, ["pack", str(staging), "--pack-destination", str(dist),
-                           "--ignore-scripts", "--silent"], stage="prepare", offline=True)
+                           "--ignore-scripts", "--silent"], stage="prepare",
+                  offline=True, progress_label="打包 npm tarball",
+                  timeout=BUILD_TIMEOUT)
     name = (result.stdout or "").strip().splitlines()[-1] if result.stdout else ""
     tarball = dist / name
     if not name or not tarball.is_file():
@@ -220,7 +230,8 @@ def _install_smoke(staging: Path, tarball: Path, runner: Runner) -> None:
         _npm(runner, ["install", "--prefix", str(smoke), "--ignore-scripts",
                       "--no-audit", "--no-fund", str(tarball)],
              stage="prepare", offline=True, cwd=staging,
-             extra_env={"HOME": str(scratch / "home"), "TMPDIR": str(scratch)})
+             extra_env={"HOME": str(scratch / "home"), "TMPDIR": str(scratch)},
+             progress_label="本地安装冒烟测试", timeout=BUILD_TIMEOUT)
         entry = smoke / "node_modules" / PACKAGE_NAME / "bin" / "dragon-quant-skills.mjs"
         if not entry.is_file():
             raise ReleaseError("prepare", "本地安装冒烟：安装产物缺少 bin 入口")
@@ -230,7 +241,8 @@ def _install_smoke(staging: Path, tarball: Path, runner: Runner) -> None:
 
 def _node_tests(staging: Path, runner: Runner) -> None:
     _npm(runner, ["test", "--prefix", str(staging)], stage="prepare",
-         offline=True, cwd=staging)
+         offline=True, cwd=staging, progress_label="运行 Node 安装器测试",
+         timeout=BUILD_TIMEOUT)
 
 
 def prepare(repo: Path, staging: Path, npm_version: str, min_cli_version: str,
@@ -276,17 +288,20 @@ def verify_local(staging: Path, expected: dict) -> Path:
 # ─── registry ─────────────────────────────────────────────────────────────
 
 
-def remote_facts(version: str, runner: Runner) -> dict | None:
+def remote_facts(version: str, runner: Runner,
+                 *, stage: str = "upload_npm") -> dict | None:
     """Return remote ``dist`` facts or ``None`` when the version is absent."""
     result = _npm(runner, ["view", f"{PACKAGE_NAME}@{version}", "dist", "--json",
                            f"--registry={REGISTRY}"],
-                  stage="upload_npm", offline=False, allow_failure=True)
+                  stage=stage, offline=False, allow_failure=True,
+                  progress_label=f"查询 npm 版本 {PACKAGE_NAME}@{version}",
+                  timeout=REGISTRY_PROBE_TIMEOUT)
     if result.returncode != 0:
         detail = f"{result.stderr or ''}{result.stdout or ''}"
         if "E404" in detail or "404 Not Found" in detail:
             return None
         raise ReleaseError(
-            "upload_npm",
+            stage,
             "无法确认 npm registry 版本状态（网络失败不能当作版本不存在）："
             + detail.strip()[:400],
         )
@@ -306,7 +321,9 @@ def remote_facts(version: str, runner: Runner) -> dict | None:
 def dist_tags(runner: Runner) -> dict:
     result = _npm(runner, ["view", PACKAGE_NAME, "dist-tags", "--json",
                            f"--registry={REGISTRY}"],
-                  stage="upload_npm", offline=False, allow_failure=True)
+                  stage="upload_npm", offline=False, allow_failure=True,
+                  progress_label="查询 npm dist-tags",
+                  timeout=REGISTRY_PROBE_TIMEOUT)
     if result.returncode != 0:
         detail = f"{result.stderr or ''}{result.stdout or ''}"
         if "E404" in detail or "404 Not Found" in detail:
@@ -386,7 +403,8 @@ def ensure_dist_tag(version: str, tag: str, runner: Runner,
             extra["npm_config_otp"] = otp
         _npm(runner, ["dist-tag", "add", f"{PACKAGE_NAME}@{version}", tag,
                       f"--registry={REGISTRY}", f"--userconfig={npmrc}"],
-             stage="upload_npm", offline=False, extra_env=extra)
+             stage="upload_npm", offline=False, extra_env=extra,
+             progress_label=f"更新 npm dist-tag {tag}", timeout=UPLOAD_TIMEOUT)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     return True
@@ -401,6 +419,7 @@ def upload(tarball: Path, runner: Runner, token: str, tag: str, access: str,
         _npm(runner, ["publish", str(tarball), "--ignore-scripts",
                       f"--registry={REGISTRY}", f"--userconfig={npmrc}",
                       f"--tag={tag}", f"--access={access}"],
-             stage="upload_npm", offline=False, extra_env=extra)
+             stage="upload_npm", offline=False, extra_env=extra,
+             progress_label="上传 npm 工件（npm publish）", timeout=UPLOAD_TIMEOUT)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

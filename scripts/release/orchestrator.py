@@ -28,7 +28,14 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from release import credentials, git_ops, publish_npm, publish_pypi
-from release.common import ReleaseError, Runner, SCHEMA_VERSION, sha256_file
+from release.common import (
+    ProgressReporter,
+    ReleaseError,
+    Runner,
+    SCHEMA_VERSION,
+    progress_task,
+    sha256_file,
+)
 from release.lock import RepoLock
 from release.state import (
     ReleaseState,
@@ -538,7 +545,8 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
         staging = state.data.get("staging")
         if resume and artifacts and staging:
             with _step(state, "prepare", reused=True):
-                _verify_local(Path(staging), state, packages)
+                _verify_local(Path(staging), state, packages,
+                              progress=runner.progress, stage="prepare")
                 state.finish("prepare", staging=staging, artifacts=artifacts,
                              reused=True)
         else:
@@ -553,7 +561,8 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
                 staging_path.mkdir(parents=True)
                 state.data["staging"] = str(staging_path)
                 state.save()
-                copy_source_tree(repo, staging_path, runner)
+                with progress_task(runner.progress, "[prepare] 复制源码快照到暂存目录"):
+                    copy_source_tree(repo, staging_path, runner)
                 artifacts = {}
                 if "pypi" in packages:
                     built = publish_pypi.prepare(
@@ -565,8 +574,9 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
                         plan["min_cli_version"], python, runner)
                     artifacts["npm"] = publish_npm.artifact(staging_path, tarball)
                 state.data["artifacts"] = artifacts
-                state.data["staging_identity"] = staging_identity(
-                    staging_path, release_paths(packages), include_dist)
+                with progress_task(runner.progress, "[prepare] 计算暂存内容哈希"):
+                    state.data["staging_identity"] = staging_identity(
+                        staging_path, release_paths(packages), include_dist)
                 state.save()
                 state.finish("prepare", staging=str(staging_path),
                              artifacts=artifacts)
@@ -574,7 +584,8 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
 
         current = "verify"
         with _step(state, "verify"):
-            _verify_local(Path(staging), state, packages)
+            _verify_local(Path(staging), state, packages, progress=runner.progress,
+                          stage="verify")
             if "pypi" in packages:
                 names = state.data["artifacts"]["pypi"]
                 publish_pypi.verify_package_boundary(
@@ -730,7 +741,8 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
             current = "upload_pypi"
             with _step(state, "upload_pypi", version=plan["pypi_version"]):
                 expected = state.data["artifacts"]["pypi"]
-                missing = publish_pypi.reconcile(plan["pypi_version"], expected)
+                missing = publish_pypi.reconcile(
+                    plan["pypi_version"], expected, progress=runner.progress)
                 if state.done("upload_pypi") and missing:
                     raise ReleaseError(
                         "upload_pypi",
@@ -740,7 +752,7 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
                     paths = [Path(staging) / "dist" / name for name in missing]
                     publish_pypi.upload(paths, python, runner, token)
                     remaining = publish_pypi.reconcile(
-                        plan["pypi_version"], expected)
+                        plan["pypi_version"], expected, progress=runner.progress)
                     if remaining:
                         raise ReleaseError(
                             "upload_pypi",
@@ -768,11 +780,13 @@ def _run(repo: Path, runner: Runner, state: ReleaseState, plan: dict,
                         raise ReleaseError(
                             "min_cli",
                             "最低 CLI 为本批次 PyPI 目标，但 PyPI 上传尚未成功；停止 npm 上传")
-                    if not publish_pypi.version_exists(min_cli, stage="min_cli"):
+                    if not publish_pypi.version_exists(
+                            min_cli, stage="min_cli", progress=runner.progress):
                         raise ReleaseError(
                             "min_cli",
                             f"最低 CLI 版本 {min_cli} 上传后仍不在 PyPI；停止 npm 上传")
-                elif not publish_pypi.version_exists(min_cli, stage="min_cli"):
+                elif not publish_pypi.version_exists(
+                        min_cli, stage="min_cli", progress=runner.progress):
                     raise ReleaseError(
                         "min_cli",
                         f"最低 CLI 版本 {min_cli} 不在 PyPI（或已全部撤回）；"
@@ -954,10 +968,13 @@ def _check_tools(repo: Path, python: str, runner: Runner, packages: list[str]) -
 
 def _check_remote_versions_free(plan: dict, runner: Runner) -> None:
     if "pypi" in plan["packages"]:
-        if publish_pypi.remote_artifacts(plan["pypi_version"]) is not None:
+        if publish_pypi.remote_artifacts(
+                plan["pypi_version"], stage="preflight",
+                progress=runner.progress) is not None:
             raise ReleaseError("preflight", f"PyPI 已存在版本 {plan['pypi_version']}")
     if "npm" in plan["packages"]:
-        facts = publish_npm.remote_facts(plan["npm_version"], runner)
+        facts = publish_npm.remote_facts(
+            plan["npm_version"], runner, stage="preflight")
         if facts is not None:
             raise ReleaseError("preflight", f"npm 已存在版本 {plan['npm_version']}")
 
@@ -979,7 +996,8 @@ def _check_min_cli_available(plan: dict, runner: Runner,
     min_cli = plan["min_cli_version"]
     if "pypi" in plan["packages"] and min_cli == plan.get("pypi_version"):
         return
-    if not publish_pypi.version_exists(min_cli, stage="preflight"):
+    if not publish_pypi.version_exists(
+            min_cli, stage="preflight", progress=runner.progress):
         raise ReleaseError(
             "preflight",
             f"最低 CLI 版本 {min_cli} 不在 PyPI（或已全部撤回）；"
@@ -1012,7 +1030,8 @@ def _reconcile_git_before_credentials(repo: Path, runner: Runner,
     packages = (state.data.get("plan") or {}).get("packages") or []
     if "pypi" in packages and state.done("upload_pypi"):
         missing = publish_pypi.reconcile(
-            state.data["plan"]["pypi_version"], artifacts.get("pypi") or {})
+            state.data["plan"]["pypi_version"], artifacts.get("pypi") or {},
+            progress=runner.progress)
         if missing:
             raise ReleaseError(
                 "upload_pypi",
@@ -1080,8 +1099,9 @@ def _identity_diff(recorded: dict, current: dict) -> str:
     return "；".join(details[:8]) or "未知差异"
 
 
-def _verify_local(staging: Path, state: ReleaseState,
-                  packages: list[str]) -> None:
+def _verify_local(staging: Path, state: ReleaseState, packages: list[str],
+                  progress: ProgressReporter | None = None,
+                  stage: str = "verify") -> None:
     """Verify frozen artifacts *and* the staged source content identity.
 
     A resume must not commit (or adopt) source/dist content that differs from
@@ -1101,7 +1121,8 @@ def _verify_local(staging: Path, state: ReleaseState,
         )
     include_dist = "pypi" in packages
     try:
-        current = staging_identity(staging, release_paths(packages), include_dist)
+        with progress_task(progress, f"[{stage}] 核验暂存内容哈希"):
+            current = staging_identity(staging, release_paths(packages), include_dist)
     except ReleaseError as exc:
         raise ReleaseError(
             "resume",
@@ -1120,7 +1141,8 @@ def _upload_need(plan: dict, artifacts: dict, runner: Runner) -> set[str]:
     need: set[str] = set()
     if "pypi" in plan["packages"]:
         if publish_pypi.reconcile(
-                plan["pypi_version"], artifacts["pypi"]):
+                plan["pypi_version"], artifacts["pypi"],
+                progress=runner.progress):
             need.add("pypi")
     if "npm" in plan["packages"]:
         npm_artifact = artifacts["npm"]

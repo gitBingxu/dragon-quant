@@ -4,8 +4,8 @@ description: Use when the user asks about A-share 个股行情, 真龙/龙头扫
 license: MIT
 compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
-  skill-version: "1.0.2"
-  min-cli-version: "0.8.1"
+  skill-version: "1.0.3"
+  min-cli-version: "0.8.2"
 ---
 
 # dragon-quant 交易日助手

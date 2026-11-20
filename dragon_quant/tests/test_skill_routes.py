@@ -23,8 +23,10 @@ ALLOWED_TOP = {
     "dashboard",
     "workspace",
     "strategy",
+    "assets",
 }
 ALLOWED_DATA = {"quote", "kline", "minute", "batch-quote"}
+ALLOWED_CAPTURE = {"plan", "once", "session", "coverage", "schedule"}
 ALLOWED_FACTOR = {"build", "list", "status", "query", "export", "eval",
                   "decision-review"}
 ALLOWED_RESEARCH = {"datasets", "schema", "query", "scan-quality", "account",
@@ -92,6 +94,20 @@ def _route_command_parts(command: str):
     return parent, sub
 
 
+def _route_parts(command: str):
+    parts = command.split()
+    assert parts[0] == "dragon-quant", command
+    return parts[1:]
+
+
+def _actions(*prefix):
+    """从叶子 help 的 Arguments 块解析子动作名。"""
+    text = _help(*prefix)
+    block = text.split("Arguments:", 1)[1].split("Options:", 1)[0]
+    return set(re.findall(r"^ {4}([a-z][a-z0-9-]+)(?:\s{2,}|$)",
+                          block, re.MULTILINE))
+
+
 class TestSkillRoutes(unittest.TestCase):
 
     def test_routes_parse_non_empty(self):
@@ -117,6 +133,12 @@ class TestSkillRoutes(unittest.TestCase):
                 self.assertIn(sub, ALLOWED_WORKSPACE, route["command"])
             elif parent == "strategy":
                 self.assertIn(sub, ALLOWED_STRATEGY, route["command"])
+            elif parent == "assets":
+                # 只开放 capture 的五个叶子；同步/清理等兄弟命令不得出现。
+                self.assertEqual(sub, "capture", route["command"])
+                parts = _route_parts(route["command"])
+                self.assertEqual(len(parts), 3, route["command"])
+                self.assertIn(parts[2], ALLOWED_CAPTURE, route["command"])
             else:
                 self.assertIsNone(sub, route["command"])
 
@@ -141,6 +163,57 @@ class TestSkillRoutes(unittest.TestCase):
     def test_safety_is_t0_t1_only(self):
         for row in _safety():
             self.assertIn(row["tier"], {"T0", "T1"}, row["command"])
+
+    def test_capture_routes_and_tiers(self):
+        routes = {route["command"]: route for route in _routes()}
+        expected = {
+            "dragon-quant assets capture plan": "T1",
+            "dragon-quant assets capture once": "T1",
+            "dragon-quant assets capture session": "T1",
+            "dragon-quant assets capture coverage": "T0",
+            "dragon-quant assets capture schedule": "T0",
+        }
+        for command, write_class in expected.items():
+            self.assertIn(command, routes, command)
+            self.assertEqual(routes[command]["write_class"], write_class, command)
+        self.assertIn("--date", routes["dragon-quant assets capture plan"]["key_flags"])
+        self.assertIn("--dry-run",
+                      routes["dragon-quant assets capture plan"]["key_flags"])
+        for command in ("dragon-quant assets capture once",
+                        "dragon-quant assets capture session"):
+            flags = routes[command]["key_flags"]
+            self.assertIn("--plan-id", flags, command)
+            self.assertIn("--date", flags, command)
+        rows = [row for row in _safety() if row["command"] == "assets"]
+        by_flags = {row["flags"]: row["tier"] for row in rows}
+        self.assertEqual(len(by_flags), len(ALLOWED_CAPTURE), rows)
+        self.assertEqual(by_flags["capture plan --date --sectors --dry-run --json"], "T1")
+        self.assertEqual(by_flags["capture once --plan-id --date --topics --dry-run --json"], "T1")
+        self.assertEqual(
+            by_flags["capture session --plan-id --date --phase --max-slots --dry-run --json"],
+            "T1")
+        self.assertEqual(by_flags["capture coverage --from --to --topics --json"], "T0")
+        self.assertEqual(by_flags["capture schedule --kind --workdir --json"], "T0")
+
+    def test_capture_is_the_only_assets_action(self):
+        actions = _actions("assets")
+        self.assertIn("capture", actions)
+        self.assertGreater(len(actions), 1, "未能从 assets -h 枚举子命令")
+        blob = _skill_blob()
+        for action in sorted(actions - {"capture"}):
+            self.assertIsNone(
+                re.search(rf"dragon-quant\s+assets\s+{re.escape(action)}\b", blob),
+                action)
+
+    def test_capture_leaves_match_whitelist(self):
+        self.assertEqual(_actions("assets", "capture"), ALLOWED_CAPTURE)
+        for match in re.finditer(
+                r"dragon-quant\s+assets\s+([a-z][a-z0-9-]*)", _skill_blob()):
+            self.assertEqual(match.group(1), "capture", match.group(0))
+        for match in re.finditer(
+                r"dragon-quant\s+assets\s+capture\s+([a-z][a-z0-9-]*)",
+                _skill_blob()):
+            self.assertIn(match.group(1), ALLOWED_CAPTURE, match.group(0))
 
     def test_workspace_and_strategy_routes(self):
         routes = {route["command"]: route for route in _routes()}

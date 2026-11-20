@@ -40,6 +40,11 @@
 | research | datasets/schema/query/scan-quality/account/signals/snapshots/strategy --json | T0 | 本地只读、固定 v2、不构造 provider |
 | research | experiments list/show --run-id/--experiment-id | T0 | 只读已存报告，不重算、不建锁 |
 | research | experiments run --run-id --confirm --strategy-param | T1 | 冻结期初与上游、本地行情、单飞；必须真实 run_id 与 --confirm |
+| assets | capture plan --date --sectors --dry-run --json | T1 | 默认冻结计划并写 assets.db；--dry-run 只体检、不冻结、不写业务记录；不隐式 scan/prep |
+| assets | capture once --plan-id --date --topics --dry-run --json | T1 | 真实取数并写 assets.db；--dry-run 零网络零写入；必须显式 plan-id 或 date |
+| assets | capture session --plan-id --date --phase --max-slots --dry-run --json | T1 | 按计划时槽取数写库；--dry-run 零副作用；过早 window_not_open、错过只记 missed |
+| assets | capture coverage --from --to --topics --json | T0 | 只读覆盖视图，不建库；partial 也可能 exit 0，必须读 JSON |
+| assets | capture schedule --kind --workdir --json | T0 | 只输出调度模板 installed=false，不安装系统定时器 |
 <!-- safety:end -->
 
 表外说明：
@@ -50,19 +55,18 @@
 
 ## 确认话术
 
-- **T1**：`将执行 <command>，会写入本地数据库（dragon.db / assets.db）或 workspace 文件，范围 <日期/代码/workspace>。是否继续？`
+- **T1**：`将执行 <command>，会写入本地数据库（dragon.db / assets.db）或 workspace 文件，范围 <日期/代码/workspace>。是否继续？` 采集写 `assets.db`（计划日 <D>，主题 <T>，是否冻结计划 <是/否>），`--dry-run` 不写业务记录。
 - **workspace 开发任务**：用户明确要求写/改 workspace 策略或用户因子时，源码与 `workspace.json` 编辑、用户因子 build、回测与（明确要求的）持久切换属于同一任务范围，连续完成，不逐文件、逐步重复确认；越界或用户撤回才补确认。
 - **持久切换**：`strategy use` 会改写保存选择（revision CAS）；只在用户明确要求切换活动策略时执行，研究/实验成功不自动切换。
-- **面板**：`将启动本地 Web UI 面板 dashboard（长驻，可能需要初始化/校验本地 schema；默认只读、不生成 BS 派生数据），并默认尝试打开浏览器；是否继续？`
+- **面板**：`将启动本地 Web UI 面板 dashboard（长驻，可能需要初始化/校验本地 schema；默认只读、不生成 BS 派生数据），并默认尝试打开浏览器；是否继续？` 若交互询问是否安装 `[web]`，回答否，只转述手动安装指令，不要用 `--yes` 代替用户决定。
 - **文件**：`将把报告写入 <path>（本地文件）。是否继续？`；用户指定仓库内路径时提示会影响 git 状态。
 - 用户按日期/动作/参数给出的明确授权持续有效；不因「上一轮不算」反复确认，越界或撤销才补确认。
 - 盘前预案流程可以主动建议运行 `auction`，但不得因用户要预案就默认执行；需用户明确授权该动作。
-- 面板：`dashboard` 若交互询问是否安装 `[web]`，回答否，只转述手动安装指令；不要用 `--yes` 代替用户决定。
 - 语义模糊（“看看今天的”“整理一下”）时先确认，不自行选择写操作。
 
 ## 禁止操作
 
-- 未确认执行 `scan`（实时）/ `prep` / `auction` / `review` / `review-account` / `factor build` / `factor export` / `factor eval` / `factor decision-review` / `research experiments run` / `workspace init` / `strategy use`，或写用户指定文件。
+- 未确认执行 `assets capture plan/once/session`（T1）、`scan`（实时）/ `prep` / `auction` / `review` / `review-account` / `factor build` / `factor export` / `factor eval` / `factor decision-review` / `research experiments run` / `workspace init` / `strategy use`，或写用户指定文件。
 - 在单能力请求里隐式追加写操作；默认执行每日复合 workflow。
 - 把实验/回测成功当作用户授权，自动执行 `strategy use` 或推广参数。
 - 用 `--force` 绕过盘中/盘后/竞价时点，或把它当成日常手段。
@@ -70,5 +74,5 @@
 - 回显 Cookie、token 或同步凭据，或把它们写入日志/仓库。
 - 把 `dashboard` 说成“会回测/会写业务记录”，或伪造已经打开浏览器；默认只读，BS 派生数据生成需显式 opt-in 并按 T1 确认。
 - 在未启用 `--workspace-writes`（或环境变量）时声称 Web 可变更/执行用户策略；Web 默认只读。
-- 把 `research experiments run` 说成只读，或在没有真实 `run_id` 时猜「最新批次就是本次」。
+- 把 `research experiments run` 说成只读，或在没有真实 `run_id` 时猜「最新批次就是本次」；把 `assets capture plan` 说成只读，或声称 `capture schedule` 已安装定时器，或代写/安装 crontab、launchd（除非用户明确授权）。
 - 自动安装/升级 Python 包（含 `dashboard --yes` 与 `DQ_WEB_AUTO_INSTALL=1`），或执行 `npm publish`、`git commit`、`git push`、PR。

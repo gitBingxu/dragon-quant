@@ -1,6 +1,6 @@
 ---
 name: dragon-quant
-description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, 因子入库与读回 factor build/query, 自定义策略/用户因子 workspace/strategy, 扫描诊断/识别质量归因 research scan-quality, 账户策略优化/消融实验 research experiments, or 历史证据读回 research account/signals/snapshots with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
+description: Use when the user asks about A-share 个股行情, 真龙/龙头扫榜 scan/dragons, 盘后复盘 prep, 集合竞价 auction, 盘前预案 premarket, 龙头回测 review, 账户回测 review-account, 因子入库与读回 factor build/query, 持续采集/积累 BS 数据 capture, 自定义策略/用户因子 workspace/strategy, 扫描诊断/识别质量归因 research scan-quality, 账户策略优化/消融实验 research experiments, or 历史证据读回 research account/signals/snapshots with the dragon-quant CLI. Do not use for generic stock picking or investment advice.
 license: MIT
 compatibility: Requires dragon-quant CLI >=0.8.0 (Python >=3.10). Node >=22.20 is only needed for installation.
 metadata:
@@ -35,8 +35,8 @@ metadata:
 
 1. **CLI 是否存在、版本是否够**：`dragon-quant -v`。项目内优先 `.venv/bin/python -m dragon_quant -v`。低于 `min-cli-version` 时停止，给出升级/安装指引；不要自动安装 Python 包。
 2. **叶子能力探测（最低版本之外）**：对本次要用的**叶子**命令取 help（如 `data quote -h`、`factor build -h`）；关键 flag/字段缺失时降级为只读解释，不猜测旧版行为，也不取父级 `-h` 把未开放子命令带进上下文。只使用白名单列出的参数。
-3. **能力是否在白名单**：只有 `references/commands.md` 的十一类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
-4. **时点门禁**：统一按 Asia/Shanghai 与交易日判断。`scan` 当日 15:00 前不执行；`prep` 当日 16:40 前不执行；`auction` 当日 09:25 前不执行。时段不满足时说明等待条件，不用 `--force` 绕过。
+3. **能力是否在白名单**：只有 `references/commands.md` 的十二类能力可以执行。不在白名单时按「未开放能力」分流，不解释内部命令、不列替代命令名。
+4. **时点门禁**：统一按 Asia/Shanghai 与交易日判断。`scan` 当日 15:00 前不执行；`prep` 当日 16:40 前不执行；`auction` 当日 09:25 前不执行；`assets capture session` 早于计划时槽只记 `window_not_open`，不假装采过。时段不满足时说明等待条件，不用 `--force` 绕过。
 5. **数据源**：`data kline/minute` 默认 tdx（无 Cookie）。为空时改用 `--source tencent` 重试一次；仍失败则如实说明数据不可得。
 6. **授权范围（持续有效）**：授权按日期/动作/参数给出的明确范围（如「今天允许跑 prep 和因子 build」）
    在本会话内持续有效，不因「上一轮不算」反复确认；只有用户撤销、日期/动作/参数越界或出现新的
@@ -45,9 +45,9 @@ metadata:
    / `scan_id` / `run_id`；`json-lines` 逐行解析、空行只表示该行无数据；`human` 不强行 JSON 化，按
    数值与字段核对；`url` 只核对启动日志里的真实地址与进程存活。空行/失败字符串不等于成功。
 
-## 能力白名单（十一类）
+## 能力白名单（十二类）
 
-只有下面十一类能力可以执行，详细命令与参数见 `references/commands.md`：
+只有下面十二类能力可以执行，详细命令与参数见 `references/commands.md`：
 
 1. **个股行情**：实时行情、日 K、分时、批量行情。
 2. **扫描与真龙**：当日扫描（默认 `--top 5`）→ 用**本次扫描记录**核验（`scan --date D --top 5`
@@ -62,8 +62,9 @@ metadata:
 9. **可视化面板**：`dashboard`（T0 长驻，**默认只读、不生成 BS 派生数据**；显式 `--bs-autogen`/`DQ_BS_AUTOGEN=1` 才开启，此时按 T1 确认）；缺 `[web]` 时只给手动安装指令，禁止 `--yes` 自动安装。
 10. **研究读回与对照实验**：`research datasets/schema/query/scan-quality/account/signals/snapshots/strategy` 与 `research experiments list/show` 为 T0 只读；`research experiments run` 是 T1，必须 `--run-id N --confirm`。用于扫描诊断、识别质量归因、历史证据读回与策略消融；不构造 provider、不自动推广结论。详细问题→覆盖→样本→基线→实验流程见 `references/research.md`，数据集导航见 `references/datasets.md`。
 11. **自定义策略与用户因子**：`workspace init/check`、`strategy list/current/validate/use`、workspace 用户因子的 `factor build/list/query/eval/export`，以及 `review-account` 的 `--workspace/--strategy`。完整渐进流程、FactorSpec/Strategy 契约与最小示例见 `references/workspace.md`；workspace 源码编辑属于用户已授权的开发任务，不逐文件重复确认。
+12. **持续数据采集**：`assets capture plan/once/session/coverage/schedule`。用户说「积累 BS 数据 / 持续采集 / capture」时只走这五个叶子，不延伸到 assets 同步/清理。`plan` 默认**冻结**当日事前母集（T1，写本地 `assets.db`；`--dry-run` 只体检、不冻结，不写业务记录）；`once/session` 是 T1（真实取数 + 本地写入，`--dry-run` 零网络零写入）；`coverage/schedule` 是 T0。`once/session` 必须显式给 `--plan-id` 或 `--date`；`--phase auction` 只是采集阶段，不等于 standalone `auction` 竞价报告；`schedule` 只输出模板，**不安装**定时器。每日矩阵、宿主编排与失败恢复见 `references/schedule.md`。
 
-单能力请求只执行用户点名的那一个能力，不隐式附带其他写操作；只有用户明确说“每日全流程 / 每日量化入库 / 今天全套”时才按每日复合 workflow 执行。详见 `references/operations.md`。
+单能力请求只执行用户点名的那一个能力，不隐式附带其他写操作；只有用户明确说“每日全流程 / 每日量化入库 / 今天全套”时才按每日复合 workflow 执行。普通研究/建议请求**不隐含采集**授权，调度配置也只生成文本，不代写 crontab/launchd。详见 `references/operations.md`。
 
 ## 两个目标 workflow（识别质量 / 账户策略质量）
 
@@ -169,7 +170,7 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 | `references/workspace.md` | 自定义策略/用户因子、workspace 初始化、因子构建、策略校验/切换与 Web 策略页时 |
 | `references/datasets.md` | 需要选择 research 数据集、过滤器或解释 envelope 时 |
 | `references/operations.md` | 单能力/每日复合 workflow、UI 生命周期、因子三组名单时 |
-| `references/schedule.md` | 用户表达每日自动/定时/无人值守意图，或要把跨时点链交给 cron 时 |
+| `references/schedule.md` | 用户表达每日自动/定时/无人值守/持续采集意图，或要把 capture 与盘后盘前链交给 cron/launchd 时 |
 | `references/safety.md` | 执行任何 T1 命令前 |
 
 只加载需要的那一份；不要一次把全部 reference 读进来。
@@ -187,4 +188,5 @@ prep 不推荐不是看跌；auction 中性不是看涨；数据缺失不是空�
 - 不要把 `unverified`、`daily_fallback`、`degraded`、`missing_source` 的结果说成确定结论或 0。
 - 不要复制或推断评分权重、策略参数、表结构；需要时引用 `AGENTS.md`、对应 `docs/agent/*.md` 或 `STRATEGY.md`；运行时字段以 `research schema` / JSON 输出为契约。
 - 不要把 `research experiments run` 说成只读，或在没有真实 `run_id` 时猜「最新批次就是本次」。
+- 不要把 `assets capture plan` 说成只读（默认会冻结计划）；不要说 `capture schedule` 已安装定时器，也不代写/安装 crontab 或 launchd（用户明确授权后才可协助安装）。
 - 不要自动安装/升级 Python 包，也不要执行 `npm publish`、`git commit`、`git push` 或 PR；这些由用户控制。

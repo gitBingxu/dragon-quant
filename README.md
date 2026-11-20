@@ -65,13 +65,14 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 | 「帮我复盘今天」 | `prep` → 主线、情绪温度、建仓建议一屏简报 |
 | 「竞价怎么样？」 | `auction` → 近期真龙竞价强度分级与方向判断 |
 | 「给我盘前预案」 | `premarket`（只读）→ 盘前作战卡 |
+| 「持续积累数据」 | `assets capture plan` → 定时 `session` 采集 → `coverage` 复核缺口 |
 | 「回测一下这批龙头」 | `review` → 双口径回测统计，打开面板 |
 | 「跑 5 月账户回测」 | `review-account` → 权益、回撤、买点统计与逐笔交易 |
 | 「识别质量最近有改善吗？」 | `research scan-quality` + 回测证据 → 口径与归因 |
 | 「写个自己的因子/策略」 | `workspace init` → 用户因子 build/query → `strategy validate` → 账户回测 |
 | 「买卖点胜率如何？」 | `bs-eval` 假想回放 → `/bs` 页面数据 |
 
-安全边界：Agent 只开放**十一类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
+安全边界：Agent 只开放**十二类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
 必须先经你确认，不提供投资建议。自定义策略/用户因子的完整流程见
 [workspace 指南](skills/dragon-quant/references/workspace.md)。安装矩阵与交互协议详见
 [development 模块文档](docs/agent/development.md)。
@@ -189,22 +190,25 @@ source,available_at}` 与 `runtime_facts`；未知现金/成本/可卖量**不�
 TDX 当日可回溯数据可按事前母集持续留证（无需付费 key）：
 
 ```bash
-dragon-quant assets capture plan --json                     # 冻结今日事前母集（只读本地）
-dragon-quant assets capture once --topics auction_path --json
-dragon-quant assets capture session --phase auction --json  # 按计划时槽；错过记 missed
-dragon-quant assets capture coverage --from 20261101 --json
-dragon-quant assets capture schedule --kind launchd         # 只输出模板，不安装
+dragon-quant assets capture plan --date 20261120 --json   # 冻结当日事前母集（写本地 assets.db）
+dragon-quant assets capture session --phase auction --date 20261120 --max-slots 1 --json
+dragon-quant assets capture coverage --from 20261120 --to 20261120 --json
+dragon-quant assets capture schedule --kind launchd --workdir /ABS/PATH  # 只输出模板，不安装
 ```
 
+`once`/`session` 必须显式给 `--plan-id` 或 `--date`；`plan --dry-run` 只体检、不冻结计划。
 观测按「同语义同内容幂等、内容不同追加 revision」入库，单位与 bar 时点未核实即显式标注；
-`plan`/`coverage`/`schedule` 与全部 `--dry-run` 零联网。契约与四张表见
+`plan`/`coverage`/`schedule` 与全部 `--dry-run` 零联网，其中 `plan` 默认会写本地冻结计划，
+`coverage`/`schedule` 不写库。契约与四张表见
 [assets](docs/agent/assets.md#assets-capturetdx-持续采集与本地留证)。
 
 ## 每日自动化
 
-盘后 `scan` → `prep`，次日盘前 `auction` → `premarket` 是跨时点的依赖链，适合用
-cron/launchd 定时运行（时间窗与模板见 [schedule.md](skills/dragon-quant/references/schedule.md)）。
-用 Claude Code / Codex 的用户在会话里说「每天自动跑」，agent 会按 skill 生成配置；
+盘前 `assets capture plan` → 盘中/收盘 `capture session` → `capture coverage` 复核，加上盘后
+`scan` → `prep`、次日盘前 `auction` → `premarket`，都是跨时点依赖链，适合用 cron/launchd
+定时运行（完整日矩阵、时窗、时区与失败恢复见
+[schedule.md](skills/dragon-quant/references/schedule.md)）。
+用 Claude Code / Codex 的用户在会话里说「每天自动跑」或「持续采集」，agent 会按 skill 生成配置；
 资金操作（`buy`/`sell`）不做无人值守。
 
 ## 发布流程（维护者）

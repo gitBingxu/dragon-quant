@@ -80,7 +80,7 @@
   Playwright 脚本验证；fixture 使用独立 `DQ_DATA_DIR`、种子脚本与离线 provider，不打开真实
   库、不触网。脚本与启动命令见 `docs/solutions/2026-11-05-dashboard-user-reported-fixes.md`。
 - **安全边界**：`dragon_quant/tests/e2e` 永不打开真实 `dragon.db` / `assets.db` / `prep.db`，只对目录/文件做 `os.stat` 哨兵比对；每个业务命令在独立临时根下运行，隔离 `DQ_DATA_DIR` / `HOME` / `TMPDIR`，注入 fake provider/backend/Playwright/固定时钟与 socket/DNS 拦截，禁止真实网络、Cookie、R2/B2。真实目录元数据变化即失败，不得重跑淡化。
-- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 78 个 parser 节点 / 21 个顶层命令 / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。`bs-eval` 的 BS1–BS5 映射到 `test_bs_eval.py`，只读 Web API + SPA fallback（`/bs`）映射到 `cross_cutting.bs_eval_api` 与 `web_spa_fallback`；`dashboard` 节点 flags 含 `--no-bs-autogen`，D13 映射 BS 自动生成 fail-soft。计数（78/21）由 `dragon_quant/tests/e2e/test_coverage_map.py` 与 parser 快照断言。
+- **覆盖映射**：`dragon_quant/tests/e2e/coverage-map.json` 固定 parser 节点 / 21 个顶层命令（当前 92 节点，以 `coverage-map.json` 的 `parser_snapshot` 为准） / 隐藏别名 / 无参数实际帮助 / 独立入口，`test_coverage_map.py` 强制每个节点映射到真实测试，新增命令必须同步更新。`bs-eval` 的 BS1–BS5 映射到 `test_bs_eval.py`，只读 Web API + SPA fallback（`/bs`）映射到 `cross_cutting.bs_eval_api` 与 `web_spa_fallback`；`dashboard` 节点 flags 含 `--no-bs-autogen`，D13 映射 BS 自动生成 fail-soft。计数以 `coverage-map.json` 的 `parser_snapshot` 为准（当前 92/21），由 `dragon_quant/tests/e2e/test_coverage_map.py` 与 parser 快照断言。
 - **golden 纪律**：E2E golden 只在批准的行为变更时更新；结构重构不得改 golden。
 
 ## 打包边界
@@ -155,3 +155,7 @@
 - Web 策略选择/执行默认只读，需 `dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用；跨站 Origin 一律拒绝。
 - 真实浏览器交互用隔离 `DQ_DATA_DIR`/workspace + `PLAYWRIGHT_BROWSERS_PATH` 指向本机已装 chromium 的脚本验证（列表→选择→保存→CLI 读取→CLI 切换→Web 刷新→账户表单下拉），截图留证；E2E pytest 因 conftest 隔离浏览器目录而不跑真实浏览器。
 - wheel 消费测试构建本地 wheel，在临时 venv `--no-deps` 安装后执行用户策略与用户因子，并重复安装验证用户代码不被覆盖；构建失败即失败，不跳过。
+
+**BS 研究普通用户投影（2026-11-20 增量，C3）**：`/research` 的 `BsPanel` 拆为薄编排 + `pages/research/bs/*` 组件（`BsInputs` 结构化输入与中文校验、`BsAdviceSummary` 能力/限制/政策/EV 资格、`BsLedgerView` 账本状态/批次/订单/成交/事件分页、`BsExperimentList` 分页、`BsExperimentDetail` 策略×能力矩阵/指标单位与分母/成熟/分窗/恢复/审计折叠）。后端新增纯投影 `presenters/bs_research_view.py`，既有 BS 路由响应同时返回原始 `data` 与中文 `view`（GET 仍只读，不触发 run/replay/capture）。`CreateRunModal` 在保存选择为 BS 时阻止旧 entry/exit 提交并链接 `/research?bs=policy`；Account/Strategies 入口带 `?bs=account|policy#bs-panel`。前端零依赖契约测试 `test_web_frontend_bs_research.py`；改前端后必须 `npm --prefix web_ui/frontend run build` 让 `web_ui/dist` 同批更新。C3 本地 fixture 脚本 `web_ui/c3_bs_fixture.py` 在隔离 `DQ_DATA_DIR/HOME` 下生成多 variant、增强来源与失败可恢复实验，供独立端口人工点击。
+
+**W5-S 测试安全（2026-11-20 增量）**：新增 `dragon_quant/tests/sqlite_guard.py`（真实数据目录 SQLite open 前 audit 阻断，主进程/线程/Python 子进程自检）与 `test_sqlite_guard_isolation.py`；`conftest.py` 在加载应用模块前安装并自检，会话结束对非自检尝试置失败。`test_storage_readonly_contract.py` 用临时 WAL 库验证 `mode=ro` 拒写/新鲜一致性/不存在零文件。原 `real_data_metadata_guard` 一字不变；拒绝通过重跑/忽略 SHM/新增豁免“洗绿”。

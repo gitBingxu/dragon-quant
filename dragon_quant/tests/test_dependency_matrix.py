@@ -263,6 +263,7 @@ _COMMAND_PUBLIC_EXACT = frozenset({
     "dragon_quant.infra.provider.bundle",
     "dragon_quant.infra.storage.manager",
     "dragon_quant.infra.storage.connection",
+    "dragon_quant.infra.storage.paths",
     "dragon_quant.infra.factor",
     "dragon_quant.infra.factor.service",
     "dragon_quant.infra.assets.main",
@@ -286,6 +287,8 @@ _COMMAND_PUBLIC_EXACT = frozenset({
     "dragon_quant.workspace.main",
     "dragon_quant.workspace.config",
     "dragon_quant.workspace.factors",
+    # 持续采集公共门面（assets capture 的薄入口只消费这一层）。
+    "dragon_quant.data_capture",
 })
 _COMMAND_PUBLIC_TREES = (
     "dragon_quant.commands",

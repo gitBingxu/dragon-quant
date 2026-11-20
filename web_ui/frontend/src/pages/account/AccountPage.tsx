@@ -263,6 +263,7 @@ export function AccountPage() {
                 onDelete={setDeleteTarget}
               />
             ) : null}
+            <a className="btn btn-ghost" href="/research?bs=account#bs-panel">BS 账户决策（统一流程）</a>
             <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
               <IconPlus size={15} />
               生成回测记录

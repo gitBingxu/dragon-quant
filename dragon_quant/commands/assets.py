@@ -188,10 +188,18 @@ def _emit_backfill_stock_daily(outcome, *, as_json: bool) -> None:
 
 
 def handle(args, services):
-    """数据资产云端同步：doctor / push / pull / status / verify / backfill-dragons。
+    """数据资产云端同步 + 本地持续采集。
 
-    另含本地派生清理 ``purge-derived``（默认 dry-run，不触云端）。
+    云端：doctor / push / pull / status / verify / backfill-dragons（另含本地
+    ``purge-derived``）。本地采集：``assets capture <plan|once|session|coverage|
+    schedule>``，取数装配在 :mod:`dragon_quant.data_capture.cli`。
     """
+    if getattr(args, "assets_action", None) == "capture":
+        from dragon_quant.data_capture import handle_capture
+
+        handle_capture(args, services)
+        return
+
     from dragon_quant.infra.assets.main import SYNC_ACTIONS, run
 
     action = getattr(args, "assets_action", None)

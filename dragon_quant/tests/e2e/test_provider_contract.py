@@ -63,6 +63,7 @@ NOT_IMPLEMENTED = {
         "get_macro_quotes",
         "get_auction_snapshot",
         "get_5min_kline_for_date",
+        "get_daily_kline_unadjusted",
     ),
     "xueqiu": (
         "get_sector_ranking",
@@ -80,6 +81,7 @@ NOT_IMPLEMENTED = {
         "get_announcements",
         "get_auction_snapshot",
         "get_5min_kline_for_date",
+        "get_daily_kline_unadjusted",
     ),
     "tencent": (
         "get_sector_ranking",
@@ -98,6 +100,7 @@ NOT_IMPLEMENTED = {
         "get_announcements",
         "get_auction_snapshot",
         "get_5min_kline_for_date",
+        "get_daily_kline_unadjusted",
     ),
 }
 
@@ -114,6 +117,7 @@ CALL_ARGS = {
     "get_quote": "('600172',)",
     "get_minute_kline": "('600172',)",
     "get_5min_kline_for": "('600172', 1757575800000)",
+    "get_daily_kline_unadjusted": "('600172',)",
     "batch_get_quotes": "(['600172'],)",
     "batch_get_daily_klines": "(['600172'],)",
     "get_index_daily": "('SH000001',)",

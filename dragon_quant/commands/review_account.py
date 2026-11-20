@@ -25,6 +25,9 @@ def handle(args, services):
     )
     selection = _resolve_selection(getattr(args, "workspace", None),
                                    getattr(args, "strategy", None))
+    if selection is not None and _is_bs_strategy(selection.strategy_id):
+        _run_bs(args)
+        return
     want_json = bool(getattr(args, "json", False))
     call_kwargs = dict(
         date_from=_normalize_cli_date(args.date_from),
@@ -62,6 +65,55 @@ def handle(args, services):
 
     if args.ui:
         _start_ui(args)
+
+
+def _is_bs_strategy(strategy_id: str) -> bool:
+    return str(strategy_id or "") in ("builtin:bs_account_decision",
+                                      "bs_account_decision")
+
+
+def _run_bs(args) -> None:
+    """BS 账户决策分支：完整本地事件/账户用例，不复用旧 SDK entry/exit。"""
+    from dragon_quant.research.bs_advice import (
+        AccountFileError, BsReviewError, BsRunError, PolicyFileError,
+        load_account_file, load_policy_file, run_bs_review,
+    )
+
+    policy_path = getattr(args, "bs_policy", None)
+    account_path = getattr(args, "account_file", None)
+    if not policy_path or not account_path:
+        print(
+            "错误: 选择 builtin:bs_account_decision 需要 --bs-policy 与 "
+            "--account-file；只读建议请用 research bs-advice，"
+            "不会静默套用旧 buy-all 逻辑",
+            file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        policy = load_policy_file(policy_path)
+        account = load_account_file(account_path, policy_hash=policy.content_hash)
+        result = run_bs_review(
+            account=account, policy=policy,
+            date_from=_normalize_cli_date(args.date_from),
+            date_to=_normalize_cli_date(args.date_to),
+            persist=not bool(getattr(args, "no_persist", False)))
+    except (PolicyFileError, AccountFileError, BsReviewError, BsRunError) as exc:
+        print(f"错误（{exc.code}）：{exc}", file=sys.stderr)
+        raise SystemExit(getattr(exc, "exit_code", 1)) from exc
+    if getattr(args, "json", False):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    print(f"模式={result['mode']} ledger={result.get('ledger_id') or '-'} "
+          f"revision={result.get('revision')}")
+    for note in result.get("notes") or ():
+        print(f"- {note}")
+    print(f"- 事件数: {len(result.get('events') or ())} "
+          f"成交数: {len(result.get('fills') or ())}")
+    final = result.get("final_state") or {}
+    print(f"- 期末现金: {final.get('cash')} 权益: {final.get('equity')} "
+          f"回撤%: {final.get('drawdown_pct')}")
+    if result.get("persisted"):
+        print(f"- 只读读回: dragon-quant research bs-ledger "
+              f"--ledger-id {result['ledger_id']} --json")
 
 
 def _start_ui(args):

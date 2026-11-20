@@ -31,10 +31,13 @@ def _connect() -> sqlite3.Connection:
 
     ensure_data_dirs()
     conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    _ensure_ready(conn)
-    return conn
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        _ensure_ready(conn)
+        return conn
+    except BaseException:
+        conn.close()
+        raise
 
 
 def _ensure_ready(conn: sqlite3.Connection):
@@ -46,12 +49,42 @@ def _ensure_ready(conn: sqlite3.Connection):
         if _schema_ready:
             return
         try:
-            # 直接调用 _ensure_schema，绝不递归回 _connect。
+            # WAL 协商与 schema 同处 _schema_lock 内：并发首连不得在锁外争
+            # journal_mode。直接调用 _ensure_schema，绝不递归回 _connect。
+            conn.execute("PRAGMA journal_mode=WAL")
             _ensure_schema(conn)
         except BaseException:
             conn.close()
             raise
         _schema_ready = True
+
+
+def _connect_readonly():
+    """只读连接：库文件不存在时返回 ``None``（不建目录、不建 schema）。
+
+    供只读查询 API 使用（不初始化、不写）；与 ``_connect`` 的惰性建库语义相反，
+    避免「看一眼历史」就创建空库。存在则打开并启用外键，由调用方只读。
+    """
+    import os
+
+    from dragon_quant.infra.storage.paths import DB_PATH
+
+    path = str(DB_PATH)
+    if not os.path.exists(path):
+        return None
+    # SQLite 级只读 + query_only：拒写、读已提交 WAL；不使用 immutable=1，
+    # 以免活跃 WAL 的最新提交被漏读。mode=ro 不创建目录/库。
+    from pathlib import Path
+
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA query_only=ON")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
 
 
 def init_db():

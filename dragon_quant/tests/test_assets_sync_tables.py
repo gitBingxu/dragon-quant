@@ -58,6 +58,8 @@ class TestTableSpecRegistry(unittest.TestCase):
             "factor_model_snapshots", "fin_observed_snapshots",
             "fin_report_files", "fin_report_records",
             "fin_field_calibrations", "fin_xdxr_records",
+            "capture_plans", "capture_runs", "market_observations",
+            "market_bar_versions",
         })
         # fin_report_files 拆成元数据 + raw 两个单元
         units = [spec.unit_key for spec in tables.TABLE_SPECS]
@@ -77,7 +79,9 @@ class TestTableSpecRegistry(unittest.TestCase):
     def test_drift_ok_units(self):
         drift = {spec.unit_key for spec in tables.TABLE_SPECS if spec.drift_ok}
         self.assertEqual(drift, {"factor:build_runs", "fin:observed",
-                                 "fin:records", "fin:xdxr"})
+                                 "fin:records", "fin:xdxr",
+                                 "capture:plans", "capture:runs",
+                                 "capture:observations", "capture:bars"})
 
 
 class TestPartitionKeys(unittest.TestCase):

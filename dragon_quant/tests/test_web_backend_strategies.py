@@ -27,6 +27,7 @@ def test_list_and_current(tmp_path):
     data = listing.json()
     ids = [item["id"] for item in data["strategies"]]
     assert ids == ["builtin:dragon_pullback_daily",
+                   "builtin:bs_account_decision",
                    "user:example_momentum", "user:example_meanrev"]
     assert data["current"] == "builtin:dragon_pullback_daily"
     # 页面展示的是有效参数值（默认值），不是 schema 本身。
@@ -62,10 +63,11 @@ def test_list_uninitialized_workspace_falls_back_to_builtin_read_only(tmp_path):
     assert data["revision"] is None
     assert data["current"] == "builtin:dragon_pullback_daily"
     assert [item["id"] for item in data["strategies"]] == [
-        "builtin:dragon_pullback_daily"]
+        "builtin:dragon_pullback_daily", "builtin:bs_account_decision"]
     builtin = data["strategies"][0]
     assert builtin["id"] == "builtin:dragon_pullback_daily"
     assert builtin["current"] is True
+    assert data["strategies"][1]["current"] is False
 
     current = client.get("/api/strategies/current")
     assert current.status_code == 200

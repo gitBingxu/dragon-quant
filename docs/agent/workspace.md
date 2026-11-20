@@ -16,7 +16,7 @@ factors/                  # 用户因子模块（SPECS = [FactorSpec, ...]）
 snapshots/                # 运行时冻结快照（<sha256>/manifest.json + 源码）
 ```
 
-- 稳定 ID：内建 `builtin:dragon_pullback_daily`；用户 `user:<slug>`（与目录名一致）。
+- 稳定 ID：内建 `builtin:dragon_pullback_daily`（默认）与 `builtin:bs_account_decision`（显式选择，账户政策需 `--bs-policy`，不走旧 SDK entry/exit）；用户 `user:<slug>`（与目录名一致）。
 - 路径优先级：显式 `--workspace` > `DQ_WORKSPACE` > 本机登记 `DQ_DATA_DIR/workspace-selection.json`。
 - `workspace.json` 修改用内容 `revision` CAS；冲突保留原文件（Web 409，CLI 非零退出）。
 

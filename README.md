@@ -145,6 +145,33 @@ dragon-quant review-account --from 20260101 --to 20260201 --strategy user:exampl
 `dragon-quant dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用，
 用户代码在独立本地 worker 进程执行。安全边界与冻结语义见 [workspace](docs/agent/workspace.md)。
 
+### 账户政策（BS）只读建议与回放
+
+内建 `builtin:bs_account_decision` 是**账户级政策**（G1–G8：资格/增配/保护/收缩恢复），
+默认不改变现有策略选择。它不伪造风险参数：需要显式 `--bs-policy`（`BSPolicyConfig`
+JSON，冻结规范化内容 + hash）与账户文件，缺配置时只输出观察/受限缺项、仍保留可确定保护。
+
+```bash
+dragon-quant strategy list --json        # 可见 builtin:bs_account_decision；current 仍为默认策略
+dragon-quant research bs-advice \
+    --account-file account.json --bs-policy bs-policy.json \
+    --cutoff 2026-11-18T16:00:00+08:00 --json
+dragon-quant review-account --strategy builtin:bs_account_decision \
+    --account-file account.json --bs-policy bs-policy.json \
+    --from 20261101 --to 20261130 --json
+```
+
+`research bs-advice` 只读（不联网、不下单、不写账本），输出 `research_v1` envelope；
+候选母集来自本地最近 5 个真实交易日 dragons + T-1 prep 全候选 + 持仓/跟踪项（含
+null/0/rejected 分母），新入场证据只从可用本地快照派生；`--strict` 在缺完整配置/
+证据时非零退出。账户文件 schema v1 固定货币 `CNY`、股数单位 `share/股`，含现金、
+批次原始 `batch_id`/owner/plan/family/可卖事实、预留/未成订单、`mark_source{price,
+source,available_at}` 与 `runtime_facts`；未知现金/成本/可卖量**不猜**（受限而非伪造
+空仓）。review-account 的 BS 分支只用**会话内已校准分钟观测**做执行事件（日K收盘
+不冒充成交），显式运行持久化到账户账本并可用 `research bs-ledger --ledger-id` 读回，
+`--no-persist` 仅作研究预览。研究页 `/research` 的 BS 面板可粘贴结构化 account/policy JSON 做只读建议、显式模拟与冻结对照（`research bs-experiment`），可附显式 `--study-file`（有限命名 variant）与 `--enhanced-experiment-id` 做能力/策略分离比较；指标含 KR6 全集、占用/滑点/成熟度与分母定义。详见 [trading](docs/agent/trading.md) 的 W4a/W4b/W4c 节；教学样例
+参数标非推荐，真实研究必须自行提供风险参数。
+
 ### 双口径回测（review / review-account）
 
 `review` 回测入选龙头：宽松口径按入选后首个非一字板交易日最低价买入，统计第 2~5 个交易日
@@ -157,7 +184,21 @@ dragon-quant review-account --from 20260101 --to 20260201 --strategy user:exampl
 行情链路 **TDX（`tmdx`，首选，个股 K 线/分时）+ 同花顺（板块）+ 腾讯（批量行情）**，`scan`
 与 `data` 命令无需 Cookie；雪球仅老链路（账户/复盘）使用。本地 SQLite 持久化
 （惰性初始化、WAL、线程安全），数据资产支持云端双向同步。
-架构见 [architecture](docs/agent/architecture.md)，同步见 [assets](docs/agent/assets.md)。
+架构见 [architecture](docs/agent/architecture.md)，同步与持续采集见 [assets](docs/agent/assets.md)。
+
+TDX 当日可回溯数据可按事前母集持续留证（无需付费 key）：
+
+```bash
+dragon-quant assets capture plan --json                     # 冻结今日事前母集（只读本地）
+dragon-quant assets capture once --topics auction_path --json
+dragon-quant assets capture session --phase auction --json  # 按计划时槽；错过记 missed
+dragon-quant assets capture coverage --from 20261101 --json
+dragon-quant assets capture schedule --kind launchd         # 只输出模板，不安装
+```
+
+观测按「同语义同内容幂等、内容不同追加 revision」入库，单位与 bar 时点未核实即显式标注；
+`plan`/`coverage`/`schedule` 与全部 `--dry-run` 零联网。契约与四张表见
+[assets](docs/agent/assets.md#assets-capturetdx-持续采集与本地留证)。
 
 ## 每日自动化
 

@@ -28,6 +28,9 @@ WORKSPACE_SCHEMA_VERSION = 1
 
 #: 内建策略的 canonical ID（列表里只展示实际存在的实现）
 BUILTIN_STRATEGY_ID = "builtin:dragon_pullback_daily"
+#: BS 账户决策的稳定 ID（与 ``review_account.strategy.bs_policy`` 常量一致；
+#: workspace 层不 import 策略实现，避免把纯核拉进配置解析路径）。
+BUILTIN_BS_STRATEGY_ID = "builtin:bs_account_decision"
 
 WORKSPACE_FILE = "workspace.json"
 SELECTION_FILE = "workspace-selection.json"

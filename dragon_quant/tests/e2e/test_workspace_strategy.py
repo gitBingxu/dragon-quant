@@ -57,6 +57,7 @@ def test_ws1_init_list_validate_and_use():
         data = _json(listing.stdout)
         ids = [item["id"] for item in data["strategies"]]
         assert ids == ["builtin:dragon_pullback_daily",
+                       "builtin:bs_account_decision",
                        "user:example_momentum", "user:example_meanrev"]
         assert all(item["valid"] for item in data["strategies"])
 
@@ -116,7 +117,8 @@ def test_ws4_list_without_workspace_shows_builtin_only():
         assert listing.returncode == 0, listing.stderr
         data = _json(listing.stdout)
         assert data["workspace"] is None
-        assert [item["id"] for item in data["strategies"]] == ["builtin:dragon_pullback_daily"]
+        assert [item["id"] for item in data["strategies"]] == [
+            "builtin:dragon_pullback_daily", "builtin:bs_account_decision"]
 
 
 USER_STRATEGY = '''

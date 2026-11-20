@@ -118,6 +118,10 @@ export function StrategiesPage() {
 
   return (
     <>
+      <div className="panel mb-3 flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-body">
+        <span>账户级 BS 策略需要完整账户/风险配置，不在旧 entry/exit 表单里运行。</span>
+        <a className="btn btn-sm btn-outline" href="/research?bs=policy#bs-panel">前往 BS 账户决策统一流程</a>
+      </div>
       <PageHeader
         eyebrow="策略配置"
         title="内建与用户策略"

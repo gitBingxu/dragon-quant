@@ -31,7 +31,11 @@
       "fin_report_files",
       "fin_report_records",
       "fin_field_calibrations",
-      "fin_xdxr_records"
+      "fin_xdxr_records",
+      "capture_plans",
+      "capture_runs",
+      "market_observations",
+      "market_bar_versions"
     ],
     "sync_units": [
       "prepsnap:snapshots",
@@ -49,7 +53,11 @@
       "fin:calibrations",
       "fin:xdxr",
       "prep:*",
-      "auction:*"
+      "auction:*",
+      "capture:plans",
+      "capture:runs",
+      "capture:observations",
+      "capture:bars"
     ],
     "partitions": [
       "2026-10-21",
@@ -73,7 +81,11 @@
       "fin_report_files": 1,
       "fin_report_records": 2,
       "fin_field_calibrations": 1,
-      "fin_xdxr_records": 1
+      "fin_xdxr_records": 1,
+      "capture_plans": 0,
+      "capture_runs": 0,
+      "market_observations": 0,
+      "market_bar_versions": 0
     },
     "shards_by_partition": {
       "2026-10-21": [

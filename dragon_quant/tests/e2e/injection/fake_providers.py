@@ -293,6 +293,10 @@ class _FakeProvider:
     def name(self) -> str:
         raise NotImplementedError(f"{self.provider} 未声明 name")
 
+    def capture_provenance(self):  # type: ignore[no-untyped-def]
+        """E2E fake 不声明真实解析器身份：采集保持 unverified。"""
+        return None
+
     # ─── required StockProvider surface (fixture-driven) ──────────────────
 
     def get_sector_ranking(self, asc: bool = False,
@@ -401,6 +405,9 @@ class _FakeProvider:
     def get_5min_kline_for_date(self, code: str, date: str):
         raise NotImplementedError(f"{self.provider} 不提供指定日 5 分钟 K")
 
+    def get_daily_kline_unadjusted(self, code: str, days: int = 120):
+        raise NotImplementedError(f"{self.provider} 不提供不复权日 K")
+
 
 # Base-class methods must be instrumented once; subclasses override a few and
 # are instrumented by ``__init_subclass__`` when they are defined.
@@ -413,6 +420,10 @@ class TdxProvider(_FakeProvider):
     @property
     def name(self) -> str:
         return "tdx"
+
+    def capture_provenance(self):  # type: ignore[no-untyped-def]
+        """显式覆写以匹配生产 override 面；E2E 不冒充真实解析器身份。"""
+        return None
 
     def get_sector_1min_kline(self, sector_code: str, bars: int = 240,
                               category: str = "hy"):  # type: ignore[no-untyped-def]
@@ -499,6 +510,15 @@ class TdxProvider(_FakeProvider):
         return [
             _build("KBar", item, _KBAR_DEFAULTS)
             for item in _require_list(payload, "get_5min_kline_for_date")
+        ]
+
+    def get_daily_kline_unadjusted(self, code: str, days: int = 120):  # type: ignore[no-untyped-def]
+        payload = _respond(
+            self.provider, "get_daily_kline_unadjusted", code=code, days=days
+        )
+        return [
+            _build("KBar", item, _KBAR_DEFAULTS)
+            for item in _require_list(payload, "get_daily_kline_unadjusted")
         ]
 
     def get_finance_info(self, code: str) -> dict:

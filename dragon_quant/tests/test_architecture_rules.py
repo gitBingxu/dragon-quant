@@ -190,3 +190,82 @@ class TestPremarketIsReadOnlyAndPure(unittest.TestCase):
             _hits(path, ("dragon_quant.infra.assets", "sqlite3",
                          "dragon_quant.infra.provider", "socket", "urllib")),
             [])
+
+
+class TestBsPolicyAndEvidenceBoundaries(unittest.TestCase):
+    """BS 纯核与证据分层：不触网/读库，模型不深引仓储。"""
+
+    BS_DIR = REPO_ROOT / "dragon_quant" / "review_account" / "strategy" / "bs_policy"
+    EVIDENCE_DIR = REPO_ROOT / "dragon_quant" / "review_account" / "evidence"
+
+    def test_bs_policy_is_pure_and_has_no_io_or_provider_edges(self):
+        forbidden = ("dragon_quant.infra.provider", "dragon_quant.infra.assets.db",
+                     "sqlite3", "socket", "urllib", "requests", "pandas")
+        offenders = {}
+        for path in sorted(self.BS_DIR.glob("*.py")):
+            hits = _hits(path, forbidden)
+            if hits:
+                offenders[path.name] = hits
+        self.assertEqual(offenders, {})
+
+    def test_evidence_models_do_not_import_storage_adapter(self):
+        pure = ("schema.py", "frozen.py", "dates.py", "semantics.py",
+                "facts.py", "snapshots.py", "need.py", "checks.py")
+        offenders = {}
+        for name in pure:
+            path = self.EVIDENCE_DIR / name
+            hits = _hits(path, ("dragon_quant.infra.assets.observations",))
+            if hits:
+                offenders[name] = hits
+        self.assertEqual(offenders, {})
+
+
+class TestExecutionCoreBoundaries(unittest.TestCase):
+    """C1：执行核心是纯叶子；W2 场景不得经由 ledger/store 触达存储。"""
+
+    CORE_DIR = REPO_ROOT / "dragon_quant" / "review_account" / "execution_core"
+
+    def test_execution_core_never_imports_io_or_strategy_or_ledger(self):
+        forbidden = (
+            "dragon_quant.review_account.ledger",
+            "dragon_quant.infra.storage",
+            "dragon_quant.infra.assets",
+            "dragon_quant.infra.provider",
+            "dragon_quant.review_account.strategy",
+            "dragon_quant.review_account.evidence.store_adapter",
+            "sqlite3", "socket", "urllib", "requests", "pandas",
+        )
+        offenders = {}
+        for path in sorted(self.CORE_DIR.glob("*.py")):
+            hits = _hits(path, forbidden)
+            if hits:
+                offenders[path.name] = hits
+        self.assertEqual(offenders, {})
+
+    def test_bs_policy_does_not_import_ledger_store(self):
+        offenders = {}
+        for path in sorted(TestBsPolicyAndEvidenceBoundaries.BS_DIR.glob("*.py")):
+            hits = _hits(path, ("review_account.ledger.store",
+                                "review_account.ledger.projection",
+                                "infra.storage.connection"))
+            if hits:
+                offenders[path.name] = hits
+        self.assertEqual(offenders, {})
+
+    def test_importing_bs_policy_does_not_load_storage_or_ledger_store(self):
+        import subprocess
+        import sys
+        code = (
+            "import sys;"
+            "import dragon_quant.review_account.strategy.bs_policy;"
+            "bad=[m for m in sys.modules if m in {"
+            "'dragon_quant.infra.storage.connection',"
+            "'dragon_quant.infra.assets.db',"
+            "'dragon_quant.review_account.ledger.store',"
+            "'dragon_quant.review_account.ledger'}"
+            "];"
+            "print(','.join(sorted(bad)))"
+        )
+        result = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT,
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.strip(), "")

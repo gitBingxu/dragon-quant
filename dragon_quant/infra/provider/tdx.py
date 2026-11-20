@@ -428,6 +428,12 @@ class TdxProvider(StockProvider):
     def name(self) -> str:
         return "tdx"
 
+    def capture_provenance(self):
+        """TDX MAC 解析器身份（供版本化校准）；缺包/指纹不符返回 ``None``。"""
+        from dragon_quant.infra.calibration import current_tdx_provenance
+
+        return current_tdx_provenance()
+
     # ─── 连接 ───
 
     def _get_client(self):
@@ -859,6 +865,39 @@ class TdxProvider(StockProvider):
                                  elapsed_ms=elapsed, error=str(e))
             return []
 
+    def get_daily_kline_unadjusted(self, code: str, days: int = 120) -> list[KBar]:
+        """个股日 K（**不复权** NONE），供执行价/原始留证使用。
+
+        与 :meth:`get_kline`（QFQ）刻意分开：QFQ 不能作为历史执行价证据，
+        也不得回填旧决策。
+        """
+        t0 = time.time()
+        try:
+            et = _import_easytdx()
+            if et is None:
+                return []
+            client = self._get_client()
+            if client is None:
+                return []
+            market, c = _resolve(code)
+            with self._lock:
+                df = client.get_stock_kline(
+                    market=market, code=c, period=et.Period.DAILY,
+                    count=max(days, 1), adjust=et.Adjust.NONE,
+                )
+            kbars = _to_kbars(df.to_dict("records")) if not df.empty else []
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "daily_kline_unadjusted", ok=bool(kbars),
+                                 elapsed_ms=elapsed, note=f"n={len(kbars)}")
+            return kbars[-days:] if days else kbars
+        except Exception as e:
+            elapsed = (time.time() - t0) * 1000
+            if self._logger:
+                self._logger.api("tdx", "daily_kline_unadjusted", ok=False,
+                                 elapsed_ms=elapsed, error=str(e))
+            return []
+
     def get_5min_kline(self, code: str, bars: int = 96) -> list[KBar]:
         t0 = time.time()
         try:
@@ -1171,11 +1210,16 @@ class TdxProvider(StockProvider):
             return []
 
     def get_auction_snapshot(self, code: str) -> dict | None:
-        """当日 09:25 竞价终态：取 ``get_auction`` 的最后一根。
+        """当日竞价末笔快照（**不是**已核验的 09:25 成交终态）。
 
-        TDX 竞价接口只返回当日数据（无历史回看），调用方只在
-        ``trade_date == today`` 的 T+1 反馈补采里使用。失败/无数据返回 None。
+        取 ``get_auction`` 的最后一根；TDX 竞价接口只返回当日数据（无历史回看），
+        调用方只在 ``trade_date == today`` 的补采里使用。失败/无数据返回 None。
         ``amount`` 为竞价成交额（元）= 匹配价 × 累计匹配量。
+
+        返回值显式携带来源时点与衍生来源：``time`` 是该末笔的源时间
+        （HH:MM:SS，可能为空），``terminal_source='last_tick_virtual_match'``
+        说明这不是交易所终态。证据层只有看到 ``exchange_final`` 才能把竞价终态
+        当作可用证据。
         """
         items = self.get_auction(code)
         if not items:
@@ -1190,6 +1234,8 @@ class TdxProvider(StockProvider):
             "amount": price * matched,
             "matched": matched,
             "unmatched": int(_f(last.get("unmatched"))),
+            "time": str(last.get("time") or ""),
+            "terminal_source": "last_tick_virtual_match",
         }
 
     def get_5min_kline_for_date(self, code: str, date: str) -> list[KBar]:

@@ -15,6 +15,7 @@ import { TextField } from "../../components/Select";
 import { fmtPct, pnlClass, pnlStatTone } from "../../lib/format";
 import { labelOf } from "../../lib/labels";
 import { useSearchParams } from "../../router";
+import { BsPanel } from "./BsPanel";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -347,6 +348,8 @@ export function ResearchPage() {
 
   return (
     <>
+      <BsPanel />
+
       <PageHeader
         eyebrow="RESEARCH · 扫描研究"
         title="扫描研究"

@@ -99,7 +99,7 @@ python -m dragon_quant assets capture schedule [--kind launchd|systemd|cron] [--
 - **长历史边界（W0 返工）**：观测/bar 覆盖全部走 SQL 聚合 + 显式 `--limit/--offset`（默认 1000 组），返回准确 `totals` 与 `truncated`；`interval_code_limit`（默认 100 code/计划）超出时写 `interval_coverage_truncated`。截断结果附 `coverage_truncated` 缺口，严格研究不得把截断当完整。
 - **只读与零副作用**：`plan`/`coverage`/`schedule` 与全部 `--dry-run` 不构造 provider、不联网；`coverage` 在库不存在时返回空结构且不建库；`schedule` 只输出 launchd/systemd/cron 模板（`installed=false`），**不安装**系统定时器。
 - **同步**：四表已注册为 `capture:plans|runs|observations|bars`（date 分区，`drift_ok=True`，追加式）；`capture_runs` 的 `lease_*` 列**刻意不同步**。云端备份仍是可选；无云端 key 不影响本地采集。
-- **文档归属**：外部数据的降级矩阵、PIT 与账户动作边界见方案 `docs/solutions/2026-11-18-bs-account-decision.md` §4–§5.4；旧 `auction_assets` 的每日 UPSERT 与快照短路**不承担**连续观测史，本模块不改写旧表。
+- **文档归属**：外部数据的降级矩阵、PIT 与账户动作边界见[已归档方案](../../archived_md/review_account/2026-11-18-bs-account-decision.md) §4–§5.4；旧 `auction_assets` 的每日 UPSERT 与快照短路**不承担**连续观测史，本模块不改写旧表。
 
 ## `dragons` 镜像表契约
 

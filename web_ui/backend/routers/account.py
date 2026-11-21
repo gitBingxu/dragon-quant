@@ -94,9 +94,14 @@ def create_account_run(payload: dict | None = Body(default=None),
 
 
 def _resolve_selection(payload: dict, settings, workspace):
-    """账户回测的策略选择：显式 strategy_id > 已保存选择；无 workspace 时 None。
+    """账户回测的策略选择：显式 strategy_id > 已保存选择 > 内建默认。
 
     用户策略（会执行本地 Python）必须显式本机启用；默认 dashboard 只读。
+    **无论是否传 strategy_id 都解析有效选择**：显式 ``workspace_path`` /
+    ``DQ_WORKSPACE`` 指向未初始化路径、已存在但损坏的 ``workspace.json`` 都在
+    这里显式 400，不能因省略 strategy_id 就静默跑内建默认。本机登记指向已删除
+    的临时 workspace 按「无 workspace」处理，见
+    ``workspace.main._load_config_for_selection``。
     """
     strategy_id = payload.get("strategy_id")
     if strategy_id is not None and (not isinstance(strategy_id, str) or not strategy_id.strip()):
@@ -105,12 +110,6 @@ def _resolve_selection(payload: dict, settings, workspace):
     if parameters is not None and not isinstance(parameters, dict):
         raise ValueError("strategy_parameters 必须是对象")
     path = getattr(settings, "workspace_path", None)
-    try:
-        current = workspace.current_selection(path)
-    except Exception:
-        current = {}
-    if not (strategy_id or current.get("workspace")):
-        return None
     try:
         selection = workspace.resolve_selection(path, strategy_id, parameters)
     except workspace.WorkspaceError as exc:  # type: ignore[attr-defined]

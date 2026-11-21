@@ -130,6 +130,30 @@ import pytest  # noqa: E402  (must run after the environment is rewritten)
 
 
 @pytest.fixture(autouse=True)
+def isolated_workspace_registry(tmp_path):
+    """本机 workspace 登记逐用例隔离。
+
+    ``init_workspace(register=True)`` / ``select_strategy`` 会写
+    ``DQ_DATA_DIR/workspace-selection.json``。session 共用的临时数据目录下，一个
+    用例登记的临时 workspace 会被后续用例（CLI / Web 不显式传 workspace 时）
+    消费，制造顺序相关的假失败。重定向到用例私有文件：真实读写语义不变，
+    但不再把一次性路径登记到全局状态。
+
+    这里不用 ``monkeypatch``：它会改变 fixture 创建顺序，导致 ``HOME`` 类用例的
+    环境恢复晚于 ``real_data_metadata_guard`` 的 teardown，从而误报真实数据目录变化。
+    """
+    from dragon_quant.workspace import config as workspace_config
+
+    original = workspace_config.selection_path
+    path = tmp_path / "workspace-selection.json"
+    workspace_config.selection_path = lambda: path
+    try:
+        yield path
+    finally:
+        workspace_config.selection_path = original
+
+
+@pytest.fixture(autouse=True)
 def real_data_metadata_guard():
     """单元测试逐用例观察真实数据目录元数据；任何差异立即报错。"""
 

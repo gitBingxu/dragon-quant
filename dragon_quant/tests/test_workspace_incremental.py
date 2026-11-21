@@ -13,7 +13,7 @@ from dragon_quant.workspace import config, main, snapshots
 
 def _ref(tmp_path):
     root = tmp_path / "ws"
-    main.init_workspace(str(root))
+    main.init_workspace(str(root), register=False)
     selection = main.resolve_selection(str(root), "user:example_momentum")
     return root, main.freeze_strategy(selection)
 

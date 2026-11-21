@@ -115,6 +115,16 @@ python -m dragon_quant sell --force
 - 选择优先级：显式 `--strategy` > 已保存选择 > 内建默认。`sell --strategy ID` 只筛选该归属持仓，不替换退出规则；旧持仓无 `strategy_ref` 走 legacy 内建。
 - 引擎经 `review_account/strategy/runtime.py` 统一决策；T+1、成交、费用、手数、仓位与同 code 幂等仍由系统执行。详见 [workspace](workspace.md)。
 
+## 增量身份与「重新回测」（2026-11-21）
+
+- **选择解析区分路径来源**：`workspace/config.resolve_workspace_path_with_source` 返回（路径, 来源），`workspace/main._load_config_for_selection` 据此区分失败语义——显式 `--workspace` / `DQ_WORKSPACE` 指向未初始化路径仍显式失败；本机登记 `workspace-selection.json` 指向已删除的临时 workspace 时按「无 workspace」解析内置/默认策略（不报错、不隐式 `init`、不改写登记）。`workspace.json` 存在但损坏、用户策略不可用、保存的 BS 选择仍显式失败（Web 400）。
+- **省略 `strategy_id` 不等于跳过校验**：`/api/account/runs` 无论是否传 `strategy_id` 都解析有效选择（显式 > 保存 > 内建默认），因此显式/环境路径缺失与坏配置在**进入 runner 之前**就 400；只在真正无 workspace（含失效自动登记）时才回退内置默认，且保存的 BS 选择与用户代码执行门禁不变。
+- **内置身份冻结完整有效参数**：内置（含 BS）`strategy_ref.params` = 本次生效的完整 `StrategyConfig`（显式 `strategy_params` > workspace 保存值 > 默认），与落库 `strategy_params`、runtime controls、后续增量重建完全一致；不同有效参数 → 不同 `params_hash`/`snapshot_id`。用户策略仍按快照冻结 descriptor + 参数（源码/因子版本是它的身份），BS 协议拒绝与版本校验不变。此前只冻结保存的覆盖值，provider 再用 `ref.params` 盖到 cfg 上，会让旧记录重跑时被当前保存值逆转执行参数。
+- **新建即冻结身份**：内置/默认新建同样落 `run_meta.strategy_ref`（`strategy_id` + 完整有效 `params` + `params_hash` + `toolkit_version`）。`strategy_params`（StrategyConfig 形状）仍按列落库，增量据此重建 cfg。
+- **无身份记录不得增量**：缺/损坏 `strategy_ref` 的记录，`/api/account/runs/incremental` 继续 400 拒绝（不换用当前规则）；前端据此不发注定失败的请求，改为提供「重新回测」。
+- **重新回测 = 普通全量新建**：复用 `CreateRunModal` 的可选 `seed`：预填原 `date_from`、原 `initial_cash`、原 `strategy_params`；结束日取「当前默认终点 vs 原终点」较晚者（绝不早于原终点）。历史 `strategy_name` 只做显式映射（`dragon_pullback_daily` → `builtin:dragon_pullback_daily`），未知/自定义历史策略要求用户显式选择（不猜）。提交走同一 `/api/account/runs`（实验绕过开关等既有 API 策略不变），新记录冻结身份并被选中；旧记录逐字段不变；普通新建关闭再打开会重置 seed。
+- **前端时序守卫**：异步策略目录响应（generation + touched）不得覆盖 seed 值与用户后续编辑。
+
 ## 证据快照与能力检查（W1，只读公共契约）
 
 `review_account/evidence/`（公共入口仍是 `review_account.evidence`）把 `assets.db` 的采集观测变成**当时可用**的窄公共契约，供 W2 政策/场景与 W3 账本消费；本层不执行交易、不构造 provider、不读真实账户。

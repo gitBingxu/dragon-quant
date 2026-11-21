@@ -47,7 +47,7 @@ def test_page_has_incremental_button_and_exact_tooltip():
     for token in ("createIncrementalAccountRun", "增量回测中…", "增量回测",
                   'label="增量回测说明"', TOOLTIP, "actionError",
                   "loadRuns(resp.data.id)", "setDetailRefresh",
-                  "disabled={!runId || incrementing}"):
+                  "disabled={!runId || incrementing || !selectedHasFrozenStrategy}"):
         assert token in page, token
     assert "HintIcon" in page
 
@@ -97,3 +97,49 @@ def test_dist_is_built_and_carries_incremental_contract():
     js = _dist_js()
     for token in (TOOLTIP, "增量回测中…", INCREMENTAL_PATH):
         assert token in js, token
+
+
+def test_missing_frozen_identity_offers_full_rerun_instead_of_incremental():
+    """KR3：旧记录缺冻结身份时，UI 必须给「重新回测」而不是发注定失败的增量请求。"""
+    page = _account_page()
+    for token in ("runStrategyRef", "historicalStrategyId", "selectedHasFrozenStrategy",
+                  "重新回测", "缺少策略版本信息", "openRerun",
+                  "strategyParams: { ...(selectedRun.strategy_params || {}) }",
+                  "<CreateRunModal"):
+        assert token in page, token
+    # 增量按钮前先做身份判定，绝不对缺 ref 的记录发 POST。
+    guard = page.index("if (!runStrategyRef(selectedRun))")
+    post = page.index("await createIncrementalAccountRun(runId)")
+    assert guard < post
+    # 用户策略引用还必须带 params_hash（后端会拒绝无哈希的用户引用）。
+    api = _account_api()
+    assert 'ref.strategy_id.startsWith("user:")' in api
+    assert "params_hash" in api
+
+
+def test_create_run_modal_supports_seeded_full_rerun():
+    modal = _read(FRONTEND / "pages" / "account" / "CreateRunModal.tsx")
+    for token in ("CreateRunSeed", "seedRange", "laterDate",
+                  "确认重新回测", "原记录保持不变",
+                  "strategy_params: params", "generationRef",
+                  "strategyTouchedRef", "请选择策略（必选）",
+                  "历史记录的策略无法对应到当前可用版本"):
+        assert token in modal, token
+    # 当前默认终点 vs 原终点取较晚者：绝不早于原记录结束日。
+    assert "laterDate(range.dateTo, seed.dateTo)" in modal
+    # 未知/自定义历史策略：必选项占位 + 阻止提交。
+    assert "{seeded && !strategyId ?" in modal
+    api = _account_api()
+    for token in ("strategy_params?:", "LEGACY_BUILTIN_STRATEGY_IDS",
+                  "dragon_pullback_daily: \"builtin:dragon_pullback_daily\""):
+        assert token in api, token
+
+
+def test_dist_carries_full_rerun_contract():
+    js = _dist_js()
+    for token in ("重新回测", "确认重新回测", "请选择策略（必选）",
+                  "缺少策略版本信息"):
+        assert token in js, token
+    # 产品文案不暴露内部英文术语（BsExperimentDetail 的 API 字段 identity 不算文案）。
+    assert "无冻结" not in js
+    assert "冻结 identity" not in js

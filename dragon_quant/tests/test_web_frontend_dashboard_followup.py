@@ -79,9 +79,12 @@ def test_review_control_restores_and_separates_business_outcome():
     assert "composeSummaryText" in control
     assert "任务部分失败" in control
     assert "未取得业务汇总" in control
-    assert "没有需要补算的成熟标的" in control
     assert "列表刷新失败" in control
     assert "已保留上次有效数据" in control
+    # KR1：常规成功（无需补算 / 窗口不完整 / 跳过计数）不再弹长文案。
+    assert "没有需要补算的成熟标的" not in control
+    assert "收益窗口不完整" not in control
+    assert "text: null" in control
     # 轮询失败不得暗示后端取消。
     assert "任务不会被取消" in control
 

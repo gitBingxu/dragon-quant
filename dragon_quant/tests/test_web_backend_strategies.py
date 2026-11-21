@@ -14,7 +14,7 @@ from web_ui.backend.settings import DashboardSettings
 
 def _client(tmp_path, **settings_kwargs):
     root = tmp_path / "ws"
-    workspace_main.init_workspace(str(root))
+    workspace_main.init_workspace(str(root), register=False)
     settings_kwargs.setdefault("workspace_writes_enabled", True)
     settings = DashboardSettings(workspace_path=str(root), **settings_kwargs)
     return TestClient(create_app(settings), base_url="http://localhost"), root
@@ -149,7 +149,7 @@ def test_account_run_gate_blocks_user_strategy_when_disabled_or_cross_site(tmp_p
     from web_ui.backend.deps import run_account_backtest
 
     root = tmp_path / "ws"
-    workspace_main.init_workspace(str(root))
+    workspace_main.init_workspace(str(root), register=False)
     calls: list[str] = []
 
     def sentinel(**kwargs):
@@ -220,7 +220,7 @@ def _account_fixture(tmp_path, monkeypatch):
     from dragon_quant.strategy_sdk import FACTOR_STATUS_OK, FactorValue
 
     root = tmp_path / "ws"
-    workspace_main.init_workspace(str(root))
+    workspace_main.init_workspace(str(root), register=False)
     strategy_pid = tmp_path / "strategy-pid"
     factor_pid = tmp_path / "factor-pid"
     (root / "strategies" / "example_momentum" / "strategy.py").write_text(

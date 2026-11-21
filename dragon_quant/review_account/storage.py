@@ -477,7 +477,8 @@ def save_review_account_experiment(base_run_id: int, *,
                                    experiment_version: str,
                                    status: Optional[str],
                                    request: Optional[dict],
-                                   report: dict) -> int:
+                                   report: dict,
+                                   run_digest: Optional[str] = None) -> int:
     """保存用户显式触发的对照实验报告（可审计；GET 只读不重算）。"""
     with _lock:
         conn = _connect()
@@ -485,9 +486,9 @@ def save_review_account_experiment(base_run_id: int, *,
             _ensure_schema(conn)
             cur = conn.execute(
                 "INSERT INTO review_account_experiments("
-                "base_run_id, experiment_version, status, request_json, report_json"
-                ") VALUES (?, ?, ?, ?, ?)",
-                (base_run_id, experiment_version, status,
+                "base_run_id, experiment_version, status, run_digest, "
+                "request_json, report_json) VALUES (?, ?, ?, ?, ?, ?)",
+                (base_run_id, experiment_version, status, run_digest,
                  json.dumps(request or {}, ensure_ascii=False),
                  json.dumps(report, ensure_ascii=False, default=str)),
             )
@@ -543,3 +544,120 @@ def query_review_account_events(run_id: int) -> list[dict]:
     finally:
         conn.close()
 
+
+
+def update_review_account_experiment(experiment_id: int, *, status: str,
+                                     report: dict) -> bool:
+    """更新实验生命周期状态/报告（running → completed/failed/cancelled）。"""
+    with _lock:
+        conn = _connect()
+        try:
+            _ensure_schema(conn)
+            cur = conn.execute(
+                "UPDATE review_account_experiments SET status = ?, report_json = ? "
+                "WHERE id = ?",
+                (status, json.dumps(report, ensure_ascii=False, default=str),
+                 int(experiment_id)),
+            )
+            conn.commit()
+            return bool(cur.rowcount)
+        finally:
+            conn.close()
+
+
+def get_review_account_experiment(experiment_id: int, *,
+                                  experiment_version: Optional[str] = None
+                                  ) -> Optional[dict]:
+    """精确 ID 读回（可选版本过滤），不扫描最近 N 条。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        sql = ("SELECT id, base_run_id, created_at, experiment_version, status, "
+               "run_digest, request_json, report_json "
+               "FROM review_account_experiments WHERE id = ?")
+        params: list = [int(experiment_id)]
+        if experiment_version:
+            sql += " AND experiment_version = ?"
+            params.append(str(experiment_version))
+        row = conn.execute(sql, tuple(params)).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0], "base_run_id": row[1], "created_at": row[2],
+            "experiment_version": row[3], "status": row[4],
+            "run_digest": row[5],
+            "request": json.loads(row[6]) if row[6] else {},
+            "report": json.loads(row[7]) if row[7] else {},
+        }
+    finally:
+        conn.close()
+
+
+def list_review_account_experiments_by_version(
+        experiment_version: str, *, limit: int = 20,
+        cursor: Optional[int] = None, total_only: bool = False):
+    """按版本真实分页（id 游标）与 total/truncated，不做“先通用取 N 再过滤”。"""
+    limit = max(1, min(200, int(limit)))
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM review_account_experiments "
+            "WHERE experiment_version = ?", (str(experiment_version),)
+        ).fetchone()[0]
+        if total_only:
+            return {"total": int(total)}
+        sql = ("SELECT id, base_run_id, created_at, experiment_version, status, "
+               "run_digest, request_json, report_json "
+               "FROM review_account_experiments WHERE experiment_version = ?")
+        params: list = [str(experiment_version)]
+        if cursor is not None:
+            sql += " AND id < ?"
+            params.append(int(cursor))
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit + 1)
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        items = [{
+            "id": row[0], "base_run_id": row[1], "created_at": row[2],
+            "experiment_version": row[3], "status": row[4],
+            "run_digest": row[5],
+            "request": json.loads(row[6]) if row[6] else {},
+            "report": json.loads(row[7]) if row[7] else {},
+        } for row in rows]
+        return {
+            "items": items, "total": int(total), "has_more": has_more,
+            "next_cursor": items[-1]["id"] if has_more and items else None,
+        }
+    finally:
+        conn.close()
+
+
+def find_review_account_experiment_by_digest(
+        run_digest: str, *, experiment_version: Optional[str] = None
+        ) -> Optional[dict]:
+    """按冻结 digest 精确查找（同输入幂等，显式新 attempt 才新增）。"""
+    conn = _connect()
+    try:
+        _ensure_schema(conn)
+        sql = ("SELECT id, base_run_id, created_at, experiment_version, status, "
+               "run_digest, request_json, report_json "
+               "FROM review_account_experiments WHERE run_digest = ?")
+        params: list = [str(run_digest)]
+        if experiment_version:
+            sql += " AND experiment_version = ?"
+            params.append(str(experiment_version))
+        sql += " ORDER BY id LIMIT 1"
+        row = conn.execute(sql, tuple(params)).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0], "base_run_id": row[1], "created_at": row[2],
+            "experiment_version": row[3], "status": row[4],
+            "run_digest": row[5],
+            "request": json.loads(row[6]) if row[6] else {},
+            "report": json.loads(row[7]) if row[7] else {},
+        }
+    finally:
+        conn.close()

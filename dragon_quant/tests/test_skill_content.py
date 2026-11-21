@@ -1,9 +1,16 @@
+import io
 import json
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import fields
 from pathlib import Path
+from unittest.mock import patch
 
+from dragon_quant import cli
 from dragon_quant.review_account.models import StrategyConfig
 
 ROOT = Path(__file__).resolve().parents[2] / "skills" / "dragon-quant"
@@ -194,7 +201,7 @@ class TestSkillContent(unittest.TestCase):
             self.assertIn(token, text)
         self.assertNotIn("T2", text)
         for pattern in (r"\bbuy\b", r"\bsell\b", r"\bvpa\b", r"\bblacklist\b",
-                        r"dragon-quant\s+assets\b", r"dragon-quant\s+storage\b"):
+                        r"dragon-quant\s+storage\b"):
             self.assertIsNone(re.search(pattern, text), pattern)
 
     def test_all_reference_links_exist(self):
@@ -407,9 +414,9 @@ class TestPremarketSkill(unittest.TestCase):
     def _evidence(self) -> str:
         return (ROOT / "references" / "evidence.md").read_text(encoding="utf-8")
 
-    def test_skill_declares_nine_capabilities_and_premarket_route(self):
+    def test_skill_declares_twelve_capabilities_and_premarket_route(self):
         text = SKILL.read_text(encoding="utf-8")
-        self.assertIn("十一类", text)
+        self.assertIn("十二类", text)
         self.assertIn("盘前预案", text)
         self.assertIn("premarket", text)
         self.assertIn("T0", text)
@@ -622,6 +629,145 @@ class TestSkillWorkspaceGuide(unittest.TestCase):
         for pattern in (r"dragon-quant\s+buy\b", r"dragon-quant\s+sell\b",
                         r"dragon-quant\s+assets\b", r"dragon-quant\s+storage\b"):
             self.assertIsNone(re.search(pattern, guide), pattern)
+
+
+def _leaf_help(*args):
+    buf = io.StringIO()
+    with patch("sys.argv", ["dragon-quant", *args, "-h"]):
+        try:
+            with redirect_stdout(buf):
+                cli.main()
+        except SystemExit as exc:
+            assert exc.code == 0
+    return buf.getvalue()
+
+
+class TestSkillCapture(unittest.TestCase):
+    """持续采集：触发词、五叶子、调度矩阵、真实 parser 与失败恢复边界。"""
+
+    def _skill(self) -> str:
+        return SKILL.read_text(encoding="utf-8")
+
+    def _schedule(self) -> str:
+        return (ROOT / "references" / "schedule.md").read_text(encoding="utf-8")
+
+    def test_skill_trigger_and_capability(self):
+        text = self._skill()
+        for token in ("持续采集", "积累 BS 数据", "capture",
+                      "assets capture plan", "coverage", "schedule",
+                      "references/schedule.md", "十二类"):
+            self.assertIn(token, text, token)
+        front = _frontmatter()
+        for token in ("持续采集", "capture"):
+            self.assertIn(token, front, token)
+
+    def test_capture_is_not_implicit_for_research_or_advice(self):
+        text = self._skill()
+        for token in ("不隐含采集", "普通研究/建议", "不要自动安装", "不代写"):
+            self.assertIn(token, text, token)
+
+    def test_schedule_daily_matrix_and_timezone(self):
+        text = self._schedule()
+        for token in ("Asia/Shanghai", "09:10", "09:26", "14:50", "15:10",
+                      "15:20", "15:30", "16:45", "--date", "--plan-id",
+                      "--max-slots 1", "window_not_open", "interval-seconds",
+                      "--sectors", "same_day_recovered", "coverage_complete",
+                      "truncated", "unusable", "plan_not_found",
+                      "history_not_recoverable", "节假日", "launchd", "cron",
+                      "missed", "mermaid"):
+            self.assertIn(token, text, token)
+
+    def test_schedule_does_not_claim_macos_flock_or_catchup(self):
+        text = self._schedule()
+        self.assertNotIn("flock -n /tmp/dragon-quant.lock", text)
+        for token in ("不补跑", "不会回补", "骨架", "不是完整", "不安装"):
+            self.assertIn(token, text, token)
+        self.assertIn("Linux", text)
+        self.assertIn("macOS", text)
+
+    def test_schedule_examples_use_real_capture_flags(self):
+        text = self._schedule()
+        pattern = re.compile(
+            r"(?:dragon-quant|\S*python\S*\s+-m\s+dragon_quant)"
+            r"\s+assets\s+capture\s+([a-z]+)", re.IGNORECASE)
+        checked = 0
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            match = pattern.search(line)
+            if match is None:
+                continue
+            leaf = match.group(1)
+            checked += 1
+            help_text = _leaf_help("assets", "capture", leaf)
+            for flag in re.findall(r"--[a-z][a-z-]*", line[match.end():]):
+                self.assertIn(flag, help_text, f"{leaf} {flag}")
+        self.assertGreater(checked, 0, "schedule.md 没有可校验的 capture 示例")
+
+    def _cron_lines(self):
+        text = self._schedule()
+        block = text.split("```cron", 1)[1].split("```", 1)[0]
+        return [line for line in block.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+
+    @staticmethod
+    def _cron_command(line):
+        """去掉 cron 的 5 个时间字段，返回实际 shell 命令。"""
+        fields = line.split(None, 5)
+        assert len(fields) == 6, line
+        return fields[5]
+
+    def test_cron_lines_are_working_daily_jobs(self):
+        lines = self._cron_lines()
+        self.assertGreaterEqual(len(lines), 5)
+        for line in lines:
+            shell_line = self._cron_command(line).replace("\\%", "%")
+            result = subprocess.run(["sh", "-n"], input=shell_line,
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for token in ("TZ=Asia/Shanghai date", "/ABS/PATH", "/ABS/PYTHON",
+                          "DQ_DATA_DIR=/ABS/DATA", "/ABS/LOG/", "--json"):
+                self.assertIn(token, shell_line)
+            self.assertNotIn("--date D", shell_line)
+
+    def test_cron_plan_line_runs_in_temp_storage(self):
+        line = self._cron_command(self._cron_lines()[0]).replace("\\%", "%")
+        with tempfile.TemporaryDirectory() as tmp:
+            data = str(Path(tmp) / "data")
+            log = str(Path(tmp) / "capture-plan.log")
+            err_log = str(Path(tmp) / "capture-plan.err.log")
+            command = (line.replace("/ABS/PATH", tmp)
+                           .replace("/ABS/PYTHON", sys.executable)
+                           .replace("/ABS/DATA", data)
+                           .replace("/ABS/LOG/dq-capture-plan.err.log", err_log)
+                           .replace("/ABS/LOG/dq-capture-plan.log", log))
+            result = subprocess.run(command, shell=True, cwd=tmp, text=True,
+                                    capture_output=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            raw = Path(log).read_text(encoding="utf-8")
+            payload = json.loads(raw[raw.index("{"):])
+            self.assertTrue(payload["ok"], payload)
+            self.assertTrue(payload["plan_id"], payload)
+
+    def test_capture_auction_phase_is_not_standalone_auction(self):
+        text = self._schedule()
+        for token in ("命名空间", "--phase auction", "standalone",
+                      "auction 快照", "不能互相替代"):
+            self.assertIn(token, text, token)
+
+    def test_in_window_sampling_is_not_same_day_recovered(self):
+        text = self._schedule()
+        for token in ("时窗内普通采样", "semantics_unverified",
+                      "same_day_recovered", "不能把更早时点倒填",
+                      "同一 phase/slot 已 complete 会被跳过"):
+            self.assertIn(token, text, token)
+
+    def test_capture_quality_boundary_and_recovery(self):
+        text = self._schedule()
+        for token in ("complete", "全市场", "标签成熟", "EV",
+                      "虚拟匹配", "unverified", "status", "退出码",
+                      "scope_empty", "no_data", "source"):
+            self.assertIn(token, text, token)
 
 
 class TestSkillBehaviorScenarios(unittest.TestCase):

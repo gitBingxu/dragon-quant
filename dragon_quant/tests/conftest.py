@@ -48,6 +48,31 @@ if ISOLATION_ENABLED:
     if not netguard.is_patched():
         raise RuntimeError("单元测试 netguard 安装后自检失败：socket 入口未被接管")
 
+# ── SQLite 真实库 open 阻断（先于任何应用模块连接）──────────────────────────
+# 以真实 OS 用户 home 解析默认数据目录（不信测试 HOME/DQ_DATA_DIR），在
+# sqlite3.connect 的 audit 事件里于实际 open 前拒绝；覆盖主进程/线程/Python
+# 子进程（子进程需显式注入，见 test_sqlite_guard_isolation.py）。
+from dragon_quant.tests import sqlite_guard  # noqa: E402
+
+_GUARD_LOG = Path(
+    (os.environ.get("DQ_TEST_ISOLATED_DATA_DIR") or tempfile.gettempdir())
+) / "sqlite-guard.jsonl"
+os.environ["DQ_SQLITE_GUARD_LOG"] = str(_GUARD_LOG)
+sqlite_guard.install(log_path=_GUARD_LOG)
+sqlite_guard.verify_selftest()
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    """被被测代码吞掉的真实库 open 尝试也必须让最终诊断失败。"""
+    violations = sqlite_guard.log_violations(_GUARD_LOG)
+    if violations:
+        sample = violations[:5]
+        sys.stderr.write(
+            "真实数据目录 SQLite open 尝试被 guard 阻断（最终诊断失败）:\n"
+            + "\n".join(f"  pid={item.get('pid')} target={item.get('target')}"
+                        for item in sample) + "\n")
+        session.exitstatus = 1
+
 # ── 真实数据目录 stat 哨兵 ────────────────────────────────────────────────
 # 只读 os.stat 元数据，绝不打开/读取/写入真实库。测试进程若把漏 patch 的写
 # 操作落到真实 dragon.db / assets.db，本哨兵在用例结束时 fail closed。

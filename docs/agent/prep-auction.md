@@ -86,6 +86,8 @@ python -m dragon_quant prep --json                        # 完整复盘 JSON（
 | `auction_assets`（assets.db） | 集合竞价原始资产 | `auction` 命令产出；`items_json` 存当日竞价盘口明细（`time`/`price`/`matched`/`unmatched` 数组），`quote_json`（可空）存 `Quote` 行情快照（昨收/跌停价/流通市值等，旧行为 NULL），`UNIQUE(trade_date, code)`；`trade_date` 为竞价所属交易日（=当日）。仅当日 9:25 后可用、盘后仍可拉取、无历史回看 |
 | `auction_snapshots`（assets.db） | 集合竞价强度计算结果 | `auction` 采集/`auction --recompute DATE` 写入；单列 `analysis_json` 存 **v2** 契约（旧键 `version`/`code`/`is_weak`/`strength`/`direction`/`level`/`dims`/`reject_reason`/`unverified`/`rank` 全保留，`version="2"`；新增 `rank_reason`/`pre_veto_strength`/`validation_status`/`config_version`/`config_hash`/`semantics`/`data_quality`/`risk_events`/`raw_factors`/`evidence`/`reference_prices`/`windows`/`actions`；`strength`/`level`/`dims.*.score`/`rank` 允许 `null`），`UNIQUE(trade_date, code, source)`、`source` 默认 `v2`；同日重跑整日原子替换，空结果不删旧快照。读接口 `assets_db.list_auction_snapshots` / `get_auction_snapshot`（逐行 JSON 损坏隔离）供候选池 A 维度消费；`assets_db.list_auction_history(before_date, codes, limit=5)` 只读历史末点匹配量（不建库/建表） |
 
+> **连续观测边界（2026-11-18）**：`auction_assets` 按 `(trade_date, code)` UPSERT、`auction.collect` 命中当日快照直接短路，只能表达「最后一版每日资产」，**不承担时点观测史**。需要"何时第一次看到、之后如何修订"的连续证据时走 `assets capture`（`capture_runs` / `market_observations` / `market_bar_versions`，契约见 [assets](assets.md#assets-capturetdx-持续采集与本地留证)）；两者独立，采集层不改写旧表语义。
+
 ## dashboard 复盘 / 竞价投影（只读，2026-11-01）
 
 `web_ui` 只读 `assets.db`（`create=False`），不改快照字段、算法、采集器或 CLI。

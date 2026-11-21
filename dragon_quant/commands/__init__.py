@@ -59,7 +59,12 @@ def _data_providers(args: Any) -> bool:
 
 
 def _review_account_providers(args: Any) -> bool:
-    """Only a real backtest reads market data; ``--ui-only``/missing dates do not."""
+    """Only a real backtest reads market data; ``--ui-only``/missing dates do not.
+
+    BS 账户决策分支只读本地 assets/账户文件；显式选择该策略时不构造联网 provider。
+    """
+    if "bs_account_decision" in str(getattr(args, "strategy", "") or ""):
+        return False
     return (
         not getattr(args, "ui_only", False)
         and bool(getattr(args, "date_from", None))
@@ -90,8 +95,17 @@ def _never_providers(args: Any) -> bool:
 
 
 def _assets_providers(args: Any) -> bool:
-    """Only the local stock_daily backfill touches TDX; every other action is offline."""
-    return (getattr(args, "assets_action", None) == "backfill-stock-daily"
+    """Only real market reads construct providers; everything else is offline.
+
+    - ``backfill-stock-daily``（非 dry-run）读 TDX 日 K；
+    - ``capture once|session``（非 dry-run）显式取数；
+    - ``capture plan|coverage|schedule`` 与全部 dry-run 保持零联网。
+    """
+    action = getattr(args, "assets_action", None)
+    if action == "capture":
+        capture = getattr(args, "capture_action", None)
+        return capture in ("once", "session") and not getattr(args, "dry_run", False)
+    return (action == "backfill-stock-daily"
             and not getattr(args, "dry_run", False))
 
 

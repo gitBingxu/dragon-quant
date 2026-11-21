@@ -1,0 +1,84 @@
+{
+  "case": "capture",
+  "now": "2026-11-18T09:26:00+08:00",
+  "trade_date": "2026-11-18",
+  "note": "持续采集 E2E：竞价过程/终态/分钟；仅覆盖 600001、600002。",
+  "providers": {
+    "tdx": {
+      "get_auction": {
+        "by_code": {
+          "600001": [
+            {
+              "time": "09:20:00",
+              "price": 10.5,
+              "matched": 100,
+              "unmatched": 10
+            },
+            {
+              "time": "09:24:00",
+              "price": 10.6,
+              "matched": 200,
+              "unmatched": 5
+            }
+          ],
+          "600002": [
+            {
+              "time": "09:20:00",
+              "price": 20.5,
+              "matched": 300,
+              "unmatched": 20
+            }
+          ]
+        }
+      },
+      "get_auction_snapshot": {
+        "by_code": {
+          "600001": {
+            "price": 10.6,
+            "amount": 123000.0,
+            "matched": 200,
+            "unmatched": 5
+          },
+          "600002": {
+            "price": 20.6,
+            "amount": 456000.0,
+            "matched": 300,
+            "unmatched": 20
+          }
+        }
+      },
+      "get_minute_kline": {
+        "by_code": {
+          "600001": [
+            {
+              "timestamp": 1795003140000,
+              "volume": 10.0,
+              "open": 10.0,
+              "high": 10.1,
+              "low": 9.9,
+              "close": 10.05,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 1000.0
+            }
+          ],
+          "600002": [
+            {
+              "timestamp": 1795003140000,
+              "volume": 20.0,
+              "open": 20.0,
+              "high": 20.1,
+              "low": 19.9,
+              "close": 20.05,
+              "chg": 0.0,
+              "pct": 0.0,
+              "turnover": 0.0,
+              "amount": 2000.0
+            }
+          ]
+        }
+      }
+    }
+  }
+}

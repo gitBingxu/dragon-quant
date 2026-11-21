@@ -22,13 +22,11 @@
 ## 次日盘前 session（交易日 ≥09:25）
 
 1. `dragon-quant premarket --json`（T0 只读）：拿到 T-1 计划 + T 日竞价 + 结构化降级，默认一屏结论；完整盘前作战卡八段模板按需展开。
-2. **09:25 前**：只出无竞价版；结尾主动建议「09:25 后先运行 `auction` 采集竞价终态，再重新生成盘前预案」。
-3. **09:25 后**：先跑 `premarket` 检查竞价状态；`ready / partial` 直接生成；缺失 / 不可用时**主动建议**运行 `dragon-quant auction --json`（T1，会写 assets.db），给出确认话术；只有用户明确授权该动作后才执行；成功后重跑 `premarket`，再生成最终预案。用户拒绝或自行执行 → 无竞价版并写明「竞价缺失」。
-4. 不自动运行 `auction`、不自动加 `--force`、不用 `--force` 绕过 09:25 门禁。
-5. 默认一屏简报，完整报告按 `references/reports.md` 七段模板交付；**09:30 后运行仍读取/采集 09:25 终态**，正常生成竞价强度报告，标注实际运行时点与缓存状态。
-6. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
+2. **09:25 前**只出无竞价版并主动建议「09:25 后先运行 `auction` 采集竞价终态，再重新生成盘前预案」；**09:25 后**先跑 `premarket` 检查竞价状态，`ready / partial` 直接生成，缺失 / 不可用才**主动建议**运行 `dragon-quant auction --json`（T1，会写 assets.db），且需用户明确授权该动作，成功后重跑 `premarket`；拒绝或自行执行 → 无竞价版并写明「竞价缺失」。
+3. 不自动运行 `auction`、不自动加 `--force`；**09:30 后运行仍读取/采集 09:25 终态**，标注实际运行时点与缓存状态；完整报告按 `references/reports.md` 七段模板。
+4. 只有用户明确提出“竞价因子入库 / 每日量化入库”时，才继续构建 auction 组；单能力 `auction` 到报告结束。
 
-## 十一类 workflow
+## 常用 workflow（按能力分组）
 
 ### 1. 个股行情
 
@@ -45,10 +43,7 @@
 3. 执行 `scan --top 5`（默认）；只有用户明确要求更多/并发时才加参数。
 4. 核验：`trade_date`、本次 `scan_id`/`top_n` 与原始候选必须与刚跑的那次一致（必要时
    `scan --date D --top 5` 读回同一记录比对）；不把读取到的其他 `top_n` 记录当本次结果。
-5. 另报 `dragons --date D --true-only` 的**新增回测池数量**；它是 5 日去重池，不是当日原始候选，
-   不得据此说“当日只有 N 只真龙”，也不用它反推权重。
-6. 研究/校准需求走 `research scan-quality --from D1 --to D2`（原始候选、通过/否决、错失机会与基准差），
-   不改 dragons 去重与生产候选池。
+5. 另报 `dragons --date D --true-only` 的**新增回测池数量**；它是 5 日去重池，不是当日原始候选，不得据此说“当日只有 N 只真龙”，也不用它反推权重；研究/校准走 `research scan-quality --from D1 --to D2`，不改 dragons 去重与生产候选池。
 
 ### 3. 龙头回测与面板
 
@@ -88,17 +83,14 @@
 
 ### 8. 盘前预案
 
-1. 运行 `premarket --json`（T0）；先核对 `data_quality`、`prep.strictness`、`proven_gap`、`auction.state`、`cache=unknown`。
-2. 09:25 前只出无竞价版；`auction.state=missing/not_ready/corrupt` 不等于看空，候选行动上限降为 `observe_only`。
-3. 外部证据按 `references/evidence.md` 采集；缺失只降情景覆盖，不填中性、不硬否决。
-4. 默认一屏结论，完整八段模板按需展开；不自动运行 `auction`、不自动交易、不写用户文件。
+1. 运行 `premarket --json`（T0）并核对 `data_quality`、`prep.strictness`、`proven_gap`、`auction.state`、`cache=unknown`；09:25 前只出无竞价版，`auction.state=missing/not_ready/corrupt` 不等于看空，行动上限降为 `observe_only`。
+2. 外部证据按 `references/evidence.md`，缺失只降情景覆盖、不填中性、不硬否决；默认一屏结论、完整八段按需展开；不自动运行 `auction`、不自动交易、不写用户文件。
 
 ### 9. 可视化面板
 
 1. 用户明确要看面板（龙头 / 扫描 / 因子 / 复盘 / 竞价 / 账户）时，运行 `dashboard`（T0，长驻）。
 2. 默认打开复盘页；账户页用 URL `/account`，其他页面按启动日志中的真实地址进入。
-3. 缺 `[web]` 依赖时只转述 stderr 的手动安装指令；禁止 `--yes`、禁止自动 pip 安装。
-4. 面板默认只读，不回测、不写业务记录；`--bs-autogen` / `DQ_BS_AUTOGEN=1` 会生成 BS 派生数据，按 T1 确认；详见“UI 生命周期”。
+3. 缺 `[web]` 依赖时只转述 stderr 的手动安装指令，禁止 `--yes`、禁止自动 pip 安装；面板默认只读、不回测、不写业务记录；`--bs-autogen` / `DQ_BS_AUTOGEN=1` 才生成 BS 派生数据，按 T1 确认；详见“UI 生命周期”。
 
 ### 10. 自定义策略与用户因子
 
@@ -106,6 +98,11 @@
 2. 用户因子构建需要该日本地源数据（scan/prep/auction/vpa/fin）；`missing_source` 不是 0。策略回测需要本地行情/缓存与候选池。
 3. 只在用户明确要求时 `strategy use` 持久切换，并用 `strategy current` 核对；研究/实验成功不自动推广。
 4. Web 策略页需 `dashboard --workspace-writes`（或环境变量）显式启用；默认只读。
+
+### 11. 持续采集（capture）
+
+1. 用户点名「积累 BS 数据 / 持续采集 / capture」时只走 `assets capture` 五个叶子，不延伸到 assets 同步/清理；先用显式 `--date` 跑 `plan --json` 冻结当日母集（**默认写本地 assets.db**；`--dry-run` 只体检、不冻结）。
+2. `once/session` 必须显式 `--plan-id` 或 `--date`，属 T1，其 `--dry-run` 零网络零写入；`coverage/schedule` 属 T0；调度只生成/展示配置（不安装、不代写 crontab/launchd），每日矩阵/时窗/宿主模板/恢复见 `references/schedule.md`。
 
 ## UI 生命周期
 

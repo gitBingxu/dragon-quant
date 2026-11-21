@@ -1,215 +1,218 @@
 {
   "schema": 1,
-  "description": "M1F2 machine-checkable coverage map: every parser node (70), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
+  "description": "M1F2 machine-checkable coverage map: every parser node (92), hidden alias, invocation fact, and independent entry maps to real tests under dragon_quant/tests/e2e.",
   "parser_snapshot": {
     "source": "/tmp/dragon-quant-architecture-research/parser_dump.json",
     "sha256": "8a7543cac6438ee357f9cfd2f627ca78fe4f4c74d716c2afb15605760903d2a2",
-    "node_count": 78,
+    "node_count": 92,
     "top_level_count": 21,
     "nodes": [
       {
         "command": "scan",
         "flags": [
-          "-h",
-          "--help",
-          "--top",
           "--candidates",
-          "--workers",
+          "--date",
           "--force",
+          "--help",
           "--no-cache",
-          "--date"
+          "--top",
+          "--workers",
+          "-h"
         ]
       },
       {
         "command": "logs",
         "flags": [
-          "-h",
           "--help",
-          "--source"
+          "--source",
+          "-h"
         ]
       },
       {
         "command": "logs tail",
         "flags": [
-          "-h",
           "--help",
-          "-n",
-          "--lines"
+          "--lines",
+          "-h",
+          "-n"
         ]
       },
       {
         "command": "logs query",
         "flags": [
-          "-h",
-          "--help",
-          "--date",
           "--category",
-          "--level",
           "--code",
-          "--tail"
+          "--date",
+          "--help",
+          "--level",
+          "--tail",
+          "-h"
         ]
       },
       {
         "command": "logs clear",
         "flags": [
-          "-h",
+          "--days",
           "--help",
-          "--days"
+          "-h"
         ]
       },
       {
         "command": "logs list",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "logs summary",
         "flags": [
-          "-h",
+          "--date",
           "--help",
-          "--date"
+          "-h"
         ]
       },
       {
         "command": "data",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "data sector",
         "flags": [
-          "-h",
+          "--asc",
           "--help",
-          "--asc"
+          "-h"
         ]
       },
       {
         "command": "data components",
         "flags": [
-          "-h",
           "--help",
-          "--sector"
+          "--sector",
+          "-h"
         ]
       },
       {
         "command": "data kline",
         "flags": [
-          "-h",
-          "--help",
           "--code",
+          "--days",
+          "--help",
           "--source",
-          "--days"
+          "-h"
         ]
       },
       {
         "command": "data minute",
         "flags": [
-          "-h",
-          "--help",
           "--code",
-          "--source"
+          "--help",
+          "--source",
+          "-h"
         ]
       },
       {
         "command": "data quote",
         "flags": [
-          "-h",
-          "--help",
           "--code",
-          "--source"
+          "--help",
+          "--source",
+          "-h"
         ]
       },
       {
         "command": "data batch-quote",
         "flags": [
-          "-h",
-          "--help",
           "--codes",
-          "--source"
+          "--help",
+          "--source",
+          "-h"
         ]
       },
       {
         "command": "data cookie-status",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "data cookie-fetch",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "data cookie-set",
         "flags": [
-          "-h",
-          "--help",
           "--cookie",
-          "-c"
+          "--help",
+          "-c",
+          "-h"
         ]
       },
       {
         "command": "blacklist",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "blacklist list",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "blacklist add",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "blacklist remove",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "review",
         "flags": [
-          "-h",
-          "--help",
           "--date",
-          "--top",
-          "--force",
-          "--recompute-all",
           "--dry-run",
+          "--force",
+          "--help",
           "--limit",
+          "--no-browser",
+          "--port",
+          "--recompute-all",
           "--source",
+          "--top",
           "--ui",
           "--ui-only",
-          "--port",
-          "--no-browser"
+          "-h"
         ]
       },
       {
         "command": "review-account",
         "flags": [
+          "--account-file",
+          "--bs-policy",
           "--capital",
           "--config",
           "--from",
           "--help",
           "--json",
           "--no-browser",
+          "--no-persist",
           "--port",
           "--source",
           "--strategy",
@@ -223,143 +226,234 @@
       {
         "command": "dragons",
         "flags": [
-          "-h",
-          "--help",
           "--date",
-          "--true-only"
+          "--help",
+          "--true-only",
+          "-h"
         ]
       },
       {
         "command": "prep",
         "flags": [
-          "-h",
-          "--help",
           "--date",
-          "--recompute",
           "--force",
-          "--json"
+          "--help",
+          "--json",
+          "--recompute",
+          "-h"
         ]
       },
       {
         "command": "auction",
         "flags": [
-          "-h",
-          "--help",
-          "--pool",
           "--days",
           "--force",
+          "--help",
+          "--json",
+          "--pool",
           "--recompute",
-          "--json"
+          "-h"
         ]
       },
       {
         "command": "premarket",
         "flags": [
-          "-h",
-          "--help",
           "--date",
-          "--json"
+          "--help",
+          "--json",
+          "-h"
         ]
       },
       {
         "command": "assets",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "assets doctor",
         "flags": [
-          "-h",
           "--help",
           "--profile",
+          "--samples",
           "--timeout",
-          "--samples"
+          "-h"
         ]
       },
       {
         "command": "assets push",
         "flags": [
-          "-h",
+          "--all",
+          "--allow-shrink",
+          "--dry-run",
+          "--from",
           "--help",
           "--profile",
           "--timeout",
-          "--from",
           "--to",
-          "--all",
-          "--dry-run",
-          "--allow-shrink"
+          "-h"
         ]
       },
       {
         "command": "assets pull",
         "flags": [
-          "-h",
-          "--help",
-          "--profile",
-          "--timeout",
-          "--from",
-          "--to",
           "--apply",
           "--force",
+          "--from",
+          "--help",
           "--pick",
-          "--target-dir"
+          "--profile",
+          "--target-dir",
+          "--timeout",
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "assets status",
         "flags": [
-          "-h",
+          "--all",
           "--help",
+          "--orphans",
           "--profile",
           "--timeout",
-          "--all",
-          "--orphans"
+          "-h"
         ]
       },
       {
         "command": "assets verify",
         "flags": [
-          "-h",
-          "--help",
-          "--profile",
-          "--timeout",
-          "--from",
-          "--to",
-          "--samples",
           "--deep",
-          "--md5"
+          "--from",
+          "--help",
+          "--md5",
+          "--profile",
+          "--samples",
+          "--timeout",
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "assets backfill-dragons",
         "flags": [
-          "-h",
-          "--help",
-          "--from",
-          "--to",
           "--dry-run",
+          "--from",
+          "--help",
+          "--json",
           "--prune",
-          "--json"
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "assets backfill-stock-daily",
         "flags": [
-          "-h",
-          "--help",
-          "--dry-run",
-          "--days",
           "--codes",
-          "--json"
+          "--days",
+          "--dry-run",
+          "--help",
+          "--json",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets purge-derived",
+        "flags": [
+          "--apply",
+          "--help",
+          "--json",
+          "--yes",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets capture",
+        "flags": [
+          "--help",
+          "--json",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets capture plan",
+        "flags": [
+          "--codes",
+          "--date",
+          "--dry-run",
+          "--help",
+          "--json",
+          "--no-holdings",
+          "--recent-days",
+          "--sectors",
+          "--topics",
+          "--track-days",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets capture once",
+        "flags": [
+          "--allow-outside-window",
+          "--budget",
+          "--date",
+          "--deadline-minutes",
+          "--dry-run",
+          "--help",
+          "--json",
+          "--phase",
+          "--plan-id",
+          "--slot",
+          "--topics",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets capture session",
+        "flags": [
+          "--budget",
+          "--date",
+          "--dry-run",
+          "--grace-minutes",
+          "--help",
+          "--interval-seconds",
+          "--json",
+          "--max-slots",
+          "--phase",
+          "--plan-id",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets capture coverage",
+        "flags": [
+          "--codes",
+          "--from",
+          "--help",
+          "--json",
+          "--limit",
+          "--offset",
+          "--to",
+          "--topics",
+          "-h"
+        ]
+      },
+      {
+        "command": "assets capture schedule",
+        "flags": [
+          "--help",
+          "--json",
+          "--kind",
+          "--workdir",
+          "-h"
         ]
       },
       {
         "command": "factor",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
@@ -403,9 +497,9 @@
       {
         "command": "factor status",
         "flags": [
-          "-h",
           "--help",
-          "--json"
+          "--json",
+          "-h"
         ]
       },
       {
@@ -450,58 +544,58 @@
       {
         "command": "factor decision-review",
         "flags": [
-          "-h",
-          "--help",
-          "--source",
-          "--from",
-          "--to",
-          "--horizon",
           "--cost-bps",
+          "--from",
+          "--help",
+          "--horizon",
+          "--include-samples",
+          "--json",
           "--min-days",
           "--min-group-samples",
-          "--include-samples",
-          "--json"
+          "--source",
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "factor fin",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "factor fin sync",
         "flags": [
-          "-h",
-          "--help",
-          "--snapshot",
           "--backfill",
           "--date",
-          "--from-period",
-          "--to-period",
           "--force",
+          "--from-period",
+          "--help",
           "--host",
-          "--json"
+          "--json",
+          "--snapshot",
+          "--to-period",
+          "-h"
         ]
       },
       {
         "command": "factor fin calibrate",
         "flags": [
-          "-h",
           "--help",
-          "--sample",
-          "--period",
           "--host",
-          "--json"
+          "--json",
+          "--period",
+          "--sample",
+          "-h"
         ]
       },
       {
         "command": "factor fin status",
         "flags": [
-          "-h",
           "--help",
-          "--json"
+          "--json",
+          "-h"
         ]
       },
       {
@@ -535,57 +629,60 @@
         ]
       },
       {
+        "command": "bs-eval",
+        "flags": [
+          "--force",
+          "--from",
+          "--help",
+          "--json",
+          "--limit",
+          "--source",
+          "--to",
+          "-h"
+        ]
+      },
+      {
         "command": "vpa",
         "flags": [
-          "-h",
-          "--help",
           "--code",
-          "--source",
           "--days",
-          "--no-save"
+          "--help",
+          "--no-save",
+          "--source",
+          "-h"
         ]
       },
       {
         "command": "storage",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "storage status",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "storage size",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "storage clear",
         "flags": [
-          "-h",
-          "--help",
           "--all",
           "--cache",
-          "--results",
-          "--logs",
-          "--days"
-        ]
-      },
-      {
-        "command": "assets purge-derived",
-        "flags": [
-          "-h",
+          "--days",
           "--help",
-          "--apply",
-          "--yes",
-          "--json"
+          "--logs",
+          "--results",
+          "-h"
         ]
       },
       {
@@ -603,149 +700,223 @@
         ]
       },
       {
-        "command": "bs-eval",
-        "flags": [
-          "-h",
-          "--help",
-          "--from",
-          "--to",
-          "--limit",
-          "--force",
-          "--source",
-          "--json"
-        ]
-      },
-      {
         "command": "research",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "research datasets",
         "flags": [
-          "-h",
           "--help",
-          "--json"
+          "--json",
+          "-h"
         ]
       },
       {
         "command": "research schema",
         "flags": [
-          "-h",
-          "--help",
           "--dataset",
-          "--json"
+          "--help",
+          "--json",
+          "-h"
         ]
       },
       {
         "command": "research query",
         "flags": [
-          "-h",
-          "--help",
-          "--dataset",
-          "--from",
-          "--to",
           "--code",
-          "--scan-id",
-          "--run-id",
-          "--fields",
-          "--limit",
           "--cursor",
-          "--json"
+          "--dataset",
+          "--fields",
+          "--from",
+          "--help",
+          "--json",
+          "--limit",
+          "--run-id",
+          "--scan-id",
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "research scan-quality",
         "flags": [
-          "-h",
-          "--help",
           "--from",
-          "--to",
+          "--help",
           "--include-samples",
-          "--sample-limit",
+          "--json",
           "--sample-cursor",
-          "--json"
+          "--sample-limit",
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "research account",
         "flags": [
-          "-h",
+          "--cursor",
           "--help",
+          "--json",
+          "--limit",
           "--run-id",
           "--view",
-          "--limit",
-          "--cursor",
-          "--json"
+          "-h"
         ]
       },
       {
         "command": "research signals",
         "flags": [
-          "-h",
-          "--help",
-          "--from",
-          "--to",
           "--code",
-          "--status",
-          "--limit",
           "--cursor",
-          "--json"
+          "--from",
+          "--help",
+          "--json",
+          "--limit",
+          "--status",
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "research snapshots",
         "flags": [
-          "-h",
-          "--help",
-          "--kind",
+          "--code",
+          "--cursor",
           "--date",
           "--from",
-          "--to",
-          "--code",
+          "--help",
+          "--json",
+          "--kind",
           "--limit",
-          "--cursor",
-          "--json"
+          "--to",
+          "-h"
         ]
       },
       {
         "command": "research strategy",
         "flags": [
-          "-h",
           "--help",
+          "--json",
           "--kind",
           "--run-id",
-          "--json"
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-advice",
+        "flags": [
+          "--account-file",
+          "--bs-policy",
+          "--cutoff",
+          "--help",
+          "--json",
+          "--strict",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-ledger",
+        "flags": [
+          "--cursor",
+          "--help",
+          "--json",
+          "--ledger-id",
+          "--limit",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-experiment",
+        "flags": [
+          "--help",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-experiment run",
+        "flags": [
+          "--account-file",
+          "--bs-policy",
+          "--cohort-mode",
+          "--confirm",
+          "--enhanced-experiment-id",
+          "--enhanced-file",
+          "--from",
+          "--help",
+          "--json",
+          "--new-attempt",
+          "--study-file",
+          "--to",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-experiment list",
+        "flags": [
+          "--cursor",
+          "--help",
+          "--json",
+          "--limit",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-experiment show",
+        "flags": [
+          "--experiment-id",
+          "--help",
+          "--include-details",
+          "--include-frozen",
+          "--json",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-experiment replay",
+        "flags": [
+          "--experiment-id",
+          "--help",
+          "--json",
+          "-h"
+        ]
+      },
+      {
+        "command": "research bs-experiment resume",
+        "flags": [
+          "--experiment-id",
+          "--help",
+          "--json",
+          "-h"
         ]
       },
       {
         "command": "research experiments",
         "flags": [
-          "-h",
-          "--help"
+          "--help",
+          "-h"
         ]
       },
       {
         "command": "research experiments list",
         "flags": [
-          "-h",
-          "--help",
-          "--run-id",
-          "--limit",
           "--cursor",
-          "--json"
+          "--help",
+          "--json",
+          "--limit",
+          "--run-id",
+          "-h"
         ]
       },
       {
         "command": "research experiments show",
         "flags": [
-          "-h",
-          "--help",
           "--experiment-id",
+          "--help",
+          "--json",
           "--run-id",
-          "--json"
+          "-h"
         ]
       },
       {
@@ -1009,7 +1180,9 @@
           "dragon_quant/tests/e2e/test_review_account.py::test_ra9_runtime_clock_mode_excludes_intraday_today",
           "dragon_quant/tests/e2e/test_web_api.py::test_ra7_review_account_ui_runs_backtest_then_serves_account",
           "dragon_quant/tests/e2e/test_web_api.py::test_ra7_review_account_ui_only_needs_no_backtest",
-          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws6_cli_review_account_runs_user_strategy_in_worker"
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws6_cli_review_account_runs_user_strategy_in_worker",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_review_account_bs_without_explicit_inputs_is_rejected",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_saved_workspace_bs_selection_enters_account_protocol"
         ],
         "notes": "RA1-RA9; RA9 pins the runtime-clock include_today boundary; RA7 UI lifecycle is shared with the Web entry; WS6 pins user strategies to a worker child process."
       },
@@ -1449,7 +1622,8 @@
       "strategy list": {
         "tests": [
           "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws1_init_list_validate_and_use",
-          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws4_list_without_workspace_shows_builtin_only"
+          "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws4_list_without_workspace_shows_builtin_only",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_strategy_list_exposes_bs_id_and_keeps_default"
         ],
         "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
       },
@@ -1472,6 +1646,98 @@
           "dragon_quant/tests/e2e/test_workspace_strategy.py::test_ws2_list_never_imports_user_code"
         ],
         "notes": "workspace/strategy 新命令：隔离沙箱真实子进程。"
+      },
+      "research bs-advice": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_advice_cli_observation_envelope_without_config"
+        ],
+        "notes": "W4a：只读观察 envelope（无配置→受限并保留冻结保护）；拒绝下单/落库。"
+      },
+      "research bs-ledger": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_ledger_missing_is_structured_error"
+        ],
+        "notes": "A4：显式 BS 账本有界只读读回；缺失→结构化 ledger_missing。"
+      },
+      "research bs-experiment": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_list_and_confirmation_gate",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_study_and_enhanced_by_id_cross_restart"
+        ],
+        "notes": "W4b/C1/C2：BS 冻结对照实验生命周期与跨重启重放。 C2：显式 study/增强本地 ID、删源 resume/replay 等价。"
+      },
+      "research bs-experiment run": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_list_and_confirmation_gate",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_study_and_enhanced_by_id_cross_restart"
+        ],
+        "notes": "W4b：BS 冻结对照实验 run 确认门禁与生命周期占位。 C2：显式 study/增强本地 ID、删源 resume/replay 等价。"
+      },
+      "research bs-experiment list": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_list_and_confirmation_gate"
+        ],
+        "notes": "W4b：BS 冻结实验生命周期/只读读回。"
+      },
+      "research bs-experiment show": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_cross_restart_replay_without_source"
+        ],
+        "notes": "C1：show 默认投影、--include-frozen 本地取证。"
+      },
+      "research bs-experiment replay": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_cross_restart_replay_without_source",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_study_and_enhanced_by_id_cross_restart"
+        ],
+        "notes": "C2：读冻结包→校验→完整变体重算；删源后仍可读。 C2：显式 study/增强本地 ID、删源 resume/replay 等价。"
+      },
+      "research bs-experiment resume": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_cross_restart_replay_without_source",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_resume_failed_full_experiment_without_source",
+          "dragon_quant/tests/e2e/test_bs_advice.py::test_bs_experiment_study_and_enhanced_by_id_cross_restart"
+        ],
+        "notes": "C1 F2/C2：按旧 ID 从冻结包恢复完整实验与研究规范。 C2：显式 study/增强本地 ID、删源 resume/replay 等价。"
+      },
+      "assets capture": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_group_help_and_schedule_template_write_nothing"
+        ],
+        "notes": "capture 组只输出 help/JSON；schedule 是纯模板且不安装系统定时器。"
+      },
+      "assets capture plan": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_plan_dry_run_registers_pools_without_writing",
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_once_writes_observations_and_replay_is_idempotent"
+        ],
+        "notes": "plan 只读 assets.db 既有母集；dry-run 不落库，冻结后 revision 不可变。"
+      },
+      "assets capture once": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_once_writes_observations_and_replay_is_idempotent",
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_once_dry_run_never_calls_the_provider"
+        ],
+        "notes": "once 显式取数；重放同槽幂等，dry-run 不触网/不写库/不残留租约。"
+      },
+      "assets capture session": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_session_runs_the_planned_auction_slot"
+        ],
+        "notes": "按计划时槽推进；错过窗口记 missed（单测覆盖）。"
+      },
+      "assets capture coverage": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_coverage_reports_plan_observations_and_gaps",
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_coverage_on_missing_database_is_empty_and_creates_nothing"
+        ],
+        "notes": "只读覆盖视图：无库返回空结构且不建库；缺口按日期×代码×主题展开。"
+      },
+      "assets capture schedule": {
+        "tests": [
+          "dragon_quant/tests/e2e/test_capture.py::test_capture_group_help_and_schedule_template_write_nothing"
+        ],
+        "notes": "模板输出（launchd/systemd/cron），installed=false，不写系统配置。"
       }
     },
     "hidden_aliases": {

@@ -12,7 +12,7 @@ from typing import Optional
 from dragon_quant.workspace import snapshots
 from dragon_quant.workspace.catalog import (
     StrategyDescriptor,
-    builtin_descriptor,
+    builtin_descriptors,
     find_descriptor,
     list_descriptors,
 )
@@ -184,7 +184,8 @@ def check_workspace(path: Optional[str] = None) -> dict:
     config = _load_config_or_none(path)
     if config is None:
         return {"ok": True, "workspace": None, "current": BUILTIN_STRATEGY_ID,
-                "strategies": [builtin_descriptor().to_dict()], "errors": []}
+                "strategies": [item.to_dict() for item in builtin_descriptors()],
+                "errors": []}
     results, errors = [], []
     for desc in list_descriptors(config):
         entry = desc.to_dict()
@@ -289,7 +290,12 @@ def validate_strategy(strategy_id: str, path: Optional[str] = None) -> dict:
     config = _load_config_or_none(path)
     descriptor = find_descriptor(config, strategy_id)
     if descriptor.source == "builtin":
-        return {"ok": True, "strategy": descriptor.to_dict(), "builtin": True}
+        payload = {"ok": True, "strategy": descriptor.to_dict(), "builtin": True}
+        if descriptor.id == "builtin:bs_account_decision":
+            payload["requires_bs_policy"] = True
+            payload["run_hint"] = ("review-account --bs-policy <JSON> / "
+                                   "research bs-advice --bs-policy <JSON>")
+        return payload
     result = describe_strategy(config, descriptor)
     return {"ok": True, "strategy": descriptor.to_dict(), "detail": result}
 

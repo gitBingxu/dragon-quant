@@ -1006,7 +1006,7 @@ def test_as7_pull_apply_target_dir_row_merge_conflict_force_and_null_fill():
         assert_stderr_contains(
             result, "恢复：restored=20 skipped=0 已判定冲突=0 source=remote")
 
-        # Restored target database: 15 physical tables, same row counts, raw filled.
+        # Restored target database: 19 physical tables, same row counts, raw filled.
         assert sqlite_tables(target_db) == sorted(PHYSICAL_TABLES)
         for table, expected in golden("pull_target_counts.json").items():
             assert sqlite_count(target_db, table) == expected, table
@@ -1125,7 +1125,7 @@ def test_as8_status_full_coverage_clean_then_drift():
         assert {item["table"] for item in tables.values()} == set(PHYSICAL_TABLES)
         assert tables["fin:report_files"]["table"] == (
             tables["fin:report_raw"]["table"]) == "fin_report_files"
-        assert_stderr_contains(result, "同步覆盖：16/16 个同步单元有远端数据")
+        assert_stderr_contains(result, "同步覆盖：16/20 个同步单元有远端数据")
         assert_stderr_contains(result, "factor_* / fin_*: 已纳入同步")
 
         exec_sql(

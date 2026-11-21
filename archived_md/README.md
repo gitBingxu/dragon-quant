@@ -94,6 +94,8 @@
 
 | 日期 | 主题 | 文件 | 原路径 |
 |------|------|------|--------|
+| 2026-11-20 | BS 策略指导纲领（G1–G8，风险下限与盈利右尾的研究目标） | [bs策略.md](review_account/bs策略.md) | `bs策略.md` |
+| 2026-11-20 | BS 账户决策完整技术方案（无 key 留证 / 批次执行 / 冻结研究 / Web） | [2026-11-18-bs-account-decision.md](review_account/2026-11-18-bs-account-decision.md) | `docs/solutions/2026-11-18-bs-account-decision.md` |
 | 2026-10-22 | 清仓后窗口指标 + 买点统计 | [2026-10-22-post-exit-and-entry-reason-stats.md](review_account/2026-10-22-post-exit-and-entry-reason-stats.md) | `docs/solutions/2026-10-22-post-exit-and-entry-reason-stats.md` |
 | 2026-10-22 | 停牌标的处理（缺日K/双零量冻结估值） | [2026-10-22-suspended-stock-handling.md](review_account/2026-10-22-suspended-stock-handling.md) | `docs/solutions/2026-10-22-suspended-stock-handling.md` |
 | 2026-10-22 | 首日止损改造技术方案（D3 首日浮亏减半 `first_day_stop`，默认关） | [2026-10-22-first-day-stoploss-redesign.md](review_account/2026-10-22-first-day-stoploss-redesign.md) | `docs/solutions/2026-10-22-first-day-stoploss-redesign.md` |

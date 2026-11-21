@@ -20,6 +20,7 @@ def test_init_creates_two_templates_and_builtin(tmp_path):
     data = main.list_strategies(str(root))
     ids = [item["id"] for item in data["strategies"]]
     assert ids == ["builtin:dragon_pullback_daily",
+                   "builtin:bs_account_decision",
                    "user:example_momentum", "user:example_meanrev"]
     assert data["current"] == config.BUILTIN_STRATEGY_ID
     assert (root / "AGENTS.md").is_file()

@@ -21,6 +21,7 @@ export function CreateRunModal({
   const [initialCash, setInitialCash] = useState("100000");
   const [strategies, setStrategies] = useState<StrategyItem[]>([]);
   const [strategyId, setStrategyId] = useState("");
+  const [bsDefault, setBsDefault] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,11 +35,15 @@ export function CreateRunModal({
     setError(null);
     void fetchStrategies()
       .then((payload) => {
-        setStrategies(payload.strategies.filter((item) => item.valid));
-        setStrategyId(payload.current);
+        setStrategies(payload.strategies.filter(
+          (item) => item.valid && item.id !== "builtin:bs_account_decision"));
+        const isBs = payload.current === "builtin:bs_account_decision";
+        setBsDefault(isBs);
+        setStrategyId(isBs ? "" : payload.current);
       })
       .catch(() => {
         setStrategies([]);
+        setBsDefault(false);
         setStrategyId("");
       });
   }, [open]);
@@ -59,6 +64,10 @@ export function CreateRunModal({
       return;
     }
 
+    if (bsDefault && !strategyId) {
+      setError("当前保存选择是 BS 账户决策，旧 entry/exit 表单不能默默改跑其它策略；请改用专用流程。");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -154,6 +163,13 @@ export function CreateRunModal({
             onChange={(event) => setInitialCash(event.currentTarget.value)}
           />
         </label>
+        {bsDefault ? (
+          <div className="rounded-lg border border-warning-line bg-warning-soft px-3 py-2 text-caption text-warning">
+            当前保存的策略是 <b>BS 账户决策</b>：本表单只运行旧 entry/exit 策略，不会替它提交。
+            请前往 <a className="underline" href="/research?bs=policy">BS 账户决策统一流程</a>
+            显式选择策略/账户；或在上方主动选择其它策略再运行。
+          </div>
+        ) : null}
         <Select
           label="策略"
           value={strategyId}

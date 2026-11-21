@@ -20,6 +20,15 @@ import sys
 from pathlib import Path
 
 EXPECTED_PROVIDERS = ("tdx", "ths", "xueqiu", "tencent")
+
+# 真实 OS 用户默认数据目录的 SQLite open 前阻断（与单元 guard 同一实现）。
+# 以中性模块名按文件加载，避免 preflight “sitecustomize 不得 import 业务模块”。
+_guard_spec = importlib.util.spec_from_file_location(
+    "_dq_sqlite_guard", Path(__file__).resolve().parents[2] / "sqlite_guard.py")
+_guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(_guard)
+_guard.install()
+_guard.verify_selftest()
 INJECTION_DIR = Path(__file__).resolve().parent
 
 

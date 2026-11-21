@@ -65,13 +65,14 @@ npx dragon-quant-skills doctor                     # 检查安装完整性与 CL
 | 「帮我复盘今天」 | `prep` → 主线、情绪温度、建仓建议一屏简报 |
 | 「竞价怎么样？」 | `auction` → 近期真龙竞价强度分级与方向判断 |
 | 「给我盘前预案」 | `premarket`（只读）→ 盘前作战卡 |
+| 「持续积累数据」 | `assets capture plan` → 定时 `session` 采集 → `coverage` 复核缺口 |
 | 「回测一下这批龙头」 | `review` → 双口径回测统计，打开面板 |
 | 「跑 5 月账户回测」 | `review-account` → 权益、回撤、买点统计与逐笔交易 |
 | 「识别质量最近有改善吗？」 | `research scan-quality` + 回测证据 → 口径与归因 |
 | 「写个自己的因子/策略」 | `workspace init` → 用户因子 build/query → `strategy validate` → 账户回测 |
 | 「买卖点胜率如何？」 | `bs-eval` 假想回放 → `/bs` 页面数据 |
 
-安全边界：Agent 只开放**十一类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
+安全边界：Agent 只开放**十二类白名单能力**，遵守时点门禁（如 `scan` 15:00 后才跑），写操作
 必须先经你确认，不提供投资建议。自定义策略/用户因子的完整流程见
 [workspace 指南](skills/dragon-quant/references/workspace.md)。安装矩阵与交互协议详见
 [development 模块文档](docs/agent/development.md)。
@@ -145,6 +146,33 @@ dragon-quant review-account --from 20260101 --to 20260201 --strategy user:exampl
 `dragon-quant dashboard --workspace-writes`（或 `DQ_DASHBOARD_WORKSPACE_WRITES=1`）显式启用，
 用户代码在独立本地 worker 进程执行。安全边界与冻结语义见 [workspace](docs/agent/workspace.md)。
 
+### 账户政策（BS）只读建议与回放
+
+内建 `builtin:bs_account_decision` 是**账户级政策**（G1–G8：资格/增配/保护/收缩恢复），
+默认不改变现有策略选择。它不伪造风险参数：需要显式 `--bs-policy`（`BSPolicyConfig`
+JSON，冻结规范化内容 + hash）与账户文件，缺配置时只输出观察/受限缺项、仍保留可确定保护。
+
+```bash
+dragon-quant strategy list --json        # 可见 builtin:bs_account_decision；current 仍为默认策略
+dragon-quant research bs-advice \
+    --account-file account.json --bs-policy bs-policy.json \
+    --cutoff 2026-11-18T16:00:00+08:00 --json
+dragon-quant review-account --strategy builtin:bs_account_decision \
+    --account-file account.json --bs-policy bs-policy.json \
+    --from 20261101 --to 20261130 --json
+```
+
+`research bs-advice` 只读（不联网、不下单、不写账本），输出 `research_v1` envelope；
+候选母集来自本地最近 5 个真实交易日 dragons + T-1 prep 全候选 + 持仓/跟踪项（含
+null/0/rejected 分母），新入场证据只从可用本地快照派生；`--strict` 在缺完整配置/
+证据时非零退出。账户文件 schema v1 固定货币 `CNY`、股数单位 `share/股`，含现金、
+批次原始 `batch_id`/owner/plan/family/可卖事实、预留/未成订单、`mark_source{price,
+source,available_at}` 与 `runtime_facts`；未知现金/成本/可卖量**不猜**（受限而非伪造
+空仓）。review-account 的 BS 分支只用**会话内已校准分钟观测**做执行事件（日K收盘
+不冒充成交），显式运行持久化到账户账本并可用 `research bs-ledger --ledger-id` 读回，
+`--no-persist` 仅作研究预览。研究页 `/research` 的 BS 面板可粘贴结构化 account/policy JSON 做只读建议、显式模拟与冻结对照（`research bs-experiment`），可附显式 `--study-file`（有限命名 variant）与 `--enhanced-experiment-id` 做能力/策略分离比较；指标含 KR6 全集、占用/滑点/成熟度与分母定义。详见 [trading](docs/agent/trading.md) 的 W4a/W4b/W4c 节；教学样例
+参数标非推荐，真实研究必须自行提供风险参数。
+
 ### 双口径回测（review / review-account）
 
 `review` 回测入选龙头：宽松口径按入选后首个非一字板交易日最低价买入，统计第 2~5 个交易日
@@ -157,13 +185,30 @@ dragon-quant review-account --from 20260101 --to 20260201 --strategy user:exampl
 行情链路 **TDX（`tmdx`，首选，个股 K 线/分时）+ 同花顺（板块）+ 腾讯（批量行情）**，`scan`
 与 `data` 命令无需 Cookie；雪球仅老链路（账户/复盘）使用。本地 SQLite 持久化
 （惰性初始化、WAL、线程安全），数据资产支持云端双向同步。
-架构见 [architecture](docs/agent/architecture.md)，同步见 [assets](docs/agent/assets.md)。
+架构见 [architecture](docs/agent/architecture.md)，同步与持续采集见 [assets](docs/agent/assets.md)。
+
+TDX 当日可回溯数据可按事前母集持续留证（无需付费 key）：
+
+```bash
+dragon-quant assets capture plan --date 20261120 --json   # 冻结当日事前母集（写本地 assets.db）
+dragon-quant assets capture session --phase auction --date 20261120 --max-slots 1 --json
+dragon-quant assets capture coverage --from 20261120 --to 20261120 --json
+dragon-quant assets capture schedule --kind launchd --workdir /ABS/PATH  # 只输出模板，不安装
+```
+
+`once`/`session` 必须显式给 `--plan-id` 或 `--date`；`plan --dry-run` 只体检、不冻结计划。
+观测按「同语义同内容幂等、内容不同追加 revision」入库，单位与 bar 时点未核实即显式标注；
+`plan`/`coverage`/`schedule` 与全部 `--dry-run` 零联网，其中 `plan` 默认会写本地冻结计划，
+`coverage`/`schedule` 不写库。契约与四张表见
+[assets](docs/agent/assets.md#assets-capturetdx-持续采集与本地留证)。
 
 ## 每日自动化
 
-盘后 `scan` → `prep`，次日盘前 `auction` → `premarket` 是跨时点的依赖链，适合用
-cron/launchd 定时运行（时间窗与模板见 [schedule.md](skills/dragon-quant/references/schedule.md)）。
-用 Claude Code / Codex 的用户在会话里说「每天自动跑」，agent 会按 skill 生成配置；
+盘前 `assets capture plan` → 盘中/收盘 `capture session` → `capture coverage` 复核，加上盘后
+`scan` → `prep`、次日盘前 `auction` → `premarket`，都是跨时点依赖链，适合用 cron/launchd
+定时运行（完整日矩阵、时窗、时区与失败恢复见
+[schedule.md](skills/dragon-quant/references/schedule.md)）。
+用 Claude Code / Codex 的用户在会话里说「每天自动跑」或「持续采集」，agent 会按 skill 生成配置；
 资金操作（`buy`/`sell`）不做无人值守。
 
 ## 发布流程（维护者）

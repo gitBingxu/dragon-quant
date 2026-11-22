@@ -515,13 +515,23 @@ def build_runtime_for_selection(selection, controls: StrategyConfig, *,
                               factor_versions=factor_versions)
 
 
+def _thaw_ref(ref: Optional[dict]) -> dict:
+    """把账本/批次里深冻结的 ``strategy_ref`` 还原为纯 dict（哈希/序列化需要）。"""
+    from dragon_quant.review_account.evidence import thaw
+
+    return dict(thaw(dict(ref or {})))
+
+
 def ref_identity(ref: Optional[dict]) -> tuple:
-    """冻结身份（不含展示字段）；相同身份才允许复用活动运行时。"""
-    ref = ref or {}
-    versions = ref.get("factor_versions") or {}
-    version_key = tuple(sorted((str(k), str(v)) for k, v in versions.items()))
-    return (ref.get("workspace_id"), ref.get("strategy_id"), ref.get("snapshot_id"),
-            ref.get("params_hash"), version_key)
+    """冻结身份（不含展示字段）；相同身份才允许复用活动运行时。
+
+    口径唯一实现位于纯叶子 :mod:`review_account.execution_core.identity`，
+    执行核心/场景/账本/投影都复用它（避免 core → strategy 反向依赖）。
+    """
+    from dragon_quant.review_account.execution_core.identity import (
+        ref_identity as _ref_identity,
+    )
+    return _ref_identity(ref)
 
 
 class FrozenRuntimeProvider:
@@ -547,33 +557,66 @@ class FrozenRuntimeProvider:
             if callable(closer):
                 closer()
 
-    def build(self, ref: dict, *, fresh: bool = False):
-        ref = dict(ref or {})
+    def build(self, ref: dict, *, fresh: bool = False,
+              protocol: str = "entry_exit"):
+        ref = dict(_thaw_ref(ref))
         self._verify_ref(ref)
-        key = ref_identity(ref)
+        strategy_id = str(ref.get("strategy_id") or "")
+        is_account = strategy_id in ("builtin:bs_account_decision",
+                                     "bs_account_decision")
+        if protocol not in ("entry_exit", "account"):
+            raise FrozenReferenceError(strategy_id or "<unknown>",
+                                       f"未知策略协议: {protocol!r}")
+        if is_account and protocol != "account":
+            raise FrozenReferenceError(
+                strategy_id,
+                "BS 账户政策不是旧 SDK entry/exit 协议；请用 build_account / "
+                "review-account --bs-policy / research bs-advice")
+        key = (protocol,) + ref_identity(ref)
         if not fresh and key in self._cache:
             return self._cache[key]
         if not ref.get("strategy_id"):
             raise FrozenReferenceError("<unknown>", "缺少 strategy_id，无法解析策略版本")
-        runtime = self._build(ref)
+        if protocol == "account":
+            from dragon_quant.review_account.strategy.account_runtime import (
+                build_account_runtime,
+            )
+
+            runtime = build_account_runtime(ref, controls=self.controls)
+        else:
+            runtime = self._build(ref)
         if not fresh:
             # fresh=True 用于独立模拟（每个 split / 参数变体各建实例），不跨实验复用。
             self._cache[key] = runtime
         return runtime
 
+    def build_account(self, ref: dict, *, fresh: bool = False):
+        """显式账户政策协议入口（完整 ref/params/snapshot/toolkit 校验）。"""
+        return self.build(ref, fresh=fresh, protocol="account")
+
     @staticmethod
     def _verify_ref(ref: dict) -> None:
-        """引用自洽性：params 必须与其 params_hash 一致（缓存前校验，防伪造复用）。"""
+        """引用自洽性：params 必须与其 params_hash 一致（缓存前校验，防伪造复用）。
+
+        内建/账户政策引用与用户引用同一口径：``params_hash`` 一旦存在就必须与
+        ``params`` 匹配（否则同 strategy_id 可凭改动参数冒用冻结身份）。用户引用
+        仍要求必须有 ``params_hash``；旧内建引用缺失 hash 时保留只读兼容，但
+        ``_builtin`` 仍校验 toolkit 版本。
+        """
         strategy_id = str(ref.get("strategy_id") or "<unknown>")
+        params = dict(ref.get("params") or {})
+        if ref.get("params_hash"):
+            from dragon_quant.workspace import snapshots
+
+            expected = snapshots.params_hash(params)
+            if ref["params_hash"] != expected:
+                raise FrozenReferenceError(
+                    strategy_id, "params 与 params_hash 不一致（拒绝伪造引用）")
         if not strategy_id.startswith("user:"):
             return
-        from dragon_quant.workspace import snapshots
-
-        params = dict(ref.get("params") or {})
-        expected = snapshots.params_hash(params)
-        if not ref.get("params_hash") or ref["params_hash"] != expected:
+        if not ref.get("params_hash"):
             raise FrozenReferenceError(
-                strategy_id, "params 与 params_hash 不一致（拒绝伪造引用）")
+                strategy_id, "缺少 params_hash，无法证明冻结参数身份")
 
     def _build(self, ref: dict):
         strategy_id = str(ref["strategy_id"])
@@ -585,6 +628,13 @@ class FrozenRuntimeProvider:
         from dragon_quant.workspace import snapshots
 
         strategy_id = str(ref["strategy_id"])
+        if strategy_id in ("builtin:bs_account_decision", "bs_account_decision"):
+            # 新账户政策协议不实现旧 SDK 的 entry/exit；绝不能把新 runtime 塞进
+            # 旧评估链（会 AttributeError）。显式拒绝并指向正式入口。
+            raise FrozenReferenceError(
+                strategy_id,
+                "BS 账户决策不是旧 SDK 策略；请用 review-account --bs-policy "
+                "或 research bs-advice")
         frozen_version = ref.get("toolkit_version")
         current = snapshots.builtin_ref(strategy_id=strategy_id,
                                         params=ref.get("params") or {})

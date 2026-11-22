@@ -237,6 +237,60 @@ TABLE_SPECS: tuple[TableSpec, ...] = (
         clock_column="created_at", size_expr="LENGTH(payload_json)",
         drift_ok=True,
     ),
+    # ── 持续采集（追加式不可变：修订=新行；租约列不同步）────────────────────
+    # ``capture_runs`` 刻意**不**同步 lease_owner/lease_token/lease_expires_at：
+    # 备份恢复不得把本机协调字段恢复成活跃锁，也不得覆盖在跑的任务。
+    TableSpec(
+        source="capture", asset_type="plans", table="capture_plans",
+        partition_kind="date", partition_column="trade_date",
+        columns=("plan_id", "trade_date", "revision", "parent_plan_id",
+                 "pool_json", "members_json", "task_config_json",
+                 "config_version", "content_hash", "created_at"),
+        identity=("plan_id",),
+        json_columns=("pool_json", "members_json", "task_config_json"),
+        order_by=("revision",), clock_column="created_at",
+        size_expr="LENGTH(pool_json)+LENGTH(members_json)+LENGTH(task_config_json)",
+        drift_ok=True,
+    ),
+    TableSpec(
+        source="capture", asset_type="runs", table="capture_runs",
+        partition_kind="date", partition_column="trade_date",
+        columns=("run_id", "plan_id", "trade_date", "phase", "slot", "status",
+                 "started_at", "finished_at", "deadline_at", "report_json",
+                 "created_at"),
+        identity=("run_id",), json_columns=("report_json",),
+        order_by=("phase", "slot"), clock_column="created_at",
+        size_expr="LENGTH(COALESCE(report_json,''))",
+        drift_ok=True,
+    ),
+    TableSpec(
+        source="capture", asset_type="observations", table="market_observations",
+        partition_kind="date", partition_column="trade_date",
+        columns=("obs_id", "trade_date", "market", "code", "obs_type", "source",
+                 "source_event_time", "received_at", "first_received_at",
+                 "available_at", "valid_until", "units_json", "quality",
+                 "schema_version", "revision", "content_hash", "semantic_key",
+                 "payload_json", "run_id", "calibration_json", "created_at"),
+        identity=("obs_id",),
+        json_columns=("units_json", "payload_json"),
+        order_by=("obs_type", "code", "revision"), clock_column="received_at",
+        size_expr="LENGTH(payload_json)+LENGTH(units_json)",
+        drift_ok=True,
+    ),
+    TableSpec(
+        source="capture", asset_type="bars", table="market_bar_versions",
+        partition_kind="date", partition_column="trade_date",
+        columns=("bar_id", "trade_date", "market", "code", "period",
+                 "interval_start", "interval_end", "open", "high", "low",
+                 "close", "volume", "amount", "adjustment", "source",
+                 "observed_at", "available_at", "revision", "content_hash",
+                 "completeness", "time_semantics", "unit_semantics", "derived",
+                 "schema_version", "run_id", "calibration_json", "created_at"),
+        identity=("bar_id",),
+        order_by=("code", "period", "interval_end", "revision"),
+        clock_column="observed_at",
+        size_expr="0", drift_ok=True,
+    ),
 )
 
 
@@ -848,3 +902,12 @@ class FactorAssetSource(CompositeTableSource):
 
 class FinAssetSource(CompositeTableSource):
     name = "fin"
+
+
+class CaptureAssetSource(CompositeTableSource):
+    """``assets.db`` 持续采集四表（计划/运行/原始观测/bar 版本）。
+
+    租约字段不进入同步语义列：恢复只写计划、状态与报告，绝不恢复活跃锁。
+    """
+
+    name = "capture"

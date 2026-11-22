@@ -17,6 +17,14 @@ class StockProvider(ABC):
     def set_logger(self, logger):
         self._logger = logger
 
+    def capture_provenance(self):
+        """原始行情解析器身份（协议/安装版本/转换代码指纹）；未知返回 ``None``。
+
+        默认未知：只有真实适配器（如 TDX MAC）显式声明身份后，版本化校准才能把
+        采集行标为 verified；测试/未知 provider 保持 unverified。
+        """
+        return None
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -150,6 +158,15 @@ class StockProvider(ABC):
     def get_5min_kline_for_date(self, code: str, date: str) -> list[KBar]:
         """指定交易日（``YYYY-MM-DD``）的 5 分钟 K 线；不可用返回 ``[]``。"""
         raise NotImplementedError(f"{self.name} 不提供指定日 5 分钟 K")
+
+    def get_daily_kline_unadjusted(self, code: str, days: int = 120) -> list[KBar]:
+        """日 K（不复权）；不可用返回 ``[]``。
+
+        不复权是执行价与原始留证的唯一口径：provider 只提供前复权时必须实现
+        本方法或保持未实现，调用方据此记 ``unadjusted_daily_unavailable``，
+        绝不把 QFQ 当执行价证据。
+        """
+        raise NotImplementedError(f"{self.name} 不提供不复权日 K")
 
     # ─── prep 宏观扰动（普通方法，默认未实现；仅部分 provider 覆写）───
     # 错误契约：transport/解析失败抛异常，由 providers.macro.collect_macro 逐源回退。

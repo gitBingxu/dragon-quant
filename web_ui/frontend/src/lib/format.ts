@@ -112,3 +112,16 @@ export function defaultDateRange(): { dateFrom: string; dateTo: string } {
 export function runReturnLabel(run: { total_return: number | null }): string {
   return fmtPct(run.total_return);
 }
+
+/** 当前本地时刻的 ISO 字符串（带时区偏移，供 BS cutoff 显式输入）。 */
+export function nowIsoWithOffset(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const abs = Math.abs(offset);
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  );
+}

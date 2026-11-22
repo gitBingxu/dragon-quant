@@ -16,8 +16,9 @@ factors/                  # 用户因子模块（SPECS = [FactorSpec, ...]）
 snapshots/                # 运行时冻结快照（<sha256>/manifest.json + 源码）
 ```
 
-- 稳定 ID：内建 `builtin:dragon_pullback_daily`；用户 `user:<slug>`（与目录名一致）。
-- 路径优先级：显式 `--workspace` > `DQ_WORKSPACE` > 本机登记 `DQ_DATA_DIR/workspace-selection.json`。
+- 稳定 ID：内建 `builtin:dragon_pullback_daily`（默认）与 `builtin:bs_account_decision`（显式选择，账户政策需 `--bs-policy`，不走旧 SDK entry/exit）；用户 `user:<slug>`（与目录名一致）。
+- 路径优先级：显式 `--workspace` > `DQ_WORKSPACE` > 本机登记 `DQ_DATA_DIR/workspace-selection.json`；`resolve_workspace_path_with_source` 同时返回来源。
+- **缺失语义按来源区分**：显式/环境路径指向未初始化 workspace → 显式报错；本机登记指向已删除的临时 workspace → 任务解析（`resolve_selection`）按「无 workspace」走内建默认，不报错、不隐式 `init`、不改写/删除登记。`workspace.json` 存在但损坏仍显式失败。写入/校验路径保持严格（不因登记失效而静默退化）。
 - `workspace.json` 修改用内容 `revision` CAS；冲突保留原文件（Web 409，CLI 非零退出）。
 
 ## 选择与参数
@@ -52,7 +53,7 @@ snapshots/                # 运行时冻结快照（<sha256>/manifest.json + 源
 ## Web
 
 - `GET /api/strategies` / `GET /api/strategies/current` 只读 descriptor；`POST /api/strategies/selection` 变更选择（同源 + `workspace_writes_enabled`，冲突 409、非法 400）。
-- 只读策略查询遇到尚未初始化的 workspace 路径时回退为内建默认（`workspace/revision = null`），因此首次使用仍可浏览内建策略；若 `workspace.json` 已存在但损坏则继续显式失败。写入、校验与执行路径不做该回退。
+- 只读策略查询遇到尚未初始化的 workspace 路径时回退为内建默认（`workspace/revision = null`），因此首次使用仍可浏览内建策略；若 `workspace.json` 已存在但损坏则继续显式失败。任务解析（`resolve_selection`）只对**本机登记且缺 `workspace.json`** 的路径按无 workspace 处理（历史脚本遗留的已删临时目录不阻塞内置/默认新建），显式 `--workspace` / `DQ_WORKSPACE` 缺失仍报错；写入与校验路径不做回退。
 - 不从请求接受宿主任意绝对路径或 Python 源码；workspace 由服务端设置/CLI 解析决定。
 - 账户回测表单可选策略并真正发送 `strategy_id`；省略时消费同一保存选择。
 - `/strategies` 页左侧卡片只负责选择策略，右侧按 `StrategyDescriptor.parameters` 元数据动态渲染参数表单（number/int → 数字输入，bool → 开关，string+enum → 下拉，string → 文本框）；不再手写 JSON 或维护第二份策略下拉框。
@@ -63,7 +64,7 @@ snapshots/                # 运行时冻结快照（<sha256>/manifest.json + 源
 
 - **统一按冻结身份解析**：`(workspace_id, strategy_id, snapshot_id, params_hash, factor_versions)` 是运行时缓存键；即使 strategy_id 与活动选择相同，也只用快照执行。`FrozenRuntimeProvider` 从 `snapshots/<id>/` 加载源码与 descriptor，校验 manifest 身份、文件哈希、SDK 与工具版本。
 - **缺失即拒绝**：已知归属的快照缺失/损坏/不兼容抛 `FrozenReferenceError`（`ValueError` 子类），本次写操作整体中止；只有真正无 `strategy_ref` 的旧仓走 legacy 内建。
-- **内建旧仓冻结参数**：`BuiltinStrategyRuntime.controls` 使用持仓冻结的 `strategy_ref.params`，不用当前 cfg 的止损/退出；新内建运行（含无 workspace）同样冻结身份与有效参数，并写入每笔 `entry_signal`。
+- **内建旧仓冻结参数**：`BuiltinStrategyRuntime.controls` 使用持仓冻结的 `strategy_ref.params`，不用当前 cfg 的止损/退出；新内建运行（含无 workspace / 显式选择）冻结的是**完整有效 `StrategyConfig`**（显式请求参数 > 保存值 > 默认），与落库 `strategy_params`、runtime controls 和增量重建逐值一致，并写入每笔 `entry_signal`；用户策略仍只冻结 descriptor + 参数快照。
 - **首次运行也从快照执行**：先发布快照，再由 provider 从快照构造运行时，消除 freeze 后读当前源码的竞态。
 - **PIT Context**：日K兜底的开盘事件使用可知字段白名单，不公开当日最终 OHLCV 或其派生指标；历史均线等读取 `row.prev_row`。分时事件保留由已完成 K 线计算的可知累计值，`intraday_bars` 按事件时间切片；KBar 转纯 dict 并深度冻结（不共享可变引用）。内建引擎仍读原始 row，golden 不变。
 - **用户因子**：必要因子名映射到 `ws_<short>.<local>`；任务开始冻结 `factor_versions`，`FactorReader` 显式按版本读取；候选因子用候选 `code` 与入选 `trade_date`，退出用持仓 `code` 与事件日。读取故障向上抛，不缓存成缺失。

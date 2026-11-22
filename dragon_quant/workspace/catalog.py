@@ -19,6 +19,7 @@ from typing import Optional
 
 from dragon_quant.strategy_sdk import SDK_VERSION
 from dragon_quant.workspace.config import (
+    BUILTIN_BS_STRATEGY_ID,
     BUILTIN_STRATEGY_ID,
     WorkspaceConfig,
     WorkspaceError,
@@ -65,6 +66,22 @@ BUILTIN_DESCRIPTOR = {
 
 _PARAM_TYPES = {"number", "int", "bool", "string"}
 
+#: BS 账户决策内建策略：参数来自 ``--bs-policy``（领域配置），不在此 schema 里
+#: 另造一套默认值；``data_requirements`` 只声明真实消费的能力。
+BS_BUILTIN_DESCRIPTOR = {
+    "id": BUILTIN_BS_STRATEGY_ID,
+    "label": "BS 账户决策（内建）",
+    "description": ("账户级政策：G1–G8 资格/增配/保护/收缩恢复；"
+                    "需要 --bs-policy 显式风险配置，旧 SDK entry/exit 不适用。"),
+    "sdk_version": SDK_VERSION,
+    "source": "builtin",
+    "entrypoint": "",
+    "parameters": {},
+    "required_factors": [],
+    "data_requirements": ["1d", "1m", "auction_path", "auction_final",
+                          "account_state", "risk_budget"],
+}
+
 
 @dataclass
 class StrategyDescriptor:
@@ -102,7 +119,14 @@ class StrategyDescriptor:
 
 
 def builtin_descriptor() -> StrategyDescriptor:
+    """默认内建策略（保持历史行为：默认选择不变）。"""
     return StrategyDescriptor(**BUILTIN_DESCRIPTOR)
+
+
+def builtin_descriptors() -> list[StrategyDescriptor]:
+    """全部**实际存在**的内建策略（BS 账户决策为显式选择，不改变默认）。"""
+    return [StrategyDescriptor(**BUILTIN_DESCRIPTOR),
+            StrategyDescriptor(**BS_BUILTIN_DESCRIPTOR)]
 
 
 def _is_number(value: object) -> bool:
@@ -261,7 +285,7 @@ def user_descriptors(config: WorkspaceConfig) -> list[StrategyDescriptor]:
 
 def list_descriptors(config: Optional[WorkspaceConfig]) -> list[StrategyDescriptor]:
     """内建 + 用户策略（按 ID 排序，内建在前）。"""
-    descriptors = [builtin_descriptor()]
+    descriptors = builtin_descriptors()
     if config is not None:
         descriptors.extend(user_descriptors(config))
     # 重名检测：用户不得覆盖内建或彼此覆盖。

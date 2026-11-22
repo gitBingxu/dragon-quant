@@ -117,6 +117,54 @@ def _human_experiments(payload: dict) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
+def _human_bs_advice(payload: dict) -> None:
+    data = payload.get("data") or {}
+    print(f"status={data.get('status')} cutoff={data.get('cutoff')} "
+          f"strategy={data.get('strategy_id')} snapshot={data.get('snapshot_id')}")
+    missing = data.get("missing_capabilities") or []
+    if missing:
+        print(f"缺项: {', '.join(missing)}")
+    print(f"- 决策: {'有' if data.get('decision') else '无（观察/受限）'}")
+    print(f"- 保护义务: {len(data.get('protections') or [])} "
+          f"意图: {len(data.get('intents') or [])} "
+          f"受限: {len(data.get('restrictions') or [])}")
+    for note in data.get("notes") or []:
+        print(f"- {note}")
+
+
+def _human_bs_ledger(payload: dict) -> None:
+    data = payload.get("data") or {}
+    print(f"ledger={data.get('ledger_id')} revision={data.get('revision')} "
+          f"orders={len(data.get('orders') or [])} "
+          f"fills={len(data.get('fills') or [])} "
+          f"batches={len(data.get('batches') or [])}")
+    final = data.get("final_state") or {}
+    print(f"- 期末现金: {final.get('cash')} 权益: {final.get('equity')}")
+    history = data.get("history") or {}
+    print(f"- 历史记录: {len(history.get('records') or [])} "
+          f"has_more={history.get('has_more')} "
+          f"next={history.get('next_cursor')}")
+
+
+def _human_bs_experiment(payload: dict) -> None:
+    data = payload.get("data") or {}
+    if isinstance(data, list):
+        _human_rows(payload)
+        return
+    print(f"experiment_id={data.get('id')} status={data.get('status')} "
+          f"expected={data.get('expected_events')} "
+          f"completed={data.get('completed_events')}")
+    metrics = (data.get("report") or {}).get("metrics") or {}
+    for name in ("bs", "baseline_no_new_risk"):
+        item = metrics.get(name) or {}
+        print(f"- {name}: status={item.get('status')} "
+              f"net_return_pct={item.get('net_return_pct')} "
+              f"max_dd={item.get('max_drawdown_pct')} "
+              f"closed={ (item.get('denominator') or {}).get('closed_trades')}")
+    comparison = metrics.get("comparison") or {}
+    print(f"- delta_net_return_pct={comparison.get('delta_net_return_pct')}")
+
+
 def _print_human(payload: dict) -> None:
     command = payload.get("command", "")
     if command == "research datasets":
@@ -131,6 +179,12 @@ def _print_human(payload: dict) -> None:
         _human_account(payload)
     elif command == "research strategy":
         _human_strategy(payload)
+    elif command == "research bs-advice":
+        _human_bs_advice(payload)
+    elif command == "research bs-ledger":
+        _human_bs_ledger(payload)
+    elif command == "research bs-experiment":
+        _human_bs_experiment(payload)
     elif command.startswith("research experiments"):
         _human_experiments(payload)
     else:
@@ -157,7 +211,233 @@ def _request(args) -> dict:
         return {"experiments_action": getattr(args, "experiments_action", None),
                 "run_id": getattr(args, "run_id", None),
                 "experiment_id": getattr(args, "experiment_id", None)}
+    if action == "bs-advice":
+        return {"account_file": getattr(args, "account_file", None),
+                "policy_file": getattr(args, "bs_policy", None),
+                "cutoff": getattr(args, "cutoff", None),
+                "strict": bool(getattr(args, "strict", False))}
+    if action == "bs-ledger":
+        return {"ledger_id": getattr(args, "ledger_id", None),
+                "limit": getattr(args, "limit", None)}
+    if action == "bs-experiment":
+        return {"experiments_action": getattr(args, "bs_experiments_action", None),
+                "experiment_id": getattr(args, "experiment_id", None),
+                "include_frozen": bool(getattr(args, "include_frozen", False)),
+                "date_from": getattr(args, "from_date", None),
+                "date_to": getattr(args, "to_date", None)}
     return {}
+
+
+def _bs_advice(args) -> dict:
+    """BS 只读建议：复用同一证据/政策用例，包成 research_v1 envelope。"""
+    from dragon_quant.research import bs_advice
+    from dragon_quant.research.envelope import (
+        InvalidRequest, ReadonlyUnavailable, envelope,
+    )
+
+    try:
+        advice = bs_advice.build_advice_from_files(
+            account_file=args.account_file, policy_file=args.bs_policy,
+            cutoff=args.cutoff, strict=bool(getattr(args, "strict", False)))
+    except (bs_advice.BsAdviceError, bs_advice.PolicyFileError,
+            bs_advice.AccountFileError) as exc:
+        code = getattr(exc, "code", "bs_advice_error")
+        cls = (InvalidRequest if int(getattr(exc, "exit_code", 2)) == 2
+               else ReadonlyUnavailable)
+        error = cls(str(exc))
+        error.code = code
+        raise error from exc
+    policy = advice.get("policy") or {}
+    return envelope(
+        command="research bs-advice", request=_request(args), data=advice,
+        meta={
+            "data_quality": ("ok" if advice.get("status") in ("ok", "ready")
+                             else "degraded"),
+            "snapshot_version": advice.get("snapshot_id"),
+            "strategy_version": policy.get("profile_version"),
+            "policy_hash": policy.get("content_hash"),
+            "calibration_version": (advice.get("capabilities") or {}).get(
+                "calibration_version"),
+            "returned": 1,
+            "truncated": False,
+            "next_cursor": None,
+        })
+
+
+def _bs_ledger(args) -> dict:
+    """有界只读读回显式 BS review 账本（跨重启可用）。"""
+    from dragon_quant.research import bs_advice
+    from dragon_quant.research.envelope import (
+        InvalidRequest, ReadonlyUnavailable, envelope,
+    )
+
+    try:
+        data = bs_advice.read_run(
+            args.ledger_id, limit=getattr(args, "limit", 100) or 100,
+            cursor=getattr(args, "cursor", None))
+    except bs_advice.BsRunError as exc:
+        error = InvalidRequest(str(exc))
+        error.code = getattr(exc, "code", "bs_run_error")
+        raise error from exc
+    if data is None:
+        error = ReadonlyUnavailable(f"未找到 BS 账本 {args.ledger_id}")
+        error.code = "ledger_missing"
+        raise error
+    return envelope(
+        command="research bs-ledger", request=_request(args), data=data,
+        meta={"data_quality": "ok", "snapshot_version": None,
+              "returned": len(data.get("history", {}).get("records") or ()),
+              "truncated": bool(data.get("history", {}).get("has_more")),
+              "next_cursor": data.get("history", {}).get("next_cursor")})
+
+
+def _bs_lock_path():
+    from dragon_quant.infra.storage import paths
+
+    return paths.DATA_DIR / "locks" / "bs_experiment.lock"
+
+
+def _read_json_argument(path: str, flag: str) -> dict:
+    """读显式 JSON 文件为结构化内容；只把内容带入执行，不把路径存为权威。"""
+    import json
+    from pathlib import Path
+
+    from dragon_quant.research.envelope import InvalidRequest
+
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        error = InvalidRequest(f"{flag} 无法读取: {exc}")
+        error.code = "invalid_request"
+        raise error from exc
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        error = InvalidRequest(f"{flag} 不是合法 JSON: {exc}")
+        error.code = "invalid_request"
+        raise error from exc
+    if not isinstance(payload, dict):
+        error = InvalidRequest(f"{flag} 必须是 JSON 对象")
+        error.code = "invalid_request"
+        raise error
+    return payload
+
+
+def _bs_experiment(args) -> dict:
+    from dragon_quant.research import bs_advice
+    from dragon_quant.research.bs_advice import service
+    from dragon_quant.research.envelope import (
+        InvalidRequest, envelope, normalize_date,
+    )
+    from dragon_quant.research.experiments import (
+        ConfirmationRequired, ExperimentBusy,
+    )
+
+    sub = getattr(args, "bs_experiments_action", None)
+    if sub == "list":
+        page = bs_advice.list_bs_experiments(
+            limit=getattr(args, "limit", 20) or 20,
+            cursor=getattr(args, "cursor", None))
+        return envelope(
+            command="research bs-experiment", request=_request(args),
+            data=page["items"],
+            meta={"data_quality": "ok", "returned": len(page["items"]),
+                  "truncated": page["has_more"],
+                  "next_cursor": page["next_cursor"],
+                  "total": page["total"]})
+    if sub == "show":
+        row = bs_advice.show_bs_experiment(
+            int(args.experiment_id),
+            include_frozen=bool(getattr(args, "include_frozen", False)),
+            include_details=bool(getattr(args, "include_details", False)))
+        if row is None:
+            error = InvalidRequest(f"未找到 BS 实验 {args.experiment_id}")
+            error.code = "experiment_not_found"
+            raise error
+        return envelope(command="research bs-experiment", request=_request(args),
+                        data=row, meta={"data_quality": "ok", "returned": 1})
+    if sub in ("replay", "resume"):
+        try:
+            result = (bs_advice.replay_bs_experiment(int(args.experiment_id))
+                      if sub == "replay" else
+                      service.resume_experiment_flow(
+                          experiment_id=int(args.experiment_id),
+                          lock_path=_bs_lock_path()))
+        except bs_advice.BsExperimentError as exc:
+            error = InvalidRequest(str(exc))
+            error.code = exc.code
+            error.exit_code = 2 if exc.status == 400 else 1
+            raise error from exc
+        return envelope(command="research bs-experiment replay",
+                        request=_request(args), data=result,
+                        meta={"data_quality": "ok",
+                              "returned": len(result.get("events") or ())})
+    if sub != "run":
+        raise InvalidRequest("bs-experiment 需要 run/list/show/replay/resume")
+    if not getattr(args, "confirm", False):
+        raise ConfirmationRequired("BS 对照实验会消耗本地算力，需显式 --confirm")
+    try:
+        policy = bs_advice.load_policy_file(args.bs_policy)
+        account = bs_advice.load_account_file(
+            args.account_file, policy_hash=policy.content_hash)
+    except (bs_advice.PolicyFileError, bs_advice.AccountFileError) as exc:
+        error = InvalidRequest(str(exc))
+        error.code = getattr(exc, "code", "invalid_request")
+        raise error from exc
+    try:
+        date_from = normalize_date(args.from_date, "--from")
+        date_to = normalize_date(args.to_date, "--to")
+    except ValueError as exc:
+        raise InvalidRequest(str(exc)) from exc
+    if not date_from or not date_to:
+        raise InvalidRequest("bs-experiment run 需要 --from 与 --to")
+    from dragon_quant.infra.storage import paths
+
+    study = None
+    study_file = getattr(args, "study_file", None)
+    if study_file:
+        study = _read_json_argument(study_file, "--study-file")
+    enhanced = None
+    enhanced_id = getattr(args, "enhanced_experiment_id", None)
+    enhanced_file = getattr(args, "enhanced_file", None)
+    if enhanced_id and enhanced_file:
+        raise InvalidRequest("--enhanced-experiment-id 与 --enhanced-file 二选一")
+    if enhanced_id:
+        try:
+            enhanced = service.enhanced_freeze_for_experiment(
+                experiment_id=int(enhanced_id))
+        except bs_advice.BsExperimentError as exc:
+            error = InvalidRequest(str(exc))
+            error.code = exc.code
+            error.exit_code = 2 if exc.status == 400 else 1
+            raise error from exc
+    if enhanced_file:
+        enhanced = _read_json_argument(enhanced_file, "--enhanced-file")
+
+    try:
+        data = service.run_experiment_flow(
+            account=account, policy=policy, date_from=date_from,
+            date_to=date_to, confirm=True,
+            lock_path=paths.DATA_DIR / "locks" / "bs_experiment.lock",
+            cohort_mode=getattr(args, "cohort_mode", "rolling"),
+            new_attempt=bool(getattr(args, "new_attempt", False)),
+            study=study, enhanced=enhanced)
+    except ExperimentBusy as exc:
+        error = InvalidRequest("已有对照实验在运行，请稍后再试")
+        error.code = "experiment_busy"
+        error.exit_code = 1
+        raise error from exc
+    except bs_advice.BsExperimentError as exc:
+        error = InvalidRequest(str(exc))
+        error.code = exc.code
+        error.exit_code = 2 if exc.status == 400 else 1
+        raise error from exc
+    return envelope(
+        command="research bs-experiment", request=_request(args), data=data,
+        meta={"data_quality": ("ok" if data.get("status") == "completed"
+                               else "degraded"),
+              "expected_events": data.get("expected_events"),
+              "completed_events": data.get("completed_events")})
 
 
 def _dispatch(args) -> dict:
@@ -199,6 +479,12 @@ def _dispatch(args) -> dict:
                                   cursor=args.cursor)
     if action == "strategy":
         return research.strategy(kind=args.kind, run_id=args.run_id)
+    if action == "bs-advice":
+        return _bs_advice(args)
+    if action == "bs-ledger":
+        return _bs_ledger(args)
+    if action == "bs-experiment":
+        return _bs_experiment(args)
     if action == "experiments":
         sub = getattr(args, "experiments_action", None)
         if sub == "list":

@@ -27,6 +27,49 @@
         "sqlite_autoindex_auction_snapshots_1"
       ]
     },
+    "capture_plans": {
+      "columns": [
+        "plan_id",
+        "trade_date",
+        "revision",
+        "parent_plan_id",
+        "pool_json",
+        "members_json",
+        "task_config_json",
+        "config_version",
+        "content_hash",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_capture_plans_date",
+        "sqlite_autoindex_capture_plans_1",
+        "sqlite_autoindex_capture_plans_2"
+      ]
+    },
+    "capture_runs": {
+      "columns": [
+        "run_id",
+        "plan_id",
+        "trade_date",
+        "phase",
+        "slot",
+        "status",
+        "started_at",
+        "finished_at",
+        "deadline_at",
+        "lease_owner",
+        "lease_token",
+        "lease_expires_at",
+        "report_json",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_capture_runs_date",
+        "idx_capture_runs_plan",
+        "sqlite_autoindex_capture_runs_1",
+        "sqlite_autoindex_capture_runs_2"
+      ]
+    },
     "dragons": {
       "columns": [
         "id",
@@ -226,6 +269,76 @@
         "sqlite_autoindex_fin_xdxr_records_1"
       ]
     },
+    "market_bar_versions": {
+      "columns": [
+        "bar_id",
+        "trade_date",
+        "market",
+        "code",
+        "period",
+        "interval_start",
+        "interval_end",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "adjustment",
+        "source",
+        "observed_at",
+        "available_at",
+        "revision",
+        "content_hash",
+        "completeness",
+        "time_semantics",
+        "unit_semantics",
+        "derived",
+        "schema_version",
+        "run_id",
+        "calibration_json",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_market_bars_code",
+        "idx_market_bars_date",
+        "sqlite_autoindex_market_bar_versions_1",
+        "sqlite_autoindex_market_bar_versions_2",
+        "sqlite_autoindex_market_bar_versions_3"
+      ]
+    },
+    "market_observations": {
+      "columns": [
+        "obs_id",
+        "trade_date",
+        "market",
+        "code",
+        "obs_type",
+        "source",
+        "source_event_time",
+        "received_at",
+        "first_received_at",
+        "available_at",
+        "valid_until",
+        "units_json",
+        "quality",
+        "schema_version",
+        "revision",
+        "content_hash",
+        "semantic_key",
+        "payload_json",
+        "run_id",
+        "calibration_json",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_market_obs_code",
+        "idx_market_obs_date",
+        "sqlite_autoindex_market_observations_1",
+        "sqlite_autoindex_market_observations_2",
+        "sqlite_autoindex_market_observations_3"
+      ]
+    },
     "prep_assets": {
       "columns": [
         "id",
@@ -252,6 +365,191 @@
     }
   },
   "dragon_schema": {
+    "account_batch_facts": {
+      "columns": [
+        "ledger_id",
+        "batch_id",
+        "entry_source_ts",
+        "peak_price",
+        "peak_source_ts",
+        "peak_available_at",
+        "took_profit_half",
+        "first_day_seen",
+        "last_fill_event",
+        "facts_version",
+        "updated_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_account_batch_facts_1"
+      ]
+    },
+    "account_batches": {
+      "columns": [
+        "ledger_id",
+        "batch_id",
+        "code",
+        "qty",
+        "remaining",
+        "entry_date",
+        "sellable_mode",
+        "sellable_date",
+        "cost_price",
+        "fee",
+        "initial_risk",
+        "risk_themes_json",
+        "strategy_ref_json",
+        "plan_id",
+        "obligation_id",
+        "fill_id",
+        "source",
+        "family_id",
+        "content_hash",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_account_batches_ledger",
+        "sqlite_autoindex_account_batches_1"
+      ]
+    },
+    "account_fills": {
+      "columns": [
+        "ledger_id",
+        "fill_id",
+        "order_id",
+        "code",
+        "side",
+        "price",
+        "qty",
+        "fee",
+        "event_id",
+        "event_hash",
+        "batch_id",
+        "realized_pnl",
+        "content_hash",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_account_fills_ledger",
+        "sqlite_autoindex_account_fills_1"
+      ]
+    },
+    "account_ledger_events": {
+      "columns": [
+        "ledger_id",
+        "event_id",
+        "source_hash",
+        "content_hash",
+        "revision_after",
+        "seq",
+        "event_time",
+        "trade_date",
+        "record_version",
+        "decision_json",
+        "execution_json",
+        "applied_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_account_ledger_events_1"
+      ]
+    },
+    "account_ledgers": {
+      "columns": [
+        "ledger_id",
+        "revision",
+        "initial_cash",
+        "cash",
+        "peak_equity",
+        "drawdown_pct",
+        "consecutive_losses",
+        "event_cursor",
+        "event_time",
+        "trade_date",
+        "recovery_stage",
+        "policy_states_json",
+        "marks_json",
+        "recovery_json",
+        "last_decision_json",
+        "mark_facts_json",
+        "trade_stats_json",
+        "closed_trades_json",
+        "fund_credits_json",
+        "config_hash",
+        "snapshot_id",
+        "strategy_ref_json",
+        "run_status",
+        "expected_events",
+        "completed_events",
+        "watermark",
+        "failure_reason",
+        "failed_cursor",
+        "schema_version",
+        "created_at",
+        "updated_at"
+      ],
+      "indexes": [
+        "sqlite_autoindex_account_ledgers_1"
+      ]
+    },
+    "account_orders": {
+      "columns": [
+        "ledger_id",
+        "order_id",
+        "code",
+        "side",
+        "qty",
+        "filled_qty",
+        "status",
+        "limit_price",
+        "reserved_amount",
+        "reserved_risk",
+        "locked_qty",
+        "created_event",
+        "valid_until_event",
+        "trigger_kind",
+        "trigger_price",
+        "evidence_rule",
+        "evidence_ids_json",
+        "depends_on_json",
+        "sequence",
+        "risk_amount",
+        "risk_themes_json",
+        "strategy_ref_json",
+        "plan_id",
+        "obligation_id",
+        "batch_ids_json",
+        "family_id",
+        "invalidate_below",
+        "reason",
+        "content_hash",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_account_orders_ledger",
+        "sqlite_autoindex_account_orders_1"
+      ]
+    },
+    "account_reservations": {
+      "columns": [
+        "ledger_id",
+        "order_id",
+        "code",
+        "side",
+        "qty",
+        "amount",
+        "status",
+        "purpose",
+        "price",
+        "theme_ids_json",
+        "pressure_pct",
+        "risk_amount",
+        "valid_until_event",
+        "created_at"
+      ],
+      "indexes": [
+        "idx_account_reservations_ledger",
+        "sqlite_autoindex_account_reservations_1"
+      ]
+    },
     "bs_runs": {
       "columns": [
         "id",
@@ -504,6 +802,7 @@
         "created_at",
         "experiment_version",
         "status",
+        "run_digest",
         "request_json",
         "report_json"
       ],
@@ -1026,10 +1325,10 @@
     "assets/doctor_summary.json": "5cf15a653362b537572aa096c883ffba3ab498e27202fd0d5edd573e0eca02cd",
     "assets/pull_apply.json": "b32ab19a092fafa9cfb83f9e9ce6d1916fd6fa93d532a153d1f7a7f628c7fb30",
     "assets/pull_dry_run.json": "96e874f5bfffd4ffc22a1b40f54b661bfce3d12e297196c8bd56245dc94f227a",
-    "assets/pull_target_counts.json": "e366986b2340381d8c68dafafcbde9729af9cd5b7b4f02266627096db3980eb1",
+    "assets/pull_target_counts.json": "6b481c9aae265cb20e17a5865d884c8ad543cb5f95859d351c0f93f47d727db4",
     "assets/push_summary.json": "fafe166edc347752869e90c7559c382a014713ed9d943395eb6c414c3e159fad",
     "assets/state.json": "5b6d0b7715ca3a241e041a4037a717acabc04f7597b6e24b407ef60e2f618893",
-    "assets/status_clean.json": "1ec4c3bc0e992d98f185aca237c6744dcb995ebf45a4a81723496e6541e66037",
+    "assets/status_clean.json": "d9425f023d35241ba1c7fc61beee0b86a1281c0b8f9565faf0de7b05d085da1d",
     "auction/assets.json": "91962844bf44cdea5ad89a976500226e9e1eec2a0e54af91ffd7a6e827ad7629",
     "auction/calls.json": "94ab53dde21d8e7c44a10bc383d8fc693dec6cfee6c941c935c001fceb1b0c09",
     "auction/json_collect.json": "ce47ee5a771aeced620f5636d7879831f6cac121ffd287f3ff5ea25512fc0498",

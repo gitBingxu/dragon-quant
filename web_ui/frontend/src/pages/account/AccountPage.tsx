@@ -9,6 +9,8 @@ import {
   fetchAccountSnapshots,
   fetchAccountSummary,
   fetchAccountTrades,
+  historicalStrategyId,
+  runStrategyRef,
   type AccountBenchmarkPoint,
   type AccountPosition,
   type AccountPositionStats,
@@ -30,7 +32,7 @@ import { TradesTable } from "./TradesTable";
 import { PositionsTable } from "./PositionsTable";
 import { AccountTimeline } from "./AccountTimeline";
 import { RunPicker } from "./RunPicker";
-import { CreateRunModal } from "./CreateRunModal";
+import { CreateRunModal, type CreateRunSeed } from "./CreateRunModal";
 import { DeleteRunModal } from "./DeleteRunModal";
 import { EmptyRuns } from "./EmptyRuns";
 import { ExperimentPanel } from "./ExperimentPanel";
@@ -67,6 +69,8 @@ export function AccountPage() {
   const [auxError, setAuxError] = useState<string | null>(null);
   const [partialError, setPartialError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  /** 「重新回测」预填：非 null 时打开同一表单（旧记录不变，新记录全量重跑）。 */
+  const [rerunSeed, setRerunSeed] = useState<CreateRunSeed | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccountRun | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [incrementing, setIncrementing] = useState(false);
@@ -82,6 +86,8 @@ export function AccountPage() {
     () => runs.find((run) => run.id === runId) ?? null,
     [runs, runId]
   );
+  /** 该记录是否有可用的冻结策略身份；没有就必须走「重新回测」而非增量。 */
+  const selectedHasFrozenStrategy = runStrategyRef(selectedRun) !== null;
   const latest = snapshots[snapshots.length - 1] ?? null;
 
   const loadRuns = useCallback(async (preferred: number | null = null) => {
@@ -213,6 +219,14 @@ export function AccountPage() {
 
   const runIncremental = useCallback(async () => {
     if (!runId || incrementing) return;
+    if (!runStrategyRef(selectedRun)) {
+      // 绝不对缺策略版本的旧记录发注定失败的增量请求，也不静默改跑全量。
+      setActionError(
+        "该记录缺少策略版本信息，不能增量续算；" +
+          "请用「重新回测」按当前策略版本全量重跑，或先在列表中选择其它记录。"
+      );
+      return;
+    }
     setIncrementing(true);
     setActionError(null);
     try {
@@ -231,7 +245,20 @@ export function AccountPage() {
     } finally {
       setIncrementing(false);
     }
-  }, [runId, incrementing, loadRuns]);
+  }, [runId, incrementing, loadRuns, selectedRun]);
+
+  const openRerun = useCallback(() => {
+    if (!selectedRun) return;
+    setActionError(null);
+    setRerunSeed({
+      originRunId: selectedRun.id,
+      dateFrom: selectedRun.date_from,
+      dateTo: selectedRun.date_to,
+      initialCash: selectedRun.initial_cash,
+      strategyId: historicalStrategyId(selectedRun),
+      strategyParams: { ...(selectedRun.strategy_params || {}) },
+    });
+  }, [selectedRun]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -263,6 +290,7 @@ export function AccountPage() {
                 onDelete={setDeleteTarget}
               />
             ) : null}
+            <a className="btn btn-ghost" href="/research?bs=account#bs-panel">BS 账户决策（统一流程）</a>
             <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
               <IconPlus size={15} />
               生成回测记录
@@ -271,7 +299,12 @@ export function AccountPage() {
               type="button"
               className="btn btn-ghost group"
               onClick={runIncremental}
-              disabled={!runId || incrementing}
+              disabled={!runId || incrementing || !selectedHasFrozenStrategy}
+              title={
+                runId && !selectedHasFrozenStrategy
+                  ? "该记录缺少策略版本信息，需先「重新回测」"
+                  : undefined
+              }
             >
               <IconRefresh size={15} />
               {incrementing ? "增量回测中…" : "增量回测"}
@@ -279,6 +312,12 @@ export function AccountPage() {
                 在当前回测记录与操盘策略的基础上对增量数据执行回测
               </HintIcon>
             </button>
+            {runId != null && !selectedHasFrozenStrategy ? (
+              <button type="button" className="btn btn-primary" onClick={openRerun}>
+                <IconRefresh size={15} />
+                重新回测
+              </button>
+            ) : null}
           </>
         }
       />
@@ -294,6 +333,13 @@ export function AccountPage() {
         <div className="alert-danger mb-3 flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-body">
           <IconAlert size={15} />
           {actionError}
+        </div>
+      ) : null}
+
+      {runId != null && !selectedHasFrozenStrategy ? (
+        <div className="mb-3 rounded-lg border border-warning-line bg-warning-soft px-3.5 py-2.5 text-caption text-warning">
+          当前记录缺少策略版本信息，不能增量续算；
+          请使用「重新回测」按当前策略版本全量重跑并生成新记录，原记录保持不变。
         </div>
       ) : null}
 
@@ -316,9 +362,14 @@ export function AccountPage() {
       ) : null}
 
       <CreateRunModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        open={createOpen || rerunSeed != null}
+        seed={rerunSeed}
+        onClose={() => {
+          setCreateOpen(false);
+          setRerunSeed(null);
+        }}
         onCreated={(run) => {
+          setRerunSeed(null);
           loadRuns(run.id).catch(() => {
             setRuns([run]);
             setRunId(run.id);

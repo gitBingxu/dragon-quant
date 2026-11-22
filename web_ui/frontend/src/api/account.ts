@@ -3,6 +3,20 @@
 // 前端固定 v2：请求层补 source，页面不感知数据版本。
 const ACCOUNT_SOURCE = "v2" as const;
 
+/** 冻结策略身份（run_meta.strategy_ref）；旧 run 没有此字段。 */
+export interface StrategyRef {
+  schema_version?: number;
+  strategy_id: string;
+  workspace_id?: string | null;
+  snapshot_id?: string | null;
+  params?: Record<string, unknown>;
+  params_hash?: string | null;
+  factor_versions?: Record<string, string>;
+  sdk_version?: number;
+  toolkit_version?: string;
+  workspace?: string | null;
+}
+
 export interface AccountRun {
   id: number;
   source: "v1" | "v2";
@@ -30,6 +44,44 @@ export interface AccountRun {
   run_meta?: Record<string, unknown>;
 }
 
+/** 旧内建策略名 → canonical ID：历史 run 只存列名，不允许按当前选择猜。 */
+export const LEGACY_BUILTIN_STRATEGY_IDS: Record<string, string> = {
+  dragon_pullback_daily: "builtin:dragon_pullback_daily",
+  "builtin:dragon_pullback_daily": "builtin:dragon_pullback_daily",
+};
+
+/**
+ * 可用的冻结策略身份：``run_meta.strategy_ref`` 必须是带非空 ``strategy_id`` 的对象，
+ * 且用户策略（``user:``）必须带 ``params_hash``（后端会拒绝无哈希的用户引用）。
+ * 返回 null = 该记录无法证明策略版本，增量续算必然被后端拒绝（不要发 doomed 请求）。
+ */
+export function runStrategyRef(run: AccountRun | null): StrategyRef | null {
+  if (!run) return null;
+  const raw = run.run_meta?.strategy_ref;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const ref = raw as StrategyRef;
+  if (typeof ref.strategy_id !== "string" || !ref.strategy_id.trim()) return null;
+  if (ref.strategy_id.startsWith("user:")) {
+    const hash = ref.params_hash;
+    if (typeof hash !== "string" || !hash.trim()) return null;
+  }
+  return ref;
+}
+
+/**
+ * 历史策略 → 本次「重新回测」可预选的 canonical ID。
+ *
+ * 有冻结身份时用它自己；否则只认**旧内建名**（显式映射，与当前保存的用户/BS
+ * 选择无关）。未知/自定义历史策略返回 null：必须由用户在表单里显式选择，不猜。
+ */
+export function historicalStrategyId(run: AccountRun | null): string | null {
+  if (!run) return null;
+  const ref = runStrategyRef(run);
+  if (ref) return ref.strategy_id;
+  const name = (run.strategy_name || "").trim();
+  return LEGACY_BUILTIN_STRATEGY_IDS[name] ?? null;
+}
+
 export interface AccountPositionSeed {
   code: string;
   qty: number;
@@ -49,6 +101,11 @@ export interface CreateAccountRunInput {
   /** 显式策略选择（覆盖保存选择）；省略时后端消费同一保存状态。 */
   strategy_id?: string;
   strategy_parameters?: Record<string, unknown>;
+  /**
+   * 交易参数覆盖（StrategyConfig 形状，服务端仍按现有合同校验）。
+   * 目前只由「重新回测」预填：把旧记录的交易参数带到新全量记录。
+   */
+  strategy_params?: Record<string, unknown>;
 }
 
 export interface AccountSnapshot {

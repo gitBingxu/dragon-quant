@@ -44,6 +44,11 @@
 | 实验列表 | dragon-quant research experiments list | --run-id --limit --cursor --json | T0 | human/json | 只读已存报告，不重算 |
 | 实验详情 | dragon-quant research experiments show | --experiment-id --run-id --json | T0 | human/json | 只读已存报告，不重算 |
 | 运行对照实验 | dragon-quant research experiments run | --run-id --confirm --sell-rule --strategy-param --json | T1 | human/json | 必须真实 run_id 与 --confirm；未知 sell-rule 报错；单飞 |
+| 采集计划 | dragon-quant assets capture plan | --date --codes --sectors --topics --recent-days --track-days --no-holdings --dry-run --json | T1 | human/json | 读本地输入并**冻结**计划；--dry-run 只体检、不冻结、不写业务记录；不隐式 scan/prep |
+| 一次取数 | dragon-quant assets capture once | --plan-id --date --topics --phase --slot --budget --deadline-minutes --allow-outside-window --dry-run --json | T1 | human/json | 必须显式 --plan-id 或 --date；--dry-run 零网络零写入；窗外仅当日补采标 same_day_recovered |
+| 有界会话 | dragon-quant assets capture session | --plan-id --date --phase --max-slots --interval-seconds --grace-minutes --budget --dry-run --json | T1 | human/json | 单时槽作业用 --max-slots 1；过早只记 window_not_open；错过记 missed，不补跑；--phase auction 是采集阶段，不是 standalone auction 报告 |
+| 采集覆盖 | dragon-quant assets capture coverage | --from --to --codes --topics --limit --offset --json | T0 | human/json | 只读不建库；partial 也可能 exit 0，必须读 JSON |
+| 调度模板 | dragon-quant assets capture schedule | --kind --workdir --json | T0 | human/json | 只输出模板 installed=false；内置模板仅竞价且不含 plan/date，是骨架不是完整流水线 |
 <!-- routes:end -->
 
 ## 关键约定
@@ -61,3 +66,4 @@
 - **workspace / strategy**：`workspace init` 写 workspace 文件并登记活动选择；`check` 与 `strategy validate` 会导入用户策略（只读）；`strategy list/current` 只读 descriptor。`strategy use` 是持久切换，`--strategy` 只覆盖单次命令。用户因子构建必须用 `factor list --workspace` 给出的精确注册名 `ws_<id>.<local>` 配 `--only`；完整流程见 [workspace.md](workspace.md)。
 - **`research` 参数纪律**：只用注册表声明的 dataset/filter/field；未知项 exit 2。`--json` stdout 只有一个 `research_v1` envelope；缺库/缺表/空集 exit 0 且有 `empty_reason`，只读不可用等真实故障才非零。
 - **实验纪律**：`research experiments run` 需要真实 `--run-id` 与 `--confirm`；先冻结期初与上游，再运行；与 Web 同一单飞；`no_change` / `insufficient_evidence` 不能当改进。
+- **capture 纪律**：只开放 `assets capture` 五个叶子；同步/清理等 `assets` 兄弟命令不在白名单。`plan` 默认写本地计划（不是只读），`--dry-run` 才只体检；`once/session` 必须显式 `--plan-id` 或 `--date`，不要依赖省略日期；`coverage/schedule` 只读。`schedule` 只输出模板，安装系统定时器需用户另行授权；编排见 [schedule.md](schedule.md)。

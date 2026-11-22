@@ -284,6 +284,12 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     acct_p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
 
     acct_p.add_argument("--config", help="共享策略参数 JSON 文件")
+    acct_p.add_argument("--bs-policy", dest="bs_policy", default=None,
+                        help="BS 账户政策配置 JSON（选择 builtin:bs_account_decision 时必需）")
+    acct_p.add_argument("--account-file", dest="account_file", default=None,
+                        help="BS 账户文件 JSON（现金/批次/预留/marks 的显式输入）")
+    acct_p.add_argument("--no-persist", dest="no_persist", action="store_true",
+                        help="BS 分支仅研究预览：不写入/查询持久化账本")
     acct_p.add_argument("--json", dest="json", action="store_true",
                         help="只输出本次回执 JSON（run_id + 汇总），默认人读输出不变")
 
@@ -388,10 +394,11 @@ Use \"dragon-quant <command> -h\" for command-specific help.
     # assets 子命令（数据资产云端同步）
     assets_p = sub.add_parser(
         "assets",
-        help="数据资产云端同步（备份/恢复）",
+        help="数据资产云端同步 + 持续采集（备份/恢复/留证）",
         usage="dragon-quant assets <action> [action-options]",
-        description="把 assets.db 全部 15 张表的行级数据资产备份到 S3 兼容对象存储，"
-                    "或从云端恢复（prep/auction 原始资产 + 快照/因子/财务表 + dragons 镜像）。",
+        description="把 assets.db 全部 19 张表的行级数据资产备份到 S3 兼容对象存储，"
+                    "或从云端恢复（prep/auction 原始资产 + 快照/因子/财务表 + "
+                    "dragons 镜像 + 持续采集计划/观测）。capture 子命令负责本地采集。",
         epilog="""Examples:
   dragon-quant assets push --profile r2
   dragon-quant assets pull --from 20261020 --to 20261022 --apply
@@ -566,6 +573,155 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                               help="二次确认（与 --apply 成对使用）")
     assets_purge.add_argument("--json", dest="json", action="store_true",
                               help="输出稳定 JSON（默认人读摘要到 stderr）")
+
+    # assets capture 子命令（TDX 持续采集与本地留证）
+    assets_capture = assets_subs.add_parser(
+        "capture",
+        help="持续采集：事前母集 / 显式取数 / 有界会话 / 覆盖 / 调度模板",
+        usage="dragon-quant assets capture <action> [action-options]",
+        description="把 TDX 当日可回溯数据按事前母集持续采进 assets.db"
+                    "（capture_plans / capture_runs / market_observations / "
+                    "market_bar_versions）。plan/coverage/schedule 只读本地；"
+                    "once/session 才显式取数。无付费 key 也能正常使用。",
+        epilog="""Examples:
+  dragon-quant assets capture plan --json
+  dragon-quant assets capture plan --date 20261118 --dry-run --json
+  dragon-quant assets capture once --plan-id cp_20261118_r1 --topics auction_path --json
+  dragon-quant assets capture session --phase auction --json
+  dragon-quant assets capture coverage --from 20261101 --to 20261118 --json
+  dragon-quant assets capture schedule --kind launchd
+""",
+    )
+    assets_capture.add_argument("--json", dest="json", action="store_true",
+                                help="输出完整 JSON（默认人读摘要到 stderr）")
+    capture_subs = assets_capture.add_subparsers(dest="capture_action")
+    capture_subs.title = "Actions"  # type: ignore[assignment]
+    capture_subs.metavar = "<action>"
+
+    capture_plan = capture_subs.add_parser(
+        "plan",
+        help="从本地既有数据生成/冻结事前母集（不隐式 scan/prep）",
+        usage="dragon-quant assets capture plan [--date D] [--codes A,B] "
+              "[--sectors S1,S2] [--dry-run] [--json]",
+        description="最近 N 个交易日 dragons 记录 + 严格早于计划日的 prep 全部 "
+                    "review_candidates（含被过滤项）+ 持仓代码 + 待成熟观察对象。"
+                    "只读本地，不触发 scan/prep；--dry-run 只体检不写库。",
+    )
+    capture_plan.add_argument("--date", default=None,
+                              help="计划交易日 (YYYYMMDD / YYYY-MM-DD，默认今天)")
+    capture_plan.add_argument("--codes", default=None,
+                              help="显式补充代码（逗号分隔）")
+    capture_plan.add_argument("--sectors", default=None,
+                              help="板块/主题代码（逗号分隔；供归属采集）")
+    capture_plan.add_argument("--topics", default=None,
+                              help="采集主题（逗号分隔，默认全部）")
+    capture_plan.add_argument("--recent-days", dest="recent_days", type=int,
+                              default=5, help="最近 N 个 dragons 交易日（默认 5）")
+    capture_plan.add_argument("--track-days", dest="track_days", type=int,
+                              default=10, help="事前评价截止（日历日，默认 10）")
+    capture_plan.add_argument("--no-holdings", dest="no_holdings",
+                              action="store_true",
+                              help="不读取账户持仓代码（默认只读取最近一次回测的未平仓）")
+    capture_plan.add_argument("--dry-run", dest="dry_run", action="store_true",
+                              help="只体检母集，不写库")
+    capture_plan.add_argument("--json", dest="json", action="store_true",
+                              help="输出完整 JSON")
+
+    capture_once = capture_subs.add_parser(
+        "once",
+        help="显式执行一次取数（有预算/时窗约束）",
+        usage="dragon-quant assets capture once (--plan-id ID | --date D) "
+              "[--topics T] [--slot HHMM] [--budget N] [--dry-run] [--json]",
+        description="按计划范围取数并落库。时窗之外只允许当日补采（标 "
+                    "same_day_recovered）；历史日期直接拒绝。--dry-run 不联网、不写库。",
+    )
+    capture_once.add_argument("--plan-id", dest="plan_id", default=None,
+                              help="计划 ID（默认用 --date 的最新版本）")
+    capture_once.add_argument("--date", default=None,
+                              help="计划交易日 (YYYYMMDD / YYYY-MM-DD)")
+    capture_once.add_argument("--topics", default=None,
+                              help="只采这些主题（逗号分隔，默认取计划配置）")
+    capture_once.add_argument("--phase", default="manual",
+                              help="运行阶段标签（默认 manual）")
+    capture_once.add_argument("--slot", default=None,
+                              help="时槽标签 HHMM（默认用当前时刻）")
+    capture_once.add_argument("--budget", type=int, default=200,
+                              help="本轮最多请求数（默认 200）")
+    capture_once.add_argument("--deadline-minutes", dest="deadline_minutes",
+                              type=int, default=None,
+                              help="相对当前时刻的截止分钟数（写入运行行）")
+    capture_once.add_argument("--allow-outside-window", dest="allow_outside_window",
+                              action="store_true",
+                              help="允许在时窗前手动补采（仍标质量等级）")
+    capture_once.add_argument("--dry-run", dest="dry_run", action="store_true",
+                              help="只解析范围，不联网、不写库")
+    capture_once.add_argument("--json", dest="json", action="store_true",
+                              help="输出完整 JSON")
+
+    capture_session = capture_subs.add_parser(
+        "session",
+        help="执行有界采集会话（按计划时槽；错过记 missed）",
+        usage="dragon-quant assets capture session [--plan-id ID | --date D] "
+              "[--phase P] [--max-slots N] [--interval-seconds S] [--json]",
+        description="按计划时槽推进；已过时槽（含宽限）只记 missed，不假装采过。"
+                    "机器睡眠/断电造成的漏采不会被定时器自动补回。",
+    )
+    capture_session.add_argument("--plan-id", dest="plan_id", default=None,
+                                 help="计划 ID（默认用 --date 的最新版本）")
+    capture_session.add_argument("--date", default=None,
+                                 help="计划交易日 (YYYYMMDD / YYYY-MM-DD)")
+    capture_session.add_argument("--phase", default="auction",
+                                 help="阶段：auction / intraday / postclose")
+    capture_session.add_argument("--max-slots", dest="max_slots", type=int,
+                                 default=3, help="本轮最多执行时槽数（默认 3）")
+    capture_session.add_argument("--interval-seconds", dest="interval_seconds",
+                                 type=int, default=60,
+                                 help="时槽间隔秒（默认 60）")
+    capture_session.add_argument("--grace-minutes", dest="grace_minutes",
+                                 type=int, default=None,
+                                 help="时槽宽限分钟（默认取计划配置）")
+    capture_session.add_argument("--budget", type=int, default=200,
+                                 help="每个时槽最多请求数（默认 200）")
+    capture_session.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                 help="只演练时槽推进，不联网、不写库")
+    capture_session.add_argument("--json", dest="json", action="store_true",
+                                 help="输出完整 JSON")
+
+    capture_coverage = capture_subs.add_parser(
+        "coverage",
+        help="只读覆盖视图：计划 / 运行 / 观测 / bar / 缺口",
+        usage="dragon-quant assets capture coverage [--from D] [--to D] "
+              "[--codes A,B] [--topics T] [--json]",
+        description="按日期 × 代码 × 主题分开统计；库不存在时返回空结构且不建库。",
+    )
+    capture_coverage.add_argument("--from", dest="from_date", default=None,
+                                  help="起始日期 (YYYYMMDD / YYYY-MM-DD)")
+    capture_coverage.add_argument("--to", dest="to_date", default=None,
+                                  help="结束日期 (YYYYMMDD / YYYY-MM-DD)")
+    capture_coverage.add_argument("--codes", default=None,
+                                  help="只看这些代码（逗号分隔）")
+    capture_coverage.add_argument("--topics", default=None,
+                                  help="只看这些主题（逗号分隔）")
+    capture_coverage.add_argument("--limit", type=int, default=1000,
+                                  help="每组聚合最多返回条数（默认 1000）")
+    capture_coverage.add_argument("--offset", type=int, default=0,
+                                  help="聚合结果偏移（分页）")
+    capture_coverage.add_argument("--json", dest="json", action="store_true",
+                                  help="输出完整 JSON")
+
+    capture_schedule = capture_subs.add_parser(
+        "schedule",
+        help="只输出宿主调度模板（launchd/systemd/cron，不安装）",
+        usage="dragon-quant assets capture schedule [--kind launchd] [--workdir DIR]",
+        description="模板输出后需用户显式安装；本命令不写系统配置、不启动服务。",
+    )
+    capture_schedule.add_argument("--kind", default="launchd",
+                                  choices=["launchd", "systemd", "cron"],
+                                  help="模板类型（默认 launchd）")
+    capture_schedule.add_argument("--workdir", default=None,
+                                  help="模板里的工作目录（默认占位符）")
+    capture_schedule.add_argument("--json", dest="json", action="store_true",
+                                  help="输出完整 JSON")
 
     # factor 子命令（因子层：只读迁移 scan/vpa 产物，落 assets.db）
     factor_p = sub.add_parser(
@@ -1081,6 +1237,83 @@ Use \"dragon-quant <command> -h\" for command-specific help.
                                    choices=("scan", "account"))
     research_strategy.add_argument("--run-id", dest="run_id", default=None)
     research_strategy.add_argument("--json", dest="json", action="store_true")
+
+    research_bs = research_subs.add_parser(
+        "bs-advice",
+        help="BS 账户政策只读建议（不下单、不写账本）",
+        usage="dragon-quant research bs-advice --account-file JSON "
+              "[--bs-policy JSON] --cutoff ISO [--strict] [--json]")
+    research_bs.add_argument("--account-file", dest="account_file",
+                             required=True, help="账户文件 JSON（显式本机路径）")
+    research_bs.add_argument("--bs-policy", dest="bs_policy", default=None,
+                             help="BS 政策配置 JSON；缺省为观察模式（列出缺项）")
+    research_bs.add_argument("--cutoff", required=True,
+                             help="决策 cutoff（带时区的 ISO 时点）")
+    research_bs.add_argument("--strict", action="store_true",
+                             help="严格研究：缺完整配置/合格证据时非零退出")
+    research_bs.add_argument("--json", dest="json", action="store_true")
+
+    research_bs_ledger = research_subs.add_parser(
+        "bs-ledger", help="只读读回显式 BS review 账本（有界分页）",
+        usage="dragon-quant research bs-ledger --ledger-id ID "
+              "[--limit N] [--cursor C] [--json]")
+    research_bs_ledger.add_argument("--ledger-id", dest="ledger_id",
+                                    required=True)
+    research_bs_ledger.add_argument("--limit", type=int, default=100)
+    research_bs_ledger.add_argument("--cursor", default=None)
+    research_bs_ledger.add_argument("--json", dest="json", action="store_true")
+
+    research_bs_exp = research_subs.add_parser(
+        "bs-experiment", help="BS 冻结对照实验：run 需 --confirm，list/show 只读",
+        usage="dragon-quant research bs-experiment <run|list|show> [options]")
+    bs_exp_subs = research_bs_exp.add_subparsers(dest="bs_experiments_action")
+    bs_exp_subs.title = "Actions"  # type: ignore[assignment]
+    bs_exp_subs.metavar = "<action>"
+    bs_exp_run = bs_exp_subs.add_parser("run", help="运行 BS vs 无新增风险对照")
+    bs_exp_run.add_argument("--account-file", dest="account_file", required=True)
+    bs_exp_run.add_argument("--bs-policy", dest="bs_policy", required=True)
+    bs_exp_run.add_argument("--from", dest="from_date", required=True)
+    bs_exp_run.add_argument("--to", dest="to_date", required=True)
+    bs_exp_run.add_argument("--cohort-mode", dest="cohort_mode",
+                            choices=("rolling", "fixed"), default="rolling")
+    bs_exp_run.add_argument("--confirm", action="store_true")
+    bs_exp_run.add_argument("--new-attempt", dest="new_attempt",
+                            action="store_true",
+                            help="同 digest 已有失败/运行记录时显式新建 attempt")
+    bs_exp_run.add_argument(
+        "--study-file", dest="study_file", default=None,
+        help="显式研究规范 JSON（有限命名 variant / 阈值 / 评价截止）")
+    bs_exp_run.add_argument(
+        "--enhanced-experiment-id", dest="enhanced_experiment_id", default=None,
+        help="已存实验 ID，作为增强能力条件的冻结包")
+    bs_exp_run.add_argument(
+        "--enhanced-file", dest="enhanced_file", default=None,
+        help="已校验冻结包 JSON（与 --enhanced-experiment-id 二选一）")
+    bs_exp_run.add_argument("--json", dest="json", action="store_true")
+    bs_exp_list = bs_exp_subs.add_parser("list", help="列出 BS 实验")
+    bs_exp_list.add_argument("--limit", type=int, default=20)
+    bs_exp_list.add_argument("--cursor", default=None)
+    bs_exp_list.add_argument("--json", dest="json", action="store_true")
+    bs_exp_show = bs_exp_subs.add_parser("show", help="显示单个 BS 实验")
+    bs_exp_show.add_argument("--experiment-id", dest="experiment_id",
+                             type=int, required=True)
+    bs_exp_show.add_argument("--include-frozen", dest="include_frozen",
+                             action="store_true",
+                             help="显式本地取证：输出完整冻结输入（含 seed）")
+    bs_exp_show.add_argument("--include-details", dest="include_details",
+                             action="store_true",
+                             help="输出各 variant 原始事件/成交（默认投影）")
+    bs_exp_show.add_argument("--json", dest="json", action="store_true")
+    bs_exp_replay = bs_exp_subs.add_parser(
+        "replay", help="跨重启：读已存冻结包→校验→显式重放")
+    bs_exp_replay.add_argument("--experiment-id", dest="experiment_id",
+                               type=int, required=True)
+    bs_exp_replay.add_argument("--json", dest="json", action="store_true")
+    bs_exp_resume = bs_exp_subs.add_parser(
+        "resume", help="按旧 ID 从冻结包恢复完整实验（无需源库）")
+    bs_exp_resume.add_argument("--experiment-id", dest="experiment_id",
+                               type=int, required=True)
+    bs_exp_resume.add_argument("--json", dest="json", action="store_true")
 
     research_exp = research_subs.add_parser(
         "experiments", help="账户对照实验：list/show 只读，run 需 --confirm",

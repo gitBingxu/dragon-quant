@@ -28,6 +28,12 @@ flowchart TB
             PS["prep_snapshots<br>(主线/情绪/候选池)"]
             AS["auction_snapshots<br>(竞价强度)"]
         end
+        subgraph Capture["持续采集观测层"]
+            CP["capture_plans<br>(事前母集 revision)"]
+            CR["capture_runs<br>(阶段×时槽 + 租约)"]
+            MO["market_observations<br>(原始观测 revision)"]
+            MB["market_bar_versions<br>(不复权 bar revision)"]
+        end
     end
 
     subgraph Cloud["云端资产"]
@@ -138,3 +144,29 @@ flowchart LR
 | review-account / buy 消费 `auction_snapshots` | ✅ 已接线（`assets_db.list_auction_snapshots`）：`auction_ranking_enabled` / `auction_veto_enabled` 任一开启才读取；`SEMANTICS_VERIFIED=False` 期间 unverified → A 恒 Unknown |
 | `auction` 采集池改为 prep 推荐 | ✅ 默认 `--pool prep`；空推荐集/缺失回退 legacy；`--pool legacy` 可复现旧口径 |
 | assets 同步 push / pull / status / verify | ⚠️ M1 仅 `doctor`（连通性门槛）；push/pull 在 M2-M4 |
+| 持续采集观测层（`assets capture` + 4 张 `capture_*`/`market_*` 表） | ✅ W0 已实现（计划/运行/观测/bar 版本 + 租约 fencing + 覆盖视图 + 同步注册）；旧 `auction_assets` 每日 UPSERT 与快照短路不承担连续观测史 |
+
+## 持续采集观测层（W0）
+
+旧 `auction_assets` 每天同码 UPSERT、`auction.collect` 命中当日快照就直接返回，因此只能
+表达「最后一版每日资产」，不能表达「何时第一次看到、之后如何修订」。持续采集把时点历史
+独立成四张不可变表：
+
+```mermaid
+flowchart LR
+    P["capture_plans<br>事前母集 revision"] --> R["capture_runs<br>计划×阶段×时槽"]
+    R --> L{"短事务租约<br>+ fencing token"}
+    L -->|"网络请求在事务外"| C["collectors<br>auction/minute/quote/membership"]
+    C --> O["market_observations<br>同内容幂等 / 内容不同 revision"]
+    C --> B["market_bar_versions<br>不复权 bar revision"]
+    R --> V["coverage<br>日期×代码×主题缺口"]
+    O --> V
+    B --> V
+    O --> S["assets 同步<br>capture:plans|runs|observations|bars"]
+    B --> S
+    R -.->|"lease_* 不同步"| S
+```
+
+- 计划与观测**不可变**：内容不同只追加 revision；旧 revision 永不回改。
+- `capture_runs` 的租约字段是本机协调状态：同步规格刻意排除，备份恢复后不会恢复成活跃锁。
+- 覆盖按日期 × 代码 × 主题分开统计；`complete` 只表示该计划范围的数据要求达到。

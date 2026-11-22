@@ -23,6 +23,10 @@ def _ensure_schema(*args, **kwargs):
     return _connection._ensure_schema(*args, **kwargs)
 
 
+def _connect_readonly(*args, **kwargs):
+    return _connection._connect_readonly(*args, **kwargs)
+
+
 def _normalize_source(*args, **kwargs):
     return _identifiers._normalize_source(*args, **kwargs)
 

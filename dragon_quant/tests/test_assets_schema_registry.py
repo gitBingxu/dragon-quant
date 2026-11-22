@@ -1,6 +1,6 @@
 """Task 6: ``infra.assets`` schema registry 与公共接口冻结。
 
-- assets.db 的 15 张表必须与 S0 基线（``dragon_quant/tests/fixtures/architecture_baseline.json``）
+- assets.db 的 19 张表必须与 S0 基线（``dragon_quant/tests/fixtures/architecture_baseline.json``）
   完全一致；
 - ``schema.TABLE_NAMES`` 必须与同步注册表 / 两个既有适配器一致（防 DDL 与
   ``assets_sync`` 漂移）；
@@ -24,7 +24,7 @@ def test_assets_schema_table_set_is_frozen(tmp_path):
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     snapshot = assets_schema_snapshot(tmp_path)
     assert set(snapshot) == set(baseline["assets_schema"])
-    assert len(snapshot) == 15
+    assert len(snapshot) == 19
 
 
 def test_schema_table_names_match_sync_specs_and_legacy_adapters():
@@ -32,7 +32,7 @@ def test_schema_table_names_match_sync_specs_and_legacy_adapters():
     from dragon_quant.infra.assets.sync import tables
 
     spec_tables = {spec.table for spec in tables.TABLE_SPECS}
-    assert len(schema.TABLE_NAMES) == 15
+    assert len(schema.TABLE_NAMES) == 19
     assert spec_tables <= set(schema.TABLE_NAMES)
     # prep_assets / auction_assets 由两个既有适配器同步（无 TableSpec）。
     assert spec_tables | {"prep_assets", "auction_assets"} == set(schema.TABLE_NAMES)

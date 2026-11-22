@@ -2,7 +2,8 @@
 
 - ``BASE_SCHEMA``：15 张表的 ``CREATE TABLE IF NOT EXISTS`` 与索引；
 - ``TABLE_NAMES``：assets.db 物理表全集（4 张 prep/auction 资产 + dragons 镜像 +
-  5 张 ``factor_*`` + 5 张 ``fin_*``）；
+  5 张 ``factor_*`` + 5 张 ``fin_*`` + 4 张持续采集 ``capture_*`` /
+  ``market_*``）；
 - ``_REQUIRED_COLUMNS`` / ``_WRITE_REQUIRED_COLUMNS`` / ``_COLUMN_MIGRATIONS``：
   wrong-DB 识别与表驱动列迁移。
 
@@ -28,6 +29,10 @@ TABLE_NAMES = (
     "fin_report_records",
     "fin_field_calibrations",
     "fin_xdxr_records",
+    "capture_plans",
+    "capture_runs",
+    "market_observations",
+    "market_bar_versions",
 )
 
 BASE_SCHEMA = """
@@ -260,6 +265,121 @@ CREATE TABLE IF NOT EXISTS fin_xdxr_records (
     created_at   TEXT DEFAULT (datetime('now','localtime')),
     UNIQUE(code, ex_date, category)
 );
+
+-- ─── 持续采集：观察计划 / 采集运行 / 原始观测 / bar 版本（§5.4）───────────
+-- 契约：原始市场资产归 assets.db；计划与观测**不可变**（修订=新行），
+-- 账户金额/真实成交不写入本库。租约字段（lease_*）是本机协调状态，
+-- **不进入同步语义列**，备份恢复后不得变回活跃锁。
+
+-- 事前母集：每个 (trade_date, revision) 一行；revision 只追加，不回改。
+CREATE TABLE IF NOT EXISTS capture_plans (
+    plan_id          TEXT PRIMARY KEY,        -- cp_<YYYYMMDD>_r<N>
+    trade_date       TEXT NOT NULL,           -- YYYY-MM-DD（计划所属交易日）
+    revision         INTEGER NOT NULL,
+    parent_plan_id   TEXT,                    -- 上一版计划（盘中修订）
+    pool_json        TEXT NOT NULL,           -- 母集来源/读取日期/覆盖缺口
+    members_json     TEXT NOT NULL,           -- 逐 code 首次获知/入池原因/跟踪截止
+    task_config_json TEXT NOT NULL,           -- 时槽/主题/版本
+    config_version   TEXT NOT NULL,
+    content_hash     TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    UNIQUE(trade_date, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_plans_date
+    ON capture_plans(trade_date, revision);
+
+-- 一次（计划×阶段×时槽）运行：唯一防止重入；租约为短事务协调字段。
+CREATE TABLE IF NOT EXISTS capture_runs (
+    run_id            TEXT PRIMARY KEY,       -- <plan_id>:<phase>:<slot>
+    plan_id           TEXT NOT NULL,
+    trade_date        TEXT NOT NULL,
+    phase             TEXT NOT NULL,          -- auction / intraday / postclose
+    slot              TEXT NOT NULL,          -- 计划时槽标签（如 0926）
+    status            TEXT NOT NULL,          -- planned/running/partial/complete/
+                                              -- missed/failed/skipped
+    started_at        TEXT,
+    finished_at       TEXT,
+    deadline_at       TEXT,
+    lease_owner       TEXT,                   -- 本机协调字段（不同步）
+    lease_token       INTEGER NOT NULL DEFAULT 0,   -- fencing token（不同步）
+    lease_expires_at  TEXT,                   -- 不同步
+    report_json       TEXT,                   -- 逐项成功/失败/缺失与覆盖
+    created_at        TEXT NOT NULL,
+    UNIQUE(plan_id, phase, slot)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_runs_date
+    ON capture_runs(trade_date, status);
+CREATE INDEX IF NOT EXISTS idx_capture_runs_plan
+    ON capture_runs(plan_id);
+
+-- 原始观测：同语义键 + 同内容 = 幂等去重；内容不同 = 追加 revision。
+CREATE TABLE IF NOT EXISTS market_observations (
+    obs_id            TEXT PRIMARY KEY,       -- <semantic_key>#r<N>
+    trade_date        TEXT NOT NULL,
+    market            TEXT NOT NULL,          -- sh/sz/bj/sector/market
+    code              TEXT NOT NULL DEFAULT '',
+    obs_type          TEXT NOT NULL,          -- auction_path/auction_final/quote/...
+    source            TEXT NOT NULL,          -- tdx / ths / imported:...
+    source_event_time TEXT,                   -- 源事件时间（可空）
+    received_at       TEXT NOT NULL,          -- 系统首次收到该内容的时间
+    first_received_at TEXT NOT NULL,          -- 同一语义观测的最早收到时间
+    available_at      TEXT NOT NULL,          -- 可用于决策的时点（PIT）
+    valid_until       TEXT,
+    units_json        TEXT NOT NULL,          -- 单位（未核实显式标 unverified）
+    quality           TEXT NOT NULL,          -- semantics_verified / unverified / ...
+    schema_version    TEXT NOT NULL,
+    revision          INTEGER NOT NULL,
+    content_hash      TEXT NOT NULL,
+    semantic_key      TEXT NOT NULL,
+    payload_json      TEXT NOT NULL,
+    run_id            TEXT,
+    calibration_json  TEXT,
+    created_at        TEXT NOT NULL,
+    UNIQUE(semantic_key, revision),
+    UNIQUE(semantic_key, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_market_obs_date
+    ON market_observations(trade_date, obs_type);
+CREATE INDEX IF NOT EXISTS idx_market_obs_code
+    ON market_observations(code, trade_date);
+
+-- 不复权 bar 版本：身份 = (market, code, period, adjustment, interval_end)。
+-- 不同 market / source / 复权口径不得共用 revision；语义验证状态随行留证。
+CREATE TABLE IF NOT EXISTS market_bar_versions (
+    bar_id         TEXT PRIMARY KEY,          -- <market>|<code>|<period>|<adj>|<end>#r<N>
+    trade_date     TEXT NOT NULL,
+    market         TEXT NOT NULL,
+    code           TEXT NOT NULL,
+    period         TEXT NOT NULL,             -- 1min / 5min / daily
+    interval_start TEXT NOT NULL,
+    interval_end   TEXT NOT NULL,
+    open           REAL NOT NULL,
+    high           REAL NOT NULL,
+    low            REAL NOT NULL,
+    close          REAL NOT NULL,
+    volume         REAL,
+    amount         REAL,
+    adjustment     TEXT NOT NULL DEFAULT 'none',   -- 原始不复权
+    source         TEXT NOT NULL,
+    observed_at    TEXT NOT NULL,
+    available_at   TEXT NOT NULL,
+    revision       INTEGER NOT NULL,
+    content_hash   TEXT NOT NULL,
+    completeness   TEXT NOT NULL,             -- final / unverified / partial
+    time_semantics TEXT NOT NULL DEFAULT 'unverified',  -- verified / unverified
+    unit_semantics TEXT NOT NULL DEFAULT 'unverified',  -- verified / unverified
+    derived        INTEGER NOT NULL DEFAULT 0,
+    schema_version TEXT NOT NULL,
+    run_id         TEXT,
+    calibration_json TEXT,
+    created_at     TEXT NOT NULL,
+    UNIQUE(market, code, period, adjustment, interval_end, revision),
+    UNIQUE(market, code, period, adjustment, interval_end, content_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_market_bars_code
+    ON market_bar_versions(code, period, trade_date);
+CREATE INDEX IF NOT EXISTS idx_market_bars_date
+    ON market_bar_versions(trade_date, period);
 """
 
 # 形状探针（读路径 / wrong-DB 识别）：只校验 NOT NULL 核心列，旧库缺 quote_json 也能读。
@@ -286,15 +406,36 @@ _REQUIRED_COLUMNS = {
                            "values_json", "available_at", "pit_basis"),
     "fin_field_calibrations": ("layout_key", "num_fields", "mapping_json", "status"),
     "fin_xdxr_records": ("code", "ex_date", "category", "payload_json"),
+    # 持续采集：只登记核心列（wrong-DB 识别）；租约列只属于 capture_runs。
+    "capture_plans": ("plan_id", "trade_date", "revision", "members_json",
+                      "task_config_json", "content_hash"),
+    "capture_runs": ("run_id", "plan_id", "trade_date", "phase", "slot", "status"),
+    "market_observations": ("obs_id", "trade_date", "obs_type", "source",
+                            "received_at", "revision", "content_hash",
+                            "semantic_key", "payload_json", "calibration_json"),
+    "market_bar_versions": ("bar_id", "trade_date", "code", "period",
+                            "interval_end", "open", "high", "low", "close",
+                            "revision", "content_hash", "completeness"),
 }
 
 # 写路径探针：迁移后必须包含可空新增列，补列失败立即以 AssetsDbSchemaError 暴露。
 _WRITE_REQUIRED_COLUMNS = {
     **_REQUIRED_COLUMNS,
     "auction_assets": ("trade_date", "code", "items_json", "quote_json"),
+    "market_bar_versions": ("time_semantics", "unit_semantics",
+                            "calibration_json"),
 }
 
 # 表驱动列迁移：新增可空列 = 注册一行；只在写路径执行。
+# 注意：SQLite 无法 ALTER 既有 UNIQUE 约束；bar 身份从 (code, period, end)
+# 扩到 (market, code, period, adjustment, end) 只对**新写入**生效，旧行保留其
+# 当时身份。同步/恢复按 bar_id 逐行，不受影响。
 _COLUMN_MIGRATIONS = {
     "auction_assets": (("quote_json", "TEXT"),),
+    "market_observations": (("calibration_json", "TEXT"),),
+    "market_bar_versions": (
+        ("time_semantics", "TEXT NOT NULL DEFAULT 'unverified'"),
+        ("unit_semantics", "TEXT NOT NULL DEFAULT 'unverified'"),
+        ("calibration_json", "TEXT"),
+    ),
 }

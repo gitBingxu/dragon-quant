@@ -14,7 +14,9 @@
  * - 状态轮询用串行 setTimeout（不重叠），并按 `started_at` 作业身份守卫，
  *   过期 running 响应不得覆盖终态；网络失败只提示重试，不暗示任务被取消；
  * - 作业状态（进程退出码）与业务结果（processed/failed/...）分开展示：
- *   CLI 对单条 error 仍正常退出，exit 0 不能当作业务全部成功。
+ *   CLI 对单条 error 仍正常退出，exit 0 不能当作业务全部成功；
+ * - 但常规成功（含窗口不完整、无需补算）**不弹任何通知**：卡片数量与列表已
+ *   是结果，长文案只服务于真实异常（无汇总 / failed>0 / 刷新·网络错误）。
  */
 import {
   useCallback,
@@ -77,24 +79,31 @@ export interface ReviewRefreshResult {
   error?: string;
 }
 
-/** 业务汇总 → 用户可见文案：没有汇总 / 有 failed 时绝不伪报全部成功。 */
+/** 业务汇总 → 用户可见文案。
+ *
+ * ``text === null`` 表示「无需任何提示」：常规成功（包含窗口不完整 / 无需补算）
+ * 不弹长文案，卡片上的待回测数量与列表刷新已经是结果。
+ *
+ * 仍必须提示的只有：取不到汇总（无法宣称成功）、业务失败（failed>0）、刷新/
+ * 网络错误（由调用方拼接）。绝不伪报全部成功，也不把不完整窗口算成完成。
+ */
 export function composeSummaryText(
   summary: ReviewJobSummary | null | undefined,
   remaining: number | null
-): { text: string; tone: MessageTone } {
+): { text: string | null; tone: MessageTone } {
   const failed = summary?.failed ?? 0;
   const completed = summary?.completed ?? 0;
   const cannot = summary?.cannot_evaluate ?? 0;
   const partial = summary?.partial ?? 0;
   const skipped = summary?.skipped ?? 0;
-  const processed = summary?.processed;
   const tail =
     remaining != null && remaining > 0
       ? ` 仍有 ${remaining} 条待处理（可能为未成熟、行情失败或历史不足），请查看状态/错误。`
       : "";
   if (!summary) {
+    // 取不到汇总不能当作成功：这是真实的作业/解析异常。
     return {
-      tone: remaining != null && remaining > 0 ? "warn" : "info",
+      tone: "warn",
       text:
         "任务执行结束，未取得业务汇总" +
         (remaining != null && remaining > 0
@@ -103,7 +112,7 @@ export function composeSummaryText(
         "，请查看状态/错误。",
     };
   }
-  // 只有 failed（K 线拉取失败 / 历史不足）才是失败；窗口不完整单列。
+  // 只有 failed（K 线拉取失败 / 历史不足）才是失败，必须提示并保留重试指引。
   if (failed > 0) {
     return {
       tone: "warn",
@@ -113,30 +122,8 @@ export function composeSummaryText(
         `请检查错误后重试。${tail}`,
     };
   }
-  if (processed === 0) {
-    return {
-      tone: "info",
-      text:
-        "任务执行结束：没有需要补算的成熟标的" +
-        (skipped ? `（跳过 ${skipped} 条未成熟/已完成）` : "") +
-        `。${tail}`,
-    };
-  }
-  if (partial > 0) {
-    return {
-      tone: "info",
-      text:
-        `任务执行结束：完成 ${completed} 条、无法评估 ${cannot} 条；` +
-        `另有 ${partial} 条收益窗口不完整（未走完或窗口内缺 K 线/停牌），` +
-        `已排除在正式统计之外。${tail}`,
-    };
-  }
-  return {
-    tone: tail ? "warn" : "info",
-    text:
-      `任务执行结束：完成 ${completed} 条、无法评估 ${cannot} 条、` +
-      `跳过 ${skipped} 条。${tail}`,
-  };
+  // 常规成功（processed=0 / completed / 窗口不完整但已排除统计）不弹通知。
+  return { tone: "info", text: null };
 }
 
 export interface ReviewJobParts {

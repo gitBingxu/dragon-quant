@@ -311,17 +311,28 @@ def get_prep_assets(trade_date: str) -> dict[str, dict]:
 
 
 def save_prep_snapshot(trade_date: str, result: dict, source: str = "v2") -> None:
-    """UPSERT 复盘快照（trade_date+source 唯一）。result 为完整复盘结果 dict。"""
+    """UPSERT 复盘快照（trade_date+source 唯一）。result 为完整复盘结果 dict。
+
+    ``created_at`` 写**带时区偏移的真实接收/最后刷新时刻**（不依赖 SQLite
+    无时区 localtime，也不使用计划 frozen_at）；旧无时区行严格 PIT 保持 unverified。
+    """
+    from zoneinfo import ZoneInfo
+
+    from dragon_quant.infra.clock import get_clock
+
+    received_at = get_clock().now(ZoneInfo("Asia/Shanghai")).isoformat(
+        timespec="seconds")
     with _lock:
         conn = _connect()
         try:
             _ensure_schema(conn)
             conn.execute(
-                "INSERT INTO prep_snapshots(trade_date, source, result_json) VALUES (?, ?, ?) "
+                "INSERT INTO prep_snapshots(trade_date, source, result_json, "
+                "created_at) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(trade_date, source) DO UPDATE SET "
                 "result_json=excluded.result_json, "
-                "created_at=datetime('now','localtime')",
-                (trade_date, source, _dumps(result)),
+                "created_at=excluded.created_at",
+                (trade_date, source, _dumps(result), received_at),
             )
             conn.commit()
         finally:

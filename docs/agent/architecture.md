@@ -40,6 +40,10 @@ dragon_quant/
 │   ├── market.py / indicators.py / evaluation.py / models.py / advice.py / verdicts.py
 │   ├── candidate_view.py       # 0.8 review→candidates 兼容投影（Adapter）
 │   ├── storage.py               # review_account_* 五表仓储
+│   ├── execution_model.py       # 费用/滑点/整手共享纯函数（研究+运行时同口径）
+│   ├── execution_core/          # W2/W3 共用**纯**执行核心（models/matching/risk/transition/identity/runtime_facts/settlement，叶子层）
+│   ├── evidence/                # W1 证据快照与能力（公共入口 review_account.evidence）
+│   ├── ledger/                  # W3 账户批次账本（store/history/facts_store/projection + 对 execution_core 的兼容导出）
 │   ├── prep/                    # 盘后复盘
 │   │   ├── __init__.py / main.py / service.py / collectors.py / compute.py
 │   │   ├── rebuild.py
@@ -57,6 +61,9 @@ dragon_quant/
 │   ├── strategy/                # 策略纯拆分（main.py 只门面重导出）
 │   │   ├── __init__.py / main.py / common.py / buy.py / checks.py / sell.py
 │   │   ├── execution.py / priority.py / risk.py
+│   │   ├── account_runtime.py   # W3 账户政策运行时（账本→AccountView→DecisionBundle→订单意图）
+│   │   ├── account_engine.py    # W3 事件引擎（决策→下一事件撮合→原子落账）
+│   │   ├── bs_policy/           # W2 G1–G8 纯政策内核（无 I/O，无入口）
 │   │   └── STRATEGY.md
 │   └── live_trade/              # 实盘辅助 buy/sell（纯信号记账）
 │       ├── __init__.py / main.py / service.py / trader.py / signal_engine.py / shadow.py
@@ -69,6 +76,7 @@ dragon_quant/
 ├── infra/                       # 叶子层：唯一连接/schema/路径/缓存/provider/资产/因子
 │   ├── __init__.py / clock.py / models.py / market_calendar.py / module_proxy.py
 │   ├── board_height.py          # high_num 共享纯解析器（打包值解码，零依赖叶子）
+│   ├── calibration.py           # 版本化行情校准（协议/安装版本/代码指纹/周期 → 语义）
 │   ├── provider/                # 数据源适配
 │   │   ├── __init__.py / main.py / base.py / bundle.py / data.py / rate_limit.py
 │   │   ├── tdx.py / ths.py / xueqiu.py / tencent.py / macro.py
@@ -163,6 +171,7 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 | `sector_blacklist` | 板块黑名单 | [scan](scan.md) |
 | `dragon_review_strict` | 严格口径 review 结果（侧表） | [review](review.md) |
 | `review_account_runs` / `_snapshots` / `_trades` / `_positions` / `_events` | 账户回测批次、每日快照、交割单、已平仓持仓、决策时间线 | [trading](trading.md) |
+| `account_ledgers` / `_batches` / `_batch_facts` / `_orders` / `_fills` / `_reservations` / `_ledger_events` | W3 账户批次账本：批次真值、逐批运行事实（峰值/半仓/首日）、订单/成交腿/预留、事件幂等与 DecisionRecord 历史（私有账务，不注册云同步/市场资产） | [trading](trading.md) |
 | `buy_sell_signals` | 实盘辅助买卖信号（含半仓腿） | [trading](trading.md) |
 | `bs_runs` | BS 回放批次元数据（策略/评测器版本、计数器、note） | [bs_eval](bs_eval.md) |
 | `bs_signals` | BS 假想买卖点一行一只龙头（双口径入场、买卖后 5 日窗口、半仓腿） | [bs_eval](bs_eval.md) |
@@ -177,3 +186,9 @@ web_ui/                          # 可视化面板：backend/（FastAPI app/serv
 - **`assets.db`（独立库）**：数据资产仓（prep + auction + factor + fin + dragons 镜像），与 `dragon.db` 物理隔离，防止不可再生资产被 `storage clear --all` 连带清理；`storage status` 展示 dragon.db / assets.db / 旧 prep.db 体积。
 
 > **存储层重构（2026-10-20）**：旧 `prep.db`（`prep_assets`/`prep_snapshots`）与 dragon.db 的遗留 `auction_snapshots` 表保留但**不再读写、不自动迁移、不 DROP**。需要保留历史时按 README「持久化」段的手工迁移片段操作。
+
+### 存储连接并发与只读契约（W5-S）
+
+- `infra/storage/connection._connect`：首次连接在 `_schema_lock` 内同时完成 `PRAGMA journal_mode=WAL` 与 schema 构建（失败关闭连接、不置 ready、可重试）；成功后每操作仍独立连接，稳态不长期持有全局锁。`_lock` 与 `_schema_lock` 独立，避免领域模块持锁调用 `_connect` 时自锁。
+- `_connect_readonly`：不存在路径直接返回 `None`（不建目录/库）；存在时用 `mode=ro` URI + `PRAGMA query_only=ON`，SQL 写被拒且读取已提交 WAL（不使用 `immutable=1`，避免漏最新提交）。测试只在临时 WAL 库验证，不打开真实业务库。
+- 测试隔离（`dragon_quant/tests/sqlite_guard.py` + `conftest.py`）：以真实 OS 用户 home 解析默认数据目录，在 `sqlite3.connect` audit 事件、实际 open 前拒绝并记录 PID/目标/有限栈；覆盖主进程、线程与显式注入的 Python 子进程。任何被代码吞掉的尝试在 `pytest_sessionfinish` 使最终诊断失败。原 metadata 哨兵语义不变，不提供 `ALLOW_REAL_DATA` 豁免。

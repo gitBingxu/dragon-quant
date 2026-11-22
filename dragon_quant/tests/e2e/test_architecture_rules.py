@@ -351,7 +351,7 @@ _CURRENT_TIME_INVENTORY = {
     "dragon_quant/infra/assets/sync/backends/s3.py": {"datetime.now": 1},
     "dragon_quant/infra/assets/sync/backends/signer.py": {"datetime.now": 1},
     "dragon_quant/infra/provider/tdx.py": {
-        "time.time": 53, "time.mktime": 1,
+        "time.time": 56, "time.mktime": 1,
         "time.strftime": 1, "time.localtime": 1},
     "dragon_quant/infra/provider/tencent.py": {"time.time": 3, "time.mktime": 1},
     "dragon_quant/infra/provider/ths.py": {

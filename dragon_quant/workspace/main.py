@@ -12,17 +12,19 @@ from typing import Optional
 from dragon_quant.workspace import snapshots
 from dragon_quant.workspace.catalog import (
     StrategyDescriptor,
-    builtin_descriptor,
+    builtin_descriptors,
     find_descriptor,
     list_descriptors,
 )
 from dragon_quant.workspace.config import (
     BUILTIN_STRATEGY_ID,
+    WORKSPACE_SOURCE_REGISTERED,
     WorkspaceConfig,
     WorkspaceError,
     create_workspace_config,
     load_workspace,
     resolve_workspace_path,
+    resolve_workspace_path_with_source,
     workspace_file,
     write_active_workspace,
     write_workspace,
@@ -179,12 +181,31 @@ def _load_config_for_read(path: Optional[str]) -> Optional[WorkspaceConfig]:
     return load_workspace(resolved)
 
 
+def _load_config_for_selection(path: Optional[str]) -> Optional[WorkspaceConfig]:
+    """任务启动时的选择解析：区分路径来源，缺失语义不同。
+
+    - 显式 ``--workspace`` / ``DQ_WORKSPACE`` 指向未初始化路径 → 显式报错（用户
+      指定了路径，静默改用内建默认会让他以为跑在自己的策略上）；
+    - 本机登记（``workspace-selection.json``）指向已删除的临时 workspace →按
+      「无 workspace」处理：登记只是本机便利状态，历史脚本遗留一个失效路径不应
+      让内建/默认策略无法新建回测。不删除、不改写该登记；
+    - ``workspace.json`` 存在但损坏、用户策略不可用等仍原样显式失败。
+    """
+    resolved, source = resolve_workspace_path_with_source(path)
+    if resolved is None:
+        return None
+    if source == WORKSPACE_SOURCE_REGISTERED and not workspace_file(resolved).is_file():
+        return None
+    return load_workspace(resolved)
+
+
 def check_workspace(path: Optional[str] = None) -> dict:
     """检查 workspace 配置与全部策略/因子能否加载（显式验证路径，可执行用户代码）。"""
     config = _load_config_or_none(path)
     if config is None:
         return {"ok": True, "workspace": None, "current": BUILTIN_STRATEGY_ID,
-                "strategies": [builtin_descriptor().to_dict()], "errors": []}
+                "strategies": [item.to_dict() for item in builtin_descriptors()],
+                "errors": []}
     results, errors = [], []
     for desc in list_descriptors(config):
         entry = desc.to_dict()
@@ -289,7 +310,12 @@ def validate_strategy(strategy_id: str, path: Optional[str] = None) -> dict:
     config = _load_config_or_none(path)
     descriptor = find_descriptor(config, strategy_id)
     if descriptor.source == "builtin":
-        return {"ok": True, "strategy": descriptor.to_dict(), "builtin": True}
+        payload = {"ok": True, "strategy": descriptor.to_dict(), "builtin": True}
+        if descriptor.id == "builtin:bs_account_decision":
+            payload["requires_bs_policy"] = True
+            payload["run_hint"] = ("review-account --bs-policy <JSON> / "
+                                   "research bs-advice --bs-policy <JSON>")
+        return payload
     result = describe_strategy(config, descriptor)
     return {"ok": True, "strategy": descriptor.to_dict(), "detail": result}
 
@@ -326,9 +352,10 @@ def resolve_selection(explicit_workspace: Optional[str] = None,
                       explicit_parameters: Optional[dict] = None) -> StrategySelection:
     """解析并冻结本次任务策略：显式 > 保存选择 > 内建默认。
 
-    参数优先级：descriptor 默认 < workspace 保存值 < 本次显式参数。
+    参数优先级：descriptor 默认 < workspace 保存值 < 本次显式参数。路径来源语义
+    见 :func:`_load_config_for_selection`（只影响解析，不改写任何登记文件）。
     """
-    config = _load_config_or_none(explicit_workspace)
+    config = _load_config_for_selection(explicit_workspace)
     strategy_id = (explicit_strategy_id
                    or (config.selected_strategy_id if config else BUILTIN_STRATEGY_ID))
     descriptor = find_descriptor(config, strategy_id)

@@ -1298,6 +1298,8 @@ _ASSETS_STANDARD_TABLES = {
     "factor_registry", "factor_model_snapshots", "fin_observed_snapshots",
     "fin_report_files", "fin_report_records", "fin_field_calibrations",
     "fin_xdxr_records",
+    "capture_plans", "capture_runs", "market_observations",
+    "market_bar_versions",
 }
 
 

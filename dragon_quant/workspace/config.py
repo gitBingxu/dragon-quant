@@ -28,9 +28,17 @@ WORKSPACE_SCHEMA_VERSION = 1
 
 #: 内建策略的 canonical ID（列表里只展示实际存在的实现）
 BUILTIN_STRATEGY_ID = "builtin:dragon_pullback_daily"
+#: BS 账户决策的稳定 ID（与 ``review_account.strategy.bs_policy`` 常量一致；
+#: workspace 层不 import 策略实现，避免把纯核拉进配置解析路径）。
+BUILTIN_BS_STRATEGY_ID = "builtin:bs_account_decision"
 
 WORKSPACE_FILE = "workspace.json"
 SELECTION_FILE = "workspace-selection.json"
+
+#: 路径解析来源（区分「调用方显式给定」与「本机登记」，决定缺失时的失败语义）
+WORKSPACE_SOURCE_EXPLICIT = "explicit"
+WORKSPACE_SOURCE_ENV = "env"
+WORKSPACE_SOURCE_REGISTERED = "registered"
 
 
 class WorkspaceError(ValueError):
@@ -269,13 +277,28 @@ def write_active_workspace(root: Path) -> None:
         })
 
 
-def resolve_workspace_path(explicit: Optional[str] = None,
-                           env: Optional[dict] = None) -> Optional[Path]:
-    """路径解析优先级：显式 > ``DQ_WORKSPACE`` > 本机登记；都没有 → None。"""
+def resolve_workspace_path_with_source(
+        explicit: Optional[str] = None,
+        env: Optional[dict] = None) -> tuple[Optional[Path], Optional[str]]:
+    """路径解析 + 来源：显式 > ``DQ_WORKSPACE`` > 本机登记；都没有 → (None, None)。
+
+    调用方需要区分来源：显式/环境变量指向的路径缺失是**用户错误**（必须显式
+    失败），而本机登记的路径可能指向已删除的临时目录（历史脚本遗留），内建/
+    默认解析不得因此拒绝服务，也不得静默改写用户登记。
+    """
     if explicit:
-        return Path(explicit).expanduser()
+        return Path(explicit).expanduser(), WORKSPACE_SOURCE_EXPLICIT
     environ = os.environ if env is None else env
     from_env = environ.get("DQ_WORKSPACE")
     if from_env:
-        return Path(from_env).expanduser()
-    return read_active_workspace()
+        return Path(from_env).expanduser(), WORKSPACE_SOURCE_ENV
+    registered = read_active_workspace()
+    if registered is None:
+        return None, None
+    return registered, WORKSPACE_SOURCE_REGISTERED
+
+
+def resolve_workspace_path(explicit: Optional[str] = None,
+                           env: Optional[dict] = None) -> Optional[Path]:
+    """路径解析优先级：显式 > ``DQ_WORKSPACE`` > 本机登记；都没有 → None。"""
+    return resolve_workspace_path_with_source(explicit, env)[0]

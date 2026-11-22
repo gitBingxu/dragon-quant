@@ -65,22 +65,39 @@ def _factor_reader_factory(required_names, versions):
     return FactorReader(required_names, versions=versions)
 
 
+def _freeze_runtime_ref(selection, cfg):
+    """冻结本次运行的有效策略身份。
+
+    **内建（含 BS）冻结完整有效 ``StrategyConfig``**：显式请求参数 > workspace
+    保存值 > 默认。只冻结保存的覆盖值会让 provider 再用 ``ref.params`` 盖到
+    cfg 上，导致「实际执行参数 ≠ 已落库 strategy_params」（旧记录重跑时尤其
+    明显：请求里的旧参数会被当前保存值逆转）。用户策略继续按快照冻结
+    descriptor + 参数（源码/因子版本才是它的身份）。
+    """
+    from dragon_quant.workspace import snapshots
+    from dragon_quant.workspace.config import BUILTIN_STRATEGY_ID
+    from dragon_quant.workspace.main import freeze_strategy
+
+    effective = cfg.to_json_dict()
+    if selection is None:
+        return snapshots.builtin_ref(strategy_id=BUILTIN_STRATEGY_ID,
+                                     params=effective)
+    if selection.descriptor.source == "user":
+        return freeze_strategy(selection)
+    return snapshots.builtin_ref(strategy_id=selection.strategy_id,
+                                 params=effective)
+
+
 def _build_strategy_runtime(selection, cfg, *, use_worker=None):
     """按选择冻结并构造运行时；无选择也冻结内建身份与有效参数（M5/M6）。
 
     首次运行同样从已发布快照执行（用户策略），消除「冻结后又读当前源码」竞态。
     ``use_worker=True`` 时用户策略在独立本地子进程执行（Web 必须如此）。
+    冻结口径见 :func:`_freeze_runtime_ref`（内建 = 完整有效参数）。
     """
     from dragon_quant.review_account.strategy.runtime import make_provider, make_worker_factory
-    from dragon_quant.workspace import snapshots
-    from dragon_quant.workspace.config import BUILTIN_STRATEGY_ID
-    from dragon_quant.workspace.main import freeze_strategy
 
-    if selection is None:
-        ref = snapshots.builtin_ref(strategy_id=BUILTIN_STRATEGY_ID,
-                                    params=cfg.to_json_dict())
-    else:
-        ref = freeze_strategy(selection)
+    ref = _freeze_runtime_ref(selection, cfg)
     # CLI 用户策略与 Web 一样走独立 worker；内建无需 worker。
     if use_worker is None:
         use_worker = (selection is not None

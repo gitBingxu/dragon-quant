@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS review_account_experiments (
     created_at           TEXT DEFAULT (datetime('now','localtime')),
     experiment_version   TEXT NOT NULL,
     status               TEXT,
+    run_digest           TEXT,
     request_json         TEXT,
     report_json          TEXT
 );
@@ -316,9 +317,185 @@ CREATE INDEX IF NOT EXISTS idx_bs_runs_created ON bs_runs(started_at);
 _BLACKLIST_SEED: list[str] = []
 
 
+#: W3 账户批次账本（私有账务真值，归 dragon.db；不注册云同步、不进 assets 市场表）。
+#: 批次是账务真值，聚合持仓由批次导出；订单/成交腿/预留与事件幂等表同库事务落账。
+ACCOUNT_LEDGER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS account_ledgers (
+    ledger_id          TEXT PRIMARY KEY,
+    revision           INTEGER NOT NULL DEFAULT 0,
+    initial_cash       REAL NOT NULL,
+    cash               REAL NOT NULL,
+    peak_equity        REAL NOT NULL DEFAULT 0,
+    drawdown_pct       REAL NOT NULL DEFAULT 0,
+    consecutive_losses INTEGER NOT NULL DEFAULT 0,
+    event_cursor       INTEGER NOT NULL DEFAULT -1,
+    event_time         TEXT DEFAULT '',
+    trade_date         TEXT DEFAULT '',
+    recovery_stage     INTEGER NOT NULL DEFAULT 0,
+    policy_states_json TEXT DEFAULT '[]',
+    marks_json         TEXT DEFAULT '{}',
+    recovery_json      TEXT DEFAULT '{}',
+    last_decision_json TEXT DEFAULT '{}',
+    mark_facts_json    TEXT DEFAULT '{}',
+    trade_stats_json   TEXT DEFAULT '{}',
+    closed_trades_json TEXT DEFAULT '[]',
+    fund_credits_json  TEXT DEFAULT '{}',
+    config_hash        TEXT DEFAULT '',
+    snapshot_id        TEXT DEFAULT '',
+    strategy_ref_json  TEXT DEFAULT '{}',
+    run_status         TEXT DEFAULT 'created',
+    expected_events    INTEGER NOT NULL DEFAULT 0,
+    completed_events   INTEGER NOT NULL DEFAULT 0,
+    watermark          INTEGER NOT NULL DEFAULT -1,
+    failure_reason     TEXT DEFAULT '',
+    failed_cursor      INTEGER NOT NULL DEFAULT -1,
+    schema_version     INTEGER NOT NULL DEFAULT 6,
+    created_at         TEXT DEFAULT (datetime('now','localtime')),
+    updated_at         TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS account_batches (
+    ledger_id          TEXT NOT NULL,
+    batch_id           TEXT NOT NULL,
+    code               TEXT NOT NULL,
+    qty                INTEGER NOT NULL,
+    remaining          INTEGER NOT NULL,
+    entry_date         TEXT,
+    sellable_mode      TEXT NOT NULL DEFAULT 'unknown',
+    sellable_date      TEXT,
+    cost_price         REAL NOT NULL,
+    fee                REAL NOT NULL DEFAULT 0,
+    initial_risk       REAL NOT NULL DEFAULT 0,
+    risk_themes_json   TEXT DEFAULT '[]',
+    strategy_ref_json  TEXT DEFAULT '{}',
+    plan_id            TEXT DEFAULT '',
+    obligation_id      TEXT DEFAULT '',
+    fill_id            TEXT DEFAULT '',
+    source             TEXT DEFAULT 'runtime',
+    family_id          TEXT DEFAULT '',
+    content_hash       TEXT NOT NULL,
+    created_at         TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (ledger_id, batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_batches_ledger ON account_batches(ledger_id, code);
+
+CREATE TABLE IF NOT EXISTS account_orders (
+    ledger_id          TEXT NOT NULL,
+    order_id           TEXT NOT NULL,
+    code               TEXT NOT NULL,
+    side               TEXT NOT NULL,
+    qty                INTEGER NOT NULL,
+    filled_qty         INTEGER NOT NULL DEFAULT 0,
+    status             TEXT NOT NULL,
+    limit_price        REAL,
+    reserved_amount    REAL NOT NULL DEFAULT 0,
+    reserved_risk      REAL NOT NULL DEFAULT 0,
+    locked_qty         INTEGER NOT NULL DEFAULT 0,
+    created_event      INTEGER NOT NULL,
+    valid_until_event  INTEGER,
+    trigger_kind       TEXT DEFAULT '',
+    trigger_price      REAL,
+    evidence_rule      TEXT DEFAULT '',
+    evidence_ids_json  TEXT DEFAULT '[]',
+    depends_on_json    TEXT DEFAULT '[]',
+    sequence           INTEGER NOT NULL DEFAULT 0,
+    risk_amount        REAL NOT NULL DEFAULT 0,
+    risk_themes_json   TEXT DEFAULT '[]',
+    strategy_ref_json  TEXT DEFAULT '{}',
+    plan_id            TEXT DEFAULT '',
+    obligation_id      TEXT DEFAULT '',
+    batch_ids_json     TEXT DEFAULT '[]',
+    family_id          TEXT DEFAULT '',
+    invalidate_below   REAL,
+    reason             TEXT DEFAULT '',
+    content_hash       TEXT NOT NULL,
+    created_at         TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (ledger_id, order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_orders_ledger ON account_orders(ledger_id, status);
+
+CREATE TABLE IF NOT EXISTS account_fills (
+    ledger_id          TEXT NOT NULL,
+    fill_id            TEXT NOT NULL,
+    order_id           TEXT NOT NULL,
+    code               TEXT NOT NULL,
+    side               TEXT NOT NULL,
+    price              REAL NOT NULL,
+    qty                INTEGER NOT NULL,
+    fee                REAL NOT NULL,
+    event_id           TEXT NOT NULL,
+    event_hash         TEXT NOT NULL,
+    batch_id           TEXT DEFAULT '',
+    realized_pnl       REAL NOT NULL DEFAULT 0,
+    content_hash       TEXT NOT NULL,
+    created_at         TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (ledger_id, fill_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_fills_ledger ON account_fills(ledger_id, order_id);
+
+CREATE TABLE IF NOT EXISTS account_reservations (
+    ledger_id          TEXT NOT NULL,
+    order_id           TEXT NOT NULL,
+    code               TEXT NOT NULL,
+    side               TEXT NOT NULL,
+    qty                INTEGER NOT NULL,
+    amount             REAL NOT NULL,
+    status             TEXT NOT NULL,
+    purpose            TEXT DEFAULT '',
+    price              REAL,
+    theme_ids_json     TEXT DEFAULT '[]',
+    pressure_pct       REAL,
+    risk_amount        REAL NOT NULL DEFAULT 0,
+    valid_until_event  INTEGER,
+    created_at         TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (ledger_id, order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_reservations_ledger
+    ON account_reservations(ledger_id, status);
+
+CREATE TABLE IF NOT EXISTS account_ledger_events (
+    ledger_id          TEXT NOT NULL,
+    event_id           TEXT NOT NULL,
+    source_hash        TEXT NOT NULL,
+    content_hash       TEXT NOT NULL,
+    revision_after     INTEGER NOT NULL,
+    seq                INTEGER NOT NULL DEFAULT 0,
+    event_time         TEXT DEFAULT '',
+    trade_date         TEXT DEFAULT '',
+    record_version     INTEGER NOT NULL DEFAULT 1,
+    decision_json      TEXT DEFAULT '{}',
+    execution_json     TEXT DEFAULT '{}',
+    applied_at         TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (ledger_id, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS account_batch_facts (
+    ledger_id          TEXT NOT NULL,
+    batch_id           TEXT NOT NULL,
+    entry_source_ts    INTEGER,
+    peak_price         REAL,
+    peak_source_ts     INTEGER,
+    peak_available_at  INTEGER,
+    took_profit_half   INTEGER NOT NULL DEFAULT 0,
+    first_day_seen     INTEGER NOT NULL DEFAULT 0,
+    last_fill_event    INTEGER,
+    facts_version      INTEGER NOT NULL DEFAULT 1,
+    updated_at         TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (ledger_id, batch_id)
+);
+"""
+
+
+
 def _ensure_schema(conn: sqlite3.Connection):
     conn.executescript(BASE_SCHEMA)
+    conn.executescript(ACCOUNT_LEDGER_SCHEMA)
     _ensure_review_account_columns(conn)
+    _ensure_account_ledger_columns(conn)
     _ensure_signal_columns(conn)
     _ensure_bs_columns(conn)
     _ensure_strict_columns(conn)
@@ -391,8 +568,56 @@ def _ensure_dragon_columns(conn: sqlite3.Connection, source: str):
         conn.execute(f"ALTER TABLE {t['dragons']} ADD COLUMN is_true_dragon INTEGER")
 
 
+def _ensure_account_ledger_columns(conn: sqlite3.Connection):
+    """账户账本风险/资金分离字段（L2）与运行事实/历史审计（A1–A4）幂等补列。"""
+    additions = {
+        "account_batches": {
+            "risk_themes_json": "TEXT DEFAULT '[]'",
+            "family_id": "TEXT DEFAULT ''"},
+        "account_orders": {
+            "reserved_risk": "REAL NOT NULL DEFAULT 0",
+            "risk_amount": "REAL NOT NULL DEFAULT 0",
+            "risk_themes_json": "TEXT DEFAULT '[]'",
+            "batch_ids_json": "TEXT DEFAULT '[]'",
+            "family_id": "TEXT DEFAULT ''",
+            "invalidate_below": "REAL"},
+        "account_reservations": {
+            "risk_amount": "REAL NOT NULL DEFAULT 0"},
+        "account_ledgers": {
+            "mark_facts_json": "TEXT DEFAULT '{}'",
+            "trade_stats_json": "TEXT DEFAULT '{}'",
+            "closed_trades_json": "TEXT DEFAULT '[]'",
+            "fund_credits_json": "TEXT DEFAULT '{}'",
+            "run_status": "TEXT DEFAULT 'created'",
+            "expected_events": "INTEGER NOT NULL DEFAULT 0",
+            "completed_events": "INTEGER NOT NULL DEFAULT 0",
+            "watermark": "INTEGER NOT NULL DEFAULT -1",
+            "failure_reason": "TEXT DEFAULT ''",
+            "failed_cursor": "INTEGER NOT NULL DEFAULT -1"},
+        "account_ledger_events": {
+            "record_version": "INTEGER NOT NULL DEFAULT 1",
+            "decision_json": "TEXT DEFAULT '{}'",
+            "execution_json": "TEXT DEFAULT '{}'"},
+    }
+    for table, columns in additions.items():
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if not existing:
+            continue  # 表由 ACCOUNT_LEDGER_SCHEMA 新建时已含列
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def _ensure_review_account_columns(conn: sqlite3.Connection):
     """对已存在的账户级 review 表幂等补列。"""
+    experiment_cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(review_account_experiments)")}
+    if experiment_cols and "run_digest" not in experiment_cols:
+        try:
+            conn.execute(
+                "ALTER TABLE review_account_experiments ADD COLUMN run_digest TEXT")
+        except sqlite3.OperationalError:
+            pass
     run_cols = {r[1] for r in conn.execute("PRAGMA table_info(review_account_runs)")}
     if "display_name" not in run_cols:
         conn.execute("ALTER TABLE review_account_runs ADD COLUMN display_name TEXT")

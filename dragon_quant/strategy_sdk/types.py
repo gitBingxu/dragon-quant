@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping, Optional, Protocol, runtime_checkable
 
 SDK_VERSION = 1
+#: 账户政策可选协议版本（W3）：旧 entry/exit 协议不变，新增账户级订单意图面。
+ACCOUNT_PROTOCOL_VERSION = 1
 
 #: Intent 允许的动作
 INTENT_ACTIONS = ("buy", "sell")
@@ -130,6 +132,51 @@ class Strategy(Protocol):
 
     def explain(self, ctx: StrategyContext) -> list[Mapping]:
         ...
+
+
+@dataclass(frozen=True)
+class AccountOrderIntent:
+    """账户政策可选协议的订单**意图**（版本 ``ACCOUNT_PROTOCOL_VERSION``）。
+
+    与旧 ``StrategyIntent`` 的 entry/exit 语义并存、互不重解释：旧协议仍是单票
+    买/卖（position_pct / exit_fraction 0.5|1）；本结构面向账户级政策，数量单位
+    为成交股数 ``qty``（正整数），``limit_price`` 为买单最高价/卖单最低价
+    （``None`` 表示按下一事件的明示可成交价撮合），``strategy_ref`` 为冻结归属。
+    政策运行时只产出意图；由账户引擎校验预算/可卖量/T+1/容量后撮合与记账，用户
+    策略不得直接写账本。
+
+    结构化**触发/到期/依赖**字段（L3）：``trigger_kind``（``price_above``/
+    ``price_below``/``evidence``/``""``）、``trigger_price``、``evidence_rule``、
+    ``evidence_ids``、``depends_on``、``valid_until_event``、``sequence``；订单
+    到期或触发/证据不满足时保持等待/取消，不解析自然语言 reason。
+    """
+
+    action: str                     # buy / sell
+    code: str
+    qty: int
+    plan_id: str = ""
+    obligation_id: str = ""
+    limit_price: Optional[float] = None
+    risk_amount: float = 0.0
+    reason: str = ""
+    strategy_ref: Mapping = field(default_factory=dict)
+    trigger_kind: str = ""
+    trigger_price: Optional[float] = None
+    evidence_rule: str = ""
+    evidence_ids: tuple = ()
+    depends_on: tuple = ()
+    valid_until_event: Optional[int] = None
+    sequence: int = 0
+    risk_themes: tuple = ()
+    #: 交易家族（G3 probe + 其 add 归并同一闭合组；空 = 无家族）。
+    family_id: str = ""
+    #: 该订单所属代码的压力估计（订单预留的风险占用口径；空 = 未知受限）。
+    pressure_pct: Optional[float] = None
+    #: 冻结的价格失效线（低于即撤销未成新风险余量；None=未知，不推断失效）。
+    invalidate_below: Optional[float] = None
+    #: 明确批次范围（账户政策保护义务的 owner/batch scope）。空 = 该 ``strategy_ref``
+    #: 全部批次（旧口径）；未知范围不得被当作明确 scope。
+    batch_ids: tuple = ()
 
 
 def _finite(value: Any, *, field_name: str) -> float:
